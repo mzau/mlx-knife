@@ -1,0 +1,14 @@
+# mlx_knife requirements
+# Core dependencies for HuggingFace model management
+
+huggingface-hub>=0.19.0
+requests>=2.31.0
+mlx-lm>=0.25.0  # For running MLX models with streaming support
+mlx>=0.26.0     # Core MLX library
+
+# API Server dependencies (for 'mlxk server' command)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.4.0
+
+# Note: Python 3.10+ recommended for full MLX features

@@ -1,0 +1,15 @@
+venv/
+venv39/
+test_env*/
+test_results*.log
+mypy_*.log
+ruff_*.log
+__pycache__/
+*.pyc
+.DS_Store
+build/
+dist/
+*.egg-info/
+CLAUDE.md
+TODO_REAL_TESTS.md
+server.log

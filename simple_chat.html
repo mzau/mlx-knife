@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLX Knife Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@5.1.1/marked.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .chat-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            text-align: center;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .model-selector {
+            margin-bottom: 20px;
+        }
+        
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .chat-messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background: #fafafa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        
+        .user-message {
+            background: #007AFF;
+            color: white;
+            margin-left: auto;
+        }
+        
+        .assistant-message {
+            background: #e5e5e7;
+            color: #333;
+        }
+        
+        .typing {
+            opacity: 0.7;
+            font-style: italic;
+        }
+        
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        
+        #messageInput {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+        }
+        
+        #clearButton, #sendButton {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        #clearButton {
+            background: #6c757d;
+            color: white;
+        }
+        
+        #clearButton:hover {
+            background: #5a6268;
+        }
+        
+        #sendButton {
+            background: #007AFF;
+            color: white;
+        }
+        
+        #sendButton:hover {
+            background: #0056b3;
+        }
+        
+        #sendButton:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        .connected { color: #28a745; }
+        .disconnected { color: #dc3545; }
+        
+        /* Markdown formatting */
+        .message pre {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 12px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        
+        .message code {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            padding: 2px 4px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+        }
+        
+        .message pre code {
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+        
+        .message h1, .message h2, .message h3, .message h4, .message h5, .message h6 {
+            margin: 16px 0 8px 0;
+            color: #333;
+        }
+        
+        .message ul, .message ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        
+        .message blockquote {
+            border-left: 4px solid #ddd;
+            margin: 8px 0;
+            padding-left: 16px;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .message table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+        }
+        
+        .message th, .message td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        .message th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="header">
+            <h1>🔪 MLX Knife Chat</h1>
+            <div class="status" id="status">Connecting...</div>
+        </div>
+        
+        <div class="model-selector">
+            <select id="modelSelect">
+                <option value="">Loading models...</option>
+            </select>
+        </div>
+        
+        <div class="chat-messages" id="chatMessages">
+            <div class="message assistant-message">
+                <strong>MLX Assistant:</strong> Hi! I'm ready to chat. Select a model and send me a message!
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+            <button id="clearButton" onclick="clearChat()">Clear</button>
+            <button id="sendButton" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let currentModel = '';
+        let isConnected = false;
+        let conversationHistory = [];
+
+        // DOM elements
+        const statusEl = document.getElementById('status');
+        const modelSelect = document.getElementById('modelSelect');
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+
+        // Update status
+        function updateStatus(connected, message = '') {
+            isConnected = connected;
+            statusEl.textContent = message || (connected ? 'Connected' : 'Disconnected');
+            statusEl.className = `status ${connected ? 'connected' : 'disconnected'}`;
+            
+            messageInput.disabled = !connected || !currentModel;
+            sendButton.disabled = !connected || !currentModel;
+        }
+
+        // Check API health
+        async function checkHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                if (response.ok) {
+                    updateStatus(true, 'Connected to MLX Knife');
+                    loadModels();
+                } else {
+                    updateStatus(false, 'API Error');
+                }
+            } catch (error) {
+                updateStatus(false, 'Start server: mlxk server --port 8000');
+            }
+        }
+
+        // Load available models
+        async function loadModels() {
+            try {
+                const response = await fetch(`${API_BASE}/v1/models`);
+                if (response.ok) {
+                    const data = await response.json();
+                    modelSelect.innerHTML = '<option value="">Select a model...</option>';
+                    
+                    data.data.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = model.id.replace('mlx-community/', '');
+                        modelSelect.appendChild(option);
+                    });
+                    
+                    // Auto-select first model if available
+                    if (data.data.length > 0) {
+                        currentModel = data.data[0].id;
+                        modelSelect.value = currentModel;
+                        updateStatus(true, `Ready with ${currentModel.replace('mlx-community/', '')}`);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load models:', error);
+            }
+        }
+
+        // Add message to chat
+        function addMessage(content, isUser = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'}`;
+            
+            // Render markdown for assistant messages, plain text for user messages
+            const renderedContent = isUser ? content : marked.parse(content);
+            messageDiv.innerHTML = `<strong>${isUser ? 'You' : 'Assistant'}:</strong> ${renderedContent}`;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return messageDiv;
+        }
+
+        // Send chat message
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || !currentModel) return;
+            
+            // Add user message to history and display
+            conversationHistory.push({ role: 'user', content: message });
+            addMessage(message, true);
+            messageInput.value = '';
+            sendButton.disabled = true;
+            
+            // Add typing indicator
+            const typingDiv = addMessage('Typing...', false);
+            typingDiv.classList.add('typing');
+            
+            try {
+                const response = await fetch(`${API_BASE}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: currentModel,
+                        messages: conversationHistory, // Send full conversation history
+                        max_tokens: 2000,
+                        temperature: 0.7,
+                        stream: true
+                    })
+                });
+                
+                // Remove typing indicator
+                typingDiv.remove();
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                // Handle streaming response
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let assistantMessage = addMessage('', false);
+                let content = '';
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data === '[DONE]') continue;
+                            
+                            try {
+                                const parsed = JSON.parse(data);
+                                const delta = parsed.choices?.[0]?.delta?.content;
+                                if (delta) {
+                                    content += delta;
+                                    // Render markdown for streaming content
+                                    const renderedContent = marked.parse(content);
+                                    assistantMessage.innerHTML = `<strong>Assistant:</strong> ${renderedContent}`;
+                                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                                }
+                            } catch (e) {
+                                // Ignore parsing errors
+                            }
+                        }
+                    }
+                }
+                
+                // Add assistant response to conversation history
+                if (content.trim()) {
+                    conversationHistory.push({ role: 'assistant', content: content });
+                }
+                
+            } catch (error) {
+                typingDiv.remove();
+                addMessage(`Error: ${error.message}`, false);
+            }
+            
+            sendButton.disabled = false;
+        }
+        
+        // Clear conversation
+        function clearChat() {
+            conversationHistory = [];
+            chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Hi! I\'m ready to chat. Select a model and send me a message!</div>';
+        }
+
+        // Event listeners
+        modelSelect.addEventListener('change', (e) => {
+            currentModel = e.target.value;
+            // Clear conversation history when switching models
+            conversationHistory = [];
+            updateStatus(isConnected, currentModel ? `Ready with ${currentModel.replace('mlx-community/', '')}` : 'Select a model');
+        });
+
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        sendButton.addEventListener('click', sendMessage);
+
+        // Initialize
+        checkHealth();
+        setInterval(checkHealth, 30000); // Health check every 30s
+    </script>
+</body>
+</html>
