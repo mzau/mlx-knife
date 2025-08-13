@@ -34,14 +34,26 @@ class MLXRunner:
         self._stop_tokens = None  # Will be populated from tokenizer
         self.verbose = verbose
         self._model_loaded = False
+        self._context_entered = False  # Prevent nested context usage
 
     def __enter__(self):
         """Context manager entry - loads the model."""
-        self.load_model()
-        return self
+        if self._context_entered:
+            raise RuntimeError("MLXRunner context manager cannot be entered multiple times")
+        
+        self._context_entered = True
+        try:
+            self.load_model()
+            return self
+        except Exception:
+            # If load_model fails, ensure cleanup happens
+            self._context_entered = False
+            self.cleanup()
+            raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - cleans up the model."""
+        self._context_entered = False
         self.cleanup()
         return False  # Don't suppress exceptions
 
@@ -57,39 +69,54 @@ class MLXRunner:
         start_time = time.time()
 
         # Capture baseline memory before loading
-        mx.clear_cache()
+        try:
+            mx.clear_cache()
+        except Exception:
+            pass  # Continue even if cache clear fails
         self._memory_baseline = mx.get_active_memory() / 1024**3
 
-        # Load model and tokenizer
-        self.model, self.tokenizer = load(
-            str(self.model_path),
-            adapter_path=self.adapter_path
-        )
+        try:
+            # Load model and tokenizer
+            self.model, self.tokenizer = load(
+                str(self.model_path),
+                adapter_path=self.adapter_path
+            )
 
-        load_time = time.time() - start_time
-        current_memory = mx.get_active_memory() / 1024**3
-        model_memory = current_memory - self._memory_baseline
+            load_time = time.time() - start_time
+            current_memory = mx.get_active_memory() / 1024**3
+            model_memory = current_memory - self._memory_baseline
 
-        if self.verbose:
-            print(f"Model loaded in {load_time:.1f}s")
-            print(f"Memory: {model_memory:.1f}GB model, {current_memory:.1f}GB total")
+            if self.verbose:
+                print(f"Model loaded in {load_time:.1f}s")
+                print(f"Memory: {model_memory:.1f}GB model, {current_memory:.1f}GB total")
 
-        # Extract stop tokens from tokenizer
-        self._extract_stop_tokens()
-        self._model_loaded = True
+            # Extract stop tokens from tokenizer
+            self._extract_stop_tokens()
+            self._model_loaded = True
+            
+        except Exception as e:
+            # Ensure partial state is cleaned up on failure
+            self.model = None
+            self.tokenizer = None
+            self._stop_tokens = None
+            self._model_loaded = False
+            # Clear any memory that might have been allocated
+            mx.clear_cache()
+            raise RuntimeError(f"Failed to load model from {self.model_path}: {e}") from e
 
     def _extract_stop_tokens(self):
         """Extract stop tokens from the tokenizer dynamically."""
         self._stop_tokens = set()
 
         # Primary source: eos_token
-        if hasattr(self.tokenizer, 'eos_token') and self.tokenizer.eos_token:
-            self._stop_tokens.add(self.tokenizer.eos_token)
+        eos_token = getattr(self.tokenizer, 'eos_token', None)
+        if eos_token:
+            self._stop_tokens.add(eos_token)
 
         # Also check pad_token if it's different from eos_token
-        if hasattr(self.tokenizer, 'pad_token') and self.tokenizer.pad_token:
-            if self.tokenizer.pad_token != self.tokenizer.eos_token:
-                self._stop_tokens.add(self.tokenizer.pad_token)
+        pad_token = getattr(self.tokenizer, 'pad_token', None)
+        if pad_token and pad_token != eos_token:
+            self._stop_tokens.add(pad_token)
 
         # Check additional_special_tokens
         if hasattr(self.tokenizer, 'additional_special_tokens'):
@@ -125,17 +152,15 @@ class MLXRunner:
             print(f"Stop tokens: {self._stop_tokens}")
 
     def cleanup(self):
-        """Clean up model resources and clear GPU memory."""
-        if not self._model_loaded:
-            if self.verbose:
-                print("No model to cleanup")
-            return
-
-        if self.verbose:
+        """Clean up model resources and clear GPU memory.
+        
+        This method is safe to call multiple times and handles partial state cleanup.
+        """
+        if self.verbose and self._model_loaded:
             memory_before = mx.get_active_memory() / 1024**3
             print(f"Cleaning up model (memory before: {memory_before:.1f}GB)...")
 
-        # Clear model references
+        # Always clean up, even if model wasn't fully loaded
         self.model = None
         self.tokenizer = None
         self._stop_tokens = None
@@ -144,12 +169,18 @@ class MLXRunner:
         # Force garbage collection and clear MLX cache
         import gc
         gc.collect()
-        mx.clear_cache()
+        try:
+            mx.clear_cache()
+        except Exception:
+            pass  # Continue cleanup even if cache clear fails
 
         if self.verbose:
             memory_after = mx.get_active_memory() / 1024**3
-            memory_freed = memory_before - memory_after
-            print(f"Cleanup complete (memory after: {memory_after:.1f}GB, freed: {memory_freed:.1f}GB)")
+            if 'memory_before' in locals():
+                memory_freed = memory_before - memory_after
+                print(f"Cleanup complete (memory after: {memory_after:.1f}GB, freed: {memory_freed:.1f}GB)")
+            else:
+                print(f"Cleanup complete (memory after: {memory_after:.1f}GB)")
 
     def generate_streaming(
         self,
@@ -472,8 +503,13 @@ class MLXRunner:
         Returns:
             Dictionary with memory statistics in GB
         """
-        current_memory = mx.get_active_memory() / 1024**3
-        peak_memory = mx.get_peak_memory() / 1024**3
+        try:
+            current_memory = mx.get_active_memory() / 1024**3
+            peak_memory = mx.get_peak_memory() / 1024**3
+        except Exception:
+            # Return zeros if memory stats unavailable
+            current_memory = 0.0
+            peak_memory = 0.0
 
         return {
             "current_gb": current_memory,

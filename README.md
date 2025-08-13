@@ -6,7 +6,7 @@
 
 A lightweight, ollama-like CLI for managing and running MLX models on Apple Silicon. **Designed for personal, local use** - perfect for individual developers and researchers working with MLX models.
 
-**Current Version**: 1.0-rc1 (August 2025)
+**Current Version**: 1.0-rc2 (August 2025)
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -14,7 +14,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-86%2F86%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-96%2F96%20passing-brightgreen.svg)](#testing)
 
 ## Features
 
@@ -43,7 +43,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 - **Memory Insights**: See GPU memory usage after model loading and generation
 - **Dynamic Stop Tokens**: Automatic detection and filtering of model-specific stop tokens
 - **Customizable Generation**: Control temperature, max_tokens, top_p, and repetition penalty
-- **RAII Memory Management**: Context manager pattern ensures automatic cleanup and no memory leaks
+- **Context-Managed Memory**: Context manager pattern ensures automatic cleanup and prevents memory leaks
 - **Exception-Safe**: Robust error handling with guaranteed resource cleanup
 
 ## Installation
@@ -298,7 +298,7 @@ mlxk run bert-base-uncased
 
 ## Testing
 
-MLX Knife includes comprehensive test coverage with **86/86 tests passing** across all supported Python versions.
+MLX Knife includes comprehensive test coverage across all supported Python versions.
 
 ### Quick Start
 
@@ -346,7 +346,7 @@ Stop tokens are dynamically extracted from each model's tokenizer:
 - Common tokens verified as single-token entities
 
 ### Memory Management
-- **RAII Pattern**: Context manager ensures automatic resource cleanup
+- **Context Managers**: Automatic resource cleanup with Python context managers
 - **Exception-Safe**: Model cleanup guaranteed even on errors
 - **Baseline Tracking**: Memory captured before model loading
 - **Real-time Monitoring**: GPU memory tracking via `mlx.core.get_active_memory()`
@@ -416,5 +416,5 @@ Copyright (c) 2025 The BROKE team 🦫
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 1.0-rc1 | August 2025</i>
+  <i>Version 1.0-rc2 | August 2025</i>
 </p>
