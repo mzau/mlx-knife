@@ -31,7 +31,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 1. Fork the repository and create your branch from `main`
 2. If you've added code, add tests that cover your changes
-3. Ensure the test suite passes: `pytest tests/`
+3. Ensure the test suite passes locally: `pytest tests/`
 4. Make sure your code follows the existing style: `ruff check mlx_knife/ --fix`
 5. Write a clear commit message
 6. Open a Pull Request with a clear title and description
@@ -46,6 +46,9 @@ cd mlx-knife
 # Install in development mode with all dependencies
 pip install -e ".[dev,test]"
 
+# Download a test model (required for full test suite)
+mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
+
 # Run tests
 pytest
 
@@ -54,9 +57,60 @@ ruff check mlx_knife/
 mypy mlx_knife/
 
 # Test with a real model
-mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 mlxk run Phi-3-mini "Hello world"
 ```
+
+## Testing Requirements
+
+**Important**: MLX Knife requires Apple Silicon hardware for testing. Tests must be run locally on M1/M2/M3 Macs.
+
+### Why Local Testing?
+
+- MLX framework only runs on Apple Silicon
+- Tests use real MLX models (4GB+) for realistic validation
+- This ensures tests reflect actual usage, not mocked behavior
+- Standard practice for MLX projects
+
+### Running Tests
+
+**Prerequisites:**
+1. Apple Silicon Mac (M1/M2/M3)
+2. Python 3.9 or newer
+3. At least one MLX model installed:
+   ```bash
+   mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
+   ```
+
+**Test Commands:**
+```bash
+# Run all tests
+pytest
+
+# Run specific test categories
+pytest tests/unit/              # Fast unit tests
+pytest tests/integration/        # Integration tests
+
+# Run with coverage
+pytest --cov=mlx_knife --cov-report=html
+
+# Skip tests requiring models
+pytest -k "not requires_model"
+```
+
+### Before Submitting PRs
+
+Please ensure all tests pass locally:
+```bash
+# Complete test workflow
+ruff check mlx_knife/ --fix    # Fix code style
+mypy mlx_knife/                 # Check types
+pytest tests/                   # Run all tests
+```
+
+Since we don't have CI/CD (MLX requires Apple Silicon), we rely on contributors to verify their changes locally. Please mention in your PR:
+- Which Python version you tested with
+- Which Mac model you tested on (M1/M2/M3)
+- Test results summary
 
 ## Python Version Requirements
 
@@ -70,6 +124,8 @@ You don't need to test on all Python versions! Just test with what you have:
 - If you have native macOS Python 3.9: Perfect! That's our main target
 - If you have a newer version: Great, test with that
 - Multiple versions installed? Bonus, but not required
+
+Mention your Python version in the PR description.
 
 ## Development Workflow
 
@@ -85,10 +141,9 @@ You don't need to test on all Python versions! Just test with what you have:
    - Update documentation if needed
 
 3. **Before submitting:**
-   - Run the full test suite: `pytest tests/`
+   - Run the full test suite locally: `pytest tests/`
    - Run code quality checks: `ruff check mlx_knife/ --fix`
    - Test with YOUR Python version (3.9+ required)
-   - Mention your Python version in the PR description
    - Update README.md if you've added features
 
 ## Testing
@@ -103,8 +158,6 @@ pytest tests/unit/              # Fast unit tests
 pytest tests/integration/        # Integration tests
 pytest -k "not requires_model"   # Skip tests requiring models
 ```
-
-**Note**: Our CI will test multiple Python versions automatically after you submit your PR. You only need to test with your local Python version (3.9+).
 
 ## Code Style
 

@@ -298,28 +298,34 @@ mlxk run bert-base-uncased
 
 ## Testing
 
-MLX Knife includes comprehensive test coverage with 86/86 tests passing across all supported Python versions.
+MLX Knife includes comprehensive test coverage with **86/86 tests passing** across all supported Python versions.
 
-### Verification Status
-✅ All tests verified on Python 3.9-3.13  
-✅ Real MLX model execution testing (Phi-3-mini-4k-instruct-4bit)  
-✅ Full MLX Knife functionality coverage  
-✅ Code quality standards maintained  
+### Quick Start
 
+**Prerequisites:**
+- Apple Silicon Mac (M1/M2/M3)
+- Python 3.9+
+- At least one MLX model: `mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit`
+
+**Run Tests:**
 ```bash
-# Quick test run
 pip install -e ".[test]"
 pytest
-
-# Code quality check
-pip install -e ".[dev]"  
-ruff check mlx_knife/ && mypy mlx_knife/
-
-# Multi-Python verification (requires multiple Python versions)
-./test-multi-python.sh
 ```
 
-For detailed testing information, development workflows, and multi-Python version testing, see **[TESTING.md](TESTING.md)**.
+### Why Local Testing?
+
+MLX requires Apple Silicon hardware and real models (4GB+) for testing. This is standard for MLX projects and ensures tests reflect real-world usage.
+
+For detailed testing documentation, development workflows, and multi-Python verification, see **[TESTING.md](TESTING.md)**.
+
+## Part of the BROKE Ecosystem 🦫
+
+MLX Knife is the first component of [BROKE Cluster](https://github.com/mzau/broke-cluster), 
+our research project for intelligent LLM routing across heterogeneous Apple Silicon networks.
+
+- **Use MLX Knife**: For single Mac setups (available now)
+- **Use BROKE Cluster**: For multi-Mac environments (in development)
 
 ## Technical Details
 
@@ -382,7 +388,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 1. Fork and clone the repository
 2. Install with development tools: `pip install -e ".[dev,test]"`
 3. Make your changes and add tests
-4. Run tests: `pytest`
+4. Run tests locally on Apple Silicon: `pytest`
 5. Check code style: `ruff check mlx_knife/ --fix`
 6. Submit a pull request
 
