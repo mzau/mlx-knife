@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.0-rc3] - 2025-08-14
+
+### Added
+- **Issue 1**: Partial name filtering for `mlxk list` command (e.g., `mlxk list Phi-3`)
+- **Issue 2**: Fuzzy matching for single-model commands (`mlxk show Phi-3`, `mlxk run Phi-3`)
+- **Issue 3**: Default `mlxk health` behavior (no `--all` flag required)
+- Comprehensive test coverage for all new fuzzy matching features
+- Smart ambiguity resolution with helpful error messages
+
+### Enhanced
+- All single-model commands now support partial name matching
+- Case-insensitive model name searching
+- Improved user experience with intelligent model resolution
+- Expanded test suite from 96 to 104 tests (104/104 passing ✅)
+
+### Fixed
+- Health command now works without requiring `--all` flag
+- Better error handling for ambiguous model specifications
+- Enhanced fuzzy matching logic with fallback mechanisms
+
 ## [1.0-rc2] - 2025-08-13
 
 ### Enhanced

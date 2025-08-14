@@ -47,6 +47,57 @@ def expand_model_name(model_name):
             return f"mlx-community/{model_name}"
     return model_name
 
+def find_matching_models(pattern):
+    """Find models that match a partial pattern. Returns a list of (model_dir, hf_name) tuples."""
+    all_models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
+    matches = []
+    
+    for model_dir in all_models:
+        hf_name = cache_dir_to_hf(model_dir.name)
+        # Check if the pattern appears in the model name (case insensitive)
+        if pattern.lower() in hf_name.lower():
+            matches.append((model_dir, hf_name))
+    
+    return matches
+
+def resolve_single_model(model_spec):
+    """
+    Resolve a model spec to a single model, supporting fuzzy matching.
+    Returns (model_path, model_name, commit_hash) or (None, None, None) if failed.
+    Prints appropriate error messages for ambiguous matches.
+    """
+    # Parse the model spec (handles @commit_hash syntax)
+    model_name, commit_hash = parse_model_spec(model_spec)
+    
+    # Try exact match first
+    base_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
+    if base_cache_dir.exists():
+        return get_model_path(model_spec)
+    
+    # Extract the base name (without @commit_hash) for fuzzy matching
+    base_spec = model_spec.split('@')[0] if '@' in model_spec else model_spec
+    
+    # Try fuzzy matching
+    matches = find_matching_models(base_spec)
+    
+    if not matches:
+        print(f"No models found matching '{base_spec}'!")
+        return None, None, None
+    elif len(matches) == 1:
+        # Unambiguous match - use the found model with the original commit hash (if any)
+        found_model_dir, found_hf_name = matches[0]
+        if commit_hash:
+            resolved_spec = f"{found_hf_name}@{commit_hash}"
+        else:
+            resolved_spec = found_hf_name
+        return get_model_path(resolved_spec)
+    else:
+        # Multiple matches - show error with suggestions
+        print(f"Multiple models match '{base_spec}'. Please be more specific:")
+        for _, hf_name in sorted(matches, key=lambda x: x[1]):
+            print(f"  {hf_name}")
+        return None, None, None
+
 def get_model_path(model_spec):
     model_name, commit_hash = parse_model_spec(model_spec)
     base_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
@@ -192,36 +243,39 @@ def check_lfs_corruption(model_path):
     return True, "No LFS corruption detected"
 
 def check_model_health(model_spec):
-    model_path, model_name, commit_hash = get_model_path(model_spec)
+    model_path, model_name, commit_hash = resolve_single_model(model_spec)
     if not model_path:
-        # Check if base directory exists but is corrupted (no snapshots)
-        base_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
-        if base_cache_dir.exists():
-            print(f"[ERROR] Model '{model_spec}' directory exists but no snapshots found!")
-            confirm = input("Model appears corrupted. Delete? [y/N] ")
-            if confirm.lower() == "y":
-                import errno
-                import shutil
-                try:
-                    shutil.rmtree(base_cache_dir)
-                    print(f"Model {model_name} deleted.")
-                except PermissionError as e:
-                    print(f"[ERROR] Permission denied: Cannot delete {e.filename}")
-                    print("   Try running with appropriate permissions or manually delete the directory.")
-                except OSError as e:
-                    if e.errno == errno.ENOTEMPTY:
-                        print(f"[ERROR] Directory not empty: {e.filename}")
-                        print("   Another process may be using this model.")
-                    elif e.errno == errno.EACCES:
-                        print(f"[ERROR] Access denied: {e.filename}")
-                    else:
-                        print(f"[ERROR] OS Error while deleting: {e}")
-                except Exception as e:
-                    print(f"[ERROR] Unexpected error while deleting: {type(e).__name__}: {e}")
-            return False
-        else:
-            print(f"[ERROR] Model '{model_spec}' not found!")
-            return False
+        # resolve_single_model already printed the appropriate error message
+        # Try one more fallback: check if this is an exact model name that exists but is corrupted
+        try:
+            fallback_model_name, fallback_commit_hash = parse_model_spec(model_spec)
+            base_cache_dir = MODEL_CACHE / hf_to_cache_dir(fallback_model_name)
+            if base_cache_dir.exists():
+                print(f"[ERROR] Model '{model_spec}' directory exists but no snapshots found!")
+                confirm = input("Model appears corrupted. Delete? [y/N] ")
+                if confirm.lower() == "y":
+                    import errno
+                    import shutil
+                    try:
+                        shutil.rmtree(base_cache_dir)
+                        print(f"Model {fallback_model_name} deleted.")
+                    except PermissionError as e:
+                        print(f"[ERROR] Permission denied: Cannot delete {e.filename}")
+                        print("   Try running with appropriate permissions or manually delete the directory.")
+                    except OSError as e:
+                        if e.errno == errno.ENOTEMPTY:
+                            print(f"[ERROR] Directory not empty: {e.filename}")
+                            print("   Another process may be using this model.")
+                        elif e.errno == errno.EACCES:
+                            print(f"[ERROR] Access denied: {e.filename}")
+                        else:
+                            print(f"[ERROR] OS Error while deleting: {e}")
+                    except Exception as e:
+                        print(f"[ERROR] Unexpected error while deleting: {type(e).__name__}: {e}")
+        except:
+            # If even fallback parsing fails, just return
+            pass
+        return False
     print(f"Checking model: {model_name}")
     if commit_hash:
         print(f"Hash: {commit_hash}")
@@ -339,15 +393,28 @@ def check_all_models_health():
 
 def list_models(show_all=False, framework_filter=None, show_health=False, single_model=None, verbose=False):
     if single_model:
-        # Expand the model name if needed
+        # Try exact match first
         expanded_model = expand_model_name(single_model)
         model_dir = MODEL_CACHE / hf_to_cache_dir(expanded_model)
 
-        if not model_dir.exists():
-            print(f"Model '{single_model}' not found!")
-            return
-
-        models = [model_dir]
+        if model_dir.exists():
+            models = [model_dir]
+        else:
+            # If exact match fails, do partial name matching
+            all_models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
+            matching_models = []
+            
+            for model_dir in all_models:
+                hf_name = cache_dir_to_hf(model_dir.name)
+                # Check if the pattern appears in the model name (case insensitive)
+                if single_model.lower() in hf_name.lower():
+                    matching_models.append(model_dir)
+            
+            if not matching_models:
+                print(f"No models found matching '{single_model}'!")
+                return
+            
+            models = matching_models
     else:
         models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
         if not models:
@@ -406,9 +473,8 @@ def run_model(model_spec, prompt=None, interactive=False, temperature=0.7,
         repetition_penalty: Penalty for repeated tokens
         stream: Whether to stream output
     """
-    model_path, model_name, commit_hash = get_model_path(model_spec)
+    model_path, model_name, commit_hash = resolve_single_model(model_spec)
     if not model_path:
-        print(f"Model '{model_spec}' not found!")
         print(f"Use: mlxk pull {model_spec}")
         sys.exit(1)
 
@@ -451,10 +517,9 @@ def run_model(model_spec, prompt=None, interactive=False, temperature=0.7,
 
 def show_model(model_spec, show_files=False, show_config=False):
     """Show detailed information about a specific model."""
-    model_path, model_name, commit_hash = get_model_path(model_spec)
+    model_path, model_name, commit_hash = resolve_single_model(model_spec)
 
     if not model_path:
-        print(f"[ERROR] Model '{model_spec}' not found!")
         return False
 
     # Basic information
@@ -661,20 +726,30 @@ def show_model(model_spec, show_files=False, show_config=False):
 
 def rm_model(model_spec):
     original_spec = model_spec
-    model_name, commit_hash = parse_model_spec(model_spec)
-    # Confirm on auto-expansion
-    if "/" not in original_spec.split("@")[0] and "/" in model_name:
-        confirm = input(f"Delete '{model_name}'? [Y/n] ")
+    
+    # First try to resolve using fuzzy matching
+    resolved_path, resolved_name, resolved_hash = resolve_single_model(model_spec)
+    
+    if not resolved_path:
+        # resolve_single_model already printed the error message
+        return
+        
+    # Use the resolved model name for deletion
+    model_name = resolved_name
+    commit_hash = resolved_hash
+    
+    # Confirm on auto-expansion (if the resolved name is different from input)
+    base_spec = original_spec.split("@")[0] if "@" in original_spec else original_spec
+    if base_spec != model_name and "/" not in base_spec:
+        confirm = input(f"Delete '{model_name}' (matched from '{base_spec}')? [Y/n] ")
         if confirm.lower() == "n":
             print("Delete aborted.")
             return
+    
     base_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
+    # This should exist since resolve_single_model succeeded, but double-check
     if not base_cache_dir.exists():
-        print(f"Model '{model_name}' not found!")
-        print("\nAvailable models:")
-        models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
-        for m in sorted(models):
-            print(f"  {cache_dir_to_hf(m.name)}")
+        print(f"[ERROR] Model directory disappeared: {model_name}")
         return
     # Specific hash to delete?
     if commit_hash:

@@ -140,3 +140,66 @@ class TestErrorHandling:
             pass
         except Exception as e:
             pytest.fail(f"Basic command robustness test failed: {e}")
+
+
+class TestHealthCommandDefaultBehavior:
+    """Test health command default behavior (Issue 3)."""
+    
+    @patch('mlx_knife.cli.check_all_models_health')
+    def test_health_command_without_args_calls_all(self, mock_check_all):
+        """Test that 'mlxk health' (no args) calls check_all_models_health."""
+        mock_check_all.return_value = True
+        
+        try:
+            with patch('sys.argv', ['mlxk', 'health']):
+                main()
+            
+            # Should have called check_all_models_health
+            assert mock_check_all.called
+            mock_check_all.assert_called_once()
+        except SystemExit:
+            # Exit is acceptable after running the command
+            assert mock_check_all.called
+        except Exception as e:
+            pytest.fail(f"Health command default behavior test failed: {e}")
+    
+    @patch('mlx_knife.cli.check_model_health')
+    @patch('mlx_knife.cli.check_all_models_health')
+    def test_health_command_with_specific_model(self, mock_check_all, mock_check_specific):
+        """Test that 'mlxk health model-name' calls check_model_health."""
+        mock_check_specific.return_value = True
+        
+        try:
+            with patch('sys.argv', ['mlxk', 'health', 'some-model']):
+                main()
+            
+            # Should have called check_model_health with the specific model
+            assert mock_check_specific.called
+            mock_check_specific.assert_called_once_with('some-model')
+            
+            # Should NOT have called check_all_models_health
+            assert not mock_check_all.called
+        except SystemExit:
+            # Exit is acceptable after running the command
+            assert mock_check_specific.called
+            assert not mock_check_all.called
+        except Exception as e:
+            pytest.fail(f"Health command specific model test failed: {e}")
+    
+    @patch('mlx_knife.cli.check_all_models_health')
+    def test_health_command_backward_compatibility_with_all_flag(self, mock_check_all):
+        """Test that 'mlxk health --all' still works for backward compatibility."""
+        mock_check_all.return_value = True
+        
+        try:
+            with patch('sys.argv', ['mlxk', 'health', '--all']):
+                main()
+            
+            # Should have called check_all_models_health  
+            assert mock_check_all.called
+            mock_check_all.assert_called_once()
+        except SystemExit:
+            # Exit is acceptable after running the command
+            assert mock_check_all.called
+        except Exception as e:
+            pytest.fail(f"Health command --all flag test failed: {e}")

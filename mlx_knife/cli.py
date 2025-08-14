@@ -102,13 +102,11 @@ def main():
     elif args.cmd == "rm":
         rm_model(args.model_spec)
     elif args.cmd == "health":
-        if args.all:
-            check_all_models_health()
-        elif args.model_spec:
+        if args.model_spec:
             check_model_health(args.model_spec)
         else:
-            print("Error: --all or model_spec required")
-            parser.print_help()
+            # Default to checking all models if no specific model is provided
+            check_all_models_health()
     elif args.cmd == "show":
         show_model(args.model_spec, show_files=args.files, show_config=args.config)
     elif args.cmd == "server":

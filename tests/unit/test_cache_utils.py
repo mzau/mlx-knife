@@ -20,7 +20,9 @@ from mlx_knife.cache_utils import (
     cache_dir_to_hf,
     is_model_healthy,
     detect_framework,
-    list_models
+    list_models,
+    find_matching_models,
+    resolve_single_model
 )
 
 
@@ -327,6 +329,95 @@ class TestModelListing:
             list_models(show_health=True)
         except Exception as e:
             pytest.fail(f"Model listing with parameters failed: {e}")
+
+
+class TestPartialNameFiltering:
+    """Test partial name filtering for list command (Issue 1)."""
+    
+    def test_find_matching_models_function(self):
+        """Test the find_matching_models helper function."""
+        with patch('mlx_knife.cache_utils.MODEL_CACHE') as mock_cache:
+            # Mock some model directories
+            mock_models = [
+                MagicMock(name="models--mlx-community--Phi-3-mini"),
+                MagicMock(name="models--mlx-community--Phi-3-medium"), 
+                MagicMock(name="models--other--Llama-3-8B"),
+            ]
+            
+            for i, mock_model in enumerate(mock_models):
+                mock_model.name = f"models--{'mlx-community' if i < 2 else 'other'}--{'Phi-3-mini' if i == 0 else 'Phi-3-medium' if i == 1 else 'Llama-3-8B'}"
+            
+            mock_cache.iterdir.return_value = mock_models
+            
+            # Test finding Phi-3 models
+            matches = find_matching_models("Phi-3")
+            assert len(matches) == 2
+            
+            # Test finding non-existent model
+            matches = find_matching_models("nonexistent")
+            assert len(matches) == 0
+    
+    def test_partial_matching_basic_functionality(self):
+        """Test basic partial matching logic without complex mocking."""
+        # Simple functional test of the helper functions
+        try:
+            # These functions exist and can be called
+            assert callable(find_matching_models)
+            # Function handles empty input gracefully
+            matches = find_matching_models("")
+            assert isinstance(matches, list)
+        except Exception as e:
+            pytest.fail(f"Basic functionality test failed: {e}")
+
+
+class TestSingleModelFuzzyMatching:
+    """Test fuzzy matching for single-model commands (Issue 2)."""
+    
+    def test_resolve_single_model_function_exists(self):
+        """Test that resolve_single_model function exists and is callable."""
+        try:
+            assert callable(resolve_single_model)
+            # Function handles invalid input gracefully 
+            result = resolve_single_model("definitely-nonexistent-model-12345")
+            assert isinstance(result, tuple)
+            assert len(result) == 3
+        except Exception as e:
+            pytest.fail(f"Function existence test failed: {e}")
+    
+    @patch('mlx_knife.cache_utils.get_model_path') 
+    @patch('mlx_knife.cache_utils.find_matching_models')
+    def test_resolve_single_model_ambiguous_fuzzy(self, mock_find, mock_get_path, capsys):
+        """Test ambiguous fuzzy match shows error."""
+        # Mock exact match fails, fuzzy finds multiple matches
+        mock_get_path.return_value = (None, None, None)
+        mock_find.return_value = [
+            (MagicMock(), "model-1"),
+            (MagicMock(), "model-2")
+        ]
+        
+        result = resolve_single_model("partial")
+        assert result[0] is None  # Should fail
+        
+        # Check that error message was printed
+        captured = capsys.readouterr()
+        assert "Multiple models match" in captured.out
+        assert "model-1" in captured.out
+        assert "model-2" in captured.out
+    
+    @patch('mlx_knife.cache_utils.get_model_path')
+    @patch('mlx_knife.cache_utils.find_matching_models')
+    def test_resolve_single_model_no_match(self, mock_find, mock_get_path, capsys):
+        """Test no match shows appropriate error."""
+        # Mock both exact and fuzzy matching fail
+        mock_get_path.return_value = (None, None, None)
+        mock_find.return_value = []
+        
+        result = resolve_single_model("nonexistent")
+        assert result[0] is None  # Should fail
+        
+        # Check error message
+        captured = capsys.readouterr()
+        assert "No models found matching" in captured.out
 
 
 # Add pytest fixture at module level

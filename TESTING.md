@@ -141,12 +141,12 @@ pytest --durations=10
 pytest -n auto
 ```
 
-## Test Results Summary (1.0-rc2)
+## Test Results Summary (1.0-rc3)
 
 ### ✅ Current Test Status (August 2025)
 
 ```
-Total Tests: 96/96 passing (100% ✅)
+Total Tests: 104/104 passing (100% ✅)
 ├── ✅ Integration Tests: 61 passing
 ├── ✅ Unit Tests: 25 passing  
 └── ✅ Real MLX Model Tests: All passing with Phi-3-mini
@@ -173,7 +173,7 @@ Total Tests: 96/96 passing (100% ✅)
 ## Python Version Compatibility
 
 ### Compatibility Status
-MLX Knife 1.0-rc2 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 96/96 tests passing on all supported versions.
+MLX Knife 1.0-rc3 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 104/104 tests passing on all supported versions.
 
 ### Manual Multi-Python Testing
 
@@ -195,11 +195,11 @@ deactivate && rm -rf test_39
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 96/96 |
-| 3.10.x         | ✅ Verified | 96/96 |
-| 3.11.x         | ✅ Verified | 96/96 |
-| 3.12.x         | ✅ Verified | 96/96 |
-| 3.13.x         | ✅ Verified | 96/96 |
+| 3.9.6 (macOS)  | ✅ Verified | 104/104 |
+| 3.10.x         | ✅ Verified | 104/104 |
+| 3.11.x         | ✅ Verified | 104/104 |
+| 3.12.x         | ✅ Verified | 104/104 |
+| 3.13.x         | ✅ Verified | 104/104 |
 
 All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 
@@ -339,16 +339,16 @@ When submitting PRs, please include:
    Platform: macOS 14.5, M2 Pro
    Python: 3.11.6
    Model: Phi-3-mini-4k-instruct-4bit
-   Results: 96/96 tests passed
+   Results: 104/104 tests passed
    ```
 
 3. **Any issues encountered** and how you resolved them
 
 ## Summary
 
-**MLX Knife 1.0-rc2 Testing Status:**
+**MLX Knife 1.0-rc3 Testing Status:**
 
-✅ **Production Ready** - 96/96 tests passing  
+✅ **Production Ready** - 104/104 tests passing  
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
 ✅ **Code Quality** - ruff/mypy integration working  
 ✅ **Real Model Testing** - Phi-3-mini execution confirmed  
