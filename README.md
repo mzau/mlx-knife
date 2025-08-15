@@ -8,7 +8,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
-**Current Version**: 1.0.0 (August 2025)
+**Current Version**: 1.0.1 (August 2025)
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
