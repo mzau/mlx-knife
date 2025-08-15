@@ -98,7 +98,7 @@ mlxk server --host 0.0.0.0 --port 8000
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0-rc3 | :white_check_mark: |
+| 1.0.0   | :white_check_mark: |
 | < 1.0   | :x:                |
 
 ## Additional Resources

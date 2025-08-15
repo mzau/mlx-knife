@@ -4,7 +4,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 Provides native MLX execution with streaming output and interactive chat capabilities.
 """
 
-__version__ = "1.0-rc3"
+__version__ = "1.0.0"
 __author__ = "The BROKE team"
 __email__ = "broke@gmx.eu"
 __license__ = "MIT"
