@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.1] - 2025-08-15
+
+### Changed
+- **Description Update**: Changed package description to "ollama-style CLI for MLX models on Apple Silicon"
+
 ## [1.0.0] - 2025-08-15
 
 ### Changed

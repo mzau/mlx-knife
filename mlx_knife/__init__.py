@@ -4,15 +4,15 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 Provides native MLX execution with streaming output and interactive chat capabilities.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __author__ = "The BROKE team"
 __email__ = "broke@gmx.eu"
 __license__ = "MIT"
-__description__ = "HuggingFace-style cache management for MLX models"
+__description__ = "ollama-style CLI for MLX models on Apple Silicon"
 __url__ = "https://github.com/mzau/mlx-knife"
 
 # Version tuple for programmatic access (major, minor, patch)
-VERSION = (1, 0, 0)  # Simplified for now
+VERSION = (1, 0, 1)  # Simplified for now
 
 # Core functionality imports
 from .cache_utils import (
