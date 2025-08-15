@@ -1,12 +1,14 @@
-# <img src="broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX Knife
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX Knife
 
 <p align="center">
-  <img src="mlxk-demo.gif" alt="MLX Knife Demo" width="1000">
+  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="1000">
 </p>
 
-A lightweight, ollama-like CLI for managing and running MLX models on Apple Silicon. **Designed for personal, local use** - perfect for individual developers and researchers working with MLX models.
+A lightweight, ollama-like CLI for managing and running MLX models on Apple Silicon. **CLI-only tool designed for personal, local use** - perfect for individual developers and researchers working with MLX models.
 
-**Current Version**: 1.0-rc3 (August 2025)
+> **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
+
+**Current Version**: 1.0.0 (August 2025)
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -47,6 +49,16 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 - **Exception-Safe**: Robust error handling with guaranteed resource cleanup
 
 ## Installation
+
+### Via PyPI (Recommended)
+```bash
+pip install mlx-knife
+```
+
+### Via GitHub (Development)
+```bash
+pip install git+https://github.com/mzau/mlx-knife.git
+```
 
 ### Requirements
 - macOS with Apple Silicon (M1/M2/M3)

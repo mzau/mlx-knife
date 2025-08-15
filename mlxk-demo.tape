@@ -22,7 +22,7 @@ Enter
 Sleep 1400ms
 
 # 2) start run
-Type "mlxk run Mistral-7B-Instruct-v0.2-4bit"
+Type "mlxk run Mistral-7B"
 Enter
 Sleep 2500ms
 

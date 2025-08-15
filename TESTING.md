@@ -141,7 +141,7 @@ pytest --durations=10
 pytest -n auto
 ```
 
-## Test Results Summary (1.0-rc3)
+## Test Results Summary (1.0.0)
 
 ### ✅ Current Test Status (August 2025)
 
@@ -173,7 +173,7 @@ Total Tests: 104/104 passing (100% ✅)
 ## Python Version Compatibility
 
 ### Compatibility Status
-MLX Knife 1.0-rc3 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 104/104 tests passing on all supported versions.
+MLX Knife 1.0.0 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 104/104 tests passing on all supported versions.
 
 ### Manual Multi-Python Testing
 
@@ -346,7 +346,7 @@ When submitting PRs, please include:
 
 ## Summary
 
-**MLX Knife 1.0-rc3 Testing Status:**
+**MLX Knife 1.0.0 Testing Status:**
 
 ✅ **Production Ready** - 104/104 tests passing  
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  

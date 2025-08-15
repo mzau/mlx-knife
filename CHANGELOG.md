@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0] - 2025-08-15
+
+### Changed
+- **STABLE RELEASE**: MLX Knife 1.0.0 officially stable and ready for production use
+- **PyPI Publication**: Now available on PyPI for easy installation via `pip install mlx-knife`
+- **CLI-Only Policy**: Officially designated as CLI-only tool (Python API access not officially supported)
+- **Documentation**: Updated all documentation to reflect stable 1.0.0 release status
+
 ## [1.0-rc3] - 2025-08-14
 
 ### Added
