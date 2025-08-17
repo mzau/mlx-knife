@@ -10,7 +10,10 @@ from pathlib import Path
 __version__ = "1.0-beta-1"
 
 DEFAULT_CACHE = Path.home() / ".cache/huggingface/hub"
-MODEL_CACHE = Path(os.environ.get("HF_HOME", DEFAULT_CACHE))
+if "HF_HOME" in os.environ:
+    MODEL_CACHE = Path(os.environ["HF_HOME"]) / "hub"
+else:
+    MODEL_CACHE = DEFAULT_CACHE
 
 
 def hf_to_cache_dir(hf_name: str) -> str:
