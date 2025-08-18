@@ -11,7 +11,7 @@ import tempfile
 import shutil
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 # Import the module under test
 from mlx_knife.cache_utils import (
@@ -418,6 +418,283 @@ class TestSingleModelFuzzyMatching:
         # Check error message
         captured = capsys.readouterr()
         assert "No models found matching" in captured.out
+
+
+class TestShowModelHealthConsistency:
+    """Test for Issue #7 - Health check inconsistency in show command with fuzzy model names."""
+    
+    @patch('mlx_knife.cache_utils.resolve_single_model')
+    @patch('mlx_knife.cache_utils.is_model_healthy')
+    @patch('mlx_knife.cache_utils.get_model_size')
+    @patch('mlx_knife.cache_utils.get_model_modified')
+    @patch('mlx_knife.cache_utils.detect_framework')
+    @patch('builtins.print')
+    def test_show_model_health_consistency_fuzzy_vs_full_name(self, mock_print, mock_framework, 
+                                                              mock_modified, mock_size, mock_healthy, 
+                                                              mock_resolve, temp_cache_dir):
+        """Test that fuzzy and full model names show identical health status.
+        
+        This is a regression test for Issue #7 where:
+        - mlxk show Phi-3 showed "CORRUPTED"  
+        - mlxk show mlx-community/Phi-3-mini-4k-instruct-4bit showed "OK"
+        for the same underlying model.
+        """
+        # Setup mock model path
+        mock_model_path = temp_cache_dir / "models--mlx-community--Phi-3-mini-4k-instruct-4bit" / "snapshots" / "abc123"
+        mock_model_path.mkdir(parents=True)
+        
+        # Mock resolve_single_model to return consistent results
+        # Both fuzzy "Phi-3" and full name should resolve to same model_name
+        mock_resolve.return_value = (
+            mock_model_path,
+            "mlx-community/Phi-3-mini-4k-instruct-4bit",  # Resolved full name
+            "abc123"
+        )
+        
+        # Mock other dependencies
+        mock_size.return_value = "4.2GB"
+        mock_modified.return_value = "2023-12-01 10:00:00"
+        mock_framework.return_value = "MLX"
+        
+        # Test both healthy and unhealthy scenarios
+        for health_status in [True, False]:
+            mock_healthy.return_value = health_status
+            mock_print.reset_mock()
+            
+            # Test fuzzy name
+            from mlx_knife.cache_utils import show_model
+            show_model("Phi-3")  # Fuzzy name
+            fuzzy_calls = [str(call) for call in mock_print.call_args_list]
+            
+            mock_print.reset_mock()
+            
+            # Test full name  
+            show_model("mlx-community/Phi-3-mini-4k-instruct-4bit")  # Full name
+            full_calls = [str(call) for call in mock_print.call_args_list]
+            
+            # Both should have identical health output
+            fuzzy_health_output = [call for call in fuzzy_calls if "Health:" in call]
+            full_health_output = [call for call in full_calls if "Health:" in call]
+            
+            assert len(fuzzy_health_output) == 1, f"Expected 1 health output for fuzzy name, got {len(fuzzy_health_output)}"
+            assert len(full_health_output) == 1, f"Expected 1 health output for full name, got {len(full_health_output)}"
+            assert fuzzy_health_output == full_health_output, f"Health status differs: fuzzy={fuzzy_health_output} vs full={full_health_output}"
+            
+            # Verify is_model_healthy was called with resolved model name (not original spec)
+            expected_calls = [call("mlx-community/Phi-3-mini-4k-instruct-4bit")] * 2
+            assert mock_healthy.call_args_list == expected_calls, f"is_model_healthy should be called with resolved name, got {mock_healthy.call_args_list}"
+            
+            # Reset for next iteration
+            mock_healthy.reset_mock()
+
+
+
+class TestIssue6RepositoryNameValidation:
+    """Test for Issue #6 - Add repository name length validation for HuggingFace Hub."""
+    
+    @patch('builtins.input', return_value='y')  # Mock user input to avoid stdin issues
+    def test_pull_model_rejects_long_names(self, mock_input, capsys):
+        """Test that repository names >96 characters are rejected."""
+        from mlx_knife.hf_download import pull_model
+        
+        # Create a name that exceeds 96 characters after expansion
+        # Use direct long name that doesn't get expanded but is >96 chars
+        long_model_name = "organization-name/very-long-model-name-that-definitely-exceeds-the-character-limit-for-repositories-on-hf-platform"
+        
+        result = pull_model(long_model_name)
+        
+        assert result is False
+        
+        captured = capsys.readouterr()
+        assert "Repository name exceeds HuggingFace Hub limit" in captured.out
+        assert "96 characters" in captured.out
+        assert "cannot exist on HuggingFace Hub" in captured.out
+
+
+class TestIssue13HashBasedDisambiguation:
+    """Test for Issue #13 - Hash-based disambiguation for ambiguous model names."""
+    
+    def test_hash_exists_in_local_cache_full_hash(self):
+        """Test hash_exists_in_local_cache returns full hash when exact match exists."""
+        with patch('mlx_knife.cache_utils.MODEL_CACHE') as mock_cache:
+            mock_hash_dir = MagicMock()
+            mock_hash_dir.exists.return_value = True
+            
+            mock_snapshots_dir = MagicMock()
+            mock_snapshots_dir.exists.return_value = True
+            mock_snapshots_dir.__truediv__.return_value = mock_hash_dir
+            
+            mock_base_dir = MagicMock()
+            mock_base_dir.exists.return_value = True
+            mock_base_dir.__truediv__.return_value = mock_snapshots_dir
+            
+            mock_cache.__truediv__.return_value = mock_base_dir
+            
+            from mlx_knife.cache_utils import hash_exists_in_local_cache
+            
+            full_hash = "a5339a4131f135d0fdc6a5c8b5bbed2753bbe0f3"
+            result = hash_exists_in_local_cache("mlx-community/Phi-3-mini", full_hash)
+            assert result == full_hash
+    
+    def test_hash_exists_in_local_cache_none_no_model(self):
+        """Test hash_exists_in_local_cache returns None when model doesn't exist."""
+        with patch('mlx_knife.cache_utils.MODEL_CACHE') as mock_cache:
+            mock_base_dir = MagicMock()
+            mock_base_dir.exists.return_value = False
+            mock_cache.__truediv__.return_value = mock_base_dir
+            
+            from mlx_knife.cache_utils import hash_exists_in_local_cache
+            
+            result = hash_exists_in_local_cache("nonexistent/model", "hash123")
+            assert result is None
+    
+    def test_hash_exists_in_local_cache_none_no_hash(self):
+        """Test hash_exists_in_local_cache returns None when hash doesn't exist."""
+        with patch('mlx_knife.cache_utils.MODEL_CACHE') as mock_cache:
+            mock_hash_dir = MagicMock()
+            mock_hash_dir.exists.return_value = False
+            
+            mock_snapshots_dir = MagicMock()
+            mock_snapshots_dir.exists.return_value = True
+            mock_snapshots_dir.__truediv__.return_value = mock_hash_dir
+            mock_snapshots_dir.iterdir.return_value = []  # No snapshots
+            
+            mock_base_dir = MagicMock()
+            mock_base_dir.exists.return_value = True
+            mock_base_dir.__truediv__.return_value = mock_snapshots_dir
+            
+            mock_cache.__truediv__.return_value = mock_base_dir
+            
+            from mlx_knife.cache_utils import hash_exists_in_local_cache
+            
+            result = hash_exists_in_local_cache("mlx-community/Phi-3-mini", "nonexistent")
+            assert result is None
+    
+    def test_hash_exists_in_local_cache_short_hash_resolution(self):
+        """Test hash_exists_in_local_cache resolves short hashes locally."""
+        with patch('mlx_knife.cache_utils.MODEL_CACHE') as mock_cache:
+            # Mock exact match fails
+            mock_hash_dir = MagicMock()
+            mock_hash_dir.exists.return_value = False
+            
+            # Mock snapshots directory with matching hash
+            mock_snapshot = MagicMock()
+            mock_snapshot.is_dir.return_value = True
+            mock_snapshot.name = "de2dfaf56839b7d0e834157d2401dee02726874d"
+            
+            mock_snapshots_dir = MagicMock()
+            mock_snapshots_dir.exists.return_value = True
+            mock_snapshots_dir.__truediv__.return_value = mock_hash_dir
+            mock_snapshots_dir.iterdir.return_value = [mock_snapshot]
+            
+            mock_base_dir = MagicMock()
+            mock_base_dir.exists.return_value = True
+            mock_base_dir.__truediv__.return_value = mock_snapshots_dir
+            
+            mock_cache.__truediv__.return_value = mock_base_dir
+            
+            from mlx_knife.cache_utils import hash_exists_in_local_cache
+            
+            result = hash_exists_in_local_cache("mlx-community/Llama-3.3-70B", "de2dfaf5")
+            assert result == "de2dfaf56839b7d0e834157d2401dee02726874d"
+    
+    @patch('mlx_knife.cache_utils.get_model_path')
+    @patch('mlx_knife.cache_utils.hash_exists_in_local_cache')
+    @patch('mlx_knife.cache_utils.find_matching_models')
+    @patch('mlx_knife.cache_utils.MODEL_CACHE')
+    def test_resolve_single_model_hash_disambiguation_success(self, mock_cache, mock_find, mock_hash_exists, mock_get_path):
+        """Test successful hash-based disambiguation when multiple models match."""
+        # Mock find_matching_models to return multiple matches
+        mock_find.return_value = [
+            (MagicMock(), "mlx-community/Llama-3.2-1B-Instruct-4bit"),
+            (MagicMock(), "mlx-community/Llama-3.3-70B-Instruct-4bit"),
+        ]
+        
+        # Mock hash_exists_in_local_cache to return full hash for second model only
+        def mock_hash_exists_side_effect(model_name, commit_hash):
+            if model_name == "mlx-community/Llama-3.3-70B-Instruct-4bit":
+                return "de2dfaf56839b7d0e834157d2401dee02726874d"
+            return None
+        mock_hash_exists.side_effect = mock_hash_exists_side_effect
+        
+        # Mock get_model_path to return success
+        mock_get_path.return_value = (MagicMock(), "mlx-community/Llama-3.3-70B-Instruct-4bit", "de2dfaf5")
+        
+        # Mock MODEL_CACHE behavior for exact match check
+        mock_base_dir = MagicMock()
+        mock_base_dir.exists.return_value = False
+        mock_cache.__truediv__.return_value = mock_base_dir
+        
+        from mlx_knife.cache_utils import resolve_single_model
+        
+        result = resolve_single_model("Llama@de2dfaf5")
+        
+        # Should successfully resolve to the second model
+        assert result[1] == "mlx-community/Llama-3.3-70B-Instruct-4bit"
+        assert result[2] == "de2dfaf5"
+        
+        # Verify hash_exists_in_local_cache was called for both models
+        assert mock_hash_exists.call_count == 2
+        
+        # Verify get_model_path was called with the resolved spec (full hash)
+        mock_get_path.assert_called_once_with("mlx-community/Llama-3.3-70B-Instruct-4bit@de2dfaf56839b7d0e834157d2401dee02726874d")
+    
+    @patch('mlx_knife.cache_utils.hash_exists_in_local_cache')
+    @patch('mlx_knife.cache_utils.find_matching_models')
+    @patch('mlx_knife.cache_utils.MODEL_CACHE')
+    def test_resolve_single_model_hash_disambiguation_no_match(self, mock_cache, mock_find, mock_hash_exists, capsys):
+        """Test hash-based disambiguation when hash doesn't exist in any model."""
+        # Mock find_matching_models to return multiple matches
+        mock_find.return_value = [
+            (MagicMock(), "mlx-community/Llama-3.2-1B-Instruct-4bit"),
+            (MagicMock(), "mlx-community/Llama-3.3-70B-Instruct-4bit"),
+        ]
+        
+        # Mock hash_exists_in_local_cache to return None for all models
+        mock_hash_exists.return_value = None
+        
+        # Mock MODEL_CACHE behavior for exact match check
+        mock_base_dir = MagicMock()
+        mock_base_dir.exists.return_value = False
+        mock_cache.__truediv__.return_value = mock_base_dir
+        
+        from mlx_knife.cache_utils import resolve_single_model
+        
+        result = resolve_single_model("Llama@nonexistent")
+        
+        # Should return None tuple
+        assert result == (None, None, None)
+        
+        # Check error message was printed
+        captured = capsys.readouterr()
+        assert "Hash 'nonexistent' not found in any model matching 'Llama'" in captured.out
+        assert "Available models:" in captured.out
+    
+    @patch('mlx_knife.cache_utils.find_matching_models')
+    @patch('mlx_knife.cache_utils.MODEL_CACHE')
+    def test_resolve_single_model_no_hash_multiple_matches(self, mock_cache, mock_find, capsys):
+        """Test traditional ambiguous model behavior without hash is preserved."""
+        # Mock find_matching_models to return multiple matches
+        mock_find.return_value = [
+            (MagicMock(), "mlx-community/Llama-3.2-1B-Instruct-4bit"),
+            (MagicMock(), "mlx-community/Llama-3.3-70B-Instruct-4bit"),
+        ]
+        
+        # Mock MODEL_CACHE behavior for exact match check
+        mock_base_dir = MagicMock()
+        mock_base_dir.exists.return_value = False
+        mock_cache.__truediv__.return_value = mock_base_dir
+        
+        from mlx_knife.cache_utils import resolve_single_model
+        
+        result = resolve_single_model("Llama")  # No hash specified
+        
+        # Should return None tuple
+        assert result == (None, None, None)
+        
+        # Check traditional error message was printed
+        captured = capsys.readouterr()
+        assert "Multiple models match 'Llama'. Please be more specific:" in captured.out
 
 
 # Add pytest fixture at module level

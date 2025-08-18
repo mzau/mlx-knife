@@ -1,17 +1,29 @@
 # MLX Knife Testing Guide
 
+## Current Status
+
+✅ **114/114 tests passing** (August 2025)  
+✅ **Apple Silicon verified** (M1/M2/M3)  
+✅ **Python 3.9-3.13 compatible**  
+✅ **Production ready** - real model execution validated
+
 ## Quick Start
 
 ```bash
 # Install with test dependencies
 pip install -e ".[test]"
 
+# Download test model (required for most tests)
+mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
+
 # Run all tests
 pytest
 
-# Run specific test categories
-pytest tests/integration/
+# Fast unit tests only
 pytest tests/unit/
+
+# Before committing
+ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
 ```
 
 ## Why Local Testing?
@@ -30,13 +42,13 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 ```
 tests/
 ├── conftest.py                     # Shared fixtures and utilities
-├── integration/                    # System-level integration tests
+├── integration/                    # System-level integration tests (62 tests)
 │   ├── test_core_functionality.py      # Basic CLI operations
 │   ├── test_health_checks.py           # Model corruption detection  
 │   ├── test_process_lifecycle.py       # Process management & cleanup
 │   ├── test_run_command_advanced.py    # Run command edge cases
 │   └── test_server_functionality.py    # OpenAI API server tests
-└── unit/                          # Module-level unit tests
+└── unit/                          # Module-level unit tests (52 tests)
     ├── test_cache_utils.py            # Cache management functions
     ├── test_cli.py                    # CLI argument parsing
     └── test_mlx_runner_memory.py     # Memory management tests
@@ -140,39 +152,19 @@ pytest --durations=10
 pytest -n auto
 ```
 
-## Test Results Summary (1.0.1)
-
-### ✅ Current Test Status (August 2025)
-
-```
-Total Tests: 105/105 passing (100% ✅)
-├── ✅ Integration Tests: 62 passing
-├── ✅ Unit Tests: 25 passing  
-└── ✅ Real MLX Model Tests: All passing with Phi-3-mini
-```
-
-**Production Ready Achievements:**
-- ✅ **Complete test coverage** - All critical functionality validated
-- ✅ **Real model execution** - No mocked tests
-- ✅ **Process hygiene confirmed** - No zombie processes, clean shutdowns
-- ✅ **Memory management robust** - Context managers prevent leaks
-- ✅ **Exception safety verified** - Context managers work correctly
-
-### Test Categories Breakdown
-
-| Category | Count | Description |
-|----------|-------|-------------|
-| **Unit Tests** | 25 | Fast, isolated function tests |
-| **Integration Tests** | 62 | Full system behavior tests |
-| **Model Execution** | 7 | Real MLX model running |
-| **Process Lifecycle** | 8 | Signal handling and cleanup |
-| **Health Checks** | 12 | Corruption detection |
-| **Server Tests** | 14 | API endpoint validation |
-
 ## Python Version Compatibility
 
-### Compatibility Status
-MLX Knife 1.0.1 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 105/105 tests passing on all supported versions.
+### Verification Results (August 2025)
+
+| Python Version | Status | Tests Passing |
+|----------------|--------|---------------|
+| 3.9.6 (macOS)  | ✅ Verified | 114/114 |
+| 3.10.x         | ✅ Verified | 114/114 |
+| 3.11.x         | ✅ Verified | 114/114 |
+| 3.12.x         | ✅ Verified | 114/114 |
+| 3.13.x         | ✅ Verified | 114/114 |
+
+All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 
 ### Manual Multi-Python Testing
 
@@ -189,18 +181,6 @@ pip install -e ".[test]"
 pytest
 deactivate && rm -rf test_39
 ```
-
-### Verification Results (August 2025)
-
-| Python Version | Status | Tests Passing |
-|----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 105/105 |
-| 3.10.x         | ✅ Verified | 105/105 |
-| 3.11.x         | ✅ Verified | 105/105 |
-| 3.12.x         | ✅ Verified | 105/105 |
-| 3.13.x         | ✅ Verified | 105/105 |
-
-All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 
 ## Code Quality & Development
 
@@ -221,11 +201,6 @@ mypy mlx_knife/
 # Complete development workflow
 ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
 ```
-
-**Current Status:**
-- ✅ **ruff**: Code style standardized
-- ✅ **mypy**: Type annotations for better IDE support
-- ✅ **pytest**: Comprehensive test coverage
 
 ### Development Workflow
 
@@ -285,7 +260,7 @@ Following the **"Process Hygiene over Edge-Case Perfection"** principle:
 3. **Core Operations**: Basic functionality works ✅
 4. **Error Handling**: Graceful failures ✅
 
-The current test suite successfully validates production readiness while identifying specific areas for enhancement.
+The test suite validates production readiness with real Apple Silicon hardware and actual MLX models.
 
 ## Troubleshooting
 
@@ -338,16 +313,16 @@ When submitting PRs, please include:
    Platform: macOS 14.5, M2 Pro
    Python: 3.11.6
    Model: Phi-3-mini-4k-instruct-4bit
-   Results: 105/105 tests passed
+   Results: 114/114 tests passed
    ```
 
 3. **Any issues encountered** and how you resolved them
 
 ## Summary
 
-**MLX Knife 1.0.1 Testing Status:**
+**MLX Knife 1.0.3 Testing Status:**
 
-✅ **Production Ready** - 105/105 tests passing  
+✅ **Production Ready** - 114/114 tests passing  
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
 ✅ **Code Quality** - ruff/mypy integration working  
 ✅ **Real Model Testing** - Phi-3-mini execution confirmed  
