@@ -29,8 +29,6 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 
 ```
 tests/
-├── TESTING.md                      # This file
-├── mlx_knife_test_requirements.md  # Original test requirements
 ├── conftest.py                     # Shared fixtures and utilities
 ├── integration/                    # System-level integration tests
 │   ├── test_core_functionality.py      # Basic CLI operations
@@ -40,7 +38,8 @@ tests/
 │   └── test_server_functionality.py    # OpenAI API server tests
 └── unit/                          # Module-level unit tests
     ├── test_cache_utils.py            # Cache management functions
-    └── test_cli.py                    # CLI argument parsing
+    ├── test_cli.py                    # CLI argument parsing
+    └── test_mlx_runner_memory.py     # Memory management tests
 ```
 
 ## Test Prerequisites
@@ -146,8 +145,8 @@ pytest -n auto
 ### ✅ Current Test Status (August 2025)
 
 ```
-Total Tests: 104/104 passing (100% ✅)
-├── ✅ Integration Tests: 61 passing
+Total Tests: 105/105 passing (100% ✅)
+├── ✅ Integration Tests: 62 passing
 ├── ✅ Unit Tests: 25 passing  
 └── ✅ Real MLX Model Tests: All passing with Phi-3-mini
 ```
@@ -164,7 +163,7 @@ Total Tests: 104/104 passing (100% ✅)
 | Category | Count | Description |
 |----------|-------|-------------|
 | **Unit Tests** | 25 | Fast, isolated function tests |
-| **Integration Tests** | 61 | Full system behavior tests |
+| **Integration Tests** | 62 | Full system behavior tests |
 | **Model Execution** | 7 | Real MLX model running |
 | **Process Lifecycle** | 8 | Signal handling and cleanup |
 | **Health Checks** | 12 | Corruption detection |
@@ -173,7 +172,7 @@ Total Tests: 104/104 passing (100% ✅)
 ## Python Version Compatibility
 
 ### Compatibility Status
-MLX Knife 1.0.1 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 104/104 tests passing on all supported versions.
+MLX Knife 1.0.1 is fully compatible with Python 3.9-3.13. Comprehensive verification completed with 105/105 tests passing on all supported versions.
 
 ### Manual Multi-Python Testing
 
@@ -195,11 +194,11 @@ deactivate && rm -rf test_39
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 104/104 |
-| 3.10.x         | ✅ Verified | 104/104 |
-| 3.11.x         | ✅ Verified | 104/104 |
-| 3.12.x         | ✅ Verified | 104/104 |
-| 3.13.x         | ✅ Verified | 104/104 |
+| 3.9.6 (macOS)  | ✅ Verified | 105/105 |
+| 3.10.x         | ✅ Verified | 105/105 |
+| 3.11.x         | ✅ Verified | 105/105 |
+| 3.12.x         | ✅ Verified | 105/105 |
+| 3.13.x         | ✅ Verified | 105/105 |
 
 All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 
@@ -339,7 +338,7 @@ When submitting PRs, please include:
    Platform: macOS 14.5, M2 Pro
    Python: 3.11.6
    Model: Phi-3-mini-4k-instruct-4bit
-   Results: 104/104 tests passed
+   Results: 105/105 tests passed
    ```
 
 3. **Any issues encountered** and how you resolved them
@@ -348,7 +347,7 @@ When submitting PRs, please include:
 
 **MLX Knife 1.0.1 Testing Status:**
 
-✅ **Production Ready** - 104/104 tests passing  
+✅ **Production Ready** - 105/105 tests passing  
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
 ✅ **Code Quality** - ruff/mypy integration working  
 ✅ **Real Model Testing** - Phi-3-mini execution confirmed  

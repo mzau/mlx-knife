@@ -1,5 +1,6 @@
 venv/
 venv39/
+venv_*/
 test_env*/
 test_results*.log
 mypy_*.log
