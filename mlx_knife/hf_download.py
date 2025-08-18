@@ -45,6 +45,13 @@ def configure_download_environment():
 def pull_model(model_spec):
     original_spec = model_spec
     model_name, commit_hash = parse_model_spec(model_spec)
+    
+    # Validate HuggingFace Hub repository name length limit (Issue #6)
+    if len(model_name) > 96:
+        print(f"[ERROR] Repository name exceeds HuggingFace Hub limit: {len(model_name)}/96 characters")
+        print("Repository names longer than 96 characters cannot exist on HuggingFace Hub.")
+        print(f"Invalid name: '{model_name}'")
+        return False
 
     if "/" not in original_spec.split("@")[0] and "/" in model_name:
         confirm = input(f"Download '{model_name}'? [Y/n] ")

@@ -72,6 +72,39 @@ def find_matching_models(pattern):
     
     return matches
 
+def hash_exists_in_local_cache(model_name, commit_hash):
+    """Check if a specific commit hash exists in the local cache for a model.
+    
+    Supports both full hashes and short hash prefixes (local resolution only).
+    
+    Args:
+        model_name: Full model name (e.g., 'mlx-community/Phi-3-mini-4k-instruct-4bit')
+        commit_hash: Commit hash to check for (short or full)
+    
+    Returns:
+        Full hash if exists in local cache, None otherwise
+    """
+    base_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
+    if not base_cache_dir.exists():
+        return None
+    
+    snapshots_dir = base_cache_dir / "snapshots"
+    if not snapshots_dir.exists():
+        return None
+    
+    # Check for exact match first (full hash)
+    hash_dir = snapshots_dir / commit_hash
+    if hash_dir.exists():
+        return commit_hash
+    
+    # Check for short hash match (local resolution)
+    if len(commit_hash) < 40:
+        for snapshot_dir in snapshots_dir.iterdir():
+            if snapshot_dir.is_dir() and snapshot_dir.name.startswith(commit_hash):
+                return snapshot_dir.name  # Return full hash
+    
+    return None
+
 def resolve_single_model(model_spec):
     """
     Resolve a model spec to a single model, supporting fuzzy matching.
@@ -103,8 +136,22 @@ def resolve_single_model(model_spec):
         else:
             resolved_spec = found_hf_name
         return get_model_path(resolved_spec)
+    elif len(matches) > 1 and commit_hash:
+        # Issue #13: Hash-based disambiguation for ambiguous model names
+        for _model_dir, hf_name in matches:
+            resolved_hash = hash_exists_in_local_cache(hf_name, commit_hash)
+            if resolved_hash:
+                resolved_spec = f"{hf_name}@{resolved_hash}"
+                return get_model_path(resolved_spec)
+        
+        # Hash not found in any candidate model
+        print(f"Hash '{commit_hash}' not found in any model matching '{base_spec}'")
+        print("Available models:")
+        for _, hf_name in sorted(matches, key=lambda x: x[1]):
+            print(f"  {hf_name}")
+        return None, None, None
     else:
-        # Multiple matches - show error with suggestions
+        # Multiple matches without hash - show error with suggestions
         print(f"Multiple models match '{base_spec}'. Please be more specific:")
         for _, hf_name in sorted(matches, key=lambda x: x[1]):
             print(f"  {hf_name}")
@@ -663,7 +710,7 @@ def show_model(model_spec, show_files=False, show_config=False):
             print(f"   - {variant}")
 
     # Health status
-    health_ok = is_model_healthy(model_spec)
+    health_ok = is_model_healthy(model_name)
     if health_ok:
         print("Health: [OK]")
     else:

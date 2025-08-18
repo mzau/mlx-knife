@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.3] - 2025-08-18
+
+### Added
+- **Issue #13**: Hash-based disambiguation for ambiguous model names
+  - Use commit hashes to disambiguate between multiple matching models
+  - Example: `mlxk show Llama@de2dfaf5` automatically resolves to `mlx-community/Llama-3.3-70B-Instruct-4bit`
+  - Pure local resolution, no external API calls, offline-capable
+- **Issue #6**: Repository name length validation for HuggingFace Hub 96-character limit
+  - Pre-validation with clear error message before attempting download
+  - Better user experience with immediate feedback on invalid repository names
+
+### Fixed
+- **Issue #7**: Fixed health check inconsistency in show command with fuzzy model names
+  - `mlxk show Phi-3` vs `mlxk show mlx-community/Phi-3-mini-4k-instruct-4bit` now show identical health status
+  - Unified health check logic to use resolved model names for consistent results
+
+### Enhanced
+- Enhanced short commit hash support with local resolution
+- Improved model name disambiguation logic
+- Real user workflow support - see hashes in `mlxk list`, use directly in other commands
+
+### Technical
+- 9 new comprehensive test cases added (TestIssue6RepositoryNameValidation, TestShowModelHealthConsistency, TestIssue13HashDisambiguation)
+- All 114 unit tests passing on Apple Silicon
+- Improved error handling and user experience across all model resolution scenarios
+
 ## [1.0.2] - 2025-08-18
 
 ### Fixed
