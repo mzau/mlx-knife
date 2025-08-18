@@ -7,10 +7,22 @@ import shutil
 import sys
 from pathlib import Path
 
-__version__ = "1.0-beta-1"
+DEFAULT_CACHE_ROOT = Path.home() / ".cache/huggingface"
+CACHE_ROOT = Path(os.environ.get("HF_HOME", DEFAULT_CACHE_ROOT))
+MODEL_CACHE = CACHE_ROOT / "hub"
 
-DEFAULT_CACHE = Path.home() / ".cache/huggingface/hub"
-MODEL_CACHE = Path(os.environ.get("HF_HOME", DEFAULT_CACHE))
+# Global variable to track if warning was shown
+_legacy_warning_shown = False
+
+# Check for models in legacy location and warn user
+_legacy_models = list(CACHE_ROOT.glob("models--*"))
+_is_test_env = "test_cache" in str(CACHE_ROOT) or "PYTEST_CURRENT_TEST" in os.environ
+if _legacy_models and not _legacy_warning_shown and not _is_test_env:
+    print(f"\n⚠️  Found {len(_legacy_models)} models in legacy location: {CACHE_ROOT}")
+    print(f"   Please move them to: {MODEL_CACHE}")
+    print(f"   Command: mv {CACHE_ROOT}/models--* {MODEL_CACHE}/")
+    print("   This warning will appear until models are moved.\n")
+    _legacy_warning_shown = True
 
 
 def hf_to_cache_dir(hf_name: str) -> str:
@@ -115,7 +127,8 @@ def get_model_path(model_spec):
         if snapshots:
             latest = max(snapshots, key=lambda x: x.stat().st_mtime)
             return latest, model_name, latest.name
-    return None, model_name, commit_hash
+    # Return base_cache_dir for corrupted models so rm_model can handle them
+    return base_cache_dir, model_name, commit_hash
 
 def parse_model_spec(model_spec):
     if "@" in model_spec:
@@ -189,7 +202,7 @@ def get_model_hash(model_path):
     return latest.name[:8]
 
 def is_model_healthy(model_spec):
-    model_path, _, _ = get_model_path(model_spec)
+    model_path, _, _ = resolve_single_model(model_spec)
     if not model_path:
         return False
     config_path = model_path / "config.json"
@@ -246,118 +259,113 @@ def check_model_health(model_spec):
     model_path, model_name, commit_hash = resolve_single_model(model_spec)
     if not model_path:
         # resolve_single_model already printed the appropriate error message
-        # Try one more fallback: check if this is an exact model name that exists but is corrupted
-        try:
-            fallback_model_name, fallback_commit_hash = parse_model_spec(model_spec)
-            base_cache_dir = MODEL_CACHE / hf_to_cache_dir(fallback_model_name)
-            if base_cache_dir.exists():
-                print(f"[ERROR] Model '{model_spec}' directory exists but no snapshots found!")
-                confirm = input("Model appears corrupted. Delete? [y/N] ")
-                if confirm.lower() == "y":
-                    import errno
-                    import shutil
-                    try:
-                        shutil.rmtree(base_cache_dir)
-                        print(f"Model {fallback_model_name} deleted.")
-                    except PermissionError as e:
-                        print(f"[ERROR] Permission denied: Cannot delete {e.filename}")
-                        print("   Try running with appropriate permissions or manually delete the directory.")
-                    except OSError as e:
-                        if e.errno == errno.ENOTEMPTY:
-                            print(f"[ERROR] Directory not empty: {e.filename}")
-                            print("   Another process may be using this model.")
-                        elif e.errno == errno.EACCES:
-                            print(f"[ERROR] Access denied: {e.filename}")
-                        else:
-                            print(f"[ERROR] OS Error while deleting: {e}")
-                    except Exception as e:
-                        print(f"[ERROR] Unexpected error while deleting: {type(e).__name__}: {e}")
-        except:
-            # If even fallback parsing fails, just return
-            pass
         return False
+        
     print(f"Checking model: {model_name}")
     if commit_hash:
         print(f"Hash: {commit_hash}")
-    issues = []
-    if not (model_path / "config.json").exists():
-        issues.append("config.json missing")
+    
+    # Use the robust health check
+    if is_model_healthy(model_spec):
+        print("\n[OK] Model is healthy and usable!")
+        return True
     else:
-        print("config.json found")
-    weight_files = list(model_path.glob("*.safetensors")) + list(model_path.glob("*.bin"))
-    if not weight_files:
-        weight_files = list(model_path.glob("**/*.safetensors")) + list(model_path.glob("**/*.bin"))
-    if not weight_files:
-        index_file = model_path / "model.safetensors.index.json"
-        if index_file.exists():
+        # Detailed diagnosis for WHY it's unhealthy
+        print("\n[ERROR] Model is corrupted. Detailed diagnosis:")
+        
+        # Check config.json
+        config_path = model_path / "config.json"
+        if not config_path.exists():
+            print("   - config.json missing")
+        else:
             try:
-                with open(index_file) as f:
+                with open(config_path) as f:
+                    config_data = json.load(f)
+                if not isinstance(config_data, dict) or len(config_data) == 0:
+                    print("   - config.json is empty or invalid")
+                else:
+                    print("   - config.json found and valid")
+            except (OSError, json.JSONDecodeError):
+                print("   - config.json exists but contains invalid JSON")
+        
+        # Check weight files (including gguf support like is_model_healthy)
+        weight_files = list(model_path.glob("*.safetensors")) + list(model_path.glob("*.bin")) + list(model_path.glob("*.gguf"))
+        if not weight_files:
+            weight_files = list(model_path.glob("**/*.safetensors")) + list(model_path.glob("**/*.bin")) + list(model_path.glob("**/*.gguf"))
+        
+        if weight_files:
+            total_size = sum(f.stat().st_size for f in weight_files)
+            size_mb = total_size / (1024 * 1024)
+            print(f"   - Model weights found ({len(weight_files)} files, {size_mb:.1f}MB)")
+        elif (model_path / "model.safetensors.index.json").exists():
+            # Check multi-file model
+            try:
+                with open(model_path / "model.safetensors.index.json") as f:
                     index = json.load(f)
                 if 'weight_map' in index:
                     referenced_files = set(index['weight_map'].values())
                     existing_files = [f for f in referenced_files if (model_path / f).exists()]
-                    if len(existing_files) > 0:
+                    if existing_files:
                         total_size = sum((model_path / f).stat().st_size for f in existing_files)
                         size_mb = total_size / (1024 * 1024)
-                        print(f"Model weights present ({len(existing_files)}/{len(referenced_files)} files, {size_mb:.1f}MB)")
+                        print(f"   - Multi-file weights ({len(existing_files)}/{len(referenced_files)} files, {size_mb:.1f}MB)")
                         if len(existing_files) < len(referenced_files):
-                            issues.append(f"Incomplete weights: {len(existing_files)}/{len(referenced_files)} files")
+                            print("   - Incomplete multi-file model")
                     else:
-                        issues.append("Multi-file model: No weight files found")
+                        print("   - Multi-file model index found but no weight files exist")
                 else:
-                    issues.append("Multi-file model: Invalid index")
+                    print("   - Multi-file model index is invalid")
             except Exception as e:
-                issues.append(f"Multi-file model: Index error - {e}")
+                print(f"   - Multi-file model index error: {e}")
         else:
-            issues.append("No model weights found")
-    else:
-        total_size = sum(f.stat().st_size for f in weight_files)
-        size_mb = total_size / (1024 * 1024)
-        print(f"Model weights present ({len(weight_files)} files, {size_mb:.1f}MB)")
-    lfs_ok, lfs_msg = check_lfs_corruption(model_path)
-    if lfs_ok:
-        print(f"[OK] {lfs_msg}")
-    else:
-        issues.append(lfs_msg)
-    framework = detect_framework(model_path.parent.parent, model_name)
-    print(f"Framework: {framework}")
-    if issues:
-        print("\n[ERROR] Issues found:")
-        for issue in issues:
-            print(f"   - {issue}")
-
-        if len(issues) >= 2:  # Multiple issues = critical
-            confirm = input("Model appears corrupted. Delete? [y/N] ")
-            if confirm.lower() == "y":
-                import errno
-                import shutil
-                try:
-                    if commit_hash:
-                        # Delete specific hash/snapshot
+            print("   - No model weights found (.safetensors, .bin, .gguf)")
+        
+        # Check LFS corruption
+        lfs_ok, lfs_msg = check_lfs_corruption(model_path)
+        if not lfs_ok:
+            print(f"   - {lfs_msg}")
+        else:
+            print(f"   - {lfs_msg}")
+        
+        # Show framework
+        framework = detect_framework(model_path.parent.parent, model_name)
+        print(f"   - Framework: {framework}")
+        
+        # Offer deletion for corrupted models
+        confirm = input("\nModel appears corrupted. Delete? [y/N] ")
+        if confirm.lower() == "y":
+            import errno
+            import shutil
+            try:
+                if commit_hash:
+                    # Delete specific hash/snapshot
+                    shutil.rmtree(model_path)
+                    print(f"Hash {commit_hash} deleted.")
+                else:
+                    # Delete entire model directory (go up from snapshots or use base_cache_dir)
+                    if model_path.name.startswith("models--"):
+                        # model_path is base_cache_dir (corrupted model case)
                         shutil.rmtree(model_path)
-                        print(f"Hash {commit_hash} deleted.")
                     else:
-                        # Delete entire model directory (go up from snapshots)
+                        # model_path is snapshot dir
                         model_base_dir = model_path.parent.parent
                         shutil.rmtree(model_base_dir)
-                        print(f"Model {model_name} deleted.")
-                except PermissionError as e:
-                    print(f"[ERROR] Permission denied: Cannot delete {e.filename}")
-                    print("   Try running with appropriate permissions or manually delete the directory.")
-                except OSError as e:
-                    if e.errno == errno.ENOTEMPTY:
-                        print(f"[ERROR] Directory not empty: {e.filename}")
-                        print("   Another process may be using this model.")
-                    elif e.errno == errno.EACCES:
-                        print(f"[ERROR] Access denied: {e.filename}")
-                    else:
-                        print(f"[ERROR] OS Error while deleting: {e}")
-                except Exception as e:
-                    print(f"[ERROR] Unexpected error while deleting: {type(e).__name__}: {e}")
+                    print(f"Model {model_name} deleted.")
+            except PermissionError as e:
+                print(f"[ERROR] Permission denied: Cannot delete {e.filename}")
+                print("   Try running with appropriate permissions or manually delete the directory.")
+            except OSError as e:
+                if e.errno == errno.ENOTEMPTY:
+                    print(f"[ERROR] Directory not empty: {e.filename}")
+                    print("   Another process may be using this model.")
+                elif e.errno == errno.EACCES:
+                    print(f"[ERROR] Access denied: {e.filename}")
+                else:
+                    print(f"[ERROR] OS Error while deleting: {e}")
+            except Exception as e:
+                print(f"[ERROR] Unexpected error while deleting: {type(e).__name__}: {e}")
+        
         return False
-    else:
-        print("\n[OK] Model is healthy and usable!")
-        return True
 
 def check_all_models_health():
     models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
