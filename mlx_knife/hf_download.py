@@ -15,7 +15,10 @@ except ImportError:
     from pathlib import Path
     def parse_model_spec(x): return (x, None)
     def hf_to_cache_dir(x): return x
-    MODEL_CACHE = Path(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub")))
+    if "HF_HOME" in os.environ:
+        MODEL_CACHE = Path(os.environ["HF_HOME"]) / "hub"
+    else:
+        MODEL_CACHE = Path(os.path.expanduser("~/.cache/huggingface/hub"))
     def is_model_healthy(x): return False
 
 def describe_http_exception(exc):
@@ -36,7 +39,7 @@ def describe_http_exception(exc):
 
 def configure_download_environment():
     os.environ['HF_HUB_DOWNLOAD_THREADS'] = '1'
-    os.environ['HF_HUB_DOWNLOAD_CHUNK_SIZE'] = '1048576'
+    os.environ['HF_HUB_DOWNLOAD_CHUNK_SIZE'] = '524288'  # 512KB chunks for household-friendly downloads
     os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = 'false'
 
 def pull_model(model_spec):

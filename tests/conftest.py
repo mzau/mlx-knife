@@ -20,6 +20,10 @@ def temp_cache_dir() -> Generator[Path, None, None]:
         cache_path = Path(temp_dir) / "test_cache"
         cache_path.mkdir()
         
+        # Create hub subdirectory (required by HF_HOME/hub fix)
+        hub_path = cache_path / "hub"
+        hub_path.mkdir()
+        
         # Set HF_HOME to our temp directory
         old_hf_home = os.environ.get("HF_HOME")
         os.environ["HF_HOME"] = str(cache_path)
@@ -103,7 +107,9 @@ def mock_model_cache(temp_cache_dir):
         """Create a mock model in the cache directory."""
         # Convert model name to cache directory format
         cache_name = model_name.replace("/", "--")
-        model_dir = temp_cache_dir / f"models--{cache_name}" / "snapshots" / "main"
+        # Create models in hub subdirectory (HF_HOME/hub fix)
+        hub_dir = temp_cache_dir / "hub"
+        model_dir = hub_dir / f"models--{cache_name}" / "snapshots" / "main"
         model_dir.mkdir(parents=True, exist_ok=True)
         
         if healthy and not corruption_type:

@@ -8,7 +8,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
-**Current Version**: 1.0.1 (August 2025)
+**Current Version**: 1.0.2 (August 2025)
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -53,11 +53,6 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 ### Via PyPI (Recommended)
 ```bash
 pip install mlx-knife
-```
-
-### Via GitHub (Development)
-```bash
-pip install git+https://github.com/mzau/mlx-knife.git
 ```
 
 ### Requirements
@@ -126,6 +121,9 @@ MLX Knife includes a built-in web interface for easy model interaction:
 ```bash
 # Start the OpenAI-compatible API server
 mlxk server --port 8000 --max-tokens 4000
+
+# Get web chat interface from GitHub
+curl -O https://raw.githubusercontent.com/mzau/mlx-knife/main/simple_chat.html
 
 # Open web chat interface in your browser
 open simple_chat.html
@@ -227,33 +225,6 @@ After installation, these commands are equivalent:
 - `mlx-knife`
 - `mlx_knife`
 
-## Project Structure
-
-```
-mlx_knife/
-├── __init__.py                    # Package metadata and version
-├── cli.py                         # Command-line interface and argument parsing
-├── cache_utils.py                 # Core model management functionality
-├── mlx_runner.py                  # Native MLX model execution
-├── server.py                      # OpenAI-compatible API server with FastAPI
-├── hf_download.py                 # HuggingFace download integration
-├── throttled_download_worker.py   # Background download worker
-├── requirements.txt               # Python dependencies
-├── pyproject.toml                 # Package configuration
-├── simple_chat.html               # Built-in web chat interface
-└── README.md                      # This file
-```
-
-### Module Overview
-
-- **`cli.py`**: Entry point handling command parsing and dispatch
-- **`cache_utils.py`**: Model discovery, metadata extraction, and cache operations
-- **`mlx_runner.py`**: MLX model loading, token generation, and streaming
-- **`server.py`**: FastAPI-based REST API server with OpenAI compatibility
-- **`simple_chat.html`**: Standalone web chat interface for immediate use
-- **`hf_download.py`**: Robust downloading with progress tracking
-- **`throttled_download_worker.py`**: Prevents network overload during downloads
-
 ## Configuration
 
 ### Cache Location
@@ -308,70 +279,6 @@ mlxk run bert-base-uncased
 # Use MLX-Community models: https://huggingface.co/mlx-community
 ```
 
-## Testing
-
-MLX Knife includes comprehensive test coverage across all supported Python versions.
-
-### Quick Start
-
-**Prerequisites:**
-- Apple Silicon Mac (M1/M2/M3)
-- Python 3.9+
-- At least one MLX model: `mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit`
-
-**Run Tests:**
-```bash
-pip install -e ".[test]"
-pytest
-```
-
-### Why Local Testing?
-
-MLX requires Apple Silicon hardware and real models (4GB+) for testing. This is standard for MLX projects and ensures tests reflect real-world usage.
-
-For detailed testing documentation, development workflows, and multi-Python verification, see **[TESTING.md](TESTING.md)**.
-
-## Part of the BROKE Ecosystem 🦫
-
-MLX Knife is the first component of [BROKE Cluster](https://github.com/mzau/broke-cluster), 
-our research project for intelligent LLM routing across heterogeneous Apple Silicon networks.
-
-- **Use MLX Knife**: For single Mac setups (available now)
-- **Use BROKE Cluster**: For multi-Mac environments (in development)
-
-## Technical Details
-
-### Token Decoding
-MLX Knife uses context-aware decoding to handle tokenizers that encode spaces as separate tokens:
-
-```python
-# Sliding window approach maintains context for proper spacing
-window_tokens = generated_tokens[-10:]  # Last 10 tokens
-window_text = tokenizer.decode(window_tokens)
-```
-
-### Stop Token Detection
-Stop tokens are dynamically extracted from each model's tokenizer:
-- Primary: `tokenizer.eos_token`
-- Secondary: `tokenizer.pad_token` (if different)
-- Additional: Special tokens containing 'end', 'stop', or 'eot'
-- Common tokens verified as single-token entities
-
-### Memory Management
-- **Context Managers**: Automatic resource cleanup with Python context managers
-- **Exception-Safe**: Model cleanup guaranteed even on errors
-- **Baseline Tracking**: Memory captured before model loading
-- **Real-time Monitoring**: GPU memory tracking via `mlx.core.get_active_memory()`
-- **Memory Statistics**: Detailed usage displayed after generation
-- **Leak Prevention**: Automatic `mx.clear_cache()` and garbage collection
-
-```python
-# Context manager pattern (automatic cleanup)
-with MLXRunner(model_path) as runner:
-    response = runner.generate_batch(prompt)
-# Model automatically cleaned up here
-```
-
 ## Troubleshooting
 
 ### Model Not Found
@@ -394,17 +301,7 @@ mlxk list --all
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Quick Start:**
-1. Fork and clone the repository
-2. Install with development tools: `pip install -e ".[dev,test]"`
-3. Make your changes and add tests
-4. Run tests locally on Apple Silicon: `pytest`
-5. Check code style: `ruff check mlx_knife/ --fix`
-6. Submit a pull request
-
-We prioritize compatibility with Python 3.9 (native macOS) but welcome contributions tested on any version 3.9+.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## Security
 
@@ -428,6 +325,6 @@ Copyright (c) 2025 The BROKE team 🦫
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 1.0-rc3 | August 2025</i><br>
+  <i>Version 1.0.2 | August 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>

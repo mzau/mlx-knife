@@ -60,6 +60,29 @@ mypy mlx_knife/
 mlxk run Phi-3-mini "Hello world"
 ```
 
+## Repository Structure
+
+Understanding what goes where:
+
+```
+Repository structure:
+├── mlx_knife/              # Python package (→ PyPI)
+├── tests/                  # Test suite
+├── simple_chat.html        # Web interface (GitHub only)
+├── README.md               # User documentation  
+├── CONTRIBUTING.md         # This file
+├── TESTING.md              # Testing guide
+├── CLAUDE.md               # Development notes
+├── pyproject.toml          # Build configuration
+└── requirements.txt        # Dependencies
+```
+
+**What goes where:**
+- **PyPI Package**: Only `mlx_knife/` + build files (`pyproject.toml`, `requirements.txt`)
+- **GitHub Repository**: Everything else (documentation, tests, web interface)
+
+This helps ensure contributors commit files to the right place and understand the package vs. repository distinction.
+
 ## Testing Requirements
 
 **Important**: MLX Knife requires Apple Silicon hardware for testing. Tests must be run locally on M1/M2/M3 Macs.
@@ -85,17 +108,9 @@ mlxk run Phi-3-mini "Hello world"
 ```bash
 # Run all tests
 pytest
-
-# Run specific test categories
-pytest tests/unit/              # Fast unit tests
-pytest tests/integration/        # Integration tests
-
-# Run with coverage
-pytest --cov=mlx_knife --cov-report=html
-
-# Skip tests requiring models
-pytest -k "not requires_model"
 ```
+
+For detailed testing options, troubleshooting, and advanced workflows, see **[TESTING.md](TESTING.md)**.
 
 ### Before Submitting PRs
 
@@ -148,16 +163,9 @@ Mention your Python version in the PR description.
 
 ## Testing
 
-- **Unit tests**: Fast, isolated tests in `tests/unit/`
-- **Integration tests**: System-level tests in `tests/integration/`
-- **Real model tests**: Use Phi-3-mini for testing (it's small and fast)
+MLX Knife has comprehensive test coverage. For detailed testing documentation including advanced options, test structure, and troubleshooting, see **[TESTING.md](TESTING.md)**.
 
-Run specific test categories:
-```bash
-pytest tests/unit/              # Fast unit tests
-pytest tests/integration/        # Integration tests
-pytest -k "not requires_model"   # Skip tests requiring models
-```
+**When adding new tests**: Please update the test structure documentation in **[TESTING.md](TESTING.md)** if you add new test files or categories.
 
 ## Code Style
 

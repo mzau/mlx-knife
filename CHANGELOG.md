@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.2] - 2025-08-18
+
+### Fixed
+- **Issue #11**: Fixed HF_HOME environment variable handling - MLX Knife now correctly uses `$HF_HOME/hub` for model storage, consistent with HuggingFace standard
+- **Issue #9**: Fixed silent failure when removing corrupted models with empty snapshots directories
+- **Cache Consistency**: Unified cache path logic - both default (`~/.cache/huggingface/hub`) and custom (`$HF_HOME/hub`) paths now consistently use `/hub` subdirectory
+
+### Enhanced  
+- **Download Throttling**: Improved adaptive throttling for household-friendly downloads (512KB chunks, 2-3s delays for large files)
+- **Migration Warning**: Added helpful warning when models are found in legacy cache locations with clear migration instructions
+- **Memory Management**: Enhanced exception-safe resource cleanup and baseline tracking
+
+### Technical
+- **Dependencies**: Updated to latest tested versions (huggingface-hub 0.34.0+, mlx 0.28.0+, fastapi 0.116.0+)
+- **Python Support**: Full compatibility verified on Python 3.9-3.13
+- **Test Suite**: All 105 tests passing with real MLX models on Apple Silicon
+
 ## [1.0.1] - 2025-08-15
 
 ### Changed

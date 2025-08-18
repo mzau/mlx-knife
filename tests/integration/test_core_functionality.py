@@ -94,6 +94,45 @@ class TestBasicOperations:
         # Should not crash
         # Exact behavior depends on implementation
 
+    def test_rm_command_corrupted_empty_snapshots(self, mlx_knife_process, temp_cache_dir):
+        """Remove command should handle corrupted models with empty snapshots directory."""
+        from mlx_knife.cache_utils import hf_to_cache_dir
+        
+        # Create a corrupted model structure (directory exists but snapshots is empty)
+        test_model = "test-org/corrupted-empty-model"
+        # Create in hub subdirectory (new cache structure)
+        hub_dir = temp_cache_dir / "hub"
+        cache_dir = hub_dir / hf_to_cache_dir(test_model)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "snapshots").mkdir(exist_ok=True)
+        (cache_dir / "blobs").mkdir(exist_ok=True)
+        (cache_dir / "refs").mkdir(exist_ok=True)
+        
+        try:
+            # This should NOT fail silently - should either provide error message or handle deletion
+            proc = mlx_knife_process(["rm", test_model])
+            stdout, stderr = proc.communicate(timeout=10)
+            
+            # Should complete (not hang)
+            assert proc.returncode is not None, "Remove command hung on corrupted model"
+            
+            # Should produce SOME output (not silent failure)
+            output = (stdout + stderr).strip()
+            assert len(output) > 0, "Remove command failed silently on corrupted model - no output produced"
+            
+            # The behavior should be explicit: either error message or deletion prompt/confirmation
+            output_lower = output.lower()
+            has_error = "error" in output_lower or "not found" in output_lower
+            has_prompt = "delete" in output_lower or "remove" in output_lower
+            
+            assert has_error or has_prompt, f"Remove command should provide clear feedback, got: {output}"
+            
+        finally:
+            # Cleanup - remove the test corrupted model structure
+            import shutil
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+
 
 @pytest.mark.timeout(60)
 class TestModelExecution:
