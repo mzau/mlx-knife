@@ -32,6 +32,7 @@ class MLXRunner:
         self.tokenizer = None
         self._memory_baseline = None
         self._stop_tokens = None  # Will be populated from tokenizer
+        self._chat_stop_tokens = None  # Chat-specific stop tokens
         self.verbose = verbose
         self._model_loaded = False
         self._context_entered = False  # Prevent nested context usage
@@ -129,11 +130,22 @@ class MLXRunner:
         # Add common stop tokens that might not be in special tokens
         # but are frequently used across models
         common_stop_tokens = {'</s>', '<|endoftext|>', '<|im_end|>'}
+        
+        # Add chat-specific stop tokens to prevent model self-conversations
+        # Based on our _format_conversation() format: "Human:" and "Assistant:"
+        # Also include "You:" as models might use UI-visible format
+        # Include single-letter variations (H:, A:, Y:) that some models use
+        chat_stop_tokens = {
+            '\nHuman:', '\nAssistant:', '\nYou:',
+            '\n\nHuman:', '\n\nAssistant:', '\n\nYou:',
+            '\nH:', '\nA:', '\nY:',  # Single-letter variations
+            '\n\nH:', '\n\nA:', '\n\nY:'
+        }
 
-        # Only add common tokens if they decode to themselves (i.e., they're real tokens)
+        # Add common stop tokens only if they decode to themselves (i.e., they're single tokens)
         for token in common_stop_tokens:
             try:
-                # Try to encode and decode to verify it's a real token
+                # Try to encode and decode to verify it's a real single token
                 ids = self.tokenizer.encode(token, add_special_tokens=False)
                 if ids and len(ids) == 1:  # Single token ID means it's a special token
                     decoded = self.tokenizer.decode(ids)
@@ -141,6 +153,10 @@ class MLXRunner:
                         self._stop_tokens.add(token)
             except:
                 pass
+        
+        # Store chat stop tokens separately - only used in interactive chat mode
+        # This prevents stopping mid-story when user asks for dialogues
+        self._chat_stop_tokens = list(chat_stop_tokens)
 
         # Remove any None values
         self._stop_tokens.discard(None)
@@ -164,6 +180,7 @@ class MLXRunner:
         self.model = None
         self.tokenizer = None
         self._stop_tokens = None
+        self._chat_stop_tokens = None
         self._model_loaded = False
 
         # Force garbage collection and clear MLX cache
@@ -191,6 +208,7 @@ class MLXRunner:
         repetition_penalty: float = 1.1,
         repetition_context_size: int = 20,
         use_chat_template: bool = True,
+        use_chat_stop_tokens: bool = False,
     ) -> Iterator[str]:
         """Generate text with streaming output.
         
@@ -201,6 +219,8 @@ class MLXRunner:
             top_p: Top-p sampling parameter
             repetition_penalty: Penalty for repeated tokens
             repetition_context_size: Context size for repetition penalty
+            use_chat_template: Apply tokenizer's chat template if available
+            use_chat_stop_tokens: Include chat turn markers as stop tokens (for interactive mode)
             
         Yields:
             Generated tokens as they are produced
@@ -249,6 +269,7 @@ class MLXRunner:
         # Collect tokens and yield text
         generated_tokens = []
         previous_decoded = ""
+        accumulated_response = ""  # Track full response for stop token detection
 
         # Keep a sliding window of recent tokens for context
         context_window = 10  # Decode last N tokens for proper spacing
@@ -285,18 +306,45 @@ class MLXRunner:
                         new_text = self.tokenizer.decode([token_id])
 
             if new_text:
-                # Filter out stop tokens that might appear as text
-                # Use dynamically detected stop tokens if available
-                stop_tokens = self._stop_tokens if self._stop_tokens else []
+                # Update accumulated response for stop token checking
+                accumulated_response += new_text
+                
+                # Filter out stop tokens with priority: native first, then chat fallback
+                # Check native stop tokens FIRST in accumulated response (highest priority)
+                native_stop_tokens = self._stop_tokens if self._stop_tokens else []
+                for stop_token in native_stop_tokens:
+                    if stop_token in accumulated_response:
+                        # Find the stop token position and yield everything before it
+                        stop_pos = accumulated_response.find(stop_token)
+                        # Calculate what text came before the stop token
+                        text_before_stop = accumulated_response[:stop_pos]
+                        # Calculate how much of that is new (not previously yielded)
+                        previously_yielded_length = len(accumulated_response) - len(new_text)
+                        if len(text_before_stop) > previously_yielded_length:
+                            # Yield only the new part before stop token
+                            new_part_before_stop = text_before_stop[previously_yielded_length:]
+                            if new_part_before_stop:
+                                yield new_part_before_stop
+                        return  # Stop generation without yielding stop token
+                
+                # Only check chat stop tokens if no native stop token found (fallback)
+                if use_chat_stop_tokens and self._chat_stop_tokens:
+                    for stop_token in self._chat_stop_tokens:
+                        if stop_token in accumulated_response:
+                            # Find the stop token position and yield everything before it
+                            stop_pos = accumulated_response.find(stop_token)
+                            # Calculate what text came before the stop token
+                            text_before_stop = accumulated_response[:stop_pos]
+                            # Calculate how much of that is new (not previously yielded)
+                            previously_yielded_length = len(accumulated_response) - len(new_text)
+                            if len(text_before_stop) > previously_yielded_length:
+                                # Yield only the new part before stop token
+                                new_part_before_stop = text_before_stop[previously_yielded_length:]
+                                if new_part_before_stop:
+                                    yield new_part_before_stop
+                            return  # Stop generation without yielding stop token
 
-                for stop_token in stop_tokens:
-                    if stop_token in new_text:
-                        # Yield everything before the stop token
-                        pre_stop = new_text.split(stop_token)[0]
-                        if pre_stop:
-                            yield pre_stop
-                        return  # Stop generation
-
+                # No stop token found, yield the new text
                 yield new_text
                 tokens_generated += 1
 
@@ -457,6 +505,7 @@ class MLXRunner:
                     temperature=temperature,
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
+                    use_chat_stop_tokens=True,  # Enable chat stop tokens in interactive mode
                 ):
                     print(token, end="", flush=True)
                     response_tokens.append(token)
