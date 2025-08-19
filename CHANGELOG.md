@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.0.4] - 2025-08-19
+
+### Fixed
+- **Issue #14**: Interactive chat self-conversation bug resolved
+  - MLX models no longer continue generating conversation turns after their response
+  - Added context-sensitive chat stop tokens: `\nHuman:`, `\nAssistant:`, `\nYou:`, `\nUser:` 
+  - Smart priority system: native model stop tokens checked first, chat tokens as fallback
+  - Affects both `mlxk run` and `mlxk server` modes
+  - Comprehensive regression test suite added with 15 tests across 7+ MLX models
+
+### Enhanced
+- **Web UI Complete Overhaul** (simple_chat.html):
+  - 🦫 Branding update: Replaced 🔪 with 🦫 (Beaver) emoji for friendlier appearance
+  - 💾 Model persistence: Selected model survives browser reload via localStorage  
+  - 📚 Chat history persistence: Full conversation history preserved across sessions
+  - 🔄 Smart model switching: Choice to keep or clear chat history when switching models
+  - 🌐 Responsive design: Full viewport height utilization, optimized screen space usage
+  - 🎯 Clear UX: "Clear Chat" instead of ambiguous "Clear" button
+  - 🏴󠁧󠁢󠁥󠁮󠁧󠁿 English dialogs: Custom modal dialogs replace German OS dialogs
+
+### Added
+- **Automated Server Testing Infrastructure**:
+  - RAM-aware model filtering: Automatic model selection based on available system RAM
+  - Self-contained server management: Automatic MLX Knife server lifecycle in tests
+  - macOS compatible: Graceful handling of permission restrictions
+  - Opt-in testing: Server tests marked `@pytest.mark.server`, excluded from default `pytest`
+  - Comprehensive testing guide with RAM-based model recommendations
+
+### Technical
+- Context-aware token decoding maintains backward compatibility
+- Native model stop tokens preserved, chat tokens only as fallback
+- Exception-safe server test infrastructure with automatic cleanup
+- Complete TESTING.md documentation for server-based regression testing
+- All existing tests continue to pass (114/114)
+
 ## [1.0.3] - 2025-08-18
 
 ### Added

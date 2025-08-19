@@ -126,8 +126,8 @@ pytest tests/integration/test_server_functionality.py -v
 # Run only basic operations tests
 pytest -k "TestBasicOperations" -v
 
-# Skip server tests (faster)
-pytest -k "not server" -v
+# Server tests are automatically excluded by default
+# (no command needed - this is the default behavior)
 
 # Skip tests requiring actual models
 pytest -k "not requires_model" -v
@@ -243,6 +243,7 @@ echo "✅ All checks passed. Safe to commit!"
 @pytest.mark.slow         # Tests >30 seconds
 @pytest.mark.requires_model  # Needs actual MLX model
 @pytest.mark.network      # Requires internet
+@pytest.mark.server       # Requires MLX Knife server (excluded from default pytest)
 ```
 
 ### Mock Utilities
@@ -320,7 +321,7 @@ When submitting PRs, please include:
 
 ## Summary
 
-**MLX Knife 1.0.3 Testing Status:**
+**MLX Knife 1.0.4 Testing Status:**
 
 ✅ **Production Ready** - 114/114 tests passing  
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
@@ -328,5 +329,120 @@ When submitting PRs, please include:
 ✅ **Real Model Testing** - Phi-3-mini execution confirmed  
 ✅ **Memory Management** - Context managers prevent leaks  
 ✅ **Exception Safety** - Context managers ensure cleanup  
+✅ **Chat Bug Fixed** - Issue #14 self-conversation regression tests added
+✅ **Server Tests** - Automated MLX Knife server testing infrastructure
 
 This comprehensive testing framework validates MLX Knife's **production readiness** through local testing on real Apple Silicon hardware with actual MLX models.
+
+## Server-Based Testing (Advanced)
+
+Some tests require a running MLX Knife server with loaded models. These tests are marked with `@pytest.mark.server` and are **not run by default** with `pytest`.
+
+### Why Separate Server Tests?
+
+- **Test count varies** by loaded models (makes CI reporting inconsistent)
+- **Large memory requirements** - need different models for different RAM sizes  
+- **Longer execution time** - each model needs to load individually
+- **Manual setup required** - need to download appropriate models first
+
+### Prerequisites for Server Tests
+
+| System RAM | Recommended Models | Commands |
+|------------|-------------------|----------|
+| **16GB**   | Small models only | `mlxk pull mlx-community/Qwen2.5-0.5B-Instruct-4bit`<br>`mlxk pull mlx-community/Llama-3.2-1B-Instruct-4bit`<br>`mlxk pull mlx-community/Llama-3.2-3B-Instruct-4bit` |
+| **32GB**   | + Medium models | `mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit`<br>`mlxk pull mlx-community/Mistral-7B-Instruct-v0.2-4bit`<br>`mlxk pull mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit` |
+| **64GB**   | + Large models | `mlxk pull mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit`<br>`mlxk pull mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit`<br>`mlxk pull mlx-community/Llama-3.3-70B-Instruct-4bit` |
+| **96GB+**  | + Huge models | `mlxk pull mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit` |
+
+### Running Server Tests
+
+**Issue #14 Regression Tests** (Chat Self-Conversation Bug):
+
+```bash
+# Set environment
+export HF_HOME=/path/to/your/cache
+
+# Smoke test first (see which models are available)
+python tests/integration/test_issue_14.py
+
+# Run server tests only (excluded from default pytest)
+pytest -m server -v
+
+# Run specific Issue #14 tests
+pytest tests/integration/test_issue_14.py -m server -v
+```
+
+**Expected Output:**
+```
+🦫 MLX Knife Issue #14 Test - Smoke Test
+==================================================
+📊 Safe models for this system: 6
+💾 System RAM: 64GB total, 40GB available
+
+  🎯 mlx-community/Mistral-7B-Instruct-v0.2-4bit
+     └─ Size: 7B, RAM needed: 8GB
+  🎯 mlx-community/Llama-3.2-3B-Instruct-4bit  
+     └─ Size: 3B, RAM needed: 4GB
+  [...]
+
+========== test session starts ==========
+tests/integration/test_issue_14.py::test_server_health[mlx_server] PASSED
+tests/integration/test_issue_14.py::test_issue_14_self_conversation_regression_original[mlx-community/Mistral-7B-Instruct-v0.2-4bit-7B-8] PASSED
+[...6 more model tests...]
+========== 7 passed in 45.23s ==========
+```
+
+### Future Server Tests (Planned)
+
+**Issue #15** - Token Limit vs Stop Token Race Condition:
+```bash
+pytest tests/integration/test_issue_15.py -m server -v
+```
+
+**Issue #16** - Interactive vs Server Token Policies:  
+```bash
+pytest tests/integration/test_issue_16.py -m server -v
+```
+
+### Troubleshooting Server Tests
+
+**Permission warnings are normal:**
+```
+WARNING: ⚠️  Cannot scan network connections (permission denied)
+INFO: 🔧 Falling back to process-based cleanup only
+```
+This is expected on macOS - the tests continue with process-based cleanup.
+
+**Memory issues:**
+- Tests automatically skip models exceeding 80% available RAM
+- Use smaller models if you see consistent memory failures  
+- Consider external SSD for model cache to reduce memory pressure
+
+**Server startup failures:**
+```bash
+# Debug server manually
+python -m mlx_knife.cli server --port 8000
+
+# Check model health  
+mlxk health
+
+# Verify environment
+echo $HF_HOME
+```
+
+### Adding New Server Tests
+
+When contributing server-based tests:
+
+```python
+@pytest.mark.server
+def test_new_feature(mlx_server, model_name: str, size_str: str, ram_needed: int):
+    """Test new feature with MLX models.""" 
+    # Use mlx_server fixture for automatic server management
+    # Test implementation here
+```
+
+1. **Mark with `@pytest.mark.server`** - excludes from default `pytest`
+2. **Use `mlx_server` fixture** - automatic server lifecycle management
+3. **Test RAM requirements** - use `get_safe_models_for_system()` helper
+4. **Document in TESTING.md** - add to this guide

@@ -12,6 +12,8 @@
             margin: 0 auto;
             padding: 20px;
             background: #f5f5f5;
+            height: 100vh;
+            box-sizing: border-box;
         }
         
         .chat-container {
@@ -19,6 +21,9 @@
             border-radius: 10px;
             padding: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         
         .header {
@@ -42,13 +47,14 @@
         }
         
         .chat-messages {
-            height: 400px;
+            flex: 1;
             overflow-y: auto;
             border: 1px solid #eee;
             padding: 15px;
             margin-bottom: 15px;
             border-radius: 5px;
             background: #fafafa;
+            min-height: 300px;
         }
         
         .message {
@@ -188,12 +194,65 @@
             background-color: #f8f9fa;
             font-weight: bold;
         }
+        
+        /* Custom modal styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .modal {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .modal-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+        
+        .modal-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            min-width: 100px;
+        }
+        
+        .modal-button.primary {
+            background: #007AFF;
+            color: white;
+        }
+        
+        .modal-button.secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .modal-button:hover {
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
     <div class="chat-container">
         <div class="header">
-            <h1>🔪 MLX Knife Chat</h1>
+            <h1>🦫 MLX Knife Chat</h1>
             <div class="status" id="status">Connecting...</div>
         </div>
         
@@ -211,16 +270,16 @@
         
         <div class="input-container">
             <input type="text" id="messageInput" placeholder="Type your message..." disabled>
-            <button id="clearButton" onclick="clearChat()">Clear</button>
+            <button id="clearButton" onclick="clearChat()">Clear Chat</button>
             <button id="sendButton" disabled>Send</button>
         </div>
     </div>
 
     <script>
         const API_BASE = 'http://localhost:8000';
-        let currentModel = '';
+        let currentModel = localStorage.getItem('mlxk_selected_model') || '';
         let isConnected = false;
-        let conversationHistory = [];
+        let conversationHistory = JSON.parse(localStorage.getItem('mlxk_chat_history') || '[]');
 
         // DOM elements
         const statusEl = document.getElementById('status');
@@ -269,10 +328,16 @@
                         modelSelect.appendChild(option);
                     });
                     
-                    // Auto-select first model if available
-                    if (data.data.length > 0) {
+                    // Restore or auto-select model
+                    if (currentModel && data.data.some(m => m.id === currentModel)) {
+                        // Restore previously selected model
+                        modelSelect.value = currentModel;
+                        updateStatus(true, `Ready with ${currentModel.replace('mlx-community/', '')}`);
+                    } else if (data.data.length > 0) {
+                        // Auto-select first model if no valid stored model
                         currentModel = data.data[0].id;
                         modelSelect.value = currentModel;
+                        localStorage.setItem('mlxk_selected_model', currentModel);
                         updateStatus(true, `Ready with ${currentModel.replace('mlx-community/', '')}`);
                     }
                 }
@@ -302,6 +367,7 @@
             
             // Add user message to history and display
             conversationHistory.push({ role: 'user', content: message });
+            localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
             addMessage(message, true);
             messageInput.value = '';
             sendButton.disabled = true;
@@ -370,6 +436,7 @@
                 // Add assistant response to conversation history
                 if (content.trim()) {
                     conversationHistory.push({ role: 'assistant', content: content });
+                    localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
                 }
                 
             } catch (error) {
@@ -382,15 +449,73 @@
         
         // Clear conversation
         function clearChat() {
-            conversationHistory = [];
-            chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Hi! I\'m ready to chat. Select a model and send me a message!</div>';
+            if (conversationHistory.length === 0) {
+                return; // Nothing to clear
+            }
+            
+            showModal(
+                'Clear Chat',
+                'Are you sure you want to clear the entire chat history?',
+                'Clear All',
+                'Cancel',
+                () => {
+                    conversationHistory = [];
+                    localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
+                    chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Hi! I\'m ready to chat. Select a model and send me a message!</div>';
+                },
+                () => {
+                    // Cancel - do nothing
+                }
+            );
         }
 
+        // Custom modal functions
+        function showModal(title, message, primaryText, secondaryText, onPrimary, onSecondary) {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            
+            overlay.innerHTML = `
+                <div class="modal">
+                    <h3>${title}</h3>
+                    <p>${message}</p>
+                    <div class="modal-buttons">
+                        <button class="modal-button primary">${primaryText}</button>
+                        <button class="modal-button secondary">${secondaryText}</button>
+                    </div>
+                </div>
+            `;
+            
+            const buttons = overlay.querySelectorAll('.modal-button');
+            buttons[0].onclick = () => { document.body.removeChild(overlay); onPrimary(); };
+            buttons[1].onclick = () => { document.body.removeChild(overlay); onSecondary(); };
+            
+            document.body.appendChild(overlay);
+        }
+        
         // Event listeners
         modelSelect.addEventListener('change', (e) => {
             currentModel = e.target.value;
-            // Clear conversation history when switching models
-            conversationHistory = [];
+            localStorage.setItem('mlxk_selected_model', currentModel);
+            
+            // Ask user if they want to keep chat history when switching models
+            if (conversationHistory.length > 0 && currentModel) {
+                showModal(
+                    'Model Switch',
+                    'Keep your chat history with the new model?',
+                    'Keep History',
+                    'Start Fresh',
+                    () => {
+                        // Keep history - do nothing
+                    },
+                    () => {
+                        // Clear history
+                        conversationHistory = [];
+                        localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
+                        chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Hi! I\'m ready to chat with the new model!</div>';
+                    }
+                );
+            }
+            
             updateStatus(isConnected, currentModel ? `Ready with ${currentModel.replace('mlx-community/', '')}` : 'Select a model');
         });
 
@@ -402,8 +527,19 @@
 
         sendButton.addEventListener('click', sendMessage);
 
+        // Restore chat history on page load
+        function restoreChatHistory() {
+            if (conversationHistory.length > 0) {
+                chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Restored previous conversation.</div>';
+                conversationHistory.forEach(msg => {
+                    addMessage(msg.content, msg.role === 'user');
+                });
+            }
+        }
+        
         // Initialize
         checkHealth();
+        restoreChatHistory();
         setInterval(checkHealth, 30000); // Health check every 30s
     </script>
 </body>

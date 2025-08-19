@@ -75,14 +75,16 @@ addopts = [
     "--tb=short", 
     "--strict-markers",
     "--disable-warnings",
-    "--durations=10"
+    "--durations=10",
+    "-m not server"
 ]
 markers = [
     "integration: integration tests (slower)",
     "unit: unit tests (faster)",
     "slow: slow running tests",
     "requires_model: tests that need actual MLX models",
-    "network: tests that require network access"
+    "network: tests that require network access",
+    "server: tests that require MLX Knife server with loaded models (manual setup required)"
 ]
 timeout = 300
 norecursedirs = [".git", ".tox", "dist", "build", "*.egg", "venv", "__pycache__"]
