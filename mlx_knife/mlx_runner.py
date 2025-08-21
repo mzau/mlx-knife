@@ -4,6 +4,8 @@ Enhanced MLX model runner with direct API integration.
 Provides ollama-like run experience with streaming and interactive chat.
 """
 
+import json
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +15,42 @@ import mlx.core as mx
 from mlx_lm import load
 from mlx_lm.generate import generate_step
 from mlx_lm.sample_utils import make_repetition_penalty, make_sampler
+
+
+def get_model_context_length(model_path: str) -> int:
+    """Extract max_position_embeddings from model config.
+    
+    Args:
+        model_path: Path to the MLX model directory
+        
+    Returns:
+        Maximum context length for the model (defaults to 4096 if not found)
+    """
+    config_path = os.path.join(model_path, "config.json")
+    
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+        
+        # Try various common config keys for context length
+        context_keys = [
+            "max_position_embeddings",
+            "n_positions",
+            "context_length",
+            "max_sequence_length",
+            "seq_len"
+        ]
+        
+        for key in context_keys:
+            if key in config:
+                return config[key]
+                
+        # If no context length found, return reasonable default
+        return 4096
+        
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        # Return default if config can't be read
+        return 4096
 
 
 class MLXRunner:
@@ -33,6 +71,7 @@ class MLXRunner:
         self._memory_baseline = None
         self._stop_tokens = None  # Will be populated from tokenizer
         self._chat_stop_tokens = None  # Chat-specific stop tokens
+        self._context_length = None  # Will be populated from model config
         self.verbose = verbose
         self._model_loaded = False
         self._context_entered = False  # Prevent nested context usage
@@ -93,6 +132,13 @@ class MLXRunner:
 
             # Extract stop tokens from tokenizer
             self._extract_stop_tokens()
+            
+            # Extract context length from model config
+            self._context_length = get_model_context_length(str(self.model_path))
+            
+            if self.verbose:
+                print(f"Model context length: {self._context_length} tokens")
+                
             self._model_loaded = True
             
         except Exception as e:
@@ -181,6 +227,7 @@ class MLXRunner:
         self.tokenizer = None
         self._stop_tokens = None
         self._chat_stop_tokens = None
+        self._context_length = None
         self._model_loaded = False
 
         # Force garbage collection and clear MLX cache
@@ -199,6 +246,38 @@ class MLXRunner:
             else:
                 print(f"Cleanup complete (memory after: {memory_after:.1f}GB)")
 
+    def get_effective_max_tokens(self, requested_tokens: Optional[int], interactive: bool = False) -> int:
+        """Get effective max tokens based on model context and usage mode.
+        
+        Args:
+            requested_tokens: The requested max tokens (None if user didn't specify --max-tokens)
+            interactive: True if this is interactive mode (gets full context length)
+            
+        Returns:
+            Effective max tokens to use
+        """
+        if not self._context_length:
+            # Fallback when context length is unknown
+            fallback = 4096 if interactive else 2048
+            if self.verbose:
+                if requested_tokens is None:
+                    print(f"[WARNING] Model context length unknown, using fallback: {fallback} tokens")
+                else:
+                    print(f"[WARNING] Model context length unknown, using user specified: {requested_tokens} tokens")
+            return requested_tokens if requested_tokens is not None else fallback
+            
+        if interactive:
+            if requested_tokens is None:
+                # User didn't specify --max-tokens: use full model context
+                return self._context_length
+            else:
+                # User specified --max-tokens explicitly: respect their choice but cap at context
+                return min(requested_tokens, self._context_length)
+        else:
+            # Server/batch mode uses half context length for DoS protection
+            server_limit = self._context_length // 2
+            return min(requested_tokens or server_limit, server_limit)
+
     def generate_streaming(
         self,
         prompt: str,
@@ -209,6 +288,7 @@ class MLXRunner:
         repetition_context_size: int = 20,
         use_chat_template: bool = True,
         use_chat_stop_tokens: bool = False,
+        interactive: bool = False,
     ) -> Iterator[str]:
         """Generate text with streaming output.
         
@@ -221,12 +301,16 @@ class MLXRunner:
             repetition_context_size: Context size for repetition penalty
             use_chat_template: Apply tokenizer's chat template if available
             use_chat_stop_tokens: Include chat turn markers as stop tokens (for interactive mode)
+            interactive: True if this is interactive mode (affects token limits)
             
         Yields:
             Generated tokens as they are produced
         """
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Apply context-aware token limits
+        effective_max_tokens = self.get_effective_max_tokens(max_tokens, interactive)
 
         # Apply chat template if available and requested
         if use_chat_template and hasattr(self.tokenizer, 'chat_template') and self.tokenizer.chat_template:
@@ -261,7 +345,7 @@ class MLXRunner:
         generator = generate_step(
             prompt=prompt_array,
             model=self.model,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             sampler=sampler,
             logits_processors=logits_processors if logits_processors else None,
         )
@@ -367,6 +451,7 @@ class MLXRunner:
         repetition_penalty: float = 1.1,
         repetition_context_size: int = 20,
         use_chat_template: bool = True,
+        interactive: bool = False,
     ) -> str:
         """Generate text in batch mode (non-streaming).
         
@@ -377,12 +462,17 @@ class MLXRunner:
             top_p: Top-p sampling parameter
             repetition_penalty: Penalty for repeated tokens
             repetition_context_size: Context size for repetition penalty
+            use_chat_template: Apply tokenizer's chat template if available
+            interactive: True if this is interactive mode (affects token limits)
             
         Returns:
             Generated text
         """
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Apply context-aware token limits
+        effective_max_tokens = self.get_effective_max_tokens(max_tokens, interactive)
 
         # Apply chat template if available and requested
         if use_chat_template and hasattr(self.tokenizer, 'chat_template') and self.tokenizer.chat_template:
@@ -418,7 +508,7 @@ class MLXRunner:
         generator = generate_step(
             prompt=prompt_array,
             model=self.model,
-            max_tokens=max_tokens,
+            max_tokens=effective_max_tokens,
             sampler=sampler,
             logits_processors=logits_processors if logits_processors else None,
         )
@@ -506,6 +596,7 @@ class MLXRunner:
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
                     use_chat_stop_tokens=True,  # Enable chat stop tokens in interactive mode
+                    interactive=True,  # Enable full context length for interactive mode
                 ):
                     print(token, end="", flush=True)
                     response_tokens.append(token)

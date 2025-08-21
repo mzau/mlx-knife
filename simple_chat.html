@@ -107,8 +107,13 @@
             color: white;
         }
         
-        #clearButton:hover {
+        #clearButton:hover:not(:disabled) {
             background: #5a6268;
+        }
+        
+        #clearButton:disabled {
+            background: #ccc;
+            cursor: not-allowed;
         }
         
         #sendButton {
@@ -116,7 +121,7 @@
             color: white;
         }
         
-        #sendButton:hover {
+        #sendButton:hover:not(:disabled) {
             background: #0056b3;
         }
         
@@ -280,6 +285,7 @@
         let currentModel = localStorage.getItem('mlxk_selected_model') || '';
         let isConnected = false;
         let conversationHistory = JSON.parse(localStorage.getItem('mlxk_chat_history') || '[]');
+        let isStreaming = false;
 
         // DOM elements
         const statusEl = document.getElementById('status');
@@ -287,6 +293,7 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        const clearButton = document.getElementById('clearButton');
 
         // Update status
         function updateStatus(connected, message = '') {
@@ -294,8 +301,9 @@
             statusEl.textContent = message || (connected ? 'Connected' : 'Disconnected');
             statusEl.className = `status ${connected ? 'connected' : 'disconnected'}`;
             
-            messageInput.disabled = !connected || !currentModel;
-            sendButton.disabled = !connected || !currentModel;
+            messageInput.disabled = !connected || !currentModel || isStreaming;
+            sendButton.disabled = !connected || !currentModel || isStreaming;
+            clearButton.disabled = isStreaming || conversationHistory.length === 0;
         }
 
         // Check API health
@@ -321,6 +329,9 @@
                     const data = await response.json();
                     modelSelect.innerHTML = '<option value="">Select a model...</option>';
                     
+                    // Store models data for context length lookup
+                    window.modelsData = data.data;
+                    
                     data.data.forEach(model => {
                         const option = document.createElement('option');
                         option.value = model.id;
@@ -332,18 +343,35 @@
                     if (currentModel && data.data.some(m => m.id === currentModel)) {
                         // Restore previously selected model
                         modelSelect.value = currentModel;
-                        updateStatus(true, `Ready with ${currentModel.replace('mlx-community/', '')}`);
+                        updateStatus(true, getModelDisplayText(currentModel));
                     } else if (data.data.length > 0) {
                         // Auto-select first model if no valid stored model
                         currentModel = data.data[0].id;
                         modelSelect.value = currentModel;
                         localStorage.setItem('mlxk_selected_model', currentModel);
-                        updateStatus(true, `Ready with ${currentModel.replace('mlx-community/', '')}`);
+                        updateStatus(true, getModelDisplayText(currentModel));
                     }
                 }
             } catch (error) {
                 console.error('Failed to load models:', error);
             }
+        }
+
+        // Update status with model info including token capacity
+        function getModelDisplayText(modelId) {
+            if (!modelId) return 'Select a model';
+            
+            const modelName = modelId.replace('mlx-community/', '');
+            
+            if (!window.modelsData) {
+                // Fallback before models data is loaded
+                return `Ready with ${modelName}`;
+            }
+            
+            const model = window.modelsData.find(m => m.id === modelId);
+            const contextLength = model?.context_length || 4096;
+            
+            return `Ready with ${modelName} (${contextLength.toLocaleString()} tokens)`;
         }
 
         // Add message to chat
@@ -370,7 +398,8 @@
             localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
             addMessage(message, true);
             messageInput.value = '';
-            sendButton.disabled = true;
+            isStreaming = true;
+            updateStatus(isConnected, `Generating response with ${currentModel.replace('mlx-community/', '')}...`);
             
             // Add typing indicator
             const typingDiv = addMessage('Typing...', false);
@@ -442,15 +471,20 @@
             } catch (error) {
                 typingDiv.remove();
                 addMessage(`Error: ${error.message}`, false);
+            } finally {
+                isStreaming = false;
+                updateStatus(isConnected, currentModel ? getModelDisplayText(currentModel) : 'Select a model');
             }
-            
-            sendButton.disabled = false;
         }
         
         // Clear conversation
         function clearChat() {
             if (conversationHistory.length === 0) {
                 return; // Nothing to clear
+            }
+            
+            if (isStreaming) {
+                return; // Don't allow clearing during streaming
             }
             
             showModal(
@@ -462,6 +496,7 @@
                     conversationHistory = [];
                     localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
                     chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Hi! I\'m ready to chat. Select a model and send me a message!</div>';
+                    updateStatus(isConnected, currentModel ? getModelDisplayText(currentModel) : 'Select a model');
                 },
                 () => {
                     // Cancel - do nothing
@@ -512,11 +547,12 @@
                         conversationHistory = [];
                         localStorage.setItem('mlxk_chat_history', JSON.stringify(conversationHistory));
                         chatMessages.innerHTML = '<div class="message assistant-message"><strong>MLX Assistant:</strong> Hi! I\'m ready to chat with the new model!</div>';
+                        updateStatus(isConnected, currentModel ? getModelDisplayText(currentModel) : 'Select a model');
                     }
                 );
             }
             
-            updateStatus(isConnected, currentModel ? `Ready with ${currentModel.replace('mlx-community/', '')}` : 'Select a model');
+            updateStatus(isConnected, currentModel ? getModelDisplayText(currentModel) : 'Select a model');
         });
 
         messageInput.addEventListener('keypress', (e) => {
@@ -535,6 +571,8 @@
                     addMessage(msg.content, msg.role === 'user');
                 });
             }
+            // Update button states after restoring
+            updateStatus(isConnected, currentModel ? getModelDisplayText(currentModel) : 'Select a model');
         }
         
         // Initialize

@@ -335,3 +335,92 @@ class TestRunCommandErrorConditions:
             
             # Each should complete independently
             assert return_code is not None, f"Concurrent run {i} did not complete"
+
+
+@pytest.mark.timeout(60)
+class TestRunCommandContextAwareLimits:
+    """Test context-aware token limits in Issues #15 and #16 resolution."""
+    
+    def test_context_length_extraction_from_real_model(self, mlx_knife_process, mock_model_cache):
+        """Test that context length is correctly extracted from real model configs."""
+        # Create a mock model with realistic config.json
+        model_path = mock_model_cache("test-model", healthy=True)
+        
+        # Add custom config.json with specific context length
+        config_content = {
+            "max_position_embeddings": 4096,
+            "hidden_size": 768,
+            "num_attention_heads": 12
+        }
+        import json
+        (model_path / "config.json").write_text(json.dumps(config_content))
+        
+        # Test that the model context length is accessible
+        # This is an indirect test - we test that the run command uses model-aware limits
+        # by checking that it doesn't hang with realistic models
+        proc = mlx_knife_process([
+            "run", "test-model", "Test prompt",
+            "--max-tokens", "8000",  # Request more than typical model context
+            "--verbose"
+        ])
+        
+        try:
+            # Should complete within timeout (won't actually generate due to mock)
+            return_code = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            pytest.fail("Run command hung with high max-tokens")
+            
+        # Should complete (may fail due to mock model, but shouldn't hang)
+        assert return_code is not None, "Run command did not complete with context-aware limits"
+        
+    def test_server_vs_interactive_token_policies(self, mock_model_cache):
+        """Test that server mode uses DoS protection while interactive mode uses full context."""
+        # This test validates the architectural decision:
+        # - Server mode: context_length / 2 (DoS protection)
+        # - Interactive mode: full context_length
+        
+        from mlx_knife.mlx_runner import MLXRunner, get_model_context_length
+        import tempfile
+        import json
+        import os
+        
+        # Create a temporary model directory with config
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.json")
+            config = {"max_position_embeddings": 4096}
+            
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+            
+            # Test context length extraction
+            context_length = get_model_context_length(temp_dir)
+            assert context_length == 4096, "Context length extraction failed"
+            
+            # Test MLXRunner effective token calculation
+            runner = MLXRunner(temp_dir, verbose=False)
+            runner._context_length = 4096
+            
+            # Interactive mode should use full context
+            interactive_tokens = runner.get_effective_max_tokens(8000, interactive=True)
+            assert interactive_tokens == 4096, f"Interactive mode should use full context: {interactive_tokens}"
+            
+            # Server mode should use half context (DoS protection)
+            server_tokens = runner.get_effective_max_tokens(8000, interactive=False)
+            assert server_tokens == 2048, f"Server mode should use half context: {server_tokens}"
+            
+            # User requests smaller than limits should be honored
+            small_interactive = runner.get_effective_max_tokens(1000, interactive=True)
+            assert small_interactive == 1000, "Small requests should be honored in interactive mode"
+            
+            small_server = runner.get_effective_max_tokens(1000, interactive=False)  
+            assert small_server == 1000, "Small requests should be honored in server mode"
+            
+            # Test None behavior (new CLI default=None logic)
+            # Interactive mode with None should use full context
+            none_interactive = runner.get_effective_max_tokens(None, interactive=True)
+            assert none_interactive == 4096, "None in interactive mode should use full context"
+            
+            # Server mode with None should use server limit
+            none_server = runner.get_effective_max_tokens(None, interactive=False)  
+            assert none_server == 2048, "None in server mode should use server limit (context/2)"

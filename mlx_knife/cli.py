@@ -41,7 +41,7 @@ def main():
     run_p.add_argument("prompt", nargs="?", default=None, help="Prompt text (if not provided, enters interactive mode)")
     run_p.add_argument("--interactive", "-i", action="store_true", help="Force interactive dialog mode")
     run_p.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature (default: 0.7)")
-    run_p.add_argument("--max-tokens", type=int, default=500, help="Maximum tokens to generate (default: 500)")
+    run_p.add_argument("--max-tokens", type=int, default=None, help="Maximum tokens to generate (default: model context length)")
     run_p.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
     run_p.add_argument("--repetition-penalty", type=float, default=1.1, help="Penalty for repeated tokens (default: 1.1)")
     run_p.add_argument("--no-stream", action="store_true", help="Disable streaming output")
