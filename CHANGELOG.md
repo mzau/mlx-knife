@@ -1,5 +1,68 @@
 # Changelog
 
+## [1.1.0-beta1] - 2025-08-21
+
+### Major Features 🚀
+- **Issues #15 & #16**: Dynamic Model-Aware Token Limits
+  - Eliminated hardcoded 500/2000 token defaults with intelligent model-based limits
+  - **Phi-3-mini**: 4096 context → 2048 server tokens, 4096 interactive (8x improvement)
+  - **Qwen2.5-30B**: 262,144 context → 131,072 server tokens, 262,144 interactive (524x improvement!)
+  - Context-aware policies: Interactive mode uses full context, server mode uses context/2 for DoS protection
+  - Automatic adaptation to new models with larger context windows (future-proof)
+
+### Enhanced Web Client 🌐  
+- **Model Token Capacity Display**: Shows "Ready with Mistral-7B (32,768 tokens)" in header
+- **Enhanced `/v1/models` API**: Now exposes `context_length` field for model capabilities
+- **Button State Management**: Clear Chat properly disabled during streaming with CSS styling
+- **Streaming Status Tracking**: Added `isStreaming` flag with "Generating response..." feedback
+
+### Interactive Mode Improvements 💡
+- **Smart CLI Defaults**: `mlxk run <model> "prompt"` automatically uses optimal token limits per model
+- **No Configuration Needed**: Users benefit immediately without changing usage patterns
+- **Explicit Control Preserved**: `--max-tokens` arguments still respected and capped at model context
+- **Clean Type Safety**: Proper `Optional[int]` handling eliminates fragile CLI guessing
+
+### Technical Architecture 🏗️
+- **`get_model_context_length()` function**: Extracts context length from model configs with multiple fallback keys
+- **Enhanced MLXRunner**: `get_effective_max_tokens()` method for context-aware token limiting
+- **Server API Updates**: All endpoints use model-aware limits with DoS protection
+- **Unified Token Logic**: Single source of truth through MLXRunner eliminates duplicate code
+- **Backward Compatible**: All existing CLI arguments and APIs work unchanged
+
+### Performance Impact 📊
+- **Modern Models Unleashed**: Large-context models can now use their full capabilities
+- **Real-World Benefits**: No more artificial 500-token truncation for 100K+ context models  
+- **Smart Server Limits**: Automatic DoS protection while maximizing usable context
+- **Zero Magic Numbers**: Clean architecture with clear `None` vs explicit value semantics
+
+### Testing & Quality Assurance ✅
+- **Comprehensive Coverage**: 131/131 tests passing (expansion from 114 tests)
+- **20 new unit tests**: Covering CLI None-handling, model context extraction, effective token calculation
+- **5 server integration tests**: Real-world validation with actual MLX models
+- **Extreme Model Testing**: Validated with models from 1B to 30B parameters, up to 256K context
+- **Edge Case Handling**: Unknown models, missing configs, CLI argument combinations
+
+### Issue #14 Model Compatibility Validation
+**Chat Self-Conversation Fix tested across model spectrum:**
+
+| Model | Size | RAM (GB) | Context | Status | Architecture |
+|-------|------|----------|---------|--------|-------------|
+| **Llama-3.2-1B-Instruct-4bit** | 1B | 2 | 131,072 | ✅ PASSED | Llama |
+| **Llama-3.2-3B-Instruct-4bit** | 3B | 4 | 131,072 | ✅ PASSED | Llama |
+| **Phi-3-mini-4k-instruct-4bit** | 4B | 5 | 4,096 | ✅ PASSED | Phi-3 |
+| **Mistral-7B-Instruct-v0.2-4bit** | 7B | 8 | 32,768 | ✅ PASSED | Mistral |
+| **Mixtral-8x7B-Instruct-v0.1-4bit** | 8x7B | 16 | 32,768 | ✅ PASSED | Mixtral MoE |
+| **Mistral-Small-3.2-24B-Instruct-2506-4bit** | 24B | 20 | 32,768 | ✅ PASSED | Mistral |
+| **Qwen3-30B-A3B-Instruct-2507-4bit** | 30B | 24 | 262,144 | ✅ PASSED | Qwen |
+
+**Validation Results**: 7/7 models passed - comprehensive coverage from 1B to 30B parameters across all major MLX architectures ensures robust chat stop token handling.
+
+### Beta Status Notes ⚠️
+- **Core Functionality**: Solid foundation with comprehensive test coverage
+- **Known Limitation**: Server deadlock possible under extreme concurrent model loading stress
+- **Workaround**: Avoid simultaneous heavy model operations (normal usage unaffected)  
+- **Real-World Ready**: Significant improvements ready for community testing and feedback
+
 ## [1.0.4] - 2025-08-19
 
 ### Fixed

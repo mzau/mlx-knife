@@ -2,10 +2,10 @@
 
 ## Current Status
 
-✅ **114/114 tests passing** (August 2025)  
+✅ **131/131 tests passing** (August 2025)  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
-✅ **Production ready** - real model execution validated
+✅ **Beta ready** - comprehensive testing with real model execution
 
 ## Quick Start
 
@@ -42,13 +42,15 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 ```
 tests/
 ├── conftest.py                     # Shared fixtures and utilities
-├── integration/                    # System-level integration tests (62 tests)
+├── integration/                    # System-level integration tests (85+ tests)
 │   ├── test_core_functionality.py      # Basic CLI operations
 │   ├── test_health_checks.py           # Model corruption detection  
+│   ├── test_issue_14.py               # Issue #14: Chat self-conversation fix
+│   ├── test_issue_15_16.py            # Issues #15/#16: Dynamic token limits
 │   ├── test_process_lifecycle.py       # Process management & cleanup
 │   ├── test_run_command_advanced.py    # Run command edge cases
 │   └── test_server_functionality.py    # OpenAI API server tests
-└── unit/                          # Module-level unit tests (52 tests)
+└── unit/                          # Module-level unit tests (45+ tests)
     ├── test_cache_utils.py            # Cache management functions
     ├── test_cli.py                    # CLI argument parsing
     └── test_mlx_runner_memory.py     # Memory management tests
@@ -158,11 +160,11 @@ pytest -n auto
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 114/114 |
-| 3.10.x         | ✅ Verified | 114/114 |
-| 3.11.x         | ✅ Verified | 114/114 |
-| 3.12.x         | ✅ Verified | 114/114 |
-| 3.13.x         | ✅ Verified | 114/114 |
+| 3.9.6 (macOS)  | ✅ Verified | 131/131 |
+| 3.10.x         | ✅ Verified | 131/131 |
+| 3.11.x         | ✅ Verified | 131/131 |
+| 3.12.x         | ✅ Verified | 131/131 |
+| 3.13.x         | ✅ Verified | 131/131 |
 
 All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 

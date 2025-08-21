@@ -76,12 +76,8 @@ class ModelInfo(BaseModel):
     object: str = "model"
     owned_by: str = "mlx-knife"
     permission: List = []
+    context_length: Optional[int] = None
 
-
-def get_effective_max_tokens(request_max_tokens: Optional[int]) -> int:
-    """Get effective max_tokens value, using global default if not specified."""
-    global _default_max_tokens
-    return request_max_tokens if request_max_tokens is not None else _default_max_tokens
 
 
 def get_or_load_model(model_spec: str, verbose: bool = False) -> MLXRunner:
@@ -155,7 +151,7 @@ async def generate_completion_stream(
         token_count = 0
         for token in runner.generate_streaming(
             prompt=prompt,
-            max_tokens=get_effective_max_tokens(request.max_tokens),
+            max_tokens=runner.get_effective_max_tokens(request.max_tokens or _default_max_tokens, interactive=False),
             temperature=request.temperature,
             top_p=request.top_p,
             repetition_penalty=request.repetition_penalty,
@@ -257,7 +253,7 @@ async def generate_chat_stream(
     try:
         for token in runner.generate_streaming(
             prompt=prompt,
-            max_tokens=get_effective_max_tokens(request.max_tokens),
+            max_tokens=runner.get_effective_max_tokens(request.max_tokens or _default_max_tokens, interactive=False),
             temperature=request.temperature,
             top_p=request.top_p,
             repetition_penalty=request.repetition_penalty,
@@ -393,10 +389,22 @@ async def list_models():
         framework = detect_framework(model_dir, model_name)
 
         if framework == "MLX" and is_model_healthy(model_name):
+            # Get model context length
+            context_length = None
+            try:
+                from .cache_utils import get_model_path
+                from .mlx_runner import get_model_context_length
+                model_path_tuple = get_model_path(model_name)
+                if model_path_tuple and model_path_tuple[0]:
+                    context_length = get_model_context_length(str(model_path_tuple[0]))
+            except Exception:
+                pass  # Fallback to None if context length cannot be determined
+            
             model_list.append(ModelInfo(
                 id=model_name,
                 object="model",
-                owned_by="mlx-knife"
+                owned_by="mlx-knife",
+                context_length=context_length
             ))
 
     return {"object": "list", "data": model_list}
@@ -430,7 +438,7 @@ async def create_completion(request: CompletionRequest):
 
             generated_text = runner.generate_batch(
                 prompt=prompt,
-                max_tokens=get_effective_max_tokens(request.max_tokens),
+                max_tokens=runner.get_effective_max_tokens(request.max_tokens or _default_max_tokens, interactive=False),
                 temperature=request.temperature,
                 top_p=request.top_p,
                 repetition_penalty=request.repetition_penalty,
@@ -486,7 +494,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
             generated_text = runner.generate_batch(
                 prompt=prompt,
-                max_tokens=get_effective_max_tokens(request.max_tokens),
+                max_tokens=runner.get_effective_max_tokens(request.max_tokens or _default_max_tokens, interactive=False),
                 temperature=request.temperature,
                 top_p=request.top_p,
                 repetition_penalty=request.repetition_penalty,
