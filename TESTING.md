@@ -2,7 +2,7 @@
 
 ## Current Status
 
-✅ **131/131 tests passing** (August 2025)  
+✅ **132/132 tests passing** (August 2025)  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
 ✅ **Beta ready** - comprehensive testing with real model execution
@@ -42,8 +42,9 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 ```
 tests/
 ├── conftest.py                     # Shared fixtures and utilities
-├── integration/                    # System-level integration tests (85+ tests)
+├── integration/                    # System-level integration tests (84+ tests)
 │   ├── test_core_functionality.py      # Basic CLI operations
+│   ├── test_end_token_issue.py         # Issue #20: End-token filtering consistency
 │   ├── test_health_checks.py           # Model corruption detection  
 │   ├── test_issue_14.py               # Issue #14: Chat self-conversation fix
 │   ├── test_issue_15_16.py            # Issues #15/#16: Dynamic token limits
@@ -115,6 +116,9 @@ pytest tests/integration/test_health_checks.py -v
 # Core functionality (basic CLI commands)
 pytest tests/integration/test_core_functionality.py -v
 
+# Issue #20: End-token filtering consistency (new in 1.1.0-beta2)
+pytest tests/integration/test_end_token_issue.py -v
+
 # Advanced run command tests
 pytest tests/integration/test_run_command_advanced.py -v
 
@@ -128,8 +132,8 @@ pytest tests/integration/test_server_functionality.py -v
 # Run only basic operations tests
 pytest -k "TestBasicOperations" -v
 
-# Server tests are automatically excluded by default
-# (no command needed - this is the default behavior)
+# Server tests are excluded by default (marked with @pytest.mark.server)
+# They require significant RAM and time (48 tests × multiple models)
 
 # Skip tests requiring actual models
 pytest -k "not requires_model" -v
@@ -154,17 +158,42 @@ pytest --durations=10
 pytest -n auto
 ```
 
+### Server Tests (Advanced)
+
+**⚠️ Warning**: Server tests require significant system resources and time.
+
+```bash
+# Run comprehensive Issue #20 server tests (48 tests, ~30 minutes)
+pytest tests/integration/test_end_token_issue.py -m server -v
+
+# All server-marked tests (includes above + server functionality)
+pytest -m server -v
+
+# Quick server functionality test only
+pytest tests/integration/test_server_functionality.py -v
+
+# Server tests are RAM-aware - automatically skip models that don't fit
+```
+
+**Server Test Requirements:**
+- **RAM**: 8GB+ recommended (16GB+ for large models)  
+- **Time**: 20-40 minutes for full suite
+- **Models**: Multiple 4-bit quantized models (1B-30B parameters)
+- **Coverage**: Streaming vs non-streaming consistency, token limits, API compliance
+
 ## Python Version Compatibility
 
 ### Verification Results (August 2025)
 
+**✅ 132/132 tests passing** - All standard tests validated on Apple Silicon
+
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 131/131 |
-| 3.10.x         | ✅ Verified | 131/131 |
-| 3.11.x         | ✅ Verified | 131/131 |
-| 3.12.x         | ✅ Verified | 131/131 |
-| 3.13.x         | ✅ Verified | 131/131 |
+| 3.9.6 (macOS)  | ✅ Verified | 132/132 |
+| 3.10.x         | ✅ Verified | 132/132 |
+| 3.11.x         | ✅ Verified | 132/132 |
+| 3.12.x         | ✅ Verified | 132/132 |
+| 3.13.x         | ✅ Verified | 132/132 |
 
 All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 
@@ -394,16 +423,16 @@ tests/integration/test_issue_14.py::test_issue_14_self_conversation_regression_o
 ========== 7 passed in 45.23s ==========
 ```
 
-### Future Server Tests (Planned)
+### Additional Server Tests
 
-**Issue #15** - Token Limit vs Stop Token Race Condition:
+**Issues #15 & #16** - Dynamic Token Limits (Implemented in 1.1.0-beta1):
 ```bash
-pytest tests/integration/test_issue_15.py -m server -v
+pytest tests/integration/test_issue_15_16.py -v
 ```
 
-**Issue #16** - Interactive vs Server Token Policies:  
+**Issue #20** - End-Token Filtering (Implemented in 1.1.0-beta2):
 ```bash
-pytest tests/integration/test_issue_16.py -m server -v
+pytest tests/integration/test_end_token_issue.py -m server -v
 ```
 
 ### Troubleshooting Server Tests

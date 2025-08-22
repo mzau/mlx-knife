@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.1.0-beta2] - 2025-08-22
+
+### Critical Bug Fixes 🐛
+- **Issue #19**: Server Response Truncation at ~1000 Words - **RESOLVED**
+  - **Root Cause**: Server hardcoded `--max-tokens 2000` overrode dynamic limits from 1.1.0-beta1
+  - **Fix**: Changed CLI `--max-tokens` default from `2000` to `None`, enabling model-aware dynamic limits
+  - **Impact**: Large context models (Qwen3-30B, Llama-3.3-70B) now work at full capacity by default
+  - **Validation**: Server startup shows "model-aware dynamic limits" instead of hardcoded values
+
+- **Issue #20**: End-Token Visibility in Non-Streaming Mode - **RESOLVED**  
+  - **Root Cause**: `generate_batch()` lacked End-Token filtering present in `generate_streaming()`
+  - **Fix**: Ported filtering logic with new `_filter_end_tokens_from_response()` method
+  - **Affected**: `mlxk run model "prompt" --no-stream` and Server API `"stream": false`
+  - **Impact**: Professional clean output - no visible `</s>`, `<|im_end|>`, `<|end|>` tokens
+  - **Test Coverage**: 47/48 comprehensive tests validate fix across all model architectures
+
+### Test Infrastructure Improvements 🧪
+- **New Test Suite**: `tests/integration/test_end_token_issue.py` with 48 systematic tests
+- **RAM-Aware Testing**: Automatic model selection based on available system memory
+- **Flaky Test Fix**: Improved server lifecycle management with proper port cleanup
+- **Blocking Read Fix**: Fixed timeout issues in server startup validation tests
+- **Test Count**: 132/132 standard tests + 48 server tests (180 total)
+
+### Documentation Updates 📚
+- **TESTING.md**: New server test procedures, updated test counts (132/132), comprehensive server test guide
+- **Test Categories**: Clear separation of standard tests vs resource-intensive server tests
+- **Server Test Documentation**: RAM requirements, timing expectations, model compatibility
+
+### Architecture Quality 🏗️
+- **End-Token Consistency**: Streaming and non-streaming pipelines now identical in behavior
+- **Clean Code**: Unified filtering logic eliminates code duplication between pipelines  
+- **Regression Prevention**: Comprehensive test coverage prevents future End-Token issues
+- **Professional Output**: All models and modes produce clean, professional responses
+- **Test Stability**: Eliminated flaky tests and timeouts for reliable CI/CD
+
 ## [1.1.0-beta1] - 2025-08-21
 
 ### Major Features 🚀

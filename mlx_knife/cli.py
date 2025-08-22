@@ -67,7 +67,7 @@ def main():
     server_p = subparsers.add_parser("server", help="Start OpenAI-compatible API server")
     server_p.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     server_p.add_argument("--port", type=int, default=8000, help="Server port (default: 8000)")
-    server_p.add_argument("--max-tokens", type=int, default=2000, help="Default max tokens for completions (default: 2000)")
+    server_p.add_argument("--max-tokens", type=int, default=None, help="Default max tokens for completions (default: model-aware dynamic limits)")
     server_p.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     server_p.add_argument("--log-level", default="info", choices=["debug", "info", "warning", "error"], help="Log level (default: info)")
 
@@ -111,7 +111,7 @@ def main():
         show_model(args.model_spec, show_files=args.files, show_config=args.config)
     elif args.cmd == "server":
         # Validate server arguments
-        if args.max_tokens <= 0:
+        if args.max_tokens is not None and args.max_tokens <= 0:
             print(f"Error: --max-tokens must be positive, got: {args.max_tokens}")
             sys.exit(1)
         if args.port <= 0 or args.port > 65535:

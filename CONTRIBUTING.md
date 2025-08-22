@@ -72,7 +72,6 @@ Repository structure:
 ├── README.md               # User documentation  
 ├── CONTRIBUTING.md         # This file
 ├── TESTING.md              # Testing guide
-├── CLAUDE.md               # Development notes
 ├── pyproject.toml          # Build configuration
 └── requirements.txt        # Dependencies
 ```

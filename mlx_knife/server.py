@@ -23,7 +23,7 @@ from .mlx_runner import MLXRunner
 # Global model cache and configuration
 _model_cache: Dict[str, MLXRunner] = {}
 _current_model_path: Optional[str] = None
-_default_max_tokens: int = 2000
+_default_max_tokens: Optional[int] = None  # Use dynamic model-aware limits by default
 
 
 class CompletionRequest(BaseModel):
@@ -544,7 +544,7 @@ def run_server(
 
     print(f"Starting MLX Knife Server on http://{host}:{port}")
     print(f"API docs available at http://{host}:{port}/docs")
-    print(f"Default max tokens: {max_tokens}")
+    print(f"Default max tokens: {'model-aware dynamic limits' if max_tokens is None else max_tokens}")
 
     uvicorn.run(
         "mlx_knife.server:app",
