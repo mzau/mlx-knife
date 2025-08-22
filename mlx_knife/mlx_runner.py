@@ -533,6 +533,9 @@ class MLXRunner:
             # Fallback: just decode generated tokens
             response = self.tokenizer.decode(generated_tokens)
 
+        # Apply end-token filtering (same logic as streaming mode for Issue #20)
+        response = self._filter_end_tokens_from_response(response, use_chat_stop_tokens=False)
+
         generation_time = time.time() - start_time
 
         # Count tokens for statistics
@@ -656,6 +659,38 @@ class MLXRunner:
             "peak_gb": peak_memory,
             "model_gb": current_memory - self._memory_baseline if self._memory_baseline else 0,
         }
+
+    def _filter_end_tokens_from_response(self, response: str, use_chat_stop_tokens: bool = False) -> str:
+        """Filter end tokens from a complete response (batch mode).
+        
+        This method applies the same filtering logic as the streaming mode
+        to ensure consistent behavior between streaming and non-streaming.
+        
+        Args:
+            response: The complete generated response
+            use_chat_stop_tokens: Whether to apply chat stop tokens
+            
+        Returns:
+            Response with end tokens filtered out
+        """
+        # Apply native stop token filtering FIRST (highest priority)
+        native_stop_tokens = self._stop_tokens if self._stop_tokens else []
+        for stop_token in native_stop_tokens:
+            if stop_token in response:
+                # Find the stop token position and return everything before it
+                stop_pos = response.find(stop_token)
+                return response[:stop_pos]
+        
+        # Only check chat stop tokens if no native stop token found (fallback)
+        if use_chat_stop_tokens and self._chat_stop_tokens:
+            for stop_token in self._chat_stop_tokens:
+                if stop_token in response:
+                    # Find the stop token position and return everything before it
+                    stop_pos = response.find(stop_token)
+                    return response[:stop_pos]
+        
+        # No stop tokens found, return original response
+        return response
 
 
 def get_gpu_status() -> Dict[str, float]:
