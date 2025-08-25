@@ -456,6 +456,10 @@ def list_models(show_all=False, framework_filter=None, show_health=False, single
             models = [model_dir]
         else:
             # If exact match fails, do partial name matching
+            if not MODEL_CACHE.exists():
+                print(f"No models found matching '{single_model}' - cache directory doesn't exist yet.")
+                print("Use 'mlxk pull <model-name>' to download models first.")
+                return
             all_models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
             matching_models = []
             
@@ -471,6 +475,10 @@ def list_models(show_all=False, framework_filter=None, show_health=False, single
             
             models = matching_models
     else:
+        if not MODEL_CACHE.exists():
+            print("No models found - cache directory doesn't exist yet.")
+            print("Use 'mlxk pull <model-name>' to download models first.")
+            return
         models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
         if not models:
             print("No models found in HuggingFace cache.")
@@ -779,19 +787,22 @@ def show_model(model_spec, show_files=False, show_config=False):
 
     return True
 
-def rm_model(model_spec):
+def rm_model(model_spec, force=False):
     original_spec = model_spec
     
     # First try to resolve using fuzzy matching
     resolved_path, resolved_name, resolved_hash = resolve_single_model(model_spec)
     
     if not resolved_path:
-        # resolve_single_model already printed the error message
+        # resolve_single_model already printed the error message for most cases
+        # But ensure we always provide feedback to the user
+        print(f"Model '{original_spec}' not found or corrupted.")
         return
         
     # Use the resolved model name for deletion
     model_name = resolved_name
     commit_hash = resolved_hash
+    
     
     # Confirm on auto-expansion (if the resolved name is different from input)
     base_spec = original_spec.split("@")[0] if "@" in original_spec else original_spec
@@ -818,17 +829,76 @@ def rm_model(model_spec):
                     if snapshot.is_dir():
                         print(f"  {snapshot.name[:8]}")
             return
-        confirm = input(f"Delete hash {commit_hash} of model {model_name}? [y/N] ")
-        if confirm.lower() == "y":
-            shutil.rmtree(hash_dir)
-            print(f"Hash {commit_hash} deleted.")
+        if force:
+            confirm_delete = True
+        else:
+            confirm = input(f"Delete hash {commit_hash} of model {model_name}? [y/N] ")
+            confirm_delete = confirm.lower() == "y"
+        
+        if confirm_delete:
+            # Issue #23 Fix: Delete entire model directory, not just the snapshot
+            # This prevents the double-execution problem where refs/ remain intact
+            shutil.rmtree(base_cache_dir)
+            print(f"{model_name}@{commit_hash} deleted")
+            
+            # Clean up associated lock files
+            try:
+                _cleanup_model_locks(model_name, force)
+            except Exception as e:
+                print(f"Warning: Could not clean up cache files: {e}")
         else:
             print("Aborted.")
     else:
         # Delete entire model
-        confirm = input(f"Delete entire model {model_name} ({base_cache_dir})? [y/N] ")
-        if confirm.lower() == "y":
+        if force:
+            confirm_delete = True
+        else:
+            confirm = input(f"Delete entire model {model_name} ({base_cache_dir})? [y/N] ")
+            confirm_delete = confirm.lower() == "y"
+        
+        if confirm_delete:
             shutil.rmtree(base_cache_dir)
             print(f"Model {model_name} completely deleted.")
+            
+            # Clean up associated lock files
+            try:
+                _cleanup_model_locks(model_name, force)
+            except Exception as e:
+                print(f"Warning: Could not clean up cache files: {e}")
         else:
             print("Aborted.")
+
+
+def _cleanup_model_locks(model_name, force=False):
+    """Clean up HuggingFace lock files for a deleted model.
+    
+    Args:
+        model_name: The model name (e.g. 'microsoft/DialoGPT-small')
+        force: If True, delete without asking. If False, prompt user.
+    """
+    locks_dir = MODEL_CACHE / ".locks" / hf_to_cache_dir(model_name)
+    
+    if not locks_dir.exists():
+        return  # No locks to clean up
+    
+    # Count lock files
+    try:
+        lock_files = list(locks_dir.iterdir())
+        if not lock_files:
+            return  # Empty directory
+        
+        if force:
+            # Delete without asking
+            shutil.rmtree(locks_dir)
+            print(f"Cleaned up cache files ({len(lock_files)} files).")
+        else:
+            # Ask user
+            confirm = input("Clean up cache files? [Y/n] ")
+            if confirm.lower() != "n":
+                shutil.rmtree(locks_dir)
+                print(f"Cache files cleaned up ({len(lock_files)} files).")
+            else:
+                print("Cache files left intact.")
+                
+    except Exception as e:
+        print(f"Warning: Could not clean up cache files: {e}")

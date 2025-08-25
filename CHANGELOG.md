@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.1.0-beta3] - 2025-08-25
+
+### Critical Bug Fixes 🐛
+- **Issue #21**: Empty Cache Directory Crash - **RESOLVED**
+  - **Root Cause**: `mlxk list` crashed with `FileNotFoundError` on fresh installations  
+  - **Fix**: Added `MODEL_CACHE.exists()` checks in `list_models()` function
+  - **Impact**: MLX-Knife now works correctly on fresh installations without pre-existing cache
+  - **Test Coverage**: Added `test_list_models_real_empty_cache()` regression test
+
+- **Issue #22**: urllib3 LibreSSL Warning on macOS Python 3.9 - **RESOLVED**
+  - **Root Cause**: Every MLX-Knife command showed SSL compatibility warning on macOS system Python
+  - **Fix**: Central warnings suppression in `__init__.py` before any imports that use urllib3
+  - **Impact**: Clean command output on macOS system Python 3.9 with LibreSSL
+  - **Scope**: Only affects macOS system Python 3.9, no impact on other environments
+
+- **Issue #23**: Double rm Execution Problem - **RESOLVED**
+  - **Root Cause**: `mlxk rm model@hash` required two executions - first left broken state, second completed
+  - **Fix**: Changed from partial `snapshots/<hash>` deletion to complete model directory removal
+  - **Enhancement**: Added intelligent lock cleanup system with user-friendly prompts
+  - **Impact**: Single execution removes models completely + optional HuggingFace lock cleanup
+  - **Features**: Interactive confirmation, `--force` parameter, robust corrupted model handling
+
+### Enhanced Cache Management 🧹
+- **Lock Cleanup System**: Addresses upstream HuggingFace FileLock accumulation issue
+  - User-friendly prompt: "Clean up cache files? [Y/n]" 
+  - `--force` parameter skips all confirmations for automation
+  - Robust error handling with warnings (never fails on lock cleanup issues)
+- **Extended rm Command**: Now handles all model states (healthy, corrupted, empty snapshots)
+- **Superior UX**: Cleaner cache management than official HuggingFace CLI tools
+
+### Test Infrastructure Improvements 🧪
+- **Test Count**: Updated to 140/140 tests passing (+5 new tests for Issue #23)
+- **Regression Coverage**: New tests for empty cache, corrupted models, lock cleanup scenarios
+- **Force Parameter Testing**: Comprehensive coverage of interactive vs force mode behavior
+- **Integration Test Robustness**: All edge cases now covered with real model testing
+
+### Documentation Updates 📚
+- **Version Updates**: All documentation updated to reflect 1.1.0-beta3 status
+- **Testing Guide**: Updated test counts and new test scenarios in TESTING.md
+- **Issue Documentation**: Added HUGGINGFACE_LOCK_ISSUES.md with upstream context
+- **Lock Cleanup Documentation**: Clear explanation of MLX-Knife's cache management advantages
+
 ## [1.1.0-beta2] - 2025-08-22
 
 ### Critical Bug Fixes 🐛

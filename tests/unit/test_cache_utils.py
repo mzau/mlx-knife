@@ -315,6 +315,29 @@ class TestModelListing:
         except Exception as e:
             pytest.fail(f"Model listing failed on empty cache: {e}")
 
+    def test_list_models_real_empty_cache(self, temp_cache_dir):
+        """Test Issue #21: list_models with real empty HF_HOME directory."""
+        import os
+        from mlx_knife.cache_utils import list_models
+        
+        # Create empty cache directory
+        empty_cache = temp_cache_dir / "empty_hf_cache" 
+        empty_cache.mkdir()
+        
+        # Set HF_HOME to empty directory and test
+        original_hf_home = os.environ.get('HF_HOME')
+        try:
+            os.environ['HF_HOME'] = str(empty_cache)
+            # Should not crash and should print helpful message
+            list_models()
+        except FileNotFoundError as e:
+            pytest.fail(f"Issue #21 regression: list_models crashed with empty cache: {e}")
+        finally:
+            if original_hf_home is not None:
+                os.environ['HF_HOME'] = original_hf_home
+            elif 'HF_HOME' in os.environ:
+                del os.environ['HF_HOME']
+
     @patch('mlx_knife.cache_utils.MODEL_CACHE')
     def test_list_models_basic_call(self, mock_cache, temp_cache_dir):
         """Test basic model listing call."""
@@ -329,6 +352,180 @@ class TestModelListing:
             list_models(show_health=True)
         except Exception as e:
             pytest.fail(f"Model listing with parameters failed: {e}")
+
+
+class TestModelRemoval:
+    """Test rm_model functionality (Issue #23)."""
+    
+    def setup_method(self):
+        """Setup mock cache structure for each test."""
+        self.test_model_name = "microsoft/DialoGPT-small"
+        self.test_hash = "49c537161a457d5256512f9d2d38a87d81ae0f0e"
+        self.test_hash_short = "49c53716"
+    
+    @patch('mlx_knife.cache_utils.MODEL_CACHE')
+    @patch('mlx_knife.cache_utils.resolve_single_model') 
+    @patch('mlx_knife.cache_utils.shutil.rmtree')
+    @patch('builtins.input', return_value='y')
+    def test_rm_model_fixed_behavior_issue23(self, mock_input, mock_rmtree, mock_resolve, mock_cache, temp_cache_dir):
+        """Test fixed rm behavior - should delete model AND locks (Issue #23 resolved).
+        
+        Setup mocked directory structure as documented in CLAUDE.md:
+        hub/
+        ├── .locks/models--<name>/      # Per-model lock files  
+        └── models--<name>/             # Model data directory
+            ├── blobs/                  # Deduplicated file storage
+            ├── refs/main               # Points to current commit hash
+            └── snapshots/<hash>/       # Specific version
+        """
+        from mlx_knife.cache_utils import rm_model
+        
+        # Create real temp directories that mirror HF cache structure
+        # After fix: MODEL_CACHE points to hub/, locks are at hub/.locks/
+        hub_dir = temp_cache_dir / "hub"
+        model_dir = hub_dir / "models--microsoft--DialoGPT-small"
+        snapshots_dir = model_dir / "snapshots"
+        hash_dir = snapshots_dir / self.test_hash_short
+        refs_dir = model_dir / "refs" 
+        blobs_dir = model_dir / "blobs"
+        locks_dir = hub_dir / ".locks" / "models--microsoft--DialoGPT-small"
+        
+        # Create the directory structure (but don't populate with real files)
+        hash_dir.mkdir(parents=True)
+        refs_dir.mkdir(parents=True) 
+        blobs_dir.mkdir(parents=True)
+        locks_dir.mkdir(parents=True)
+        
+        # Create refs/main file pointing to hash
+        (refs_dir / "main").write_text(self.test_hash_short)
+        
+        # Create some mock lock files
+        (locks_dir / "file1.lock").touch()
+        (locks_dir / "file2.lock").touch()
+        
+        # Mock resolve_single_model to return our temp structure
+        mock_resolve.return_value = (model_dir, self.test_model_name, self.test_hash_short)
+        
+        # Mock MODEL_CACHE to point to hub directory (after fix: locks are at MODEL_CACHE/.locks/)
+        import mlx_knife.cache_utils
+        mlx_knife.cache_utils.MODEL_CACHE = hub_dir
+        
+        # Verify our test structure exists
+        assert model_dir.exists()
+        assert hash_dir.exists() 
+        assert (refs_dir / "main").exists()
+        assert locks_dir.exists()
+        assert len(list(locks_dir.iterdir())) == 2
+        
+        # Test current rm behavior - this should show Issue #23
+        rm_model(f"{self.test_model_name}@{self.test_hash_short}")
+        
+        # Verify what was actually deleted
+        # Fixed behavior: should delete model directory AND locks directory
+        assert mock_rmtree.call_count == 2
+        
+        # Verify both calls: model directory and locks directory
+        calls = [call[0][0] for call in mock_rmtree.call_args_list]
+        model_call = next((call for call in calls if "models--microsoft--DialoGPT-small" in str(call) and ".locks" not in str(call)), None)
+        locks_call = next((call for call in calls if ".locks" in str(call)), None)
+        
+        assert model_call is not None, "Should delete model directory"
+        assert locks_call is not None, "Should delete locks directory"
+    
+    @patch('mlx_knife.cache_utils.MODEL_CACHE')
+    @patch('mlx_knife.cache_utils.resolve_single_model') 
+    @patch('mlx_knife.cache_utils.shutil.rmtree')
+    def test_rm_model_force_parameter(self, mock_rmtree, mock_resolve, mock_cache, temp_cache_dir):
+        """Test rm_model with force=True skips all confirmations."""
+        from mlx_knife.cache_utils import rm_model
+        
+        # Create same temp structure as previous test (updated for fix)
+        hub_dir = temp_cache_dir / "hub"
+        model_dir = hub_dir / "models--microsoft--DialoGPT-small"
+        snapshots_dir = model_dir / "snapshots"
+        hash_dir = snapshots_dir / self.test_hash_short
+        locks_dir = hub_dir / ".locks" / "models--microsoft--DialoGPT-small"
+        
+        # Create the directory structure
+        hash_dir.mkdir(parents=True)
+        locks_dir.mkdir(parents=True)
+        (locks_dir / "file1.lock").touch()
+        (locks_dir / "file2.lock").touch()
+        
+        # Mock resolve_single_model to return our temp structure
+        mock_resolve.return_value = (model_dir, self.test_model_name, self.test_hash_short)
+        
+        # Mock MODEL_CACHE to point to hub directory (after fix)
+        import mlx_knife.cache_utils
+        mlx_knife.cache_utils.MODEL_CACHE = hub_dir
+        
+        # Test with force=True - should NOT call input() at all
+        with patch('builtins.input') as mock_input:
+            rm_model(f"{self.test_model_name}@{self.test_hash_short}", force=True)
+            
+            # Verify input() was never called (no prompts with force=True)
+            mock_input.assert_not_called()
+        
+        # Verify both model and locks were deleted
+        assert mock_rmtree.call_count == 2
+        calls = [call[0][0] for call in mock_rmtree.call_args_list]
+        model_call = next((call for call in calls if "models--microsoft--DialoGPT-small" in str(call) and ".locks" not in str(call)), None)
+        locks_call = next((call for call in calls if ".locks" in str(call)), None)
+        
+        assert model_call is not None, "Should delete model directory with force=True"
+        assert locks_call is not None, "Should delete locks directory with force=True"
+    
+    @patch('mlx_knife.cache_utils.MODEL_CACHE')
+    @patch('mlx_knife.cache_utils.resolve_single_model') 
+    @patch('mlx_knife.cache_utils.shutil.rmtree')
+    def test_rm_model_force_vs_interactive(self, mock_rmtree, mock_resolve, mock_cache, temp_cache_dir):
+        """Test that force=True behaves differently than interactive mode."""
+        from mlx_knife.cache_utils import rm_model
+        
+        # Create temp structure (updated for fix)
+        hub_dir = temp_cache_dir / "hub"
+        model_dir = hub_dir / "models--test--model"
+        snapshots_dir = model_dir / "snapshots"
+        hash_dir = snapshots_dir / "abc12345"
+        locks_dir = hub_dir / ".locks" / "models--test--model"
+        
+        hash_dir.mkdir(parents=True)
+        locks_dir.mkdir(parents=True)
+        (locks_dir / "test.lock").touch()
+        
+        mock_resolve.return_value = (model_dir, "test/model", None)
+        # Mock MODEL_CACHE to point to hub directory (after fix)
+        import mlx_knife.cache_utils
+        mlx_knife.cache_utils.MODEL_CACHE = hub_dir
+        
+        # Test 1: Interactive mode - user says no
+        mock_rmtree.reset_mock()
+        with patch('builtins.input', return_value='n'):
+            rm_model("test/model", force=False)
+            # Should NOT delete anything when user says no
+            mock_rmtree.assert_not_called()
+        
+        # Test 2: Force mode - no prompts, just delete
+        mock_rmtree.reset_mock()
+        with patch('builtins.input') as mock_input:
+            rm_model("test/model", force=True)
+            # Should NOT prompt user
+            mock_input.assert_not_called()
+            # Should delete both model and locks
+            assert mock_rmtree.call_count == 2
+    
+    
+    @patch('mlx_knife.cache_utils.resolve_single_model')
+    def test_rm_model_not_found(self, mock_resolve):
+        """Test rm behavior when model is not found."""
+        from mlx_knife.cache_utils import rm_model
+        
+        # Setup resolve to return None (not found)
+        mock_resolve.return_value = (None, None, None)
+        
+        # Should return early without error
+        result = rm_model("nonexistent/model@hash")
+        assert result is None
 
 
 class TestPartialNameFiltering:

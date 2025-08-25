@@ -8,9 +8,10 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
-**Current Version**: 1.1.0-beta2 (August 2025)
-- **Issue #19**: Fixed server response truncation - large context models work at full capacity  
-- **Issue #20**: Clean output - End-Tokens no longer visible in non-streaming mode
+**Current Version**: 1.1.0-beta3 (August 2025)
+- **Issue #21**: Fixed empty cache directory crash - `mlxk list` now works on fresh installations  
+- **Issue #22**: Suppressed urllib3 LibreSSL warnings on macOS Python 3.9
+- **Issue #23**: Fixed double execution requirement in `mlxk rm` command with enhanced lock cleanup
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,7 +19,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-132%2F132%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-140%2F140%20passing-brightgreen.svg)](#testing)
 
 ## Features
 
@@ -202,9 +203,16 @@ mlxk run <model> --no-chat-template    # Raw completion mode
 
 #### `rm` - Remove Models
 ```bash
-mlxk rm <model>              # Delete a model
-mlxk rm <model> --force      # Skip confirmation
+mlxk rm <model>              # Delete model with cache cleanup confirmation  
+mlxk rm <model>@<hash>       # Delete specific version (removes entire model)
+mlxk rm <model> --force      # Skip confirmations, auto-cleanup cache files
 ```
+
+**Features:**
+- Removes entire model directory (not just snapshots)
+- Cleans up orphaned HuggingFace lock files  
+- Handles corrupted models gracefully
+- Smart prompting (only asks about cache cleanup if needed)
 
 #### `health` - Check Integrity
 ```bash
@@ -327,6 +335,6 @@ Copyright (c) 2025 The BROKE team 🦫
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 1.1.0-beta2 | August 2025</i><br>
+  <i>Version 1.1.0-beta3 | August 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>

@@ -110,7 +110,8 @@ class TestBasicOperations:
         
         try:
             # This should NOT fail silently - should either provide error message or handle deletion
-            proc = mlx_knife_process(["rm", test_model])
+            # Use --force to avoid hanging on input prompts in test environment
+            proc = mlx_knife_process(["rm", test_model, "--force"])
             stdout, stderr = proc.communicate(timeout=10)
             
             # Should complete (not hang)
