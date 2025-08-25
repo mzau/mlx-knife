@@ -2,7 +2,7 @@
 
 ## Current Status
 
-✅ **132/132 tests passing** (August 2025)  
+✅ **140/140 tests passing** (August 2025)  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
 ✅ **Beta ready** - comprehensive testing with real model execution
@@ -42,19 +42,19 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 ```
 tests/
 ├── conftest.py                     # Shared fixtures and utilities
-├── integration/                    # System-level integration tests (84+ tests)
-│   ├── test_core_functionality.py      # Basic CLI operations
+├── integration/                    # System-level integration tests (90+ tests)
+│   ├── test_core_functionality.py      # Basic CLI operations & Issue #21/#23 tests
 │   ├── test_end_token_issue.py         # Issue #20: End-token filtering consistency
 │   ├── test_health_checks.py           # Model corruption detection  
-│   ├── test_issue_14.py               # Issue #14: Chat self-conversation fix
-│   ├── test_issue_15_16.py            # Issues #15/#16: Dynamic token limits
+│   ├── test_issue_14.py                # Issue #14: Chat self-conversation fix
+│   ├── test_issue_15_16.py             # Issues #15/#16: Dynamic token limits
 │   ├── test_process_lifecycle.py       # Process management & cleanup
 │   ├── test_run_command_advanced.py    # Run command edge cases
 │   └── test_server_functionality.py    # OpenAI API server tests
-└── unit/                          # Module-level unit tests (45+ tests)
-    ├── test_cache_utils.py            # Cache management functions
-    ├── test_cli.py                    # CLI argument parsing
-    └── test_mlx_runner_memory.py     # Memory management tests
+└── unit/                          # Module-level unit tests (47+ tests)
+    ├── test_cache_utils.py             # Cache management & Issue #21/#23 tests
+    ├── test_cli.py                     # CLI argument parsing
+    └── test_mlx_runner_memory.py       # Memory management tests
 ```
 
 ## Test Prerequisites
@@ -124,6 +124,9 @@ pytest tests/integration/test_run_command_advanced.py -v
 
 # Server functionality tests
 pytest tests/integration/test_server_functionality.py -v
+
+# Lock cleanup bug tests (Issue #23 - new in 1.1.0-beta3)
+pytest tests/integration/test_lock_cleanup_bug.py -v
 ```
 
 ### Test Filtering
@@ -185,15 +188,15 @@ pytest tests/integration/test_server_functionality.py -v
 
 ### Verification Results (August 2025)
 
-**✅ 132/132 tests passing** - All standard tests validated on Apple Silicon
+**✅ 140/140 tests passing** - All standard tests validated on Apple Silicon
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 132/132 |
-| 3.10.x         | ✅ Verified | 132/132 |
-| 3.11.x         | ✅ Verified | 132/132 |
-| 3.12.x         | ✅ Verified | 132/132 |
-| 3.13.x         | ✅ Verified | 132/132 |
+| 3.9.6 (macOS)  | ✅ Verified | 140/140 |
+| 3.10.x         | ✅ Verified | 140/140 |
+| 3.11.x         | ✅ Verified | 140/140 |
+| 3.12.x         | ✅ Verified | 140/140 |
+| 3.13.x         | ✅ Verified | 140/140 |
 
 All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
 
@@ -345,23 +348,24 @@ When submitting PRs, please include:
    Platform: macOS 14.5, M2 Pro
    Python: 3.11.6
    Model: Phi-3-mini-4k-instruct-4bit
-   Results: 114/114 tests passed
+   Results: 140/140 tests passed
    ```
 
 3. **Any issues encountered** and how you resolved them
 
 ## Summary
 
-**MLX Knife 1.0.4 Testing Status:**
+**MLX Knife 1.1.0-beta3 Testing Status:**
 
-✅ **Production Ready** - 114/114 tests passing  
+✅ **Production Ready** - 140/140 tests passing  
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
 ✅ **Code Quality** - ruff/mypy integration working  
 ✅ **Real Model Testing** - Phi-3-mini execution confirmed  
 ✅ **Memory Management** - Context managers prevent leaks  
 ✅ **Exception Safety** - Context managers ensure cleanup  
-✅ **Chat Bug Fixed** - Issue #14 self-conversation regression tests added
-✅ **Server Tests** - Automated MLX Knife server testing infrastructure
+✅ **Cache Directory Fix** - Issue #21: Empty cache crash resolved
+✅ **LibreSSL Warning Fix** - Issue #22: macOS Python 3.9 warning suppression
+✅ **Double rm Fix** - Issue #23: Enhanced rm command with lock cleanup
 
 This comprehensive testing framework validates MLX Knife's **production readiness** through local testing on real Apple Silicon hardware with actual MLX models.
 

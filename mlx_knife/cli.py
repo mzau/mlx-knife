@@ -51,6 +51,7 @@ def main():
     # rm
     rm_p = subparsers.add_parser("rm", help="Delete a model from cache")
     rm_p.add_argument("model_spec", help="Model[@hash] (e.g. mlx-community/Qwen2.5-0.5B-Instruct-4bit@a5339a41)")
+    rm_p.add_argument("--force", action="store_true", help="Skip confirmation and clean up cache files automatically")
 
     # health
     health_p = subparsers.add_parser("health", help="Check model integrity")
@@ -100,7 +101,7 @@ def main():
             verbose=args.verbose
         )
     elif args.cmd == "rm":
-        rm_model(args.model_spec)
+        rm_model(args.model_spec, force=args.force)
     elif args.cmd == "health":
         if args.model_spec:
             check_model_health(args.model_spec)

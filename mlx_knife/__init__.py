@@ -4,7 +4,12 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 Provides native MLX execution with streaming output and interactive chat capabilities.
 """
 
-__version__ = "1.1.0-beta2"
+# Suppress urllib3 LibreSSL warning on macOS system Python 3.9 (must be before any imports that use urllib3)
+import warnings
+
+warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
+
+__version__ = "1.1.0-beta3"
 __author__ = "The BROKE team"
 __email__ = "broke@gmx.eu"
 __license__ = "MIT"
