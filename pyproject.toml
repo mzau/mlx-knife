@@ -13,7 +13,7 @@ authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
@@ -84,7 +84,9 @@ markers = [
     "slow: slow running tests",
     "requires_model: tests that need actual MLX models",
     "network: tests that require network access",
-    "server: tests that require MLX Knife server with loaded models (manual setup required)"
+    "server: tests that require MLX Knife server with loaded models (manual setup required)",
+    "timeout: tests with timeout requirements",
+    "framework_validation: tests that require diverse model frameworks"
 ]
 timeout = 300
 norecursedirs = [".git", ".tox", "dist", "build", "*.egg", "venv", "__pycache__"]

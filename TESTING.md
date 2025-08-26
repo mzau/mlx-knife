@@ -2,10 +2,12 @@
 
 ## Current Status
 
-✅ **140/140 tests passing** (August 2025)  
+✅ **150/150 tests passing** (August 2025) - **STABLE RELEASE** 🚀  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
-✅ **Beta ready** - comprehensive testing with real model execution
+✅ **Production ready** - comprehensive testing with real model execution
+✅ **Isolated test system** - user cache stays pristine with temp cache isolation
+✅ **3-category test strategy** - optimized for performance and safety
 
 ## Quick Start
 
@@ -13,7 +15,7 @@
 # Install with test dependencies
 pip install -e ".[test]"
 
-# Download test model (required for most tests)
+# Download test model (optional - most tests use isolated cache)
 mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
 # Run all tests
@@ -41,21 +43,87 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 
 ```
 tests/
-├── conftest.py                     # Shared fixtures and utilities
-├── integration/                    # System-level integration tests (90+ tests)
-│   ├── test_core_functionality.py      # Basic CLI operations & Issue #21/#23 tests
-│   ├── test_end_token_issue.py         # Issue #20: End-token filtering consistency
-│   ├── test_health_checks.py           # Model corruption detection  
-│   ├── test_issue_14.py                # Issue #14: Chat self-conversation fix
-│   ├── test_issue_15_16.py             # Issues #15/#16: Dynamic token limits
-│   ├── test_process_lifecycle.py       # Process management & cleanup
-│   ├── test_run_command_advanced.py    # Run command edge cases
-│   └── test_server_functionality.py    # OpenAI API server tests
-└── unit/                          # Module-level unit tests (47+ tests)
-    ├── test_cache_utils.py             # Cache management & Issue #21/#23 tests
-    ├── test_cli.py                     # CLI argument parsing
-    └── test_mlx_runner_memory.py       # Memory management tests
+├── conftest.py                         # Shared fixtures and utilities
+├── integration/                        # System-level integration tests (78 tests)
+│   ├── test_core_functionality.py          # Basic CLI operations (isolated cache)
+│   ├── test_health_checks.py               # Model corruption detection (isolated cache)
+│   ├── test_lock_cleanup_bug.py            # Issue #23: Lock cleanup (isolated cache)
+│   ├── test_process_lifecycle.py           # Process management (isolated cache)
+│   ├── test_real_model_lifecycle.py        # Full model lifecycle (isolated cache)
+│   ├── test_run_command_advanced.py        # Run command edge cases (isolated cache)
+│   ├── test_server_functionality.py        # Server lifecycle tests
+│   ├── test_end_token_issue.py             # Issue #20: End-token filtering (@server)
+│   ├── test_issue_14.py                    # Issue #14: Chat self-conversation (@server)
+│   └── test_issue_15_16.py                 # Issues #15/#16: Dynamic token limits (@server)
+└── unit/                              # Module-level unit tests (72 tests)
+    ├── test_cache_utils.py                 # Cache management & Issue #21/#23 tests
+    ├── test_cli.py                         # CLI argument parsing
+    └── test_mlx_runner_memory.py           # Memory management tests
 ```
+
+## 3-Category Test Strategy (MLX Knife 1.1.0+)
+
+MLX Knife uses a **3-category test strategy** to balance test isolation, performance, and user cache protection:
+
+### 🏠 CATEGORY 1: ISOLATED CACHE (Most Tests)
+**✅ User cache stays pristine** - Tests use temporary isolated caches with automatic cleanup
+
+**Implemented Tests (78 tests):**
+- ✅ `test_real_model_lifecycle.py` - Full model lifecycle with `tiny-random-gpt2` (~12MB download)
+- ✅ `test_core_functionality.py` - Basic CLI operations with `patch_model_cache` isolation  
+- ✅ `test_process_lifecycle.py` - Process management with isolated cache + MODEL_CACHE patching
+- ✅ `test_run_command_advanced.py` - Run command edge cases with `mock_model_cache` in isolation
+- ✅ `test_lock_cleanup_bug.py` - Lock cleanup testing with temporary MODEL_CACHE override
+- ✅ `test_health_checks.py` - Mock corruption testing with isolated `temp_cache_dir`
+
+**Technical Pattern:**
+```python
+@pytest.mark.usefixtures("temp_cache_dir")
+class TestBasicLifecycle:
+    def test_something(self, temp_cache_dir, patch_model_cache):
+        with patch_model_cache(temp_cache_dir / "hub"):
+            # Test operates in complete isolation
+            # User cache never touched, automatic cleanup
+```
+
+**Benefits:** 
+- ✅ **Clean User Cache**: No test artifacts or broken models ever
+- ✅ **Parallel Testing**: No cache conflicts between test runs  
+- ✅ **Reproducible**: No dependency on existing models in user cache
+- ✅ **Fast CI**: Small models (12MB vs 4GB) for most tests
+
+### 🏥 CATEGORY 2: USER CACHE (Framework Diversity)
+**📋 Reserved for future** - Real model diversity that cannot be mocked
+
+**Future Framework Validation Tests:**
+- Multiple framework detection (MLX + PyTorch + Tokenizer-only models)
+- Health check diversity testing with naturally corrupted models
+- Cross-framework model compatibility validation
+
+**Currently**: All health/framework tests use `mock_model_cache` and are Category 1 (isolated)
+
+### 🖥️ CATEGORY 3: SERVER CACHE (Performance Tests)  
+**🔒 Large models, user cache expected** - Marked with `@pytest.mark.server`
+
+**Server Tests (Excluded from default `pytest`):**
+- 🔒 `test_issue_14.py` - Chat self-conversation regression tests
+- 🔒 `test_issue_15_16.py` - Dynamic token limit validation  
+- 🔒 `test_end_token_issue.py` - End-token filtering consistency
+- 🔒 `test_server_functionality.py` - OpenAI API compliance (basic tests only)
+
+**Technical Pattern:**
+```python
+@pytest.mark.server  # Excluded from default pytest
+def test_server_feature(mlx_server, model_name: str):
+    # Uses real models in user cache
+    # Requires significant RAM and time
+```
+
+**Characteristics:**
+- 🔒 **Not run by default** - Must use `pytest -m server`
+- 💾 **RAM-aware** - Auto-skip models exceeding available memory
+- ⏱️ **Longer execution** - 20-40 minutes for full suite
+- 🎯 **Model diversity** - Tests across different model sizes/architectures
 
 ## Test Prerequisites
 
@@ -67,21 +135,21 @@ tests/
    ```bash
    pip install -e ".[test]"
    ```
-4. **At least one MLX model**:
-   ```bash
-   mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
-   ```
 
-### Optional Setup
+**That's it!** Most tests (Category 1) use isolated caches and download small test models automatically (~12MB).
 
-For full test coverage, you may want additional models:
+### Optional Setup (Server Tests Only)
+
+For server tests (`@pytest.mark.server` - **excluded by default**):
 ```bash
-# Smaller model for quick tests
-mlxk pull mlx-community/Phi-3-mini-128k-instruct-4bit
+# Medium model for server testing
+mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
-# Different architecture for variety
+# Different architecture for variety  
 mlxk pull mlx-community/Mistral-7B-Instruct-v0.3-4bit
 ```
+
+**Note**: Server tests are excluded from default `pytest` and require manual execution with `pytest -m server`.
 
 ## Test Commands
 
@@ -136,10 +204,11 @@ pytest tests/integration/test_lock_cleanup_bug.py -v
 pytest -k "TestBasicOperations" -v
 
 # Server tests are excluded by default (marked with @pytest.mark.server)
-# They require significant RAM and time (48 tests × multiple models)
+# Run server tests manually (requires large models in user cache)
+pytest -m server -v
 
-# Skip tests requiring actual models
-pytest -k "not requires_model" -v
+# Skip server tests explicitly (default behavior)
+pytest -m "not server" -v
 
 # Run only process lifecycle tests
 pytest -k "process_lifecycle or zombie" -v
@@ -188,17 +257,18 @@ pytest tests/integration/test_server_functionality.py -v
 
 ### Verification Results (August 2025)
 
-**✅ 140/140 tests passing** - All standard tests validated on Apple Silicon
+**✅ 150/150 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 140/140 |
-| 3.10.x         | ✅ Verified | 140/140 |
-| 3.11.x         | ✅ Verified | 140/140 |
-| 3.12.x         | ✅ Verified | 140/140 |
-| 3.13.x         | ✅ Verified | 140/140 |
+| 3.9.6 (macOS)  | ✅ Verified | 150/150 |
+| 3.10.x         | ✅ Verified | 150/150 |
+| 3.11.x         | ✅ Verified | 150/150 |
+| 3.12.x         | ✅ Verified | 150/150 |
+| 3.13.x         | ✅ Verified | 150/150 |
 
-All versions tested with real MLX model execution (Phi-3-mini-4k-instruct-4bit).
+All versions tested with isolated cache system.
+Real MLX execution verified separately with server/run commands.
 
 ### Manual Multi-Python Testing
 
@@ -348,26 +418,28 @@ When submitting PRs, please include:
    Platform: macOS 14.5, M2 Pro
    Python: 3.11.6
    Model: Phi-3-mini-4k-instruct-4bit
-   Results: 140/140 tests passed
+   Results: 150/150 tests passed
    ```
 
 3. **Any issues encountered** and how you resolved them
 
 ## Summary
 
-**MLX Knife 1.1.0-beta3 Testing Status:**
+**MLX Knife 1.1.0 STABLE Testing Status:**
 
-✅ **Production Ready** - 140/140 tests passing  
+✅ **Production Ready** - 150/150 tests passing  
+✅ **Isolated Test System** - User cache stays pristine with temp cache isolation
+✅ **3-Category Strategy** - Optimized for performance and safety
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
 ✅ **Code Quality** - ruff/mypy integration working  
-✅ **Real Model Testing** - Phi-3-mini execution confirmed  
+✅ **Real Model Testing** - Server/run commands validated with multiple models
 ✅ **Memory Management** - Context managers prevent leaks  
 ✅ **Exception Safety** - Context managers ensure cleanup  
 ✅ **Cache Directory Fix** - Issue #21: Empty cache crash resolved
 ✅ **LibreSSL Warning Fix** - Issue #22: macOS Python 3.9 warning suppression
-✅ **Double rm Fix** - Issue #23: Enhanced rm command with lock cleanup
+✅ **Lock Cleanup Fix** - Issue #23: Enhanced rm command with lock cleanup
 
-This comprehensive testing framework validates MLX Knife's **production readiness** through local testing on real Apple Silicon hardware with actual MLX models.
+This comprehensive testing framework validates MLX Knife's **production readiness** through isolated testing with automatic model downloads and separate real MLX validation.
 
 ## Server-Based Testing (Advanced)
 

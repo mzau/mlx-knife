@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.usefixtures("temp_cache_dir")
 class TestRunCommandProcessLifecycle:
     """Test process management during model execution."""
     
@@ -131,6 +132,7 @@ class TestRunCommandProcessLifecycle:
 
 
 @pytest.mark.timeout(90)
+@pytest.mark.usefixtures("temp_cache_dir")
 class TestRunCommandMemoryManagement:
     """Test memory management during run command execution."""
     
@@ -193,6 +195,7 @@ class TestRunCommandMemoryManagement:
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.usefixtures("temp_cache_dir")
 class TestRunCommandStreamingAndOutput:
     """Test streaming and output handling in run command."""
     
@@ -280,6 +283,7 @@ class TestRunCommandStreamingAndOutput:
 
 
 @pytest.mark.timeout(45)
+@pytest.mark.usefixtures("temp_cache_dir")
 class TestRunCommandErrorConditions:
     """Test run command error handling."""
     
@@ -338,6 +342,7 @@ class TestRunCommandErrorConditions:
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.usefixtures("temp_cache_dir")
 class TestRunCommandContextAwareLimits:
     """Test context-aware token limits in Issues #15 and #16 resolution."""
     

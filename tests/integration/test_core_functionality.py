@@ -208,30 +208,33 @@ class TestPullOperation:
         output = stdout + stderr
         assert len(output) > 0, "No error message for invalid model"
 
-    def test_pull_command_network_timeout_handling(self, mlx_knife_process, temp_cache_dir):
-        """Pull command should handle network issues gracefully."""
-        # Use a model that likely exists but may be slow/timeout
-        proc = mlx_knife_process(["pull", "mlx-community/Phi-3-mini-4k-instruct-4bit", "--no-progress"])
-        
-        # Give it limited time to start, then interrupt
-        time.sleep(5)
-        
-        if proc.poll() is None:  # Still running
-            proc.send_signal(subprocess.signal.SIGINT)
-            try:
-                stdout, stderr = proc.communicate(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    def test_pull_command_network_timeout_handling(self, mlx_knife_process, temp_cache_dir, patch_model_cache):
+        """Pull command should handle network issues gracefully - uses isolated cache."""
+        # Use Phi-3-mini for realistic timeout testing, but in ISOLATED cache
+        with patch_model_cache(temp_cache_dir / "hub"):
+            proc = mlx_knife_process(["pull", "mlx-community/Phi-3-mini-4k-instruct-4bit", "--no-progress"])
+            
+            # Give it limited time to start, then interrupt
+            time.sleep(5)
+            
+            if proc.poll() is None:  # Still running
+                proc.send_signal(subprocess.signal.SIGINT)
+                try:
+                    stdout, stderr = proc.communicate(timeout=15)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, stderr = proc.communicate()
+            else:
                 stdout, stderr = proc.communicate()
-        else:
-            stdout, stderr = proc.communicate()
-        
-        # Key test: should not hang indefinitely
-        assert proc.returncode is not None, "Pull command did not terminate"
-        
-        # Should handle interruption gracefully
-        output = stdout + stderr
-        assert len(output) >= 0  # Some output expected
+            
+            # Key test: should not hang indefinitely
+            assert proc.returncode is not None, "Pull command did not terminate"
+            
+            # Should handle interruption gracefully
+            output = stdout + stderr
+            assert len(output) >= 0  # Some output expected
+            
+            print("✓ Timeout test completed - any broken Phi-3-mini in isolated cache will be auto-cleaned")
 
 
 @pytest.mark.timeout(30)  
