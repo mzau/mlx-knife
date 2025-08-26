@@ -130,66 +130,79 @@ class TestProcessLifecycle:
         # Child processes should be cleaned up by OS
         assert process_monitor["wait_for_cleanup"](main_pid, timeout=5)
 
-    def test_download_worker_cleanup(self, mlx_knife_process, process_monitor):
-        """Ensure download workers don't become zombies."""
-        # This test simulates download interruption
-        # We'll start a pull command and interrupt it
+    def test_download_worker_cleanup(self, mlx_knife_process, process_monitor, temp_cache_dir, patch_model_cache):
+        """Ensure download workers don't become zombies - uses isolated cache."""
+        # This test simulates download interruption with Phi-3-mini in ISOLATED cache
+        # Any broken download will be auto-cleaned, user cache stays pristine
         
-        proc = mlx_knife_process(["pull", "mlx-community/Phi-3-mini-4k-instruct-4bit", "--no-progress"])
-        main_pid = proc.pid
-        
-        # Let download start
-        time.sleep(2.0)
-        
-        children_before = process_monitor["get_process_tree"](main_pid)
-        
-        # Interrupt the download
-        proc.send_signal(signal.SIGINT)
-        
-        try:
-            return_code = proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            pytest.fail("Download process did not respond to interruption")
-        
-        # Verify cleanup - this is critical for download workers
-        assert process_monitor["wait_for_cleanup"](main_pid, timeout=10)
-        
-        for child in children_before:
-            if child.is_running():
-                # Give more details about surviving process
-                try:
-                    cmd = " ".join(child.cmdline())
-                    pytest.fail(f"Download worker survived: PID {child.pid}, CMD: {cmd}")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass  # Process died while we were checking
+        with patch_model_cache(temp_cache_dir / "hub"):
+            proc = mlx_knife_process(["pull", "mlx-community/Phi-3-mini-4k-instruct-4bit", "--no-progress"])
+            main_pid = proc.pid
+            
+            # Let download start
+            time.sleep(2.0)
+            
+            children_before = process_monitor["get_process_tree"](main_pid)
+            
+            # Interrupt the download
+            proc.send_signal(signal.SIGINT)
+            
+            try:
+                return_code = proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                pytest.fail("Download process did not respond to interruption")
+            
+            # Verify cleanup - this is critical for download workers
+            assert process_monitor["wait_for_cleanup"](main_pid, timeout=10)
+            
+            for child in children_before:
+                if child.is_running():
+                    # Give more details about surviving process
+                    try:
+                        cmd = " ".join(child.cmdline())
+                        pytest.fail(f"Download worker survived: PID {child.pid}, CMD: {cmd}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass  # Process died while we were checking
+                        
+            print("✓ Download interrupt test completed - any broken Phi-3-mini in isolated cache will be auto-cleaned")
 
-    def test_streaming_interruption_cleanup(self, mlx_knife_process, process_monitor):
-        """Test clean cancellation of token generation streaming with real model."""
-        test_model = "Phi-3-mini-4k-instruct-4bit"
-        # Use a prompt that would generate longer output
+    def test_streaming_interruption_cleanup(self, mlx_knife_process, process_monitor, temp_cache_dir, patch_model_cache):
+        """Test clean cancellation of token generation streaming - uses tiny test model for isolation."""
+        # Use tiny-random-gpt2 for streaming tests to avoid dependencies on user cache
+        test_model = "hf-internal-testing/tiny-random-gpt2"
         test_prompt = "Write a long story about a cat and a dog."
         
-        proc = mlx_knife_process(["run", test_model, test_prompt])
-        
-        # Let it start generating, then interrupt
-        time.sleep(2)  # Give it time to start
-        
-        # Send SIGINT (Ctrl+C) to interrupt gracefully
-        proc.send_signal(signal.SIGINT)
-        
-        try:
-            stdout, stderr = proc.communicate(timeout=10)
-            # Should terminate gracefully
-            assert proc.returncode is not None, "Process didn't terminate after SIGINT"
-        except subprocess.TimeoutExpired:
-            # If it doesn't respond to SIGINT, force kill
-            proc.kill()
-            stdout, stderr = proc.communicate()
-            pytest.fail("Process didn't respond to SIGINT - cleanup may have failed")
-        
-        # Check that we got some output before interruption
-        assert len(stdout) >= 0, "Process should handle interruption gracefully"
+        with patch_model_cache(temp_cache_dir / "hub"):
+            # First download the model for this isolated test
+            from mlx_knife.hf_download import pull_model
+            from unittest.mock import patch
+            
+            with patch('builtins.input', return_value='y'):
+                pull_model(test_model)
+                
+            proc = mlx_knife_process(["run", test_model, test_prompt])
+            
+            # Let it start generating, then interrupt
+            time.sleep(2)  # Give it time to start
+            
+            # Send SIGINT (Ctrl+C) to interrupt gracefully
+            proc.send_signal(signal.SIGINT)
+            
+            try:
+                stdout, stderr = proc.communicate(timeout=10)
+                # Should terminate gracefully
+                assert proc.returncode is not None, "Process didn't terminate after SIGINT"
+            except subprocess.TimeoutExpired:
+                # If it doesn't respond to SIGINT, force kill
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                pytest.fail("Process didn't respond to SIGINT - cleanup may have failed")
+            
+            # Check that we got some output before interruption
+            assert len(stdout) >= 0, "Process should handle interruption gracefully"
+            
+            print("✓ Streaming interrupt test completed - test model in isolated cache will be auto-cleaned")
 
     def test_file_handle_management(self, mlx_knife_process, temp_cache_dir):
         """Verify no file handle leaks after process termination."""

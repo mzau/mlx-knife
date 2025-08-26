@@ -8,10 +8,11 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
-**Current Version**: 1.1.0-beta3 (August 2025)
-- **Issue #21**: Fixed empty cache directory crash - `mlxk list` now works on fresh installations  
-- **Issue #22**: Suppressed urllib3 LibreSSL warnings on macOS Python 3.9
-- **Issue #23**: Fixed double execution requirement in `mlxk rm` command with enhanced lock cleanup
+**Current Version**: 1.1.0 (August 2025) - **STABLE RELEASE** 🚀
+- **Production Ready**: First stable release since 1.0.4 with comprehensive testing
+- **Enhanced Test System**: 150/150 tests passing with real model lifecycle integration tests  
+- **Python 3.9-3.13**: Full compatibility verified across all Python versions
+- **All Critical Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -19,7 +20,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-140%2F140%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-150%2F150%20passing-brightgreen.svg)](#testing)
 
 ## Features
 

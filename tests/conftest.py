@@ -38,6 +38,49 @@ def temp_cache_dir() -> Generator[Path, None, None]:
                 del os.environ["HF_HOME"]
 
 
+@pytest.fixture(scope="class")
+def class_temp_cache_dir() -> Generator[Path, None, None]:
+    """Create a temporary cache directory for class-level testing (setup_class/teardown_class)."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        cache_path = Path(temp_dir) / "test_cache"
+        cache_path.mkdir()
+        
+        # Create hub subdirectory (required by HF_HOME/hub fix)
+        hub_path = cache_path / "hub"
+        hub_path.mkdir()
+        
+        # Set HF_HOME to our temp directory
+        old_hf_home = os.environ.get("HF_HOME")
+        os.environ["HF_HOME"] = str(cache_path)
+        
+        try:
+            yield cache_path
+        finally:
+            # Restore original HF_HOME
+            if old_hf_home:
+                os.environ["HF_HOME"] = old_hf_home
+            elif "HF_HOME" in os.environ:
+                del os.environ["HF_HOME"]
+
+
+@pytest.fixture
+def patch_model_cache():
+    """Utility fixture to temporarily patch MODEL_CACHE to isolated directory."""
+    from contextlib import contextmanager
+    
+    @contextmanager
+    def _patch_cache(cache_path: Path):
+        from mlx_knife import cache_utils
+        original_cache = cache_utils.MODEL_CACHE
+        cache_utils.MODEL_CACHE = cache_path
+        try:
+            yield cache_path
+        finally:
+            cache_utils.MODEL_CACHE = original_cache
+    
+    return _patch_cache
+
+
 @pytest.fixture
 def mlx_knife_process():
     """Factory fixture to create and manage mlx_knife subprocess."""

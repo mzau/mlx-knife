@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.0] - 2025-08-26 - **STABLE RELEASE** 🚀
+
+### Production Readiness & Enhanced Testing 🧪
+- **First Stable Release Since 1.0.4**: Comprehensive beta testing cycle complete
+- **Isolated Test System**: 150/150 tests passing with pristine user cache protection
+  - **3-Category Test Strategy**: Isolated cache (78 tests) + Server tests (@pytest.mark.server) + Future framework diversity
+  - **User Cache Protection**: Tests use temporary isolated caches - user cache stays completely clean
+  - **Real Model Validation**: End-to-end tests using `hf-internal-testing/tiny-random-gpt2` (~12MB) in isolation
+  - **Automatic Test Downloads**: No manual model setup required for standard test suite
+  - **Parallel Testing**: No cache conflicts between test runs, improved CI reliability
+- **Multi-Python Support**: Full compatibility verified for Python 3.9, 3.10, 3.11, 3.12, 3.13
+- **All Critical Issues Resolved**: Issues #21, #22, #23 thoroughly tested and production-ready
+
+### Technical Improvements 🔧
+- **Test Infrastructure Revolution**: Complete migration from mocked tests to isolated real-world validation
+- **Cache Isolation System**: `temp_cache_dir` + `patch_model_cache` fixtures ensure test isolation
+- **Performance Optimization**: Fast CI with small test models, comprehensive validation with server tests
+- **Developer Experience**: Clean setup process - only Python + test dependencies required
+- **Test Reliability**: Reproducible results independent of user's existing model cache
+
+---
+
 ## [1.1.0-beta3] - 2025-08-25
 
 ### Critical Bug Fixes 🐛

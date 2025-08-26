@@ -15,6 +15,7 @@ from typing import Dict, Any
 
 
 @pytest.mark.timeout(30)
+@pytest.mark.usefixtures("temp_cache_dir")
 class TestHealthCheckRobustness:
     """Test health check reliability for various corruption scenarios."""
     

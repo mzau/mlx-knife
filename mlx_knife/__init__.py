@@ -9,7 +9,7 @@ import warnings
 
 warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
 
-__version__ = "1.1.0-beta3"
+__version__ = "1.1.0"
 __author__ = "The BROKE team"
 __email__ = "broke@gmx.eu"
 __license__ = "MIT"
