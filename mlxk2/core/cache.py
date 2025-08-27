@@ -10,25 +10,27 @@ MODEL_CACHE = CACHE_ROOT / "hub"
 
 
 def hf_to_cache_dir(hf_name: str) -> str:
-    """Convert HuggingFace model name to cache directory name."""
+    """Convert HuggingFace model name to cache directory name.
+    
+    Universal rule: ALL "/" become "--" (mechanical conversion).
+    """
     if hf_name.startswith("models--"):
         return hf_name
-    if "/" in hf_name:
-        org, model = hf_name.split("/", 1)
-        return f"models--{org}--{model}"
-    else:
-        return f"models--{hf_name}"
+    
+    # Replace all "/" with "--" for universal conversion
+    converted = hf_name.replace("/", "--")
+    return f"models--{converted}"
 
 
 def cache_dir_to_hf(cache_name: str) -> str:
-    """Convert cache directory name to HuggingFace model name."""
+    """Convert cache directory name to HuggingFace model name.
+    
+    Universal rule: ALL "--" become "/" (mechanical conversion).
+    This handles both clean names and corrupted cache entries gracefully.
+    """
     if cache_name.startswith("models--"):
         remaining = cache_name[len("models--"):]
-        if "--" in remaining:
-            parts = remaining.split("--", 1)
-            return f"{parts[0]}/{parts[1]}"
-        else:
-            return remaining
+        return remaining.replace("--", "/")
     return cache_name
 
 
