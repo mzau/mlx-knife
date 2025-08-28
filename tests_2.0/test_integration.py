@@ -18,10 +18,11 @@ class TestModelResolutionIntegration:
         assert commit_hash is None
         assert ambiguous is None
     
-    def test_hash_syntax_resolution(self, mock_models):
+    def test_hash_syntax_resolution(self, mock_models, isolated_cache):
         """Test @hash syntax finds correct model by short hash."""
         # Short hash "e96" should match "e9675aa3def..."
-        resolved_name, commit_hash, ambiguous = resolve_model_for_operation("Qwen3@e96")
+        from conftest import test_resolve_model_for_operation
+        resolved_name, commit_hash, ambiguous = test_resolve_model_for_operation(isolated_cache, "Qwen3@e96")
         
         # Should find one of the Qwen3 models (both have same short hash in our mock)
         assert resolved_name is not None
@@ -29,18 +30,20 @@ class TestModelResolutionIntegration:
         assert commit_hash == "e96"
         assert ambiguous is None
     
-    def test_fuzzy_matching_partial_names(self, mock_models):
+    def test_fuzzy_matching_partial_names(self, mock_models, isolated_cache):
         """Test fuzzy matching finds models by partial names."""
-        resolved_name, commit_hash, ambiguous = resolve_model_for_operation("DialoGPT")
+        from conftest import test_resolve_model_for_operation
+        resolved_name, commit_hash, ambiguous = test_resolve_model_for_operation(isolated_cache, "DialoGPT")
         
         assert resolved_name == "microsoft/DialoGPT-small"
         assert commit_hash is None
         assert ambiguous is None
     
-    def test_ambiguous_matching_returns_choices(self, mock_models):
+    def test_ambiguous_matching_returns_choices(self, mock_models, isolated_cache):
         """Test that ambiguous patterns return list of matches."""
         # "Qwen" should match multiple models
-        resolved_name, commit_hash, ambiguous = resolve_model_for_operation("Qwen")
+        from conftest import test_resolve_model_for_operation
+        resolved_name, commit_hash, ambiguous = test_resolve_model_for_operation(isolated_cache, "Qwen")
         
         assert resolved_name is None
         assert ambiguous is not None
@@ -59,41 +62,45 @@ class TestModelResolutionIntegration:
 class TestHealthOperationIntegration:
     """Test health operation with realistic models."""
     
-    def test_health_check_all_models(self, mock_models):
+    def test_health_check_all_models(self, mock_models, isolated_cache):
         """Test health check on all cached models."""
-        result = health_check_operation()
+        from conftest import test_health_check_operation
+        result = test_health_check_operation(isolated_cache)
         
         assert result["status"] == "success"
         assert result["data"]["summary"]["total"] >= 4  # At least our mock models
         assert result["data"]["summary"]["healthy_count"] >= 3  # Healthy models
         assert result["data"]["summary"]["unhealthy_count"] >= 1  # Corrupted model
     
-    def test_health_check_specific_model_by_hash(self, mock_models):
+    def test_health_check_specific_model_by_hash(self, mock_models, isolated_cache):
         """Test health check on specific model using @hash syntax."""
-        result = health_check_operation("Qwen3@e96")
+        from conftest import test_health_check_operation
+        result = test_health_check_operation(isolated_cache, "Qwen3@e96")
         
         assert result["status"] == "success" 
         assert result["data"]["summary"]["total"] == 1
         assert len(result["data"]["healthy"]) == 1
         assert "Qwen3" in result["data"]["healthy"][0]["name"]
     
-    def test_health_check_corrupted_model_detection(self, mock_models):
+    def test_health_check_corrupted_model_detection(self, mock_models, isolated_cache):
         """Test that corrupted models are properly detected."""
-        result = health_check_operation("corrupted")
+        from conftest import test_health_check_operation
+        result = test_health_check_operation(isolated_cache, "corrupted")
         
         assert result["status"] == "success"
         assert result["data"]["summary"]["unhealthy_count"] == 1
-        assert result["data"]["unhealthy"][0]["status"] == "unhealthy"
+        assert len(result["data"]["unhealthy"]) == 1
+        assert "corrupted" in result["data"]["unhealthy"][0]["name"].lower()
 
 
 class TestRmOperationIntegration:
     """Test rm operation with realistic scenarios."""
     
-    def test_rm_with_fuzzy_matching(self, mock_models):
+    def test_rm_with_fuzzy_matching(self, mock_models, isolated_cache):
         """Test rm finds model via fuzzy matching in isolated cache."""
         # Get models from isolated cache
-        from mlxk2.operations.list import list_models
-        result = list_models()
+        from conftest import test_list_models
+        result = test_list_models(isolated_cache)
         available_models = result["data"]["models"]
         
         if not available_models:
@@ -146,10 +153,10 @@ class TestCorruptedCacheHandling:
     def test_corrupted_naming_tolerance(self, create_corrupted_cache_entry):
         """Test that corrupted cache directory names are handled gracefully."""
         # Create cache entry that violates naming rules
-        create_corrupted_cache_entry("models--org--model---corrupted")
+        cache_path = create_corrupted_cache_entry("models--org--model---corrupted").parent
         
-        from mlxk2.operations.list import list_models
-        result = list_models()
+        from conftest import test_list_models
+        result = test_list_models(cache_path)
         
         # Should not crash, should show the corrupted entry
         assert result["status"] == "success"

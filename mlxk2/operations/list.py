@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, List, Any
 
-from ..core.cache import MODEL_CACHE, cache_dir_to_hf
+from ..core.cache import get_current_model_cache, cache_dir_to_hf
 
 
 def get_model_size(model_path):
@@ -68,8 +68,9 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
         pattern: Optional pattern to filter models (case-insensitive substring match)
     """
     models = []
+    model_cache = get_current_model_cache()
     
-    if not MODEL_CACHE.exists():
+    if not model_cache.exists():
         return {
             "status": "success",
             "command": "list", 
@@ -81,7 +82,7 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
         }
     
     # Find all model directories
-    for model_dir in MODEL_CACHE.iterdir():
+    for model_dir in model_cache.iterdir():
         if not model_dir.is_dir() or not model_dir.name.startswith("models--"):
             continue
             

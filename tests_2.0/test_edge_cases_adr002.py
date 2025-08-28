@@ -196,12 +196,13 @@ size 123456789
 class TestForceFlag:
     """Test force flag behavior in rm operations."""
     
-    def test_force_flag_skips_all_confirmations(self, mock_models):
+    def test_force_flag_skips_all_confirmations(self, mock_models, isolated_cache):
         """Test that -f flag skips ALL confirmations (Issue #23 regression)."""
         from mlxk2.operations.rm import rm_operation
+        from conftest import test_list_models
         
         # Get available model from test cache
-        models = list_models()["data"]["models"]
+        models = test_list_models(isolated_cache)["data"]["models"]
         if not models:
             pytest.skip("No models in test cache for force flag testing")
         

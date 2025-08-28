@@ -5,8 +5,36 @@ from pathlib import Path
 
 # Cache path constants - copied from mlx_knife/cache_utils.py
 DEFAULT_CACHE_ROOT = Path.home() / ".cache/huggingface"
-CACHE_ROOT = Path(os.environ.get("HF_HOME", DEFAULT_CACHE_ROOT))
-MODEL_CACHE = CACHE_ROOT / "hub"
+
+
+def get_current_cache_root() -> Path:
+    """Get current cache root (respects runtime HF_HOME changes)."""
+    return Path(os.environ.get("HF_HOME", DEFAULT_CACHE_ROOT))
+
+
+def get_current_model_cache() -> Path:
+    """Get current model cache path (respects runtime HF_HOME changes)."""
+    return get_current_cache_root() / "hub"
+
+
+def verify_cache_context(expected="test"):
+    """Verify we're using the expected cache context."""
+    current_cache = get_current_model_cache()
+    path_str = str(current_cache)
+    
+    if expected == "test":
+        if "/var/folders/" not in path_str or "test_" not in path_str:
+            raise RuntimeError(f"Expected test cache, but using: {path_str}")
+    elif expected == "user":
+        if "/Volumes/mz-SSD/huggingface" not in path_str:
+            raise RuntimeError(f"Expected user cache, but using: {path_str}")
+    else:
+        raise ValueError(f"Unknown cache context: {expected}")
+
+
+# Legacy globals - DEPRECATED: Use get_current_*() functions for consistency
+CACHE_ROOT = get_current_cache_root()
+MODEL_CACHE = get_current_model_cache()
 
 
 def hf_to_cache_dir(hf_name: str) -> str:
