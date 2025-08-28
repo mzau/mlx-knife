@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from typing import Tuple, Optional, List
-from .cache import MODEL_CACHE, hf_to_cache_dir, cache_dir_to_hf
+from .cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 
 
 def expand_model_name(model_name: str) -> str:
@@ -12,7 +12,8 @@ def expand_model_name(model_name: str) -> str:
     
     # Only try mlx-community if it actually exists
     mlx_candidate = f"mlx-community/{model_name}"
-    mlx_cache_dir = MODEL_CACHE / hf_to_cache_dir(mlx_candidate)
+    model_cache = get_current_model_cache()
+    mlx_cache_dir = model_cache / hf_to_cache_dir(mlx_candidate)
     if mlx_cache_dir.exists():
         return mlx_candidate
     
@@ -38,10 +39,11 @@ def parse_model_spec(model_spec: str) -> Tuple[str, Optional[str]]:
 
 def find_matching_models(pattern: str) -> List[Tuple[Path, str]]:
     """Find models that match a partial pattern (case-insensitive)."""
-    if not MODEL_CACHE.exists():
+    model_cache = get_current_model_cache()
+    if not model_cache.exists():
         return []
         
-    all_models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
+    all_models = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
     matches = []
     
     for model_dir in all_models:
@@ -100,7 +102,8 @@ def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optiona
             return None, commit_hash, []
     
     # Try exact match first
-    exact_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
+    model_cache = get_current_model_cache()
+    exact_cache_dir = model_cache / hf_to_cache_dir(model_name)
     if exact_cache_dir.exists():
         return model_name, None, None
     

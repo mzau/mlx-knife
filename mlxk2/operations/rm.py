@@ -1,12 +1,13 @@
 import shutil
 from pathlib import Path
-from ..core.cache import MODEL_CACHE, hf_to_cache_dir, cache_dir_to_hf
+from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
 
 
 def find_matching_models(pattern):
     """Find models that match a partial pattern."""
-    all_models = [d for d in MODEL_CACHE.iterdir() if d.name.startswith("models--")]
+    model_cache = get_current_model_cache()
+    all_models = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
     matches = []
     
     for model_dir in all_models:
@@ -26,7 +27,8 @@ def resolve_model_for_deletion(model_spec):
         commit_hash = None
     
     # Try exact match first  
-    base_cache_dir = MODEL_CACHE / hf_to_cache_dir(model_name)
+    model_cache = get_current_model_cache()
+    base_cache_dir = model_cache / hf_to_cache_dir(model_name)
     if base_cache_dir.exists():
         return base_cache_dir, model_name, commit_hash, False
     
@@ -46,7 +48,8 @@ def resolve_model_for_deletion(model_spec):
 
 def check_model_locks(model_name):
     """Check if model has active lock files."""
-    locks_dir = MODEL_CACHE / ".locks"
+    model_cache = get_current_model_cache()
+    locks_dir = model_cache / ".locks"
     model_locks = []
     
     if not locks_dir.exists():
@@ -55,14 +58,15 @@ def check_model_locks(model_name):
     # Look for lock files related to this model
     for lock_file in locks_dir.glob("**/*.lock"):
         if hf_to_cache_dir(model_name) in str(lock_file):
-            model_locks.append(str(lock_file.relative_to(MODEL_CACHE)))
+            model_locks.append(str(lock_file.relative_to(model_cache)))
     
     return model_locks
 
 
 def cleanup_model_locks(model_name):
     """Clean up HuggingFace lock files for a deleted model."""
-    locks_dir = MODEL_CACHE / ".locks" / hf_to_cache_dir(model_name)
+    model_cache = get_current_model_cache()
+    locks_dir = model_cache / ".locks" / hf_to_cache_dir(model_name)
     
     if not locks_dir.exists():
         return 0
@@ -95,7 +99,8 @@ def rm_operation(model_spec, force=False):
     }
     
     try:
-        if not MODEL_CACHE.exists():
+        model_cache = get_current_model_cache()
+        if not model_cache.exists():
             result["status"] = "error"
             result["error"] = {
                 "type": "cache_not_found",
@@ -122,7 +127,7 @@ def rm_operation(model_spec, force=False):
             }
             return result
         
-        resolved_model_dir = MODEL_CACHE / hf_to_cache_dir(resolved_name)
+        resolved_model_dir = model_cache / hf_to_cache_dir(resolved_name)
         is_fuzzy_match = resolved_name != model_spec.split('@')[0]
         
         result["data"]["model"] = resolved_name

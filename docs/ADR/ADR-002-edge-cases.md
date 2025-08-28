@@ -1,7 +1,13 @@
 # ADR-002: Edge Cases Learned from MLX-Knife 1.x Test Suite
 
 ## Status
-**Proposed** - 2025-08-26
+**Accepted, Implementation In Progress** - 2025-08-28
+
+**Implementation Status:**
+- ✅ Edge cases identified and catalogued
+- ✅ Test infrastructure with isolated cache established
+- ❌ 10/45 tests failing - edge case validation incomplete
+- 🎯 **Session 4 Goal**: Complete edge case implementation and validation
 
 ## Context
 

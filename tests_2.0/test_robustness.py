@@ -17,16 +17,18 @@ from mlxk2.operations.pull import pull_operation
 class TestRmOperationRobustness:
     """Test rm operation robustness with user cache safety."""
     
-    def test_rm_force_flag_skips_all_confirmations(self, mock_models):
+    def test_rm_force_flag_skips_all_confirmations(self, mock_models, isolated_cache):
         """Critical: Force flag must skip ALL confirmations (Issue #23 regression)."""
         # Get a model from mock cache
-        from mlxk2.operations.list import list_models
-        models = list_models()["data"]["models"]
+        from conftest import test_list_models
+        models = test_list_models(isolated_cache)["data"]["models"]
         
-        if not models:
-            pytest.skip("No models in mock cache for force flag testing")
+        # Filter out sentinel model and get a real mock model
+        real_models = [m for m in models if "TEST-CACHE-SENTINEL" not in m["name"]]
+        if not real_models:
+            pytest.skip("No real models in mock cache for force flag testing")
         
-        target_model = models[0]["name"]
+        target_model = real_models[0]["name"]
         
         # Force flag should work without any interactive prompts
         with patch('builtins.input') as mock_input:
@@ -45,53 +47,64 @@ class TestRmOperationRobustness:
         assert result["status"] == "error"
         assert "not found" in result["error"]["message"].lower() or "no models found" in result["error"]["message"].lower()
     
-    def test_rm_permission_error_handling(self, mock_models):
+    def test_rm_permission_error_handling(self, mock_models, isolated_cache):
         """Test rm handles permission errors gracefully."""
-        # Create a read-only model directory for testing
-        from mlxk2.operations.list import list_models
-        models = list_models()["data"]["models"]
+        from conftest import atomic_cache_context, test_list_models
+        from mlxk2.operations.rm import rm_operation
         
-        if not models:
-            pytest.skip("No models in mock cache for permission testing")
-        
-        target_model = models[0]["name"]
-        
-        # Mock permission error
-        with patch('shutil.rmtree', side_effect=PermissionError("Permission denied")):
-            result = rm_operation(target_model, force=True)
+        with atomic_cache_context(isolated_cache, "test"):
+            # Get models in test cache context
+            models = test_list_models(isolated_cache)["data"]["models"]
             
-            assert result["status"] == "error"
-            assert "permission" in result["error"]["message"].lower()
+            # Filter out sentinel model and get a real mock model
+            real_models = [m for m in models if "TEST-CACHE-SENTINEL" not in m["name"]]  
+            if not real_models:
+                pytest.skip("No real models in mock cache for permission testing")
+            
+            target_model = real_models[0]["name"]
+            
+            # Mock permission error
+            with patch('shutil.rmtree', side_effect=PermissionError("Permission denied")):
+                result = rm_operation(target_model, force=True)
+                
+                assert result["status"] == "error"
+                assert "permission" in result["error"]["message"].lower()
     
-    def test_rm_partial_deletion_recovery(self, mock_models):
+    def test_rm_partial_deletion_recovery(self, mock_models, isolated_cache):
         """Test rm handles interrupted deletion gracefully."""
-        from mlxk2.operations.list import list_models
-        models = list_models()["data"]["models"]
+        from conftest import atomic_cache_context, test_list_models
+        from mlxk2.operations.rm import rm_operation
         
-        if not models:
-            pytest.skip("No models in mock cache for partial deletion testing")
-        
-        target_model = models[0]["name"]
-        
-        # Mock partial failure (some files deleted, then error)
-        call_count = 0
-        def mock_rmtree_partial_fail(path):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                # First call succeeds (partial deletion)
-                pass
-            else:
-                # Second call fails
-                raise OSError("Device busy")
-        
-        with patch('shutil.rmtree', side_effect=mock_rmtree_partial_fail):
-            result = rm_operation(target_model, force=True)
+        with atomic_cache_context(isolated_cache, "test"):
+            # Get models in test cache context
+            models = test_list_models(isolated_cache)["data"]["models"]
             
-            # Should handle partial failure gracefully
-            assert result["status"] in ["success", "error"]
-            if result["status"] == "error":
-                assert "error" in result["error"]["message"].lower()
+            # Filter out sentinel model and get a real mock model
+            real_models = [m for m in models if "TEST-CACHE-SENTINEL" not in m["name"]]
+            if not real_models:
+                pytest.skip("No real models in mock cache for partial deletion testing")
+            
+            target_model = real_models[0]["name"]
+            
+            # Mock partial failure (some files deleted, then error)
+            call_count = 0
+            def mock_rmtree_partial_fail(path):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    # First call succeeds (partial deletion)
+                    pass
+                else:
+                    # Second call fails
+                    raise OSError("Device busy")
+            
+            with patch('shutil.rmtree', side_effect=mock_rmtree_partial_fail):
+                result = rm_operation(target_model, force=True)
+                
+                # Should handle partial failure gracefully
+                assert result["status"] in ["success", "error"]
+                if result["status"] == "error":
+                    assert "error" in result["error"]["message"].lower()
 
 
 class TestPullOperationRobustness:
@@ -177,11 +190,11 @@ class TestCacheIntegrityRobustness:
     def test_operations_with_corrupted_cache_entries(self, create_corrupted_cache_entry):
         """Test that operations handle corrupted cache entries gracefully."""
         # Create corrupted entry
-        create_corrupted_cache_entry("models--corrupted---entry")
+        cache_path = create_corrupted_cache_entry("models--corrupted---entry").parent
         
         # List should not crash with corrupted entries
-        from mlxk2.operations.list import list_models
-        result = list_models()
+        from conftest import test_list_models
+        result = test_list_models(cache_path)
         
         assert result["status"] == "success"
         # Should include corrupted entry but mark it as such
@@ -199,8 +212,8 @@ class TestCacheIntegrityRobustness:
         snapshots_dir.mkdir()
         
         # Operations should handle partial state
-        from mlxk2.operations.list import list_models
-        result = list_models()
+        from conftest import test_list_models
+        result = test_list_models(isolated_cache)
         
         assert result["status"] == "success"
         # Should either exclude partial model or mark it as unhealthy

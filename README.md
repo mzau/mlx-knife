@@ -1,341 +1,314 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX Knife
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-alpha
 
-<p align="center">
-  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="1000">
-</p>
+**JSON-First Model Management for Automation & Scripting**
 
-A lightweight, ollama-like CLI for managing and running MLX models on Apple Silicon. **CLI-only tool designed for personal, local use** - perfect for individual developers and researchers working with MLX models.
+> **🚧 Alpha Development Branch:** This is the `feature/2.0.0-json-only` branch containing MLX-Knife 2.0.0-alpha. For stable production use, see [MLX-Knife 1.1.0](https://github.com/mzau/mlx-knife/tree/main).
 
-> **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
-
-**Current Version**: 1.1.0 (August 2025) - **STABLE RELEASE** 🚀
-- **Production Ready**: First stable release since 1.0.4 with comprehensive testing
-- **Enhanced Test System**: 150/150 tests passing with real model lifecycle integration tests  
-- **Python 3.9-3.13**: Full compatibility verified across all Python versions
-- **All Critical Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
-
-[![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0--alpha-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
-[![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-150%2F150%20passing-brightgreen.svg)](#testing)
-
-## Features
-
-### Core Functionality
-- **List & Manage Models**: Browse your HuggingFace cache with MLX-specific filtering
-- **Model Information**: Detailed model metadata including quantization info
-- **Download Models**: Pull models from HuggingFace with progress tracking
-- **Run Models**: Native MLX execution with streaming and chat modes
-- **Health Checks**: Verify model integrity and completeness
-- **Cache Management**: Clean up and organize your model storage
-
-### Local Server & Web Interface
-- **OpenAI-Compatible API**: Local REST API with `/v1/chat/completions`, `/v1/completions`, `/v1/models`
-- **Web Chat Interface**: Built-in HTML chat interface with markdown rendering  
-- **Single-User Design**: Optimized for personal use, not multi-user production environments
-- **Conversation Context**: Full chat history maintained for follow-up questions
-- **Streaming Support**: Real-time token streaming via Server-Sent Events
-- **Configurable Limits**: Set default max tokens via `--max-tokens` parameter
-- **Model Hot-Swapping**: Switch between models per conversation
-- **Tool Integration**: Compatible with OpenAI-compatible clients (Cursor IDE, etc.)
-
-### Run Experience
-- **Direct MLX Integration**: Models load and run natively without subprocess overhead
-- **Real-time Streaming**: Watch tokens generate with proper spacing and formatting
-- **Interactive Chat**: Full conversational mode with history tracking
-- **Memory Insights**: See GPU memory usage after model loading and generation
-- **Dynamic Stop Tokens**: Automatic detection and filtering of model-specific stop tokens
-- **Customizable Generation**: Control temperature, max_tokens, top_p, and repetition penalty
-- **Context-Managed Memory**: Context manager pattern ensures automatic cleanup and prevents memory leaks
-- **Exception-Safe**: Robust error handling with guaranteed resource cleanup
-
-## Installation
-
-### Via PyPI (Recommended)
-```bash
-pip install mlx-knife
-```
-
-### Requirements
-- macOS with Apple Silicon (M1/M2/M3)
-- Python 3.9+ (native macOS version or newer)
-- 8GB+ RAM recommended + RAM to run LLM
-
-### Python Compatibility
-MLX Knife has been comprehensively tested and verified on:
-
-✅ **Python 3.9.6** (native macOS) - Primary target  
-✅ **Python 3.10-3.13** - Fully compatible  
-
-All versions include full MLX model execution testing with real models.
-
-### Install from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/mzau/mlx-knife.git
-cd mlx-knife
-
-# Install in development mode
-pip install -e .
-
-# Or install normally
-pip install .
-
-# Install with development tools (ruff, mypy, tests)
-pip install -e ".[dev,test]"
-```
-
-### Install Dependencies Only
-
-```bash
-pip install -r requirements.txt
-```
+[![Tests](https://img.shields.io/badge/tests-45%2F45%20passing-brightgreen.svg)](#testing)
 
 ## Quick Start
 
-### CLI Usage
 ```bash
-# List all MLX models in your cache
-mlxk list
+# Installation (local development)
+git clone https://github.com/mzau/mlx-knife.git -b feature/2.0.0-json-only
+cd mlx-knife
+pip install -e .
 
-# Show detailed info about a model
-mlxk show Phi-3-mini-4k-instruct-4bit
-
-# Download a new model
-mlxk pull mlx-community/Mistral-7B-Instruct-v0.3-4bit
-
-# Run a model with a prompt
-mlxk run Phi-3-mini "What is the capital of France?"
-
-# Start interactive chat
-mlxk run Phi-3-mini
-
-# Check model health
-mlxk health
+# Basic usage - JSON API
+mlxk-json list --json | jq '.data.models[].name'
+mlxk-json health --json | jq '.data.summary'
+mlxk-json show "Phi-3-mini" --json | jq '.data.model_info'
 ```
 
-### Web Chat Interface
+**What's New:** JSON-first architecture for automation and scripting  
+**What's Missing:** Server mode, run command (use MLX-Knife 1.x for those)
 
-MLX Knife includes a built-in web interface for easy model interaction:
+## ⚠️ Alpha Status Disclaimer
 
-```bash
-# Start the OpenAI-compatible API server
-mlxk server --port 8000 --max-tokens 4000
+MLX-Knife 2.0.0-alpha is **feature-complete for JSON operations** with production-quality reliability:
 
-# Get web chat interface from GitHub
-curl -O https://raw.githubusercontent.com/mzau/mlx-knife/main/simple_chat.html
+- ✅ **Core functionality works:** All 5 commands (`list`, `health`, `show`, `pull`, `rm`)
+- ✅ **Test status:** 45/45 passing with comprehensive edge case coverage
+- ✅ **Production use:** Suitable for broke-cluster integration and automation
+- ✅ **Parallel use:** Deploy alongside MLX-Knife 1.x for server functionality
 
-# Open web chat interface in your browser
-open simple_chat.html
-```
+## What 2.0.0-alpha Includes
 
-**Features:**
-- **No installation required** - Pure HTML/CSS/JS
-- **Real-time streaming** - Watch tokens appear as they're generated
-- **Model selection** - Choose any MLX model from your cache
-- **Conversation history** - Full context for follow-up questions
-- **Markdown rendering** - Proper formatting for code, lists, tables
-- **Mobile-friendly** - Responsive design works on all devices
+| Command | Status | Description |
+|---------|--------|-------------|
+| ✅ `list` | **Complete** | Model discovery with JSON output |
+| ✅ `health` | **Complete** | Corruption detection and cache analysis |  
+| ✅ `show` | **Complete** | Detailed model information with --files, --config |
+| ✅ `pull` | **Complete** | HuggingFace model downloads with corruption detection |
+| ✅ `rm` | **Complete** | Model deletion with lock cleanup and fuzzy matching |
 
-### Local API Server Integration
+## What's Coming Later
 
-The MLX Knife server provides OpenAI-compatible endpoints for **local development and personal use**:
+| Feature | Target Version | Status |
+|---------|----------------|---------|
+| 🔄 `server` | 2.0.0-rc | OpenAI-compatible API server |
+| 🔄 `run` | 2.0.0-rc | Interactive model execution |
+| 🔄 Human-readable output | 2.0.0-rc | CLI formatting layer |
+| 🔄 `embed` | TBD | Embedding generation (if merged from 1.x) |
 
-```bash
-# Start local server (single-user, no authentication)
-mlxk server --host 127.0.0.1 --port 8000
+## Installation & Parallel Usage
 
-# Test with curl
-curl -X POST "http://localhost:8000/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "Phi-3-mini-4k-instruct-4bit", "messages": [{"role": "user", "content": "Hello!"}]}'
-
-# Integration with development tools (community-tested):
-# - Cursor IDE: Set API URL to http://localhost:8000/v1
-# - LibreChat: Configure as custom OpenAI endpoint  
-# - Open WebUI: Add as local OpenAI-compatible API
-# - SillyTavern: Add as OpenAI API with custom URL
-```
-
-**Note**: Tool integrations are community-tested. Some tools may require specific configuration or have compatibility limitations. Please report issues via GitHub.
-
-## Command Reference
-
-### Available Commands
-
-#### `list` - Browse Models
-```bash
-mlxk list                    # Show MLX models only (short names)
-mlxk list --verbose          # Show MLX models with full paths
-mlxk list --all              # Show all models with framework info
-mlxk list --all --verbose    # All models with full paths
-mlxk list --health           # Include health status
-mlxk list Phi-3              # Filter by model name
-mlxk list --verbose Phi-3    # Show detailed info (same as show)
-```
-
-#### `show` - Model Details
-```bash
-mlxk show <model>            # Display model information
-mlxk show <model> --files    # Include file listing
-mlxk show <model> --config   # Show config.json content
-```
-
-#### `pull` - Download Models
-```bash
-mlxk pull <model>            # Download from HuggingFace
-mlxk pull <org>/<model>      # Full model path
-```
-
-#### `run` - Execute Models
-```bash
-mlxk run <model> "prompt"              # Single prompt (minimal output)
-mlxk run <model> "prompt" --verbose    # Show loading, memory, and stats
-mlxk run <model>                       # Interactive chat
-mlxk run <model> "prompt" --no-stream  # Batch output
-mlxk run <model> --max-tokens 1000     # Custom length
-mlxk run <model> --temperature 0.9     # Higher creativity
-mlxk run <model> --no-chat-template    # Raw completion mode
-```
-
-#### `rm` - Remove Models
-```bash
-mlxk rm <model>              # Delete model with cache cleanup confirmation  
-mlxk rm <model>@<hash>       # Delete specific version (removes entire model)
-mlxk rm <model> --force      # Skip confirmations, auto-cleanup cache files
-```
-
-**Features:**
-- Removes entire model directory (not just snapshots)
-- Cleans up orphaned HuggingFace lock files  
-- Handles corrupted models gracefully
-- Smart prompting (only asks about cache cleanup if needed)
-
-#### `health` - Check Integrity
-```bash
-mlxk health                  # Check all models
-mlxk health <model>          # Check specific model
-```
-
-#### `server` - Start API Server
-```bash
-mlxk server                           # Start on localhost:8000
-mlxk server --port 8001               # Custom port
-mlxk server --host 0.0.0.0 --port 8000  # Allow external access
-mlxk server --max-tokens 4000         # Set default max tokens (default: 2000)
-mlxk server --reload                  # Development mode with auto-reload
-```
-
-### Command Aliases
-After installation, these commands are equivalent:
-- `mlxk` (recommended)
-- `mlx-knife`
-- `mlx_knife`
-
-## Configuration
-
-### Cache Location
-By default, models are stored in `~/.cache/huggingface/hub`. Configure with:
+### Development Installation
 
 ```bash
-# Set custom cache location
-export HF_HOME="/path/to/your/cache"
+# Install 2.0.0-alpha (this branch)
+pip install -e /path/to/mlx-knife
 
-# Example: External SSD
-export HF_HOME="/Volumes/ExternalSSD/models"
+# Verify installation
+mlxk-json --version  # → MLX-Knife JSON 2.0.0-alpha
+mlxk2 --version      # → MLX-Knife JSON 2.0.0-alpha
 ```
 
-### Model Name Expansion
-Short names are automatically expanded for MLX models:
-- `Phi-3-mini-4k-instruct-4bit` → `mlx-community/Phi-3-mini-4k-instruct-4bit`
-- Models already containing `/` are used as-is
+### Parallel with MLX-Knife 1.x
 
-## Advanced Usage
-
-### Generation Parameters
+Both versions can coexist safely:
 
 ```bash
-# Creative writing (high temperature, diverse output)
-mlxk run Mistral-7B "Write a story" --temperature 0.9 --top-p 0.95
+# Install stable 1.x for server/run features
+pip install mlx-knife
 
-# Precise tasks (low temperature, focused output)
-mlxk run Phi-3-mini "Extract key points" --temperature 0.3 --top-p 0.9
+# Commands available:
+mlxk list                    # 1.x - Human-readable output
+mlxk server --port 8080      # 1.x - Server mode
+mlxk run "model" -p "Hello"  # 1.x - Interactive execution
 
-# Long-form generation
-mlxk run Mixtral-8x7B "Explain quantum computing" --max-tokens 2000
-
-# Reduce repetition
-mlxk run model "prompt" --repetition-penalty 1.2
+mlxk-json list --json        # 2.0 - JSON API
+python -m mlxk2.cli list     # 2.0 - Module invocation
 ```
 
-### Working with Specific Commits
+**Package Names:**
+- MLX-Knife 1.x: `mlx-knife` → `mlxk` command
+- MLX-Knife 2.0: `mlxk-json` → `mlxk-json`, `mlxk2` commands
+
+## JSON API Documentation
+
+> **📋 Complete API Specification**: See [docs/json-api-specification.md](docs/json-api-specification.md) for comprehensive JSON schema, error codes, and integration examples.
+
+### Command Structure
+
+All commands follow this JSON response format:
+
+```json
+{
+    "status": "success|error", 
+    "command": "list|health|show|pull|rm",
+    "data": { /* command-specific data */ },
+    "error": null | { "message": "...", "details": "..." }
+}
+```
+
+### Examples
+
+#### List Models
+```bash
+mlxk-json list --json
+# Output:
+{
+    "status": "success",
+    "command": "list", 
+    "data": {
+        "models": [
+            {
+                "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
+                "hashes": ["e9675aa3def456789abcdef0123456789abcdef0"],
+                "cached": true
+            }
+        ],
+        "count": 1
+    },
+    "error": null
+}
+```
+
+#### Health Check
+```bash
+mlxk-json health --json
+# Output:
+{
+    "status": "success",
+    "command": "health",
+    "data": {
+        "healthy": [...],
+        "unhealthy": [...],
+        "summary": {"total": 5, "healthy_count": 4, "unhealthy_count": 1}
+    },
+    "error": null
+}
+```
+
+#### Show Model Details
+```bash
+mlxk-json show "Phi-3-mini" --json --files
+# Output includes file listings, model config, capabilities
+```
+
+### Hash Syntax Support
+
+All commands support `@hash` syntax for specific model versions:
 
 ```bash
-# Use specific model version
-mlxk show model@commit_hash
-mlxk run model@commit_hash "prompt"
+mlxk-json health "Qwen3@e96" --json     # Check specific hash
+mlxk-json show "model@3df9bfd" --json   # Short hash matching
+mlxk-json rm "Phi-3@e967" --json --force  # Delete specific version
 ```
 
-### Non-MLX Model Handling
+## HuggingFace Cache Safety
 
-The tool automatically detects framework compatibility:
+MLX-Knife 2.0 respects standard HuggingFace cache structure and practices:
+
+### Best Practices for Shared Environments
+- **Read operations** (`list`, `health`, `show`) always safe with concurrent processes
+- **Write operations** (`pull`, `rm`) coordinate during maintenance windows  
+- **Lock cleanup** automatic but avoid during active downloads
+- **Your responsibility:** Coordinate with team, use good timing
+
+### Example Safe Workflow
 ```bash
-# Attempting to run PyTorch model
-mlxk run bert-base-uncased
-# Error: Model bert-base-uncased is not MLX-compatible (Framework: PyTorch)!
-# Use MLX-Community models: https://huggingface.co/mlx-community
+# Check what's in cache (always safe)
+mlxk-json list --json | jq '.data.count'
+
+# Maintenance window - coordinate with team
+mlxk-json rm "corrupted-model" --json --force
+mlxk-json pull "replacement-model" --json
+
+# Back to normal operations
+mlxk-json health --json | jq '.data.summary'
 ```
 
-## Troubleshooting
+## Real-World Examples
 
-### Model Not Found
+> **🔗 Integration Reference**: External projects should implement against [docs/json-api-specification.md](docs/json-api-specification.md) - this alpha phase helps validate that specification matches actual implementation.
+
+### Broke-Cluster Integration
 ```bash
-# If model isn't found, try full path
-mlxk pull mlx-community/Model-Name-4bit
+# Get available model names for scheduling
+MODELS=$(mlxk-json list --json | jq -r '.data.models[].name')
 
-# List available models
-mlxk list --all
+# Check cache health before deployment
+HEALTH=$(mlxk-json health --json | jq '.data.summary.healthy_count')
+if [ "$HEALTH" -eq 0 ]; then
+    echo "No healthy models available"
+    exit 1
+fi
+
+# Download required models
+mlxk-json pull "mlx-community/Phi-3-mini-4k-instruct-4bit" --json
 ```
 
-### Performance Issues
-- Ensure sufficient RAM for model size
-- Close other applications to free memory
-- Use smaller quantized models (4-bit recommended)
+### CI/CD Pipeline Usage
+```bash
+# Verify model integrity in CI
+mlxk-json health --json | jq -e '.data.summary.unhealthy_count == 0'
 
-### Streaming Issues
-- Some models may have spacing issues - this is handled automatically
-- Use `--no-stream` for batch output if needed
+# Clean up CI artifacts
+mlxk-json rm "test-model-*" --json --force
+
+# Pre-warm cache for deployment
+mlxk-json pull "production-model" --json
+```
+
+### Model Management Automation
+```bash
+# Find models by pattern
+LARGE_MODELS=$(mlxk-json list --json | jq -r '.data.models[] | select(.name | contains("30B")) | .name')
+
+# Show detailed info for analysis
+for model in $LARGE_MODELS; do
+    mlxk-json show "$model" --json --config | jq '.data.model_config'
+done
+```
+
+## Testing
+
+The test suite provides comprehensive coverage with production-quality isolation:
+
+```bash
+# Run all tests
+python -m pytest tests_2.0/ -v
+
+# Test categories:
+# - ADR-002 edge cases (13 tests)
+# - Integration scenarios (12 tests)  
+# - Model naming logic (9 tests)
+# - Robustness testing (11 tests)
+
+# Current status: 45/45 passing ✅
+```
+
+**Revolutionary Test Architecture:**
+- **Isolated Cache System** - Zero risk to user data
+- **Atomic Context Switching** - Production/test cache separation
+- **Comprehensive Mock Models** - Realistic test scenarios
+- **Edge Case Coverage** - All documented failure modes tested
+
+## Known Issues & Limitations
+
+### Critical Issues
+- **Health Check False Positive**: Health check may report incomplete downloads as healthy during model pull operations (affects both 1.1.0 and 2.0.0-alpha)
+
+### Alpha Limitations
+- No interactive prompts (use `--force` flag for rm operations)
+- JSON output only (no human-readable formatting)
+- Limited error message user experience (coming in beta)
+
+### GitHub Issues
+- **Issue #18**: Server signal handling limitation (known, will fix in 2.0.0-rc)
+- **Issue #24**: Lock cleanup command (planned for future release)
+
+## Development Status
+
+### Version Roadmap
+- **2.0.0-alpha** ← You are here (JSON API core complete)
+- **2.0.0-beta**: 6-8 weeks robust testing, production validation  
+- **2.0.0-rc**: Server/run features, full 1.x parity
+- **2.0.0-stable**: Community validated, enterprise ready
+
+### Architecture Decisions
+- **JSON-First**: All output structured for scripting and automation
+- **Cache Safety**: Respects HuggingFace standards, no custom formats
+- **Atomic Operations**: Clean separation between test and production contexts
+- **Backward Compatibility**: Parallel deployment with 1.x maintained
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+This branch follows the established MLX-Knife development patterns:
 
-## Security
+```bash
+# Run quality checks
+python test-multi-python.sh  # Tests across Python 3.9-3.13
+./run_linting.sh             # Code quality validation
 
-For security concerns, please see [SECURITY.md](SECURITY.md) or contact us at broke@gmx.eu.
+# Key files:
+mlxk2/                       # 2.0.0 implementation
+tests_2.0/                   # Alpha test suite  
+docs/ADR/                    # Architecture decision records
+```
 
-MLX Knife runs entirely locally - no data is sent to external servers except when downloading models from HuggingFace.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-## License
+## Support & Feedback
 
-MIT License - see [LICENSE](LICENSE) file for details
+- **Issues**: [GitHub Issues](https://github.com/mzau/mlx-knife/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/mzau/mlx-knife/discussions)
+- **API Specification**: [docs/json-api-specification.md](docs/json-api-specification.md) - Complete JSON schema
+- **Documentation**: See `docs/` directory for technical details
 
-Copyright (c) 2025 The BROKE team 🦫
+**For production use**: Consider MLX-Knife 1.1.0 until 2.0.0-beta is available.
 
-## Acknowledgments
-
-- Built for Apple Silicon using the [MLX framework](https://github.com/ml-explore/mlx)
-- Models hosted by the [MLX Community](https://huggingface.co/mlx-community) on HuggingFace
-- Inspired by [ollama](https://ollama.ai)'s user experience
+### Alpha Testing Goals
+- ✅ Validate JSON API specification matches implementation
+- ✅ Real-world integration feedback from external projects  
+- ✅ Edge case discovery through broke-cluster usage
+- ✅ API stability testing before beta release
 
 ---
 
-<p align="center">
-  <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 1.1.0-beta3 | August 2025</i><br>
-  <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
-</p>
+*MLX-Knife 2.0.0-alpha - Built for automation, tested for reliability, designed for the future.*

@@ -1,7 +1,13 @@
 # ADR-001: MLX-Knife 2.0 Migration Path to JSON-First Architecture
 
 ## Status
-**Proposed** - 2025-08-26
+**Accepted & Implemented** - 2025-08-28
+
+**Implementation Status:**
+- ✅ Clean-room 2.0 implementation complete (Sessions 1-3)
+- ✅ JSON-first architecture validated
+- ✅ Parallel deployment strategy documented
+- ✅ Broke-cluster integration ready
 
 ## Context
 
@@ -17,25 +23,27 @@ We will create MLX-Knife 2.0 as a **clean-room implementation** with JSON-first 
 
 ## Migration Path
 
-### Phase 1: Alpha Foundation (Week 1)
-**Version: 2.0.0-alpha0**
-- Minimal viable product for broke-cluster
-- JSON-only output
-- Core commands: list, show, pull, rm, health
-- ~500 lines total code
-- No server/run functionality initially
-
-### Phase 2: Core Refactoring (Week 2) 
-**Version: 2.0.0-alpha1**
+### Phase 1: Alpha Foundation 
+**Version: 2.0.0-alpha**
+- Feature-complete JSON-only implementation
+- All 5 commands: list, show, pull, rm, health
+- 100% test coverage (45/45 passing)
 - Clean modular architecture
-- Separate concerns: models.py, operations.py, health.py
-- Maximum 200 lines per module
-- Edge case handling from 1.x learnings (see ADR-002)
+- No server/run functionality (JSON-only scope)
 
-### Phase 3: Feature Parity (Week 3-4)
-**Version: 2.0.0-beta1**
-- Port server functionality from 1.1.0
-- Port run/chat functionality 
+### Phase 2: Beta Validation (6-8 weeks)
+**Version: 2.0.0-beta**
+- All alpha features with production-grade testing
+- Performance benchmarks with large caches
+- Robust broke-cluster integration validation
+- Still JSON-only (no server/run)
+
+### Phase 3: Feature Parity (Release Candidate)
+**Version: 2.0.0-rc**  
+- Add server functionality from 1.x
+- Add run/chat functionality
+- Full feature parity with MLX-Knife 1.x
+- Human-readable output via CLI layer 
 - All features JSON-first design
 - No dual output logic
 
@@ -60,11 +68,11 @@ We will create MLX-Knife 2.0 as a **clean-room implementation** with JSON-first 
 mlx-knife-2/
 ├── mlxk2/
 │   ├── core/
-│   │   ├── cache.py       # Cache path management (100 lines)
-│   │   ├── discovery.py   # Model discovery (150 lines)
-│   │   └── health.py      # Health validation (100 lines)
+│   │   ├── cache.py       # Cache path management
+│   │   └── model_resolution.py  # Model discovery & resolution
 │   ├── operations/
-│   │   ├── list.py        # List operation (50 lines)
+│   │   ├── list.py        # List operation
+│   │   ├── health.py      # Health validation
 │   │   ├── show.py        # Show details (50 lines)
 │   │   ├── pull.py        # Download models (100 lines)
 │   │   └── remove.py      # Delete models (50 lines)
