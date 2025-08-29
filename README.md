@@ -16,6 +16,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Sponsor mlx-knife](https://img.shields.io/badge/Sponsor-mlx--knife-ff69b4?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/mzau)
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -326,6 +327,16 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 Copyright (c) 2025 The BROKE team 🦫
 
+## Sponsors
+
+<div align="left" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+  <a href="https://github.com/tileslauncher" title="Tiles Launcher">
+    <img src="https://github.com/tileslauncher.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
+  </a>
+</div>
+
+Support this project: [GitHub Sponsors → mlx-knife](https://github.com/sponsors/mzau)
+
 ## Acknowledgments
 
 - Built for Apple Silicon using the [MLX framework](https://github.com/ml-explore/mlx)
@@ -336,6 +347,6 @@ Copyright (c) 2025 The BROKE team 🦫
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 1.1.0-beta3 | August 2025</i><br>
+  <i>Version 1.1.0 | August 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>
