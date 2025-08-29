@@ -76,7 +76,13 @@ mlxk server --host 0.0.0.0 --port 8000
 ### File System Access
 - **Cache Location**: `~/.cache/huggingface/hub` or `$HF_HOME`
 - **Permissions**: Standard user permissions apply
-- **Cleanup**: Use `mlxk rm <model>` to safely remove models
+- **Cleanup**: Use `mlxk rm <model>` to safely remove models; avoid manual deletion in the user cache
+
+### Hugging Face Cache Integrity
+- Separate contexts: use an isolated test cache for automated tests; keep the user cache for manual/production work
+- HF_HOME: set explicitly for user work if needed; tests should not override user HF_HOME by default
+- Safe operations: reads (`list`, `health`, `show`) are always safe; coordinate writes (`pull`, `rm`) in maintenance windows
+- Test safeguards: the test suite places a sentinel in the test cache and enforces deletion guards to prevent accidental user-cache modification
 
 ## Security Best Practices
 

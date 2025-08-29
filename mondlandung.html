@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mondlandung – HP-25-Stil</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background-color: #121212;
+      color: #0fda7e;
+      text-align: center;
+      margin: 20px;
+    }
+    h1 {
+      color: #0fda7e;
+      text-shadow: 0 0 5px rgba(15, 218, 126, 0.7);
+    }
+    .game {
+      max-width: 600px;
+      margin: auto;
+      padding: 20px;
+      background-color: #1e1e1e;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(0, 255, 100, 0.3);
+    }
+    input {
+      font-family: 'Courier New', monospace;
+      font-size: 1.5em;
+      width: 60px;
+      text-align: center;
+      background-color: #2c2c2c;
+      color: #0fda7e;
+      border: 1px solid #0fda7e;
+      margin-top: 10px;
+    }
+    button {
+      font-family: 'Courier New', monospace;
+      background-color: #0fda7e;
+      color: black;
+      border: none;
+      padding: 10px 20px;
+      font-size: 1em;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #08b45c;
+    }
+    .status {
+      font-size: 1.2em;
+      margin-top: 15px;
+    }
+    .end {
+      font-weight: bold;
+      color: #ff0066;
+    }
+  </style>
+</head>
+<body>
+
+<div class="game">
+  <h1>🌕 MONDLANDUNG – HP-25-Stil</h1>
+  <p style="color: #80ff80;">
+    Du bist auf dem Weg zum Mond.
+  </p>
+  <div class="status" id="status">Höhe: 1000 m | Geschwindigkeit: 0.0 m/s | Treibstoff: 100.0</div>
+  <input type="number" id="throttle" min="0" max="9" value="0" />
+  <button onclick="play()">Schub einstellen</button>
+  <p style="font-size: 0.9em; color: #88ffaa;">
+    Schub (0–9): 0 = keine Bremse, 9 = maximale Bremskraft
+  </p>
+</div>
+
+<script>
+// === Mondlandung – HP-25-Stil (im Browser) ===
+
+// Startwerte
+let altitude = 1000.0;     // Höhe in Metern
+let velocity = 0.0;        // Geschwindigkeit (m/s)
+let fuel = 100.0;          // Treibstoff
+const gravity = 1.6;       // Mondgravitation (m/s²)
+const thrustPerUnit = 0.5; // Schub pro Einheit (m/s²)
+const fuelPerThrottle = 0.1; // Treibstoffverbrauch pro Schubstufe
+
+// Spiel-Status
+let gameActive = true;
+let stepCount = 0;
+
+// Funktion: Einen Schritt simulieren
+function play() {
+  if (!gameActive) return;
+
+  const throttleInput = document.getElementById("throttle");
+  let throttle = parseInt(throttleInput.value);
+  
+  // Eingabebereinigung
+  if (isNaN(throttle) || throttle < 0 || throttle > 9) {
+    alert("Bitte eine Zahl zwischen 0 und 9 eingeben.");
+    return;
+  }
+
+  // Treibstoffverbrauch
+  const fuelUsed = throttle * fuelPerThrottle;
+  if (fuelUsed > fuel) {
+    // Wenn nicht genug Treibstoff, reduziere Schub
+    throttle = Math.floor(fuel / fuelPerThrottle);
+  }
+
+  // Berechne Beschleunigung (Schub nach oben, Schwerkraft nach unten)
+  const thrustAcc = throttle * thrustPerUnit;
+  const netAccel = -gravity + thrustAcc;
+
+  // Aktualisiere Geschwindigkeit und Höhe
+  velocity += netAccel;
+  altitude += velocity;
+
+  // Treibstoff aktualisieren
+  fuel -= throttle * fuelPerThrottle;
+  if (fuel < 0) fuel = 0;
+
+  // Rundung für bessere Darstellung
+  altitude = Math.max(0, altitude);
+  velocity = Number(velocity.toFixed(1));
+  fuel = Number(fuel.toFixed(1));
+
+  // Aktualisiere Anzeige
+  document.getElementById("status").textContent =
+    `Höhe: ${altitude.toFixed(1)} m | Geschwindigkeit: ${velocity} m/s | Treibstoff: ${fuel}`;
+
+  // Überprüfung auf Landung
+  if (altitude <= 0) {
+    gameActive = false;
+    const resultDiv = document.createElement("div");
+    resultDiv.className = "status";
+    if (Math.abs(velocity) <= 5.0) {
+      resultDiv.innerHTML = "<span class='end'>🎉 GLÜCKWUNSCH! Du bist sicher gelandet!</span>";
+    } else {
+      resultDiv.innerHTML = "<span class='end'>💥 ABSTURZ! Geschwindigkeit war " + velocity + " m/s – zu schnell!</span>";
+    }
+    document.querySelector(".game").appendChild(resultDiv);
+  }
+
+  // Schritt zählen (für Nachvollziehbarkeit)
+  stepCount++;
+}
+
+// Starte das Spiel mit einem Button-Click
+document.getElementById("throttle").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") {
+    play();
+  }
+});
+</script>
+
+</body>
+</html>

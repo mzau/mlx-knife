@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lokale Chatbox</title>
+    <style>
+        /* Einfache CSS für die Chatbox */
+        #chatbox {
+            width: 300px;
+            height: 400px;
+            border: 1px solid #ccc;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+            padding: 10px;
+        }
+        #user-input {
+            width: 240px;
+            margin-right: 10px;
+        }
+        .message {
+            margin: 5px 0;
+        }
+        .user {
+            color: blue;
+        }
+        .server {
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    <div id="chatbox"></div>
+    <input type="text" id="user-input" placeholder="Nachricht eingeben"/>
+    <button onclick="sendMessage()">Senden</button>
+
+    <script>
+        function sendMessage() {
+            const userInput = document.getElementById('user-input').value.trim();
+            if (!userInput) return;
+
+            // Zeige die Benutzernachricht in der Chatbox
+            displayMessage('Du', userInput, 'user');
+
+            // Sende die Nachricht an den Server
+            fetch('http://localhost:8000/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: userInput })
+            })
+            .then(response => response.json())
+            .then(data => {
+                displayMessage('Server', data.response, 'server');
+            })
+            .catch(error => {
+                console.error('Fehler:', error);
+                displayMessage('Fehler', 'Keine Verbindung zum Server möglich.', 'server');
+            });
+
+            // Leere das Eingabefeld
+            document.getElementById('user-input').value = '';
+        }
+
+        function displayMessage(sender, message, className) {
+            const chatbox = document.getElementById('chatbox');
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', className);
+            messageElement.textContent = `${sender}: ${message}`;
+            chatbox.appendChild(messageElement);
+            chatbox.scrollTop = chatbox.scrollHeight; // Scrollt die Chatbox nach unten
+        }
+    </script>
+</body>
+</html>

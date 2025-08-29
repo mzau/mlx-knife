@@ -9,17 +9,21 @@
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
-## Quick Start
+## Quick Start (2.0 Default)
 
 ```bash
-# Install with test dependencies
-pip install -e ".[test]"
+# Install package + pytest
+pip install -e .
+pip install pytest
 
 # Download test model (optional - most tests use isolated cache)
 mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
-# Run all tests
-pytest
+# Run 2.0 tests (default: tests_2.0/)
+pytest -v
+
+# Run legacy 1.x suite explicitly (not maintained here)
+pytest tests/ -v
 
 # Fast unit tests only
 pytest tests/unit/
@@ -133,7 +137,7 @@ def test_server_feature(mlx_server, model_name: str):
 2. **Python 3.9 or newer**
 3. **Test dependencies installed**:
    ```bash
-   pip install -e ".[test]"
+   pip install -e . && pip install pytest
    ```
 
 **That's it!** Most tests (Category 1) use isolated caches and download small test models automatically (~12MB).
@@ -150,6 +154,22 @@ mlxk pull mlx-community/Mistral-7B-Instruct-v0.3-4bit
 ```
 
 **Note**: Server tests are excluded from default `pytest` and require manual execution with `pytest -m server`.
+
+## Environment & Caches
+
+To keep results reproducible and caches safe on Apple Silicon:
+
+- Preferred Python/venv: Apple‑native 3.9 in a dedicated env
+  - Example: `python3.9 -m venv venv39 && source venv39/bin/activate && pip install -e . && pip install pytest`
+- User cache (persistent): shared, real cache for manual ops and certain advanced/server tests
+  - Project default: `export HF_HOME=/Volumes/mz-SSD/huggingface/cache`
+  - Safe ops: `list`, `health`, `show`; Coordinate `pull`/`rm` (maintenance window)
+- Test cache (isolated/default): ephemeral via fixtures; default `pytest` runs must not force the user cache
+  - Category 1 tests use temporary caches and should not depend on `HF_HOME`
+  - Only server/advanced tests may require user cache and are excluded by default (`-m server`)
+  - Deletion safety: tests set `MLXK2_STRICT_TEST_DELETE=1` so delete ops fail if not in test cache
+
+In PRs, please state your Python version and whether you used the user cache or isolated test caches.
 
 ## Test Commands
 
@@ -281,7 +301,7 @@ If you have multiple Python versions installed, you can verify compatibility:
 # Or manually test specific versions
 python3.9 -m venv test_39
 source test_39/bin/activate
-pip install -e ".[test]"
+pip install -e . && pip install pytest
 pytest
 deactivate && rm -rf test_39
 ```
@@ -293,8 +313,8 @@ deactivate && rm -rf test_39
 MLX Knife includes comprehensive code quality tools:
 
 ```bash
-# Install development dependencies  
-pip install -e ".[dev]"
+# Install development tools
+pip install ruff mypy
 
 # Automatic code formatting and linting
 ruff check mlx_knife/ --fix
@@ -378,7 +398,7 @@ pytest --timeout=60
 
 **Import errors:**
 ```bash
-pip install -e ".[test]"
+pip install -e . && pip install pytest
 ```
 
 **Process cleanup issues:**
