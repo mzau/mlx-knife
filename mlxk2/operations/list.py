@@ -87,6 +87,9 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
             continue
             
         hf_name = cache_dir_to_hf(model_dir.name)
+        # Hide test sentinel directories from listings
+        if "TEST-CACHE-SENTINEL" in hf_name:
+            continue
         
         # Apply pattern filter if specified
         if pattern and pattern.strip():

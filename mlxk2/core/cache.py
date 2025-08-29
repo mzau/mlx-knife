@@ -17,17 +17,39 @@ def get_current_model_cache() -> Path:
     return get_current_cache_root() / "hub"
 
 
-def verify_cache_context(expected="test"):
-    """Verify we're using the expected cache context."""
+def _is_likely_test_cache(path: Path) -> bool:
+    """Heuristic to detect test caches safely on macOS tmp layouts.
+
+    Rules:
+    - Lives under system temp (e.g., /var/folders/)
+    - Contains our temp prefix marker 'mlxk2_test_'
+    """
+    s = str(path)
+    return "/var/folders/" in s and "mlxk2_test_" in s
+
+
+def _is_likely_user_cache(path: Path) -> bool:
+    """Heuristic to detect a non-test (user) cache.
+
+    We avoid site-specific paths. Treat anything that's NOT a test cache
+    as user cache for safety checks.
+    """
+    return not _is_likely_test_cache(path)
+
+
+def verify_cache_context(expected: str = "test"):
+    """Verify the current model cache matches the expected context.
+
+    - expected="test": assert test-like temp cache
+    - expected="user": assert project user cache convention
+    """
     current_cache = get_current_model_cache()
-    path_str = str(current_cache)
-    
     if expected == "test":
-        if "/var/folders/" not in path_str or "test_" not in path_str:
-            raise RuntimeError(f"Expected test cache, but using: {path_str}")
+        if not _is_likely_test_cache(current_cache):
+            raise RuntimeError(f"Expected test cache, but using: {current_cache}")
     elif expected == "user":
-        if "/Volumes/mz-SSD/huggingface" not in path_str:
-            raise RuntimeError(f"Expected user cache, but using: {path_str}")
+        if not _is_likely_user_cache(current_cache):
+            raise RuntimeError(f"Expected user cache, but using: {current_cache}")
     else:
         raise ValueError(f"Unknown cache context: {expected}")
 

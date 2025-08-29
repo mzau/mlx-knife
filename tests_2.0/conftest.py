@@ -7,6 +7,18 @@ from pathlib import Path
 from typing import Generator
 from contextlib import contextmanager
 
+TEST_SENTINEL = "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
+
+
+def assert_is_test_cache(cache_path: Path):
+    """Ensure operations run against the isolated test cache only."""
+    path_str = str(cache_path)
+    if "/var/folders/" not in path_str or "mlxk2_test_" not in path_str:
+        raise RuntimeError(f"WARNING: Unexpected cache path - should be test cache: {path_str}")
+    sentinel_dir = cache_path / TEST_SENTINEL
+    if not sentinel_dir.exists():
+        raise RuntimeError(f"MISSING CANARY: Test cache sentinel not found in {cache_path}")
+
 
 @pytest.fixture
 def isolated_cache() -> Generator[Path, None, None]:
@@ -29,10 +41,13 @@ def isolated_cache() -> Generator[Path, None, None]:
         cache.MODEL_CACHE = hub_path
         
         # SAFETY CANARY: Create sentinel model to verify we're in test cache
-        sentinel_dir = hub_path / "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
+        sentinel_dir = hub_path / TEST_SENTINEL
         sentinel_snapshot = sentinel_dir / "snapshots" / "test123456789abcdef0123456789abcdef0123"
         sentinel_snapshot.mkdir(parents=True)
         (sentinel_snapshot / "config.json").write_text('{"model_type": "test_sentinel", "test_cache": true}')
+        # Enable strict deletion safety inside tests
+        old_strict = os.environ.get("MLXK2_STRICT_TEST_DELETE")
+        os.environ["MLXK2_STRICT_TEST_DELETE"] = "1"
         
         try:
             yield hub_path  # Return hub path (where models-- directories go)
@@ -43,6 +58,11 @@ def isolated_cache() -> Generator[Path, None, None]:
                 os.environ["HF_HOME"] = old_hf_home
             elif "HF_HOME" in os.environ:
                 del os.environ["HF_HOME"]
+            # Restore strict delete flag
+            if old_strict is not None:
+                os.environ["MLXK2_STRICT_TEST_DELETE"] = old_strict
+            elif "MLXK2_STRICT_TEST_DELETE" in os.environ:
+                del os.environ["MLXK2_STRICT_TEST_DELETE"]
 
 
 @pytest.fixture 
@@ -154,17 +174,8 @@ def test_list_models(cache_path):
     """
     from mlxk2.core.cache import cache_dir_to_hf
     
-    # SAFETY CHECK: Ensure we're using test cache, not user cache
-    path_str = str(cache_path)
-    if "/Volumes/mz-SSD/huggingface" in path_str:
-        raise RuntimeError(f"FORBIDDEN: Test tried to use user cache: {path_str}")
-    if "/var/folders/" not in path_str or "_test_" not in path_str:
-        raise RuntimeError(f"WARNING: Unexpected cache path - should be test cache: {path_str}")
-    
-    # CANARY CHECK: Verify test cache sentinel exists
-    sentinel_dir = cache_path / "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
-    if not sentinel_dir.exists():
-        raise RuntimeError(f"MISSING CANARY: Test cache sentinel not found in {cache_path}")
+    # Centralized safety check
+    assert_is_test_cache(cache_path)
     
     models = []
     
@@ -219,17 +230,8 @@ def test_resolve_model_for_operation(cache_path, model_query):
     
     This ensures model resolution uses the same cache as other test operations.
     """
-    # SAFETY CHECK: Ensure we're using test cache, not user cache
-    path_str = str(cache_path)
-    if "/Volumes/mz-SSD/huggingface" in path_str:
-        raise RuntimeError(f"FORBIDDEN: Test tried to use user cache: {path_str}")
-    if "/var/folders/" not in path_str or "_test_" not in path_str:
-        raise RuntimeError(f"WARNING: Unexpected cache path - should be test cache: {path_str}")
-    
-    # CANARY CHECK: Verify test cache sentinel exists
-    sentinel_dir = cache_path / "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
-    if not sentinel_dir.exists():
-        raise RuntimeError(f"MISSING CANARY: Test cache sentinel not found in {cache_path}")
+    # Centralized safety check
+    assert_is_test_cache(cache_path)
     
     from mlxk2.core.cache import cache_dir_to_hf
     
@@ -298,17 +300,8 @@ def test_health_check_operation(cache_path, model_query=None):
     
     This ensures health check uses the same cache as other test operations.
     """
-    # SAFETY CHECK: Ensure we're using test cache, not user cache
-    path_str = str(cache_path)
-    if "/Volumes/mz-SSD/huggingface" in path_str:
-        raise RuntimeError(f"FORBIDDEN: Test tried to use user cache: {path_str}")
-    if "/var/folders/" not in path_str or "_test_" not in path_str:
-        raise RuntimeError(f"WARNING: Unexpected cache path - should be test cache: {path_str}")
-    
-    # CANARY CHECK: Verify test cache sentinel exists
-    sentinel_dir = cache_path / "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
-    if not sentinel_dir.exists():
-        raise RuntimeError(f"MISSING CANARY: Test cache sentinel not found in {cache_path}")
+    # Centralized safety check
+    assert_is_test_cache(cache_path)
     
     from mlxk2.core.cache import cache_dir_to_hf
     import json

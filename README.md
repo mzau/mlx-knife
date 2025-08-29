@@ -228,17 +228,20 @@ done
 
 ## Testing
 
-The test suite provides comprehensive coverage with production-quality isolation:
+The 2.0 test suite runs by default (pytest discovery points to `tests_2.0/`):
 
 ```bash
-# Run all tests
-python -m pytest tests_2.0/ -v
+# Run 2.0 tests (default)
+pytest -v
 
-# Test categories:
-# - ADR-002 edge cases (13 tests)
-# - Integration scenarios (12 tests)  
-# - Model naming logic (9 tests)
-# - Robustness testing (11 tests)
+# Explicitly run legacy 1.x tests (not maintained on this branch)
+pytest tests/ -v
+
+# Test categories (2.0 example):
+# - ADR-002 edge cases
+# - Integration scenarios  
+# - Model naming logic
+# - Robustness testing
 
 # Current status: 45/45 passing ✅
 ```
@@ -312,3 +315,34 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 ---
 
 *MLX-Knife 2.0.0-alpha - Built for automation, tested for reliability, designed for the future.*
+
+## Local Safety Setup (Optional)
+
+To keep local coordination files out of Git and avoid accidental pushes during development:
+
+- Ignore locally (branch-independent): add to `.git/info/exclude`
+  - `AGENTS.md`
+  - `CLAUDE.md`
+- Local hooks (not versioned):
+  - `.git/hooks/pre-commit` blocks commits including `AGENTS.md`/`CLAUDE.md`.
+  - `.git/hooks/pre-push` blocks pushes of the current branch. Override once with `ALLOW_PUSH=1 git push`.
+
+Minimal pre-commit example:
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+staged=$(git diff --cached --name-only || true)
+for f in AGENTS.md CLAUDE.md; do
+  echo "$staged" | grep -qx "$f" && { echo "Commit blocked: $f" >&2; exit 1; }
+done
+```
+
+Minimal pre-push example:
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${ALLOW_PUSH:-}" = "1" ] && exit 0
+br=$(git rev-parse --abbrev-ref HEAD)
+while read -r l _ r _; do [ "$l" = "refs/heads/$br" ] && { echo "Push blocked: $br" >&2; exit 1; }; done
+exit 0
+```
