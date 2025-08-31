@@ -44,3 +44,9 @@ exclude = ["tests*", "tests_2.0*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "mlxk2.__version__"}
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "jsonschema>=4.20",
+]

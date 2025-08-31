@@ -1,6 +1,6 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.1 
+**Specification Version:** 0.1.2
 **Status:** Alpha - Subject to change  
 **Target:** MLX-Knife 2.0.0
 
@@ -25,20 +25,62 @@ mlxk list                              # Human-readable output (2.0.0+)
 - **2.0.0+:** Both `mlxk --json` and `mlxk-json --json` for JSON output
 - **2.0.0+:** `mlxk` without `--json` for human-readable output
 
+### Version Reporting
+
+- CLI version (human):
+  - `mlxk2 --version`
+- CLI version (JSON):
+  - `mlxk2 --version --json`
+
+JSON output example:
+```json
+{
+  "status": "success",
+  "command": "version",
+  "data": {
+    "cli_version": "2.0.0-alpha",
+    "json_api_spec_version": "0.1.2"
+  },
+  "error": null
+}
+```
+
+Notes:
+- Regular command responses (e.g., `list`, `show`) do not include a separate protocol tag; the spec version is reported by the `version` command in `data.json_api_spec_version`.
+
 ## Commands Overview
 
 All commands support consistent JSON output with standardized error handling and exit codes.
 
 ### Core Schema Pattern
 
-```json
+```jsonc
 {
   "status": "success" | "error",
-  "command": "list" | "show" | "health" | "pull" | "rm",
+  "command": "list" | "show" | "health" | "pull" | "rm" | "version",
   "data": { /* command-specific data */ },
   "error": null | { "type": "string", "message": "string" }
 }
 ```
+
+## Common Model Object
+
+All commands that return model information use the same minimal model object.
+
+- `name`: Full HF name `org/model`.
+- `hash`: 40-char snapshot commit of the selected snapshot, or `null`.
+- `size_bytes`: Total size in bytes of files under the selected path (snapshot preferred, else model root).
+- `last_modified`: ISO-8601 UTC timestamp (with `Z`) of the selected path.
+- `framework`: "MLX" | "GGUF" | "PyTorch" | "Unknown".
+- `model_type`: "chat" | "embedding" | "base" | "unknown".
+- `capabilities`: e.g., ["text-generation", "chat"] or ["embeddings"].
+- `health`: "healthy" | "unhealthy".
+- `cached`: true.
+
+Notes:
+- No human-readable `size` field; only `size_bytes`.
+- No human-readable "modified" field; `last_modified` is authoritative.
+- No absolute filesystem paths are exposed.
 
 ### Supported Commands
 
@@ -72,10 +114,21 @@ All commands support consistent JSON output with standardized error handling and
 
 **Basic Usage:**
 ```bash
-mlxk-json list --json                        # All models
-mlxk-json list "mlx-community" --json        # Filter by pattern
+mlxk-json list --json                        # All models with health status
+mlxk-json list "mlx-community" --json        # Filter by pattern  
 mlxk-json list "Llama" --json                # Fuzzy matching
 ```
+
+**Behavior:**
+- Equivalent to 1.1.0 columns (NAME/ID/SIZE/MODIFIED/FRAMEWORK/HEALTH) with JSON mapping:
+  - NAME → `name`
+  - ID → `hash`
+  - SIZE → `size_bytes` (bytes, integer)
+  - MODIFIED → `last_modified` (ISO-8601 UTC)
+  - FRAMEWORK → `framework`
+  - HEALTH → `health`
+- Health status is always included.
+- Pattern filter is a case-insensitive substring match on `name`.
 
 **JSON Schema:**
 ```json
@@ -87,32 +140,35 @@ mlxk-json list "Llama" --json                # Fuzzy matching
       {
         "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
         "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
-        "size": "4.3GB",
+        "size_bytes": 4613734656,
+        "last_modified": "2024-10-15T08:23:41Z",
         "framework": "MLX",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
-        "cached": true,
-        "last_modified": "2024-10-15T08:23:41Z"
+        "health": "healthy",
+        "cached": true
       },
       {
         "name": "mlx-community/mxbai-embed-large-v1",
         "hash": "b5679a5f90abcdef1234567890abcdef12345678",
-        "size": "1.2GB",
+        "size_bytes": 1200000000,
+        "last_modified": "2024-10-20T10:30:15Z",
         "framework": "MLX",
         "model_type": "embedding",
         "capabilities": ["embeddings"],
-        "cached": true,
-        "last_modified": "2024-10-20T10:30:15Z"
+        "health": "healthy",
+        "cached": true
       },
       {
         "name": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
         "hash": "e96c7a5f90abcdef1234567890abcdef12345678",
-        "size": "16.9GB", 
+        "size_bytes": 16900000000,
+        "last_modified": "2024-09-20T14:15:22Z",
         "framework": "GGUF",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
-        "cached": true,
-        "last_modified": "2024-09-20T14:15:22Z"
+        "health": "unhealthy",
+        "cached": true
       }
     ],
     "count": 12
@@ -233,14 +289,13 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
     "model": {
       "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
       "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
-      "size": "4.3GB",
+      "size_bytes": 4613734656,
       "framework": "MLX",
       "model_type": "chat",
       "capabilities": ["text-generation", "chat"],
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
-      "files_count": 15,
-      "total_size_bytes": 4613734656
+      "cached": true
     },
     "metadata": {
       "model_type": "phi3",
@@ -265,10 +320,13 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
     "model": {
       "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
       "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
-      "size": "4.3GB",
+      "size_bytes": 4613734656,
       "framework": "MLX",
       "model_type": "chat",
-      "capabilities": ["text-generation", "chat"]
+      "capabilities": ["text-generation", "chat"],
+      "last_modified": "2024-10-15T08:23:41Z",
+      "health": "healthy",
+      "cached": true
     },
     "files": [
       {"name": "config.json", "size": "1.2KB", "type": "config"},
@@ -294,10 +352,13 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
     "model": {
       "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
       "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
-      "size": "4.3GB",
+      "size_bytes": 4613734656,
       "framework": "MLX",
       "model_type": "chat",
-      "capabilities": ["text-generation", "chat"]
+      "capabilities": ["text-generation", "chat"],
+      "last_modified": "2024-10-15T08:23:41Z",
+      "health": "healthy",
+      "cached": true
     },
     "config": {
       "architectures": ["Phi3ForCausalLM"],
@@ -349,6 +410,12 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
   }
 }
 ```
+
+## Changes in 0.1.2 (Alpha)
+
+- Introduced a common minimal Model Object for consistency across commands.
+- Replaced human-readable `size` with machine-friendly `size_bytes`.
+- Removed human-readable `modified`; `last_modified` (ISO-8601 UTC) is authoritative.
 
 ## Operations
 
@@ -576,12 +643,19 @@ mlxk-json rm "locked-model" --json               # Error: requires --force due t
   "status": "success",
   "command": "health", 
   "data": {
+    "healthy": [],
     "unhealthy": [{
       "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
       "status": "unhealthy",
       "reason": "config.json missing"
-    }]
-  }
+    }],
+    "summary": {
+      "total": 1,
+      "healthy_count": 0,
+      "unhealthy_count": 1
+    }
+  },
+  "error": null
 }
 ```
 
@@ -593,7 +667,8 @@ mlxk-json rm "locked-model" --json               # Error: requires --force due t
   "data": {
     "download_status": "already_exists",
     "message": "Model already exists in cache"
-  }
+  },
+  "error": null
 }
 ```
 
@@ -620,7 +695,7 @@ mlxk-json health --json | jq -r '.data.unhealthy[].name'
 mlxk-json list "Llama" --json | jq '.data.count'
 
 # Model sizes with hashes
-mlxk-json list --json | jq -r '.data.models[] | "\(.name)@\(.hash): \(.size)"'
+mlxk-json list --json | jq -r '.data.models[] | "\(.name)@\(.hash): \(.size_bytes)"'
 
 # Get detailed model info
 mlxk-json show "Phi-3-mini" --json | jq '.data.model'

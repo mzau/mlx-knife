@@ -1,11 +1,10 @@
 """Show model operation for MLX-Knife 2.0."""
 
 import json
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
-from ..core.cache import MODEL_CACHE, hf_to_cache_dir, cache_dir_to_hf
+from ..core.cache import MODEL_CACHE, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from .health import is_model_healthy
 
@@ -137,6 +136,23 @@ def detect_model_type(hf_name, config_data):
         return "base"
 
 
+def detect_framework(model_path, hf_name: str) -> str:
+    """Detect model framework similarly to list operation."""
+    if "mlx-community" in hf_name:
+        return "MLX"
+    # GGUF files
+    if list(model_path.glob("**/*.gguf")):
+        return "GGUF"
+    # PyTorch/safetensors
+    snapshots_dir = model_path / "snapshots"
+    if snapshots_dir.exists():
+        has_safetensors = any(snapshots_dir.glob("**/*.safetensors"))
+        has_pytorch_bin = any(snapshots_dir.glob("**/pytorch_model.bin"))
+        if has_safetensors or has_pytorch_bin:
+            return "PyTorch"
+    return "Unknown"
+
+
 def get_total_size_bytes(model_path):
     """Calculate total model size in bytes."""
     if not model_path.exists():
@@ -218,14 +234,8 @@ def show_model_operation(model_pattern: str, include_files: bool = False, includ
         # Get health status
         healthy, health_reason = is_model_healthy(resolved_name)
         
-        # Calculate sizes
+        # Calculate size in bytes
         total_size_bytes = get_total_size_bytes(model_path)
-        if total_size_bytes >= 1_000_000_000:
-            size_str = f"{total_size_bytes / 1_000_000_000:.1f}GB"
-        elif total_size_bytes >= 1_000_000:
-            size_str = f"{total_size_bytes / 1_000_000:.1f}MB"
-        else:
-            size_str = f"{total_size_bytes / 1_000:.1f}KB"
             
         # Get config data for metadata
         config_data = get_config_content(model_path)
@@ -235,14 +245,13 @@ def show_model_operation(model_pattern: str, include_files: bool = False, includ
             "model": {
                 "name": resolved_name,
                 "hash": commit_hash,
-                "size": size_str,
-                "framework": "MLX" if "mlx-community" in resolved_name else "Unknown",
+                "size_bytes": total_size_bytes,
+                "last_modified": datetime.fromtimestamp(model_path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "framework": detect_framework(model_cache_dir, resolved_name),
                 "model_type": detect_model_type(resolved_name, config_data),
                 "capabilities": detect_model_capabilities(resolved_name, config_data),
-                "last_modified": datetime.fromtimestamp(model_path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "health": "healthy" if healthy else "unhealthy",
-                "files_count": len(list(model_path.rglob("*"))),
-                "total_size_bytes": total_size_bytes
+                "cached": True,
             }
         }
         

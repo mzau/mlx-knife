@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0-alpha] - 2025-08-29
+
+### Fixed
+- Python 3.9 LibreSSL Warning parity with 1.1.0 (Issue #22):
+  - Suppress `urllib3 v2 only supports OpenSSL 1.1.1+` warning on macOS system Python 3.9
+  - Implemented globally in `mlxk2/__init__.py` with additional just‑in‑time safeguard in `mlxk2/operations/pull.py`
+  - Effect: Clean CLI output across all 2.0 commands; tests remain green
+
+- Health check completeness for multi‑shard safetensors (Issue #27 parity):
+  - If `model.safetensors.index.json` exists, verify all referenced shards exist, are non‑empty and not LFS pointers
+  - Without index, detect `model-XXXXX-of-YYYYY.safetensors` and require full set; subsets/empty shards → unhealthy
+  - Improved LFS detection (recursive)
+  - (Summary kept concise here; details are tracked in GitHub Issues)
+
+### Tests
+- 2.0 suite: 45/45 passed (default `tests_2.0/`) on Python 3.9 and 3.10
+  - Additional deterministic tests for Issue #27: `tests_2.0/test_health_multifile.py` (5 cases) → all passing
+
 ## [1.1.0] - 2025-08-26 - **STABLE RELEASE** 🚀
 
 ### Production Readiness & Enhanced Testing 🧪

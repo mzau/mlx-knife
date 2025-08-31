@@ -110,6 +110,16 @@ def is_lfs_pointer(file_path):
     # - "oid sha256:" in first 200 bytes
 ```
 
+## Implementation Outcome (2.0 alpha)
+
+- Multi‑shard completeness is enforced strictly:
+  - If a safetensors index exists, every referenced shard must exist and be non‑empty; any missing or zero‑byte shard is unhealthy.
+  - Without an index, shard patterns like `model‑XXXXX‑of‑YYYYY.safetensors` are detected and the complete 1..Y sequence is required; subsets are unhealthy. Conservative policy: pattern‑only sharded models are considered unhealthy even if they appear complete, unless an index is present.
+- Partial/temporary markers (e.g., `.partial.tmp`) mark snapshots as unhealthy.
+- LFS pointers are detected recursively (including index‑referenced shard files) and flagged as unhealthy.
+- Invalid or missing `config.json` results in unhealthy status.
+- Test coverage includes deterministic isolated cases and opt‑in real‑cache validations; both confirm no false OK for incomplete multi‑shard states.
+
 ### 4. Delete Operations (rm command)
 
 **Critical Cases (Issue #23 regression):**

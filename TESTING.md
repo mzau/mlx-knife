@@ -12,9 +12,8 @@
 ## Quick Start (2.0 Default)
 
 ```bash
-# Install package + pytest
-pip install -e .
-pip install pytest
+# Install package + tests
+pip install -e .[test]
 
 # Download test model (optional - most tests use isolated cache)
 mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
@@ -44,6 +43,26 @@ MLX Knife requires **Apple Silicon hardware** and **real MLX models** for compre
 This approach ensures our tests reflect real-world usage, not mocked behavior.
 
 ## Test Structure
+
+### 2.0 Test Structure (default)
+
+```
+tests_2.0/
+├── __init__.py
+├── conftest.py                      # Isolated test cache, fixtures
+├── test_edge_cases_adr002.py        # Edge-case naming, ADR-002
+├── test_health_multifile.py         # Multi-file health completeness
+├── test_integration.py              # Model resolution, health integration
+├── test_issue_27.py                 # Health policy consistency
+├── test_model_naming.py             # Pattern/@hash parsing and resolution
+├── test_robustness.py               # General robustness tests
+├── test_json_api_list.py            # JSON API v0.1.2 (list contract)
+├── test_json_api_show.py            # JSON API v0.1.2 (show contract)
+└── spec/
+    ├── test_cli_version_output.py   # version command JSON shape
+    ├── test_spec_doc_examples_validate.py # docs examples vs schema (jsonschema)
+    └── test_spec_version_sync.py    # docs version == code constant
+```
 
 ```
 tests/
@@ -135,10 +154,15 @@ def test_server_feature(mlx_server, model_name: str):
 
 1. **Apple Silicon Mac** (M1/M2/M3)
 2. **Python 3.9 or newer**
-3. **Test dependencies installed**:
+3. **Test dependencies installed** (includes jsonschema for Spec tests):
    ```bash
-   pip install -e . && pip install pytest
+   pip install -e .[test]
    ```
+
+Notes:
+- Spec validation requires `jsonschema`. Installing `.[test]` ensures it is available.
+- Without `jsonschema`, Spec example validation is skipped (you will see one extra SKIPPED test).
+- With `jsonschema` installed, expect one additional PASS in the `-m spec` and `tests_2.0/` totals.
 
 **That's it!** Most tests (Category 1) use isolated caches and download small test models automatically (~12MB).
 
@@ -160,7 +184,7 @@ mlxk pull mlx-community/Mistral-7B-Instruct-v0.3-4bit
 To keep results reproducible and caches safe on Apple Silicon:
 
 - Preferred Python/venv: Apple‑native 3.9 in a dedicated env
-  - Example: `python3.9 -m venv venv39 && source venv39/bin/activate && pip install -e . && pip install pytest`
+  - Example: `python3.9 -m venv venv39 && source venv39/bin/activate && pip install -e .[test]`
 - User cache (persistent): shared, real cache for manual ops and certain advanced/server tests
   - Project default: `export HF_HOME=/Volumes/mz-SSD/huggingface/cache`
   - Safe ops: `list`, `health`, `show`; Coordinate `pull`/`rm` (maintenance window)
@@ -235,6 +259,9 @@ pytest -k "process_lifecycle or zombie" -v
 
 # Run health check tests only
 pytest -k "health" -v
+
+# Only JSON API contract/spec tests
+pytest -m spec -v
 ```
 
 ### Timeout and Performance

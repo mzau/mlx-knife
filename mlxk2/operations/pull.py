@@ -1,6 +1,3 @@
-import subprocess
-import sys
-from pathlib import Path
 from ..core.cache import MODEL_CACHE, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from .health import is_model_healthy
@@ -11,6 +8,9 @@ from .health import is_model_healthy
 def pull_model_with_huggingface_hub(model_name):
     """Use huggingface-hub to pull a model."""
     try:
+        # Just-in-time suppression for macOS Python 3.9 LibreSSL warning
+        import warnings as _warnings
+        _warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
         # Use direct Python API instead of CLI
         from huggingface_hub import snapshot_download
         
