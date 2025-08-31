@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.1-beta.1] - 2025-09-01
+
+### Fix: Strict Health Completeness for Multi‑Shard Models (Issue #27)
+- Problem: Health reported some multi‑part downloads as OK with missing/empty shards (false positives).
+- Solution: Backported 2.0 health rules to 1.x with index‑aware validation, pattern detection, and robust corruption checks.
+- Details:
+  - Config validation: `config.json` must exist and be a non‑empty JSON object.
+  - Index‑aware: If `model.safetensors.index.json` or `pytorch_model.bin.index.json` exists, every referenced shard must exist, be non‑empty, and not be a Git LFS pointer file.
+  - Pattern fallback policy: If pattern shards like `model-XXXXX-of-YYYYY.*` are present but no index file exists, the model is considered unhealthy (parity with 2.0 policy).
+  - Partial/tmp markers: Any `*.partial`, `*.tmp`, or names containing `partial` anywhere under the snapshot mark the model as unhealthy.
+  - LFS detection: Recursive scan flags suspiciously small files (<200B) that contain the Git LFS pointer header.
+  - Single‑file weights: Non‑empty `*.safetensors`, `*.bin`, or `*.gguf` without pattern shards remain supported and healthy if not LFS pointers.
+- Impact: “Healthy” now reliably means “complete and usable” for automation and CLI workflows.
+- Tests: Added `tests/unit/test_health_multishard.py` covering complete/missing/empty shards, pointer detection, pattern‑without‑index policy, partial markers, and PyTorch index parity.
+
+Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1`.
+
+
 ## [1.1.0] - 2025-08-26 - **STABLE RELEASE** 🚀
 
 ### Production Readiness & Enhanced Testing 🧪

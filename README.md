@@ -9,6 +9,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
 **Current Version**: 1.1.0 (August 2025) - **STABLE RELEASE** 🚀
+- Pre-release: 1.1.1b1 — strict multi-shard health checks (Issue #27). Install with `pip install --pre mlx-knife`.
 - **Production Ready**: First stable release since 1.0.4 with comprehensive testing
 - **Enhanced Test System**: 150/150 tests passing with real model lifecycle integration tests  
 - **Python 3.9-3.13**: Full compatibility verified across all Python versions
@@ -21,7 +22,7 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-150%2F150%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-160%2F160%20passing-brightgreen.svg)](#testing)
 
 ## Features
 

@@ -249,55 +249,138 @@ def get_model_hash(model_path):
     return latest.name[:8]
 
 def is_model_healthy(model_spec):
-    model_path, _, _ = resolve_single_model(model_spec)
+    """Strict health check for 1.x (backport of #27 rules).
+
+    Rules:
+    - config.json must exist and be valid non-empty JSON object.
+    - If a safetensors or PyTorch index exists, all referenced shards must exist, be non-empty,
+      and not be Git LFS pointer files.
+    - Without an index: if multi-shard pattern files exist (model-XXXXX-of-YYYYY.*), require index (unhealthy without index).
+      Single-file weights (*.safetensors/*.bin/*.gguf) are allowed if non-empty and not LFS pointers.
+    - Any '.partial'/'partial' or '.tmp' artifacts anywhere => unhealthy.
+    - Recursive LFS pointer scan for suspiciously small files (<200B).
+    """
+
+    # Resolve model path: accept direct directory paths or model specs
+    candidate = Path(str(model_spec))
+    if candidate.exists() and candidate.is_dir():
+        model_path = candidate
+    else:
+        model_path, _, _ = resolve_single_model(model_spec)
     if not model_path:
         return False
+
+    # 1) config.json must be valid, non-empty dict
     config_path = model_path / "config.json"
     if not config_path.exists():
         return False
-    # Check if config.json is valid JSON and not empty
     try:
         with open(config_path) as f:
             config_data = json.load(f)
-        # Basic sanity check: should be a non-empty dict
-        if not isinstance(config_data, dict) or len(config_data) == 0:
+        if not isinstance(config_data, dict) or not config_data:
             return False
     except (OSError, json.JSONDecodeError):
         return False
-    weight_files = list(model_path.glob("*.safetensors")) + list(model_path.glob("*.bin")) + list(model_path.glob("*.gguf"))
-    if not weight_files:
-        weight_files = list(model_path.glob("**/*.safetensors")) + list(model_path.glob("**/*.bin")) + list(model_path.glob("**/*.gguf"))
-    if not weight_files:
-        index_file = model_path / "model.safetensors.index.json"
-        if index_file.exists():
+
+    # 2) Fail fast on partial/tmp markers anywhere in the snapshot
+    for p in model_path.rglob("*"):
+        name = p.name.lower()
+        if ".partial" in name or name.endswith(".partial") or name.endswith(".tmp") or "partial" in name:
+            return False
+
+    # Helper: detect Git LFS pointer file
+    def _is_lfs_pointer(fp: Path) -> bool:
+        try:
+            if fp.stat().st_size >= 200:
+                return False
+            with open(fp, "rb") as f:
+                head = f.read(200)
+                return b"version https://git-lfs.github.com/spec/v1" in head
+        except Exception:
+            return False
+
+    # Helper: verify referenced shards
+    def _verify_shards(files: list[Path]) -> bool:
+        if not files:
+            return False
+        for f in files:
             try:
-                with open(index_file) as f:
-                    index = json.load(f)
-                if 'weight_map' in index:
-                    referenced_files = set(index['weight_map'].values())
-                    existing_files = [f for f in referenced_files if (model_path / f).exists()]
-                    if len(existing_files) > 0:
-                        return True
-            except:
-                pass
-    if not weight_files:
+                if (not f.exists()) or f.stat().st_size == 0:
+                    return False
+                if _is_lfs_pointer(f):
+                    return False
+            except Exception:
+                return False
+        return True
+
+    # 3) Index-aware checks (safetensors or PyTorch)
+    st_index = model_path / "model.safetensors.index.json"
+    pt_index = model_path / "pytorch_model.bin.index.json"
+    if st_index.exists() or pt_index.exists():
+        index_files = [p for p in [st_index, pt_index] if p.exists()]
+        for idx in index_files:
+            try:
+                with open(idx) as f:
+                    idx_data = json.load(f)
+                weight_map = idx_data.get("weight_map")
+                if not isinstance(weight_map, dict) or not weight_map:
+                    return False
+                referenced = sorted(set(weight_map.values()))
+                shard_paths = [model_path / r for r in referenced]
+                if not _verify_shards(shard_paths):
+                    return False
+            except (OSError, json.JSONDecodeError):
+                return False
+        # Also ensure no recursive LFS pointers elsewhere
+        ok, _ = check_lfs_corruption(model_path)
+        return ok
+
+    # 4) No index present — detect multi-shard pattern
+    #    If pattern shards exist, require index (unhealthy without index by policy parity with 2.0)
+    import re
+    shard_re = re.compile(r"model-([0-9]{5})-of-([0-9]{5})\.(safetensors|bin)")
+    pattern_files = []
+    for f in model_path.glob("*"):
+        if f.is_file():
+            m = shard_re.match(f.name)
+            if m:
+                pattern_files.append((f, int(m.group(1)), int(m.group(2))))
+    if pattern_files:
+        # Even if complete by pattern, absence of index => unhealthy
         return False
-    lfs_ok, _ = check_lfs_corruption(model_path)
-    if not lfs_ok:
+
+    # 5) Single-file weights fallback (includes GGUF)
+    weight_files = list(model_path.rglob("*.safetensors")) + list(model_path.rglob("*.bin")) + list(model_path.rglob("*.gguf"))
+    # Exclude known pattern shards from consideration (handled above)
+    filtered_weights = []
+    for f in weight_files:
+        name = f.name
+        if shard_re.match(name):
+            continue
+        filtered_weights.append(f)
+    if not filtered_weights:
         return False
-    return True
+    for wf in filtered_weights:
+        if wf.stat().st_size == 0 or _is_lfs_pointer(wf):
+            return False
+
+    # Final recursive LFS scan
+    ok, _ = check_lfs_corruption(model_path)
+    return ok
 
 def check_lfs_corruption(model_path):
+    """Recursively scan for Git LFS pointer files (suspiciously small files)."""
     corrupted_files = []
-    for file_path in model_path.glob("*"):
-        if file_path.is_file() and file_path.stat().st_size < 200:
-            try:
+    for file_path in model_path.rglob("*"):
+        try:
+            if file_path.is_file() and file_path.stat().st_size < 200:
                 with open(file_path, 'rb') as f:
-                    header = f.read(100)
+                    header = f.read(200)
                     if b'version https://git-lfs.github.com/spec/v1' in header:
-                        corrupted_files.append(file_path.name)
-            except:
-                pass
+                        corrupted_files.append(str(file_path.relative_to(model_path)))
+        except Exception:
+            # Ignore unreadable files in corruption scan, keep conservative
+            continue
     if corrupted_files:
         return False, f"LFS pointers instead of files: {', '.join(corrupted_files)}"
     return True, "No LFS corruption detected"
