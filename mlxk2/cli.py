@@ -13,6 +13,13 @@ from .operations.pull import pull_operation
 from .operations.rm import rm_operation
 from .operations.show import show_model_operation
 from .spec import JSON_API_SPEC_VERSION
+from .output.human import (
+    render_list,
+    render_health,
+    render_show,
+    render_pull,
+    render_rm,
+)
 
 
 def format_json_output(data: Dict[str, Any]) -> str:
@@ -49,6 +56,10 @@ def main():
     # List command
     list_parser = subparsers.add_parser("list", help="List all cached models")
     list_parser.add_argument("pattern", nargs="?", help="Filter models by pattern (optional)")
+    # Human-output modifiers (JSON output remains unchanged)
+    list_parser.add_argument("--all", action="store_true", dest="show_all", help="Show all details (human output)")
+    list_parser.add_argument("--health", action="store_true", dest="show_health", help="Include health column (human output)")
+    list_parser.add_argument("--verbose", action="store_true", help="Verbose details (human output)")
     list_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     
     # Health command
@@ -94,33 +105,49 @@ def main():
                 print(f"mlxk2 {__version__}")
             sys.exit(0)
 
-        # In alpha version, --json flag is required for broke-cluster compatibility
-        if args.command and not hasattr(args, 'json'):
-            result = handle_error("CommandError", "Internal error: --json flag not found")
-        elif args.command and not args.json:
-            result = handle_error("JsonRequired", "MLX-Knife 2.0-alpha requires --json flag. Use: mlxk2 " + args.command + " --json")
-        elif args.command == "list":
+        # Execute command and render per mode
+        if args.command == "list":
             result = list_models(pattern=args.pattern)
+            if args.json:
+                print(format_json_output(result))
+            else:
+                show_health = getattr(args, "show_health", False)
+                show_all = getattr(args, "show_all", False)
+                verbose = getattr(args, "verbose", False)
+                print(render_list(result, show_health=show_health, show_all=show_all, verbose=verbose))
         elif args.command == "health":
             result = health_check_operation(args.model)
+            if args.json:
+                print(format_json_output(result))
+            else:
+                print(render_health(result))
         elif args.command == "show":
             result = show_model_operation(args.model, args.files, args.config)
+            if args.json:
+                print(format_json_output(result))
+            else:
+                print(render_show(result))
         elif args.command == "pull":
             result = pull_operation(args.model)
+            if args.json:
+                print(format_json_output(result))
+            else:
+                print(render_pull(result))
         elif args.command == "rm":
             result = rm_operation(args.model, args.force)
+            if args.json:
+                print(format_json_output(result))
+            else:
+                print(render_rm(result))
         elif args.command is None:
             result = handle_error("CommandError", "No command specified")
+            print(format_json_output(result))
         else:
             result = handle_error("CommandError", f"Unknown command: {args.command}")
-            
-        print(format_json_output(result))
-        
+            print(format_json_output(result))
+
         # Exit with appropriate code
-        if result["status"] == "error":
-            sys.exit(1)
-        else:
-            sys.exit(0)
+        sys.exit(0 if result.get("status") == "success" else 1)
             
     except Exception as e:
         error_result = handle_error("InternalError", str(e))

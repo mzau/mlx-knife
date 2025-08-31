@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlxk-json"
-version = "2.0.0-alpha"
+dynamic = ["version"]
 description = "MLX-Knife 2.0 - JSON-first model management for automation"
 readme = "README.md"
 requires-python = ">=3.9"

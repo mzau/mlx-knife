@@ -76,7 +76,7 @@ def cleanup_model_locks(model_name):
         if lock_files:
             shutil.rmtree(locks_dir)
             return len(lock_files)
-    except:
+    except Exception:
         pass
     
     return 0

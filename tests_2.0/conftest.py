@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Test fixtures for MLX-Knife 2.0 isolated testing."""
 
 import os
@@ -501,21 +503,25 @@ def copy_user_model_to_isolated(isolated_cache):
 
         # Helper: load index
         def _load_index():
-            idx = snapshots / "model.safetensors.index.json"
-            if idx.exists():
-                try:
-                    return _json.loads(idx.read_text())
-                except Exception:
-                    return None
+            if target_snap is None:
+                return None
+            sft_idx = target_snap / "model.safetensors.index.json"
+            pt_idx = target_snap / "pytorch_model.bin.index.json"
+            for idx in (sft_idx, pt_idx):
+                if idx.exists():
+                    try:
+                        return _json.loads(idx.read_text())
+                    except Exception:
+                        return None
             return None
 
         # Helper: get referenced shard paths
         def _referenced_shards():
             index = _load_index()
-            if not index or not isinstance(index.get("weight_map"), dict):
+            if not index or not isinstance(index.get("weight_map"), dict) or target_snap is None:
                 return []
             files = sorted(set(index["weight_map"].values()))
-            return [model_dir / f for f in files]
+            return [target_snap / f for f in files]
 
         for m in mutations_list:
             if m == 'remove_config' and target_snap is not None:
@@ -603,8 +609,10 @@ def copy_user_model_to_isolated(isolated_cache):
 
             # Decide which files to copy
             selected: list[Path] = []
-            idx = src_snap / "model.safetensors.index.json"
-            if strategy == "index_subset" and idx.exists():
+            sft_idx = src_snap / "model.safetensors.index.json"
+            pt_idx = src_snap / "pytorch_model.bin.index.json"
+            idx = sft_idx if sft_idx.exists() else (pt_idx if pt_idx.exists() else None)
+            if strategy == "index_subset" and idx is not None and idx.exists():
                 try:
                     index = _json.loads(idx.read_text())
                     wm = index.get("weight_map") or {}
@@ -626,8 +634,10 @@ def copy_user_model_to_isolated(isolated_cache):
                 shard_files.sort()
                 selected.extend(shard_files[:subset_count])
                 # include index if present
-                if idx.exists():
-                    selected.append(idx)
+                if sft_idx.exists():
+                    selected.append(sft_idx)
+                elif pt_idx.exists():
+                    selected.append(pt_idx)
             # Always include config.json if present
             cfg = src_snap / "config.json"
             if cfg.exists():

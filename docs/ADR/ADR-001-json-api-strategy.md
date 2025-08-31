@@ -1,7 +1,7 @@
 # ADR-001: MLX-Knife 2.0 Migration Path to JSON-First Architecture
 
 ## Status
-**Accepted & Implemented** - 2025-08-28
+**Accepted** - 2025-08-28
 
 **Implementation Status:**
 - ✅ Clean-room 2.0 implementation complete (Sessions 1-3)

@@ -6,6 +6,21 @@ First off, thank you for considering contributing to MLX Knife! It's people like
 
 We're a small team passionate about making MLX models accessible and easy to use on Apple Silicon. We welcome contributions from everyone who shares this vision.
 
+## 2.0 Alpha (JSON CLI) – Contributor Notes
+
+- Code path: `mlxk2/` (entry points: `mlxk2`, `mlxk-json`).
+- Default output: human-friendly tables/text; pass `--json` to emit the exact JSON API (spec v0.1.2).
+- Supported commands: `list`, `health`, `show`, `pull`, `rm` (no server/run in 2.0 yet — use `mlxk` 1.x for those).
+- Tests: default suite is `tests_2.0/` (see `pytest.ini`); legacy `tests/` on demand.
+- Human output options:
+  - `list`: `--all` (all frameworks), `--health` (add column), `--verbose` (full org/model names).
+  - Compact default: MLX-only, compact names (strip `mlx-community/`), no Framework column.
+- Cache safety: tests use isolated temp caches; read-only ops are safe; coordinate `pull`/`rm` when using a shared user cache.
+- Spec discipline: JSON schema/spec changes require a version bump in `mlxk2/spec.py` (see CLAUDE.md and docs/).
+
+These 2.0 alpha changes do not affect 1.x (`mlx_knife/`) behavior.
+
+
 ## How Can I Contribute?
 
 ### Reporting Bugs
@@ -31,8 +46,8 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 1. Fork the repository and create your branch from `main`
 2. If you've added code, add tests that cover your changes
-3. Ensure the test suite passes locally: `pytest tests/`
-4. Make sure your code follows the existing style: `ruff check mlx_knife/ --fix`
+3. Ensure the test suite passes locally: `pytest tests_2.0/ -v`
+4. Make sure your code follows the existing style: `ruff check mlxk2/ --fix`
 5. Write a clear commit message
 6. Open a Pull Request with a clear title and description
 
@@ -43,18 +58,18 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 
-# Install in development mode with all dependencies
-pip install -e ".[dev,test]"
+# Install in development mode
+pip install -e .
 
 # Download a test model (required for full test suite)
 mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
-# Run tests
-pytest
+# Run tests (2.0 default)
+pytest tests_2.0/ -v
 
-# Check code style
-ruff check mlx_knife/
-mypy mlx_knife/
+# Check code style (2.0)
+ruff check mlxk2/
+mypy mlxk2/
 
 # Test with a real model
 mlxk run Phi-3-mini "Hello world"

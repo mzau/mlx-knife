@@ -57,9 +57,10 @@ class TestIssue27Exploration:
         monkeypatch.setenv("MLXK2_COPY_STRATEGY", "index_subset")
         monkeypatch.setenv("MLXK2_SUBSET_COUNT", "0")
         dst = copy_user_model_to_isolated(model)
-        idx = dst / 'model.safetensors.index.json'
-        if not idx.exists():
-            pytest.skip('No safetensors index found; skipping index-missing-shards test')
+        sft_idx = dst / 'model.safetensors.index.json'
+        pt_idx = dst / 'pytorch_model.bin.index.json'
+        if not sft_idx.exists() and not pt_idx.exists():
+            pytest.skip('No safetensors/pytorch index found; skipping index-missing-shards test')
 
         from mlxk2.operations.health import health_check_operation
         result = health_check_operation(model)
@@ -71,8 +72,8 @@ class TestIssue27Exploration:
         )
         dst = copy_user_model_to_isolated(model, mutations=['delete_indexed_shard'])
         # If no index exists, skip this targeted test
-        if not (dst / 'model.safetensors.index.json').exists():
-            pytest.skip('No safetensors index found; skipping index-specific test')
+        if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
+            pytest.skip('No safetensors/pytorch index found; skipping index-specific test')
 
         from mlxk2.operations.health import health_check_operation
         result = health_check_operation(model)
@@ -83,8 +84,8 @@ class TestIssue27Exploration:
             "MLXK2_ISSUE27_MODEL", "mlx-community/Mistral-7B-Instruct-v0.2-4bit"
         )
         dst = copy_user_model_to_isolated(model, mutations=['truncate_indexed_shard'])
-        if not (dst / 'model.safetensors.index.json').exists():
-            pytest.skip('No safetensors index found; skipping index-specific test')
+        if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
+            pytest.skip('No safetensors/pytorch index found; skipping index-specific test')
 
         from mlxk2.operations.health import health_check_operation
         result = health_check_operation(model)
@@ -95,8 +96,8 @@ class TestIssue27Exploration:
             "MLXK2_ISSUE27_MODEL", "mlx-community/Mistral-7B-Instruct-v0.2-4bit"
         )
         dst = copy_user_model_to_isolated(model, mutations=['lfsify_indexed_shard'])
-        if not (dst / 'model.safetensors.index.json').exists():
-            pytest.skip('No safetensors index found; skipping index-specific test')
+        if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
+            pytest.skip('No safetensors/pytorch index found; skipping index-specific test')
 
         from mlxk2.operations.health import health_check_operation
         result = health_check_operation(model)

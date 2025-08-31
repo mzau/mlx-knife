@@ -166,6 +166,46 @@ Notes:
 
 **That's it!** Most tests (Category 1) use isolated caches and download small test models automatically (~12MB).
 
+### Enabling Issue #27 Tests (optional)
+
+By default, several Issue #27 tests are skipped because they require a real multi‑shard safetensors model (with `model.safetensors.index.json`) in your user cache and enough free disk space to create an isolated copy.
+
+- Set your user cache: `export MLXK2_USER_HF_HOME=/absolute/path/to/your/huggingface/cache`
+- Ensure the cache contains a model with a safetensors index (common for larger Llama/Mistral models).
+- Run the focused tests: `PYTHONPATH=. pytest tests_2.0/test_issue_27.py -v`
+- If you see skips:
+  - “No safetensors index found” → pick a model that has `model.safetensors.index.json`.
+  - “Not enough free space” → free disk space; tests create a subset copy into an isolated temp cache.
+  - “User model not found” → verify the exact HF path in your cache and env var points to its `.../huggingface/cache` root.
+
+With a suitable model present and `MLXK2_USER_HF_HOME` set, the Issue #27 tests should run without SKIPs.
+
+### When Issue #27 real‑model tests make sense
+
+Purpose
+- These tests validate the strict health policy against real upstream Hugging Face repositories that ship multi‑shard safetensors with a `model.safetensors.index.json`. They complement the deterministic unit tests by exercising real‑world layouts.
+
+Run them when
+- Your user cache contains at least one upstream PyTorch repo with a safetensors index (not MLX/GGUF conversions). Good candidates:
+  - `mistralai/Mistral-7B-Instruct-v0.2` or `-v0.3`
+  - `Qwen/Qwen1.5-7B-Chat`, `Qwen/Qwen2-7B-Instruct`
+  - `teknium/OpenHermes-2.5-Mistral`
+  - Gated: `meta-llama/Llama-2-7b-chat-hf`, `meta-llama/Llama-3-8B-Instruct`, `google/gemma-7b-it`
+- You want to sanity‑check index‑based completeness, shard deletion/truncation, and LFS pointer detection against real artifacts.
+
+They are not useful when
+- Your cache only has MLX Community models (no `model.safetensors.index.json`) or GGUF models — the index‑based tests will skip by design. In that case, rely on `tests_2.0/test_health_multifile.py` for deterministic coverage.
+
+Resource considerations
+- Disk: tests copy a subset of files into an isolated cache. Tune size/speed with:
+  - `export MLXK2_COPY_STRATEGY="index_subset"`
+  - `export MLXK2_SUBSET_COUNT="1"`
+  - `export MLXK2_MIN_FREE_MB="512"` (or higher)
+- Network: if you need to fetch a candidate model first, prefer downloading only `config.json`, `model.safetensors.index.json`, and 1–2 small shards to keep it light.
+
+Summary
+- If you have a suitable upstream PyTorch chat/instruct model with an index in your user cache, enable the env vars above and run `tests_2.0/test_issue_27.py` for an extra layer of real‑model assurance. Otherwise, the deterministic tests already validate the policy thoroughly.
+
 ### Optional Setup (Server Tests Only)
 
 For server tests (`@pytest.mark.server` - **excluded by default**):
@@ -186,7 +226,7 @@ To keep results reproducible and caches safe on Apple Silicon:
 - Preferred Python/venv: Apple‑native 3.9 in a dedicated env
   - Example: `python3.9 -m venv venv39 && source venv39/bin/activate && pip install -e .[test]`
 - User cache (persistent): shared, real cache for manual ops and certain advanced/server tests
-  - Project default: `export HF_HOME=/Volumes/mz-SSD/huggingface/cache`
+  - Example (external SSD): `export HF_HOME="/Volumes/SomeExternalSSD/models"`
   - Safe ops: `list`, `health`, `show`; Coordinate `pull`/`rm` (maintenance window)
 - Test cache (isolated/default): ephemeral via fixtures; default `pytest` runs must not force the user cache
   - Category 1 tests use temporary caches and should not depend on `HF_HOME`
