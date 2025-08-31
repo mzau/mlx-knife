@@ -1,5 +1,4 @@
 import shutil
-from pathlib import Path
 import os
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf, verify_cache_context
 from ..core.model_resolution import resolve_model_for_operation

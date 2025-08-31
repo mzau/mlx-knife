@@ -6,6 +6,9 @@ import pytest
 from pathlib import Path
 from typing import Generator
 from contextlib import contextmanager
+import shutil
+import random
+import json as _json
 
 TEST_SENTINEL = "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
 
@@ -457,3 +460,199 @@ def user_cache_context():
     verify_cache_context("user")
     
     yield get_current_model_cache()
+
+
+@pytest.fixture
+def copy_user_model_to_isolated(isolated_cache):
+    """Utility to copy a real user-cache model into the isolated test cache.
+
+    Safety:
+    - Read-only on user cache.
+    - Requires explicit env var MLXK2_USER_HF_HOME pointing to the user HF_HOME.
+    - Skips if user cache or model not present.
+
+    Usage:
+    >>> copier = copy_user_model_to_isolated
+    >>> path = copier('mlx-community/Phi-3-mini-4k-instruct-4bit', mutations=['remove_config'])
+    """
+    from mlxk2.core.cache import hf_to_cache_dir
+
+    user_hf_home = os.environ.get("MLXK2_USER_HF_HOME")
+    if not user_hf_home:
+        pytest.skip("MLXK2_USER_HF_HOME not set; skip user->isolated copy")
+
+    user_hub = Path(user_hf_home) / "hub"
+    if not user_hub.exists():
+        pytest.skip(f"User hub path not found: {user_hub}")
+
+    def mutate_model_dir(model_dir: Path, mutations):
+        if not mutations:
+            return
+        # Normalize list
+        if isinstance(mutations, str):
+            mutations_list = [mutations]
+        else:
+            mutations_list = list(mutations)
+
+        # Find a snapshot dir (prefer any 40-char hex dir)
+        snapshots = model_dir / "snapshots"
+        snap_dirs = [d for d in snapshots.iterdir() if d.is_dir() and len(d.name) == 40] if snapshots.exists() else []
+        target_snap = snap_dirs[0] if snap_dirs else None
+
+        # Helper: load index
+        def _load_index():
+            idx = snapshots / "model.safetensors.index.json"
+            if idx.exists():
+                try:
+                    return _json.loads(idx.read_text())
+                except Exception:
+                    return None
+            return None
+
+        # Helper: get referenced shard paths
+        def _referenced_shards():
+            index = _load_index()
+            if not index or not isinstance(index.get("weight_map"), dict):
+                return []
+            files = sorted(set(index["weight_map"].values()))
+            return [model_dir / f for f in files]
+
+        for m in mutations_list:
+            if m == 'remove_config' and target_snap is not None:
+                cfg = target_snap / "config.json"
+                if cfg.exists():
+                    cfg.unlink()
+            elif m == 'truncate_weight' and target_snap is not None:
+                # Truncate first weight-like file
+                candidates = list(target_snap.glob("**/*.safetensors")) or list(target_snap.glob("**/*.gguf"))
+                if candidates:
+                    p = candidates[0]
+                    p.write_bytes(b"")
+            elif m == 'remove_snapshot' and target_snap is not None:
+                shutil.rmtree(target_snap, ignore_errors=True)
+                target_snap = None
+            elif m == 'drop_random_files' and target_snap is not None:
+                files = [f for f in target_snap.rglob("*") if f.is_file()]
+                for f in random.sample(files, k=min(len(files), max(1, len(files)//4))):
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+            elif m == 'inject_invalid_config' and target_snap is not None:
+                (target_snap / "config.json").write_text('invalid json {')
+            elif m == 'add_partial_tmp' and target_snap is not None:
+                (target_snap / ".partial.tmp").write_bytes(b"downloading...")
+            elif m == 'delete_indexed_shard' and target_snap is not None:
+                # Delete one referenced shard (if index exists)
+                refs = _referenced_shards()
+                if refs:
+                    try:
+                        refs[0].unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            elif m == 'truncate_indexed_shard' and target_snap is not None:
+                refs = _referenced_shards()
+                if refs:
+                    refs[0].write_bytes(b"")
+            elif m == 'lfsify_indexed_shard' and target_snap is not None:
+                refs = _referenced_shards()
+                if refs:
+                    lfs_content = (
+                        "version https://git-lfs.github.com/spec/v1\n"
+                        "oid sha256:123\nsize 123\n"
+                    )
+                    refs[0].write_text(lfs_content)
+            elif m == 'remove_index' and target_snap is not None:
+                idx = target_snap / "model.safetensors.index.json"
+                if idx.exists():
+                    idx.unlink()
+
+    def _latest_snapshot_dir(model_dir: Path) -> Path | None:
+        snaps = model_dir / "snapshots"
+        if not snaps.exists():
+            return None
+        dirs = [d for d in snaps.iterdir() if d.is_dir()]
+        if not dirs:
+            return None
+        return max(dirs, key=lambda p: p.stat().st_mtime)
+
+    def copier(hf_name: str, *, mutations=None) -> Path:
+        src = user_hub / hf_to_cache_dir(hf_name)
+        if not src.exists():
+            pytest.skip(f"User model not found: {hf_name} -> {src}")
+
+        dst = isolated_cache / hf_to_cache_dir(hf_name)
+        if dst.exists():
+            shutil.rmtree(dst)
+
+        # Copy strategy controls how much data we copy (to save disk/time)
+        strategy = os.environ.get("MLXK2_COPY_STRATEGY", "full")  # full | index_subset | pattern_subset
+        subset_count = int(os.environ.get("MLXK2_SUBSET_COUNT", "2"))
+        min_free_mb = int(os.environ.get("MLXK2_MIN_FREE_MB", "1024"))
+
+        if strategy == "full":
+            shutil.copytree(src, dst)
+        else:
+            # Create dst structure minimally
+            (dst / "snapshots").mkdir(parents=True, exist_ok=True)
+            src_snap = _latest_snapshot_dir(src)
+            if src_snap is None:
+                pytest.skip("Source model has no snapshots")
+            dst_snap = (dst / "snapshots" / src_snap.name)
+            dst_snap.mkdir(parents=True, exist_ok=True)
+
+            # Decide which files to copy
+            selected: list[Path] = []
+            idx = src_snap / "model.safetensors.index.json"
+            if strategy == "index_subset" and idx.exists():
+                try:
+                    index = _json.loads(idx.read_text())
+                    wm = index.get("weight_map") or {}
+                    shard_names = sorted(set(wm.values()))
+                except Exception:
+                    shard_names = []
+                # pick N smallest shards by size to minimize copy volume
+                shard_paths = [src_snap / name for name in shard_names]
+                shard_paths = [p for p in shard_paths if p.exists()]
+                shard_paths.sort(key=lambda p: p.stat().st_size)
+                for p in shard_paths[:max(0, subset_count)]:
+                    selected.append(p)
+                selected.append(idx)
+            else:
+                # pattern_subset: pick shards by filename pattern
+                import re
+                rgx = re.compile(r"model-\d{5}-of-\d{5}\.safetensors$")
+                shard_files = [p for p in src_snap.iterdir() if p.is_file() and rgx.search(p.name)]
+                shard_files.sort()
+                selected.extend(shard_files[:subset_count])
+                # include index if present
+                if idx.exists():
+                    selected.append(idx)
+            # Always include config.json if present
+            cfg = src_snap / "config.json"
+            if cfg.exists():
+                selected.append(cfg)
+
+            # Disk space check (on the test cache volume)
+            total_bytes = 0
+            for p in selected:
+                try:
+                    total_bytes += p.stat().st_size
+                except FileNotFoundError:
+                    pass
+            free_bytes = shutil.disk_usage(str(isolated_cache)).free
+            if free_bytes < total_bytes + (min_free_mb * 1024 * 1024):
+                pytest.skip(f"Not enough free space for subset copy: need ~{(total_bytes/1e6):.1f}MB + safety, have {(free_bytes/1e6):.1f}MB")
+
+            # Copy selected files
+            for p in selected:
+                rel = p.relative_to(src_snap)
+                dst_file = dst_snap / rel
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                if p.exists():
+                    shutil.copy2(p, dst_file)
+
+        mutate_model_dir(dst, mutations)
+        return dst
+
+    return copier

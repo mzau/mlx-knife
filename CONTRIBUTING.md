@@ -166,6 +166,35 @@ MLX Knife has comprehensive test coverage. For detailed testing documentation in
 
 **When adding new tests**: Please update the test structure documentation in **[TESTING.md](TESTING.md)** if you add new test files or categories.
 
+### Spec Version Discipline (JSON API)
+
+If you change the JSON API spec or schema, bump the spec version and keep code/tests in sync.
+
+- Spec files: `docs/json-api-specification.md`, `docs/json-api-schema.json`
+- Version constant: `mlxk2/spec.py` → `JSON_API_SPEC_VERSION`
+- Guard script: `scripts/check-spec-bump.sh`
+
+Usage examples:
+
+```bash
+# Local check against main
+scripts/check-spec-bump.sh origin/main
+
+# Bypass for editorial-only changes
+SPEC_BUMP_BYPASS=1 scripts/check-spec-bump.sh origin/main
+```
+
+CI suggestion (GitHub Actions step):
+
+```bash
+- name: Check JSON API spec bump
+  run: |
+    git fetch origin main --depth=1
+    scripts/check-spec-bump.sh origin/main
+```
+
+Bypass tokens (commit message): `[no-spec-bump]` or `[skip-spec-bump]` for formatting-only edits.
+
 ## Code Style
 
 - We use `ruff` for formatting and linting
