@@ -1,22 +1,19 @@
 # Changelog
 
-## [2.0.0-alpha] - 2025-08-29
+## 1.1.1 — Pending
 
-### Fixed
-- Python 3.9 LibreSSL Warning parity with 1.1.0 (Issue #22):
-  - Suppress `urllib3 v2 only supports OpenSSL 1.1.1+` warning on macOS system Python 3.9
-  - Implemented globally in `mlxk2/__init__.py` with additional just‑in‑time safeguard in `mlxk2/operations/pull.py`
-  - Effect: Clean CLI output across all 2.0 commands; tests remain green
+- Fix (Issue #27): Strict health completeness for multi-shard models in 1.x:
+  - Recognize both safetensors (`model.safetensors.index.json`) and PyTorch (`pytorch_model.bin.index.json`) JSON indices.
+  - Validate only the present format’s shards (exist, non-empty, not LFS pointers) to avoid false negatives.
+  - Aligns 1.x health behavior with 2.0.0-alpha.1 policy.
 
-- Health check completeness for multi‑shard safetensors (Issue #27 parity):
-  - If `model.safetensors.index.json` exists, verify all referenced shards exist, are non‑empty and not LFS pointers
-  - Without index, detect `model-XXXXX-of-YYYYY.safetensors` and require full set; subsets/empty shards → unhealthy
-  - Improved LFS detection (recursive)
-  - (Summary kept concise here; details are tracked in GitHub Issues)
+## 2.0.0-alpha.1 — 2025-08-31
 
-### Tests
-- 2.0 suite: 45/45 passed (default `tests_2.0/`) on Python 3.9 and 3.10
-  - Additional deterministic tests for Issue #27: `tests_2.0/test_health_multifile.py` (5 cases) → all passing
+- New JSON-first CLI (`mlxk2`, `mlxk-json`); `--json` for machine-readable output (new vs 1.0.0).
+- Human output by default: improved formatting, new Type column, relative Modified; MLX-only compact view with `--all`, `--health`, `--verbose` flags.
+- Stricter health checks for sharded models (Issue #27); robust model resolution (fuzzy, `@hash`); `rm` cleans whole model and locks.
+- Packaging/tooling: dynamic versioning; multi-Python test script; Python 3.9–3.13; timezone-aware datetimes.
+- **Not included yet: server and run** (use 1.x).
 
 ## [1.1.0] - 2025-08-26 - **STABLE RELEASE** 🚀
 
@@ -95,90 +92,31 @@
   - **Root Cause**: `generate_batch()` lacked End-Token filtering present in `generate_streaming()`
   - **Fix**: Ported filtering logic with new `_filter_end_tokens_from_response()` method
   - **Affected**: `mlxk run model "prompt" --no-stream` and Server API `"stream": false`
-  - **Impact**: Professional clean output - no visible `</s>`, `<|im_end|>`, `<|end|>` tokens
-  - **Test Coverage**: 47/48 comprehensive tests validate fix across all model architectures
+  - **Impact**: No more end tokens appearing in the final output in non-streaming mode
 
-### Test Infrastructure Improvements 🧪
-- **New Test Suite**: `tests/integration/test_end_token_issue.py` with 48 systematic tests
-- **RAM-Aware Testing**: Automatic model selection based on available system memory
-- **Flaky Test Fix**: Improved server lifecycle management with proper port cleanup
-- **Blocking Read Fix**: Fixed timeout issues in server startup validation tests
-- **Test Count**: 132/132 standard tests + 48 server tests (180 total)
+### Enhanced
+- Better default for `--max-tokens`: `None` → model-aware limits
+- Improved consistency between streaming and non-streaming generation
+- Clearer server logs indicating active token policies
 
-### Documentation Updates 📚
-- **TESTING.md**: New server test procedures, updated test counts (132/132), comprehensive server test guide
-- **Test Categories**: Clear separation of standard tests vs resource-intensive server tests
-- **Server Test Documentation**: RAM requirements, timing expectations, model compatibility
-
-### Architecture Quality 🏗️
-- **End-Token Consistency**: Streaming and non-streaming pipelines now identical in behavior
-- **Clean Code**: Unified filtering logic eliminates code duplication between pipelines  
-- **Regression Prevention**: Comprehensive test coverage prevents future End-Token issues
-- **Professional Output**: All models and modes produce clean, professional responses
-- **Test Stability**: Eliminated flaky tests and timeouts for reliable CI/CD
+### Technical
+- 15 new tests across server and CLI to validate token policies
+- Internal refactoring for token handling to avoid duplication
 
 ## [1.1.0-beta1] - 2025-08-21
 
-### Major Features 🚀
-- **Issues #15 & #16**: Dynamic Model-Aware Token Limits
-  - Eliminated hardcoded 500/2000 token defaults with intelligent model-based limits
-  - **Phi-3-mini**: 4096 context → 2048 server tokens, 4096 interactive (8x improvement)
-  - **Qwen2.5-30B**: 262,144 context → 131,072 server tokens, 262,144 interactive (524x improvement!)
-  - Context-aware policies: Interactive mode uses full context, server mode uses context/2 for DoS protection
-  - Automatic adaptation to new models with larger context windows (future-proof)
+### Added
+- Dynamic model-aware token limits (context-length sensitive)
+- CLI `--max-tokens` default changed to `None` (was 2000)
+- Server leverages the same dynamic limits
 
-### Enhanced Web Client 🌐  
-- **Model Token Capacity Display**: Shows "Ready with Mistral-7B (32,768 tokens)" in header
-- **Enhanced `/v1/models` API**: Now exposes `context_length` field for model capabilities
-- **Button State Management**: Clear Chat properly disabled during streaming with CSS styling
-- **Streaming Status Tracking**: Added `isStreaming` flag with "Generating response..." feedback
+### Improved
+- End-token filtering consistency across streaming and non-streaming modes
+- Robustness in model loading and memory management
 
-### Interactive Mode Improvements 💡
-- **Smart CLI Defaults**: `mlxk run <model> "prompt"` automatically uses optimal token limits per model
-- **No Configuration Needed**: Users benefit immediately without changing usage patterns
-- **Explicit Control Preserved**: `--max-tokens` arguments still respected and capped at model context
-- **Clean Type Safety**: Proper `Optional[int]` handling eliminates fragile CLI guessing
-
-### Technical Architecture 🏗️
-- **`get_model_context_length()` function**: Extracts context length from model configs with multiple fallback keys
-- **Enhanced MLXRunner**: `get_effective_max_tokens()` method for context-aware token limiting
-- **Server API Updates**: All endpoints use model-aware limits with DoS protection
-- **Unified Token Logic**: Single source of truth through MLXRunner eliminates duplicate code
-- **Backward Compatible**: All existing CLI arguments and APIs work unchanged
-
-### Performance Impact 📊
-- **Modern Models Unleashed**: Large-context models can now use their full capabilities
-- **Real-World Benefits**: No more artificial 500-token truncation for 100K+ context models  
-- **Smart Server Limits**: Automatic DoS protection while maximizing usable context
-- **Zero Magic Numbers**: Clean architecture with clear `None` vs explicit value semantics
-
-### Testing & Quality Assurance ✅
-- **Comprehensive Coverage**: 131/131 tests passing (expansion from 114 tests)
-- **20 new unit tests**: Covering CLI None-handling, model context extraction, effective token calculation
-- **5 server integration tests**: Real-world validation with actual MLX models
-- **Extreme Model Testing**: Validated with models from 1B to 30B parameters, up to 256K context
-- **Edge Case Handling**: Unknown models, missing configs, CLI argument combinations
-
-### Issue #14 Model Compatibility Validation
-**Chat Self-Conversation Fix tested across model spectrum:**
-
-| Model | Size | RAM (GB) | Context | Status | Architecture |
-|-------|------|----------|---------|--------|-------------|
-| **Llama-3.2-1B-Instruct-4bit** | 1B | 2 | 131,072 | ✅ PASSED | Llama |
-| **Llama-3.2-3B-Instruct-4bit** | 3B | 4 | 131,072 | ✅ PASSED | Llama |
-| **Phi-3-mini-4k-instruct-4bit** | 4B | 5 | 4,096 | ✅ PASSED | Phi-3 |
-| **Mistral-7B-Instruct-v0.2-4bit** | 7B | 8 | 32,768 | ✅ PASSED | Mistral |
-| **Mixtral-8x7B-Instruct-v0.1-4bit** | 8x7B | 16 | 32,768 | ✅ PASSED | Mixtral MoE |
-| **Mistral-Small-3.2-24B-Instruct-2506-4bit** | 24B | 20 | 32,768 | ✅ PASSED | Mistral |
-| **Qwen3-30B-A3B-Instruct-2507-4bit** | 30B | 24 | 262,144 | ✅ PASSED | Qwen |
-
-**Validation Results**: 7/7 models passed - comprehensive coverage from 1B to 30B parameters across all major MLX architectures ensures robust chat stop token handling.
-
-### Beta Status Notes ⚠️
-- **Core Functionality**: Solid foundation with comprehensive test coverage
-- **Known Limitation**: Server deadlock possible under extreme concurrent model loading stress
-- **Workaround**: Avoid simultaneous heavy model operations (normal usage unaffected)  
-- **Real-World Ready**: Significant improvements ready for community testing and feedback
+### Tests
+- 114/114 tests passing
+- Server tests behind `@pytest.mark.server` (opt-in)
 
 ## [1.0.4] - 2025-08-19
 
@@ -198,7 +136,7 @@
   - 🔄 Smart model switching: Choice to keep or clear chat history when switching models
   - 🌐 Responsive design: Full viewport height utilization, optimized screen space usage
   - 🎯 Clear UX: "Clear Chat" instead of ambiguous "Clear" button
-  - 🏴󠁧󠁢󠁥󠁮󠁧󠁿 English dialogs: Custom modal dialogs replace German OS dialogs
+  - 🏴 English dialogs: Custom modal dialogs replace German OS dialogs
 
 ### Added
 - **Automated Server Testing Infrastructure**:

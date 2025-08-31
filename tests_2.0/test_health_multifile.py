@@ -99,3 +99,39 @@ def test_partial_tmp_marker_is_unhealthy(isolated_cache):
     from mlxk2.operations.health import health_check_operation
     result = health_check_operation("test/partial")
     assert any(m["name"] == "test/partial" and m["status"] == "unhealthy" for m in result["data"]["unhealthy"])
+
+
+def _write_pt_idx(dir: Path, shards: list[str]):
+    idx = {
+        "metadata": {},
+        "weight_map": {f"layer{i}": shard for i, shard in enumerate(shards)}
+    }
+    (dir / "pytorch_model.bin.index.json").write_text(json.dumps(idx))
+
+
+def test_pytorch_index_missing_shard_is_unhealthy(isolated_cache):
+    snap = isolated_cache / "models--test--pt" / "snapshots" / "main"
+    snap.mkdir(parents=True)
+    shards = ["pytorch_model-00001-of-00002.bin", "pytorch_model-00002-of-00002.bin"]
+    _write_pt_idx(snap, shards)
+    # Create only one shard
+    (snap / shards[0]).write_bytes(b"ok")
+    (snap / "config.json").write_text(json.dumps({"model_type": "test"}))
+
+    from mlxk2.operations.health import health_check_operation
+    result = health_check_operation("test/pt")
+    assert any(m["name"] == "test/pt" and m["status"] == "unhealthy" for m in result["data"]["unhealthy"])
+
+
+def test_pytorch_index_complete_is_healthy(isolated_cache):
+    snap = isolated_cache / "models--test--pt2" / "snapshots" / "main"
+    snap.mkdir(parents=True)
+    shards = ["pytorch_model-00001-of-00002.bin", "pytorch_model-00002-of-00002.bin"]
+    _write_pt_idx(snap, shards)
+    for s in shards:
+        (snap / s).write_bytes(b"ok")
+    (snap / "config.json").write_text(json.dumps({"model_type": "test"}))
+
+    from mlxk2.operations.health import health_check_operation
+    result = health_check_operation("test/pt2")
+    assert any(m["name"] == "test/pt2" and m["status"] == "healthy" for m in result["data"]["healthy"])

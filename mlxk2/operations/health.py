@@ -66,9 +66,20 @@ def _check_snapshot_health(model_path):
     except (OSError, json.JSONDecodeError):
         return False, "config.json contains invalid JSON"
     
-    # If a multi-file safetensors index exists, enforce completeness
-    index_file = model_path / "model.safetensors.index.json"
-    if index_file.exists():
+    # Prefer safetensors index; else fall back to PyTorch index
+    sft_index = model_path / "model.safetensors.index.json"
+    pt_index = model_path / "pytorch_model.bin.index.json"
+    has_sft_files = any(model_path.rglob("*.safetensors"))
+    has_bin_files = any(model_path.rglob("*.bin"))
+
+    chosen_index = None
+    if sft_index.exists() and has_sft_files:
+        chosen_index = ("sft", sft_index)
+    elif pt_index.exists() and has_bin_files:
+        chosen_index = ("pt", pt_index)
+
+    if chosen_index is not None:
+        kind, index_file = chosen_index
         try:
             with open(index_file) as f:
                 index = json.load(f)
@@ -98,7 +109,7 @@ def _check_snapshot_health(model_path):
                 return False, f"LFS pointers instead of files: {', '.join(lfs_bad)}"
             return True, "Multi-file model complete"
         except (OSError, json.JSONDecodeError):
-            return False, "Invalid safetensors index file"
+            return False, "Invalid index file"
 
     # No index: Check weight files (supports common formats)
     weight_files = (

@@ -1,39 +1,91 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-alpha
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-alpha.1
 
-**JSON-First Model Management for Automation & Scripting**
+<p align="center">
+  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="1000">
+</p>
 
-> **🚧 Alpha Development Branch:** This is the `feature/2.0.0-json-only` branch containing MLX-Knife 2.0.0-alpha. For stable production use, see [MLX-Knife 1.1.0](https://github.com/mzau/mlx-knife/tree/main).
+## New: JSON-First Model Management for Automation & Scripting
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.0--alpha-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+> **🚧 Alpha Development:** Server and run are not included yet in 2.0.0-alpha.1. Use [MLX-Knife 1.1.0](https://github.com/mzau/mlx-knife/tree/main) for those features.
+
+**Stable Version: 1.1.0**
+
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0--alpha.1-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
+[![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
+[![Sponsor mlx-knife](https://img.shields.io/badge/Sponsor-mlx--knife-ff69b4?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/mzau)
+
 [![Tests](https://img.shields.io/badge/tests-45%2F45%20passing-brightgreen.svg)](#testing)
+
+## Features
+
+### Core Functionality
+- **List & Manage Models**: Browse your HuggingFace cache with MLX-specific filtering
+- **Model Information**: Detailed model metadata including quantization info
+- **Download Models**: Pull models from HuggingFace with progress tracking
+- **Run Models**: Native MLX execution with streaming and chat modes (version 1.0.0 stable only)
+- **Health Checks**: Verify model integrity and completeness
+- **Cache Management**: Clean up and organize your model storage
+
+### Requirements
+- macOS with Apple Silicon (M1/M2/M3)
+- Python 3.9+ (native macOS version or newer)
+- 8GB+ RAM recommended + RAM to run LLM
+
+### Python Compatibility
+MLX Knife has been comprehensively tested and verified on:
+
+✅ **Python 3.9.6** (native macOS) - Primary target  
+✅ **Python 3.10-3.13** - Fully compatible  
+
+
 
 ## Quick Start
 
 ```bash
 # Installation (local development)
-git clone https://github.com/mzau/mlx-knife.git -b feature/2.0.0-json-only
+git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 pip install -e .
-
-# Basic usage - JSON API
-mlxk-json list --json | jq '.data.models[].name'
-mlxk-json health --json | jq '.data.summary'
-mlxk-json show "Phi-3-mini" --json | jq '.data.model_info'
+```
+# Install with development tools (ruff, mypy, tests)
+pip install -e ".[dev,test]"
 ```
 
-**What's New:** JSON-first architecture for automation and scripting  
-**What's Missing:** Server mode, run command (use MLX-Knife 1.x for those)
+## Human output (default)
+mlxk2 list
+mlxk2 list --health
+mlxk2 list --all --verbose
+mlxk2 health
+mlxk2 show "mlx-community/Phi-3-mini-4k-instruct-4bit"
+
+## JSON API
+mlxk2 list --json | jq '.data.models[].name'
+mlxk2 health --json | jq '.data.summary'
+mlxk2 show "Phi-3-mini" --json | jq '.data.model'
+```
+
+## Differences vs 1.0.0
+
+- CLI: new entry points `mlxk2` and `mlxk-json` (1.0.0 used `mlxk`).
+- Output: human output by default; add `--json` for machine-readable responses (new vs 1.0.0).
+- List formatting: improved compact table with relative times in the Modified column (e.g., 3h ago) and a new Type column; compact MLX-only view by default.
+- Flags (human-only): `--all` (all frameworks), `--health` (add Health column), `--verbose` (show full `org/model`).
+- JSON API: unchanged schema vs spec v0.1.2; CLI accepts `--json` after subcommands.
+- Missing features (compared to 1.0.0): server and run are not included in 2.0 alpha.1 (use `mlxk` 1.x).
 
 ## ⚠️ Alpha Status Disclaimer
 
-MLX-Knife 2.0.0-alpha is **feature-complete for JSON operations** with production-quality reliability:
+This is an alpha because:
+- Not feature-complete vs 1.0.0 (server and run pending).
+- Major internal refactor to a JSON-first CLI (new package `mlxk2`).
 
-- ✅ **Core functionality works:** All 5 commands (`list`, `health`, `show`, `pull`, `rm`)
-- ✅ **Test status:** 45/45 passing with comprehensive edge case coverage
-- ✅ **Production use:** Suitable for broke-cluster integration and automation
-- ✅ **Parallel use:** Deploy alongside MLX-Knife 1.x for server functionality
+Status:
+- ✅ Core commands: `list`, `health`, `show`, `pull`, `rm`.
+- ✅ JSON outputs stable and schema-aligned; human output available by default.
+- ✅ Suitable for automation/integration; can run alongside 1.x for server/run.
 
 ## What 2.0.0-alpha Includes
 
@@ -51,7 +103,7 @@ MLX-Knife 2.0.0-alpha is **feature-complete for JSON operations** with productio
 |---------|----------------|---------|
 | 🔄 `server` | 2.0.0-rc | OpenAI-compatible API server |
 | 🔄 `run` | 2.0.0-rc | Interactive model execution |
-| 🔄 Human-readable output | 2.0.0-rc | CLI formatting layer |
+| ✅ Human-readable output | 2.0.0-alpha.1 | CLI formatting layer |
 | 🔄 `embed` | TBD | Embedding generation (if merged from 1.x) |
 
 ## Installation & Parallel Usage
@@ -63,8 +115,8 @@ MLX-Knife 2.0.0-alpha is **feature-complete for JSON operations** with productio
 pip install -e /path/to/mlx-knife
 
 # Verify installation
-mlxk-json --version  # → MLX-Knife JSON 2.0.0-alpha
-mlxk2 --version      # → MLX-Knife JSON 2.0.0-alpha
+mlxk-json --version  # → mlxk2 2.0.0-alpha.1
+mlxk2 --version      # → mlxk2 2.0.0-alpha.1
 ```
 
 ### Parallel with MLX-Knife 1.x
@@ -90,7 +142,7 @@ python -m mlxk2.cli list     # 2.0 - Module invocation
 
 ## JSON API Documentation
 
-> **📋 Complete API Specification**: See [docs/json-api-specification.md](docs/json-api-specification.md) for comprehensive JSON schema, error codes, and integration examples.
+> **📋 Complete API Specification**: See the JSON API spec on GitHub for comprehensive schema, error codes, and examples: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
 
 ### Command Structure
 
@@ -107,24 +159,32 @@ All commands follow this JSON response format:
 
 ### Examples
 
+For full, up-to-date examples for every command, refer to the spec on GitHub: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
+
 #### List Models
 ```bash
 mlxk-json list --json
 # Output:
 {
-    "status": "success",
-    "command": "list", 
-    "data": {
-        "models": [
-            {
-                "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
-                "hashes": ["e9675aa3def456789abcdef0123456789abcdef0"],
-                "cached": true
-            }
-        ],
-        "count": 1
-    },
-    "error": null
+  "status": "success",
+  "command": "list",
+  "data": {
+    "models": [
+      {
+        "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
+        "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
+        "size_bytes": 4613734656,
+        "last_modified": "2024-10-15T08:23:41Z",
+        "framework": "MLX",
+        "model_type": "chat",
+        "capabilities": ["text-generation", "chat"],
+        "health": "healthy",
+        "cached": true
+      }
+    ],
+    "count": 1
+  },
+  "error": null
 }
 ```
 
@@ -133,21 +193,46 @@ mlxk-json list --json
 mlxk-json health --json
 # Output:
 {
-    "status": "success",
-    "command": "health",
-    "data": {
-        "healthy": [...],
-        "unhealthy": [...],
-        "summary": {"total": 5, "healthy_count": 4, "unhealthy_count": 1}
-    },
-    "error": null
+  "status": "success",
+  "command": "health",
+  "data": {
+    "healthy": [
+      { "name": "mlx-community/Phi-3-mini-4k-instruct-4bit", "status": "healthy", "reason": "Model is healthy" }
+    ],
+    "unhealthy": [],
+    "summary": { "total": 1, "healthy_count": 1, "unhealthy_count": 0 }
+  },
+  "error": null
 }
 ```
 
 #### Show Model Details
 ```bash
 mlxk-json show "Phi-3-mini" --json --files
-# Output includes file listings, model config, capabilities
+# Output (simplified):
+{
+  "status": "success",
+  "command": "show",
+  "data": {
+    "model": {
+      "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
+      "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
+      "size_bytes": 4613734656,
+      "framework": "MLX",
+      "model_type": "chat",
+      "capabilities": ["text-generation", "chat"],
+      "last_modified": "2024-10-15T08:23:41Z",
+      "health": "healthy",
+      "cached": true
+    },
+    "files": [
+      {"name": "config.json", "size": "1.2KB", "type": "config"},
+      {"name": "model.safetensors", "size": "2.3GB", "type": "weights"}
+    ],
+    "metadata": null
+  },
+  "error": null
+}
 ```
 
 ### Hash Syntax Support
@@ -185,7 +270,7 @@ mlxk-json health --json | jq '.data.summary'
 
 ## Real-World Examples
 
-> **🔗 Integration Reference**: External projects should implement against [docs/json-api-specification.md](docs/json-api-specification.md) - this alpha phase helps validate that specification matches actual implementation.
+> **🔗 Integration Reference**: External projects should implement against the JSON API spec on GitHub — this alpha phase validates that implementation matches documentation: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
 
 ### Broke-Cluster Integration
 ```bash
@@ -243,7 +328,7 @@ pytest tests/ -v
 # - Model naming logic
 # - Robustness testing
 
-# Current status: 45/45 passing ✅
+# Current status: all current 2.0 tests pass (some optional schema tests may be skipped without extras)
 ```
 
 **Revolutionary Test Architecture:**
@@ -258,9 +343,8 @@ pytest tests/ -v
 - **Health Check False Positive**: Health check may report incomplete downloads as healthy during model pull operations (affects both 1.1.0 and 2.0.0-alpha)
 
 ### Alpha Limitations
-- No interactive prompts (use `--force` flag for rm operations)
-- JSON output only (no human-readable formatting)
-- Limited error message user experience (coming in beta)
+- Server and run not included (use 1.x)
+- Limited error message UX in some paths (to be refined)
 
 ### GitHub Issues
 - **Issue #18**: Server signal handling limitation (known, will fix in 2.0.0-rc)
@@ -301,7 +385,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 - **Issues**: [GitHub Issues](https://github.com/mzau/mlx-knife/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/mzau/mlx-knife/discussions)
-- **API Specification**: [docs/json-api-specification.md](docs/json-api-specification.md) - Complete JSON schema
+- **API Specification**: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
 - **Documentation**: See `docs/` directory for technical details
 
 **For production use**: Consider MLX-Knife 1.1.0 until 2.0.0-beta is available.
@@ -316,33 +400,29 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 *MLX-Knife 2.0.0-alpha - Built for automation, tested for reliability, designed for the future.*
 
-## Local Safety Setup (Optional)
+## Sponsors
 
-To keep local coordination files out of Git and avoid accidental pushes during development:
+<div align="left" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+  <a href="https://github.com/tileslauncher" title="Tiles Launcher">
+    <img src="https://github.com/tileslauncher.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
+  </a>
+</div>
 
-- Ignore locally (branch-independent): add to `.git/info/exclude`
-  - `AGENTS.md`
-  - `CLAUDE.md`
-- Local hooks (not versioned):
-  - `.git/hooks/pre-commit` blocks commits including `AGENTS.md`/`CLAUDE.md`.
-  - `.git/hooks/pre-push` blocks pushes of the current branch. Override once with `ALLOW_PUSH=1 git push`.
+Support this project: [GitHub Sponsors → mlx-knife](https://github.com/sponsors/mzau)
 
-Minimal pre-commit example:
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-staged=$(git diff --cached --name-only || true)
-for f in AGENTS.md CLAUDE.md; do
-  echo "$staged" | grep -qx "$f" && { echo "Commit blocked: $f" >&2; exit 1; }
-done
-```
+Special thanks to early supporters and users providing feedback during the 2.0 alpha.
 
-Minimal pre-push example:
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-[ "${ALLOW_PUSH:-}" = "1" ] && exit 0
-br=$(git rev-parse --abbrev-ref HEAD)
-while read -r l _ r _; do [ "$l" = "refs/heads/$br" ] && { echo "Push blocked: $br" >&2; exit 1; }; done
-exit 0
-```
+
+## Acknowledgments
+
+- Built for Apple Silicon using the [MLX framework](https://github.com/ml-explore/mlx)
+- Models hosted by the [MLX Community](https://huggingface.co/mlx-community) on HuggingFace
+- Inspired by [ollama](https://ollama.ai)'s user experience
+
+---
+
+<p align="center">
+  <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
+  <i>Version 2.0.0-alpha.1 | September 2025</i><br>
+  <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
+</p> 

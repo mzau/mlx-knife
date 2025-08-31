@@ -2,7 +2,7 @@
 # Note: removed set -e to allow script to continue through all Python versions
 # Individual error handling is done explicitly in each test section
 
-echo "🧪 MLX Knife Multi-Python Version Testing"
+echo "🧪 MLX Knife 2.0 (mlxk2) Multi-Python Version Testing"
 echo "=========================================="
 echo "Prerequisites: Python versions should be available as:"
 echo "  - python3 (3.9+ - system default)"
@@ -52,26 +52,29 @@ test_python_version() {
     source "$venv_name/bin/activate"
     
     # Upgrade pip and install MLX Knife
-    echo "📦 Installing MLX Knife..."
-    pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+    echo "📦 Installing MLX Knife (2.0) ..."
+    local install_log="install_${version_name//./_}.log"
+    pip install --upgrade pip setuptools wheel > "$install_log" 2>&1
     
-    if pip install -e ".[dev,test]" > /dev/null 2>&1; then
+    if pip install -e ".[test]" >> "$install_log" 2>&1; then
         echo -e "${GREEN}✅ Installation successful${NC}"
+        echo "🧰 Ensuring tooling (ruff, mypy)..."
+        pip install -q "ruff>=0.1.0" "mypy>=1.5.0" >> "$install_log" 2>&1 || true
         
         # Run smoke test
-        echo "🧪 Running import test (this may take up to 2 minutes for MLX)..."
-        if python -c "import mlx_knife.cli; print('Import successful')"; then
+        echo "🧪 Running import test (mlxk2)..."
+        if python -c "import mlxk2, mlxk2.cli; print('Import successful')"; then
             echo -e "${GREEN}✅ Import test passed${NC}"
             
             # Try basic CLI command
-            echo "🧪 Testing CLI help..."
-            if python -m mlx_knife.cli --help > /dev/null 2>&1; then
-                echo -e "${GREEN}✅ CLI test passed${NC}"
+            echo "🧪 Testing CLI version (JSON)..."
+            if python -m mlxk2.cli --version --json > /dev/null 2>&1; then
+                echo -e "${GREEN}✅ CLI test (version) passed${NC}"
                 
                 # Run complete test suite
-                echo "🧪 Running FULL test suite (this takes 5-10 minutes)..."
+                echo "🧪 Running 2.0 test suite..."
                 local test_log="test_results_${version_name//./_}.log"
-                if python -m pytest tests/ -v --tb=short > "$test_log" 2>&1; then
+                if python -m pytest tests_2.0/ -v --tb=short > "$test_log" 2>&1; then
                     local passed_count=$(grep -c "PASSED" "$test_log" 2>/dev/null)
                     local failed_count=$(grep -c "FAILED" "$test_log" 2>/dev/null)
                     passed_count=${passed_count:-0}
@@ -82,51 +85,24 @@ test_python_version() {
                         echo -e "${GREEN}✅ Full test suite passed ($passed_count/$test_count tests)${NC}"
                         
                         # Code quality checks
-                        echo "🧪 Running code quality checks..."
+                        echo "🧪 Running code quality checks (mlxk2)..."
                         
-                        # Check if ruff is properly installed
-                        if python -c "import ruff" > /dev/null 2>&1; then
-                            local ruff_log="ruff_${version_name//./_}.log"
-                            echo "🧪 Running ruff check (logging to $ruff_log)..."
-                            if python -m ruff check mlx_knife/ > "$ruff_log" 2>&1; then
-                                echo -e "${GREEN}✅ ruff linting passed${NC}"
-                                
-                                # Note: mypy might have many warnings, so we allow it to "fail" but still continue
-                                python -m mypy mlx_knife/ --ignore-missing-imports > mypy_${version_name//./_}.log 2>&1
-                                local mypy_errors=$(grep -c "error:" mypy_${version_name//./_}.log 2>/dev/null || echo "0")
-                                echo -e "${YELLOW}ℹ️  mypy check complete ($mypy_errors errors found)${NC}"
-                                
-                                RESULTS+=("${version_name}:FULL_SUCCESS:${passed_count}tests")
-                            else
-                                local ruff_error_count=$(grep -c "Found .* error" "$ruff_log" 2>/dev/null || echo "unknown")
-                                echo -e "${RED}❌ ruff linting failed ($ruff_error_count errors)${NC}"
-                                echo "   See $ruff_log for details"
-                                RESULTS+=("${version_name}:RUFF_FAILED")
-                            fi
+                        local ruff_log="ruff_${version_name//./_}.log"
+                        echo "🧪 Running ruff check on mlxk2 (logging to $ruff_log)..."
+                        if python -m ruff check mlxk2/ > "$ruff_log" 2>&1; then
+                            echo -e "${GREEN}✅ ruff linting passed${NC}"
+                            
+                            # Note: mypy might have many warnings, so we allow it to "fail" but still continue
+                            python -m mypy mlxk2/ --ignore-missing-imports > mypy_${version_name//./_}.log 2>&1
+                            local mypy_errors=$(grep -c "error:" mypy_${version_name//./_}.log 2>/dev/null || echo "0")
+                            echo -e "${YELLOW}ℹ️  mypy check complete ($mypy_errors errors found)${NC}"
+                            
+                            RESULTS+=("${version_name}:FULL_SUCCESS:${passed_count}tests")
                         else
-                            echo -e "${RED}❌ ruff not properly installed, trying to install...${NC}"
-                            if pip install ruff>=0.1.0 > /dev/null 2>&1; then
-                                echo "🔧 ruff installed, retrying check..."
-                                local ruff_log="ruff_${version_name//./_}.log"
-                                if python -m ruff check mlx_knife/ > "$ruff_log" 2>&1; then
-                                    echo -e "${GREEN}✅ ruff linting passed${NC}"
-                                    
-                                    # Note: mypy might have many warnings, so we allow it to "fail" but still continue
-                                    python -m mypy mlx_knife/ --ignore-missing-imports > mypy_${version_name//./_}.log 2>&1
-                                    local mypy_errors=$(grep -c "error:" mypy_${version_name//./_}.log 2>/dev/null || echo "0")
-                                    echo -e "${YELLOW}ℹ️  mypy check complete ($mypy_errors errors found)${NC}"
-                                    
-                                    RESULTS+=("${version_name}:FULL_SUCCESS:${passed_count}tests")
-                                else
-                                    local ruff_error_count=$(grep -c "Found .* error" "$ruff_log" 2>/dev/null || echo "unknown")
-                                    echo -e "${RED}❌ ruff linting failed after installation ($ruff_error_count errors)${NC}"
-                                    echo "   See $ruff_log for details"
-                                    RESULTS+=("${version_name}:RUFF_FAILED")
-                                fi
-                            else
-                                echo -e "${RED}❌ Could not install ruff${NC}"
-                                RESULTS+=("${version_name}:RUFF_INSTALL_FAILED")
-                            fi
+                            local ruff_error_count=$(grep -c "Found .* error" "$ruff_log" 2>/dev/null || echo "unknown")
+                            echo -e "${RED}❌ ruff linting failed ($ruff_error_count errors)${NC}"
+                            echo "   See $ruff_log for details"
+                            RESULTS+=("${version_name}:RUFF_FAILED")
                         fi
                     else
                         echo -e "${RED}❌ Test suite failed ($passed_count passed, $failed_count failed)${NC}"
@@ -147,6 +123,7 @@ test_python_version() {
         fi
     else
         echo -e "${RED}❌ Installation failed${NC}"
+        echo "   See $install_log for details"
         RESULTS+=("${version_name}:INSTALL_FAILED")
     fi
     
@@ -250,7 +227,7 @@ if [ $fully_verified_count -ge 2 ] && [ $failed_count -eq 0 ]; then
     echo "   1. Update README.md with verified Python versions"
     echo "   2. Update pyproject.toml requires-python based on results"
     echo "   3. Document verified versions: ${fully_verified_versions[*]}"
-    echo "   4. Safe to tag and release MLX Knife 1.0-rc1"
+    echo "   4. Safe to tag and release (alpha.1)"
     exit_code=0
 else
     echo "🔧 WORK NEEDED:"
