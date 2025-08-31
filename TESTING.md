@@ -2,7 +2,7 @@
 
 ## Current Status
 
-✅ **150/150 tests passing** (August 2025) - **STABLE RELEASE** 🚀  
+✅ **160/160 tests passing** (September 2025) - **STABLE RELEASE + Pre-release** 🚀  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
 ✅ **Production ready** - comprehensive testing with real model execution
@@ -55,11 +55,13 @@ tests/
 │   ├── test_end_token_issue.py             # Issue #20: End-token filtering (@server)
 │   ├── test_issue_14.py                    # Issue #14: Chat self-conversation (@server)
 │   └── test_issue_15_16.py                 # Issues #15/#16: Dynamic token limits (@server)
-└── unit/                              # Module-level unit tests (72 tests)
+└── unit/                              # Module-level unit tests (82 tests)
     ├── test_cache_utils.py                 # Cache management & Issue #21/#23 tests
     ├── test_cli.py                         # CLI argument parsing
+    ├── test_health_multishard.py           # Strict multi-shard/index health (Issue #27)
     └── test_mlx_runner_memory.py           # Memory management tests
 ```
+
 
 ## 3-Category Test Strategy (MLX Knife 1.1.0+)
 

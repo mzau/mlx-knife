@@ -9,7 +9,7 @@ import warnings
 
 warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
 
-__version__ = "1.1.0"
+__version__ = "1.1.1b1"
 __author__ = "The BROKE team"
 __email__ = "broke@gmx.eu"
 __license__ = "MIT"
@@ -17,7 +17,7 @@ __description__ = "ollama-style CLI for MLX models on Apple Silicon"
 __url__ = "https://github.com/mzau/mlx-knife"
 
 # Version tuple for programmatic access (major, minor, patch)
-VERSION = (1, 1, 0)
+VERSION = (1, 1, 1)
 
 # Core functionality imports
 from .cache_utils import (
