@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "status": {"type": "string", "enum": ["success", "error"]},
-    "command": {"type": "string", "enum": ["list", "show", "health", "pull", "rm", "version"]},
+    "command": {"type": "string", "enum": ["list", "show", "health", "pull", "rm", "version", "push"]},
     "api_version": {"type": "string", "pattern": "^json-[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "data": {"type": ["object", "null"]},
     "error": {
@@ -219,6 +219,33 @@
                   "message": {"type": "string"}
                 },
                 "required": ["action"]
+              }
+            }
+          },
+          "else": {}
+        },
+        {
+          "if": {
+            "allOf": [
+              {"properties": {"status": {"const": "success"}}},
+              {"properties": {"command": {"const": "push"}}}
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "repo_id": {"type": "string"},
+                  "branch": {"type": "string"},
+                  "commit_sha": {"type": ["string", "null"]},
+                  "repo_url": {"type": "string"},
+                  "uploaded_files_count": {"type": ["integer", "null"], "minimum": 0},
+                  "experimental": {"type": "boolean"},
+                  "disclaimer": {"type": "string"}
+                },
+                "required": ["repo_id", "branch", "repo_url"]
               }
             }
           },

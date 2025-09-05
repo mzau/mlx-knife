@@ -64,25 +64,223 @@ tests_2.0/
     └── test_spec_version_sync.py    # docs version == code constant
 ```
 
-```
-tests/
-├── conftest.py                         # Shared fixtures and utilities
-├── integration/                        # System-level integration tests (78 tests)
-│   ├── test_core_functionality.py          # Basic CLI operations (isolated cache)
-│   ├── test_health_checks.py               # Model corruption detection (isolated cache)
-│   ├── test_lock_cleanup_bug.py            # Issue #23: Lock cleanup (isolated cache)
-│   ├── test_process_lifecycle.py           # Process management (isolated cache)
-│   ├── test_real_model_lifecycle.py        # Full model lifecycle (isolated cache)
-│   ├── test_run_command_advanced.py        # Run command edge cases (isolated cache)
-│   ├── test_server_functionality.py        # Server lifecycle tests
-│   ├── test_end_token_issue.py             # Issue #20: End-token filtering (@server)
-│   ├── test_issue_14.py                    # Issue #14: Chat self-conversation (@server)
-│   └── test_issue_15_16.py                 # Issues #15/#16: Dynamic token limits (@server)
-└── unit/                              # Module-level unit tests (72 tests)
-    ├── test_cache_utils.py                 # Cache management & Issue #21/#23 tests
-    ├── test_cli.py                         # CLI argument parsing
-    └── test_mlx_runner_memory.py           # Memory management tests
-```
+Note: This tree is illustrative (not exhaustive). Push-related tests are documented in the dedicated "Push Testing (2.0)" section below to avoid drift.
+
+## Push Testing (2.0)
+
+This section summarizes what our test suite covers for the experimental `push` feature and what still requires live/manual checks.
+
+### Reference: Push CLI and JSON
+
+- Usage: `mlxk2 push <local_dir> <org/model> --private [--create] [--branch main] [--commit <msg>] [--check-only] [--json] [--verbose]`
+- Args:
+  - `--private` (required in alpha): Safety gate to avoid public uploads.
+  - `--create`: Create the repository if it does not exist (model repo).
+  - `--branch`: Target branch, default `main`.
+  - `--commit`: Commit message, default `"mlx-knife push"`.
+  - `--check-only`: Analyze workspace locally; no network call; returns `data.workspace_health`.
+  - `--dry-run`: Compare local workspace to the remote branch and summarize changes without uploading (requires repo read access).
+  - `--json`: Print JSON response; in JSON mode, logs/progress are suppressed by default.
+  - `--verbose`: Human mode — append details (e.g., commit URL). In JSON mode, only toggles console log verbosity; the JSON payload is unchanged.
+
+- JSON fields (`data`):
+  - `repo_id: string` — target `org/model`.
+  - `branch: string` — target branch.
+  - `commit_sha: string|null` — commit id; null when `no_changes:true` or on noop.
+  - `commit_url: string|null` — link to commit; null when no commit created.
+  - `repo_url: string` — `https://huggingface.co/<org/model>`.
+  - `uploaded_files_count: int|null` — number of changed files; set to `0` on `no_changes:true`.
+  - `local_files_count: int|null` — approximate local file count scanned.
+  - `no_changes: boolean` — true when hub reports an empty commit (preferred signal) or no file operations are detected.
+  - `created_repo: boolean` — true when repo was created (with `--create`).
+  - `change_summary: {added:int, modified:int, deleted:int}` — optional; derived from hub response when available.
+  - `message: string|null` — short human hint; mirrors hub on no‑op.
+  - `hf_logs: string[]` — buffered hub log lines (not printed in JSON mode unless `--verbose`).
+  - `experimental: true` and `disclaimer: string` — feature state markers.
+  - `workspace_health: {...}` — present only with `--check-only`:
+    - `healthy: bool`, `anomalies: []`, `config`, `weights.index`, `weights.pattern_complete`, etc.
+  - `dry_run: true` — present only with `--dry-run`.
+  - `dry_run_summary: {added:int, modified:int, deleted:int}` — present with `--dry-run`.
+  - `would_create_repo: bool` / `would_create_branch: bool` — planning hints when target does not exist.
+
+- Error types (`error.type`):
+  - `dependency_missing` — `huggingface-hub` not installed.
+  - `auth_error` — missing `HF_TOKEN` (unless `--check-only`).
+  - `workspace_not_found` — local_dir missing/not a directory.
+  - `repo_not_found` — repo missing without `--create`.
+  - `upload_failed` — hub returned an error (e.g., 403/permission).
+  - `push_operation_failed` — unexpected internal failure wrapper.
+
+- Exit codes: success → `0`; any `status:error` → `1`.
+
+Notes on output verbosity and behavior
+- JSON is quiet by default: only the final JSON object is printed. Use `--verbose` to allow hub logs/progress to reach the console (the JSON payload remains unchanged). For assertions, prefer `data.hf_logs`.
+- Human mode is chatty by default: progress + one‑liner summary. `--verbose` appends the commit URL when present.
+- No‑changes detection: If the hub reports “No files have been modified… Skipping to prevent empty commit.”, JSON sets `no_changes: true`, `uploaded_files_count: 0`, and nulls `commit_sha`/`commit_url`. Human shows “— no changes”. This hub signal is preferred over inferring from file lists.
+ - `--dry-run` human output: prints a concise plan line `dry-run: +A ~M -D` (modifications are an approximation and may be `~?` in rare cases).
+
+Examples (expected)
+- No‑op re‑push (JSON): `commit_sha: null`, `commit_url: null`, `uploaded_files_count: 0`, `no_changes: true`, `message` mirrors hub text, `hf_logs` contains hub lines.
+- Commit (JSON): `commit_sha`/`commit_url` populated; `uploaded_files_count == sum(change_summary.values())`; `message` summarizes counts.
+
+- Dry-run (existing repo/branch, no changes) — JSON:
+  ```json
+  {
+    "status": "success",
+    "command": "push",
+    "error": null,
+    "data": {
+      "repo_id": "org/model",
+      "branch": "main",
+      "commit_sha": null,
+      "commit_url": null,
+      "repo_url": "https://huggingface.co/org/model",
+      "uploaded_files_count": 0,
+      "local_files_count": 11,
+      "no_changes": true,
+      "created_repo": false,
+      "message": "Dry-run: no changes",
+      "experimental": true,
+      "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review results on the Hub.",
+      "dry_run": true,
+      "dry_run_summary": {"added": 0, "modified": null, "deleted": 0},
+      "change_summary": {"added": 0, "modified": 0, "deleted": 0},
+      "would_create_repo": false,
+      "would_create_branch": false,
+      "added_files": [],
+      "deleted_files": []
+    }
+  }
+  ```
+
+- Dry-run (existing repo/branch, changes present) — JSON:
+  ```json
+  {
+    "status": "success",
+    "command": "push",
+    "error": null,
+    "data": {
+      "repo_id": "org/model",
+      "branch": "main",
+      "commit_sha": null,
+      "commit_url": null,
+      "repo_url": "https://huggingface.co/org/model",
+      "uploaded_files_count": 0,
+      "local_files_count": 11,
+      "no_changes": false,
+      "created_repo": false,
+      "message": "Dry-run: +2 ~? -1",
+      "experimental": true,
+      "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review results on the Hub.",
+      "dry_run": true,
+      "dry_run_summary": {"added": 2, "modified": null, "deleted": 1},
+      "change_summary": {"added": 2, "modified": 0, "deleted": 1},
+      "would_create_repo": false,
+      "would_create_branch": false,
+      "added_files": ["new.txt", "weights/model.safetensors"],
+      "deleted_files": ["old.txt"]
+    }
+  }
+  ```
+
+- Dry-run — Human output:
+  ```
+  push (experimental): org/model@main — dry-run: no changes
+  push (experimental): org/model@main — dry-run: +2 ~? -1
+  ```
+
+Spec/Schema
+- The JSON API spec version and schema live in `mlxk2/spec.py` and `docs/json-api-specification.md`. The docs schema includes support for `command: "push"` and its fields. Keep tests in sync with those sources of truth.
+
+**Automated (offline)**
+- **Token/Workspace errors:** Missing `HF_TOKEN` and missing workspace produce proper JSON errors.
+- **CLI args (JSON mode):** Missing positional args emit JSON errors rather than usage text.
+- **Schema shape:** Push success/error outputs validate against `docs/json-api-schema.json`.
+- **No-op push:** Detects `no_changes: true`, sets `uploaded_files_count: 0`, carries hub message into JSON (`message`/`hf_logs`), and human output shows "no changes" without duplicate logs.
+- **Commit path:** Extracts `commit_sha`, `commit_url`, `change_summary` (+/~/−), correct `uploaded_files_count`; human `--verbose` includes URL.
+- **Repo/Branch handling:** Missing repo requires `--create`; with `--create` sets `created_repo: true`. Missing branch is tolerated; upload creates it.
+- **Ignore rules:** `.hfignore` is merged with default ignores and forwarded to the hub.
+
+Files:
+- `tests_2.0/test_cli_push_args.py` (CLI errors and JSON outputs)
+- `tests_2.0/test_push_extended.py` (no-op vs commit, branch/repo, .hfignore, human)
+- `tests_2.0/spec/test_push_output_matches_schema.py` (schema success path)
+
+Run (venv39):
+- `source venv39/bin/activate && pip install -e .`
+- `pytest -q tests_2.0/test_cli_push_args.py tests_2.0/test_push_extended.py`
+- `pytest -q tests_2.0/spec/test_push_output_matches_schema.py`
+
+**Live (opt-in / wet)**
+- Purpose: sanity-check real HF behavior (auth, no-op vs commit, URLs).
+- Defaults: Live tests are skipped. Enable with env vars and markers.
+- Env:
+  - `MLXK2_LIVE_PUSH=1`
+  - `HF_TOKEN` (write-enabled)
+  - `MLXK2_LIVE_REPO='org/model'`
+  - `MLXK2_LIVE_WORKSPACE='/abs/path/to/workspace'`
+- Command:
+  - `pytest -q -m wet tests_2.0/live/test_push_live.py`
+  - or `pytest -q -m live_push`
+- Notes:
+  - Live test does not use `--create` (safety). If the repo does not exist, create it once manually.
+  - Manual create example: `mlxk2 push --private --create "$MLXK2_LIVE_WORKSPACE" "$MLXK2_LIVE_REPO" --json`
+
+**Manual Checklist (Live)**
+- **Create repo (first time):** `--private --create` → expect `created_repo: true`, private repo on HF.
+- **No-op re-push:** identical workspace → `no_changes: true`, `uploaded_files_count: 0`, concise human "no changes".
+- **Commit after change:** edit a small file → push shows `commit_sha`, `commit_url`, `change_summary` matches expectations.
+- **.hfignore behavior:** add ignores (e.g., `.idea/`, `.vscode/`, `*.ipynb`) → verify excluded on HF.
+- Optional errors: invalid token or missing rights → JSON `error` (`upload_failed` / auth error), clear message.
+
+Human vs JSON:
+- Human output is derived from JSON only; hub logs are not printed directly.
+- Use `--verbose` with human output to append the commit URL or short message; JSON content stays the same structurally.
+
+## Manual MLX Chat Model Smoke Test (2.0)
+
+Goal: Pull a small MLX chat model, verify classification, prepare a local workspace, validate it offline, and push to a private repo while preserving chat intent. This helps issuers validate iOS‑focused workflows.
+
+Model choice (example)
+- `mlx-community/Qwen2.5-0.5B-Instruct-4bit` (small, chat‑oriented)
+
+Steps
+- Pull (venv39):
+  - `mlxk2 pull mlx-community/Qwen2.5-0.5B-Instruct-4bit`
+- Verify in cache:
+  - `mlxk2 list --health "Qwen2.5-0.5B-Instruct-4bit"`
+  - Expect: Framework MLX, Type chat, capabilities include chat
+- Prepare local workspace from cache (dereference symlinks):
+  - Ensure `HF_HOME` points to your HF cache (optional, but recommended)
+  - Compute cache path: `$HF_HOME/models--mlx-community--Qwen2.5-0.5B-Instruct-4bit`
+  - Find latest snapshot hash under `snapshots/`
+  - Copy to workspace and dereference symlinks:
+    - `rsync -aL "$HF_HOME/models--mlx-community--Qwen2.5-0.5B-Instruct-4bit/snapshots/<HASH>/" ./mymodel_test_workspace/`
+- Recommended README front‑matter (to preserve intent on push):
+  - Include YAML with tags and pipeline tag, e.g.
+    - `tags: [mlx, chat]`
+    - `pipeline_tag: text-generation`
+    - `base_model: <upstream_base>`
+  - Keep model name containing `Instruct` or `chat` to aid chat detection
+- Offline validation (no network):
+  - `mlxk2 push --check-only ./mymodel_test_workspace <org/model> --json`
+  - Expect: `workspace_health.healthy: true`; ensure tokenizer present (`tokenizer.json` or `tokenizer.model`) and at least one non‑empty weight file
+- Push to private repo:
+  - `mlxk2 push --private --create ./mymodel_test_workspace <org/model> --json`
+  - Re‑push without changes should show `no_changes: true`
+- Post‑push verification:
+  - `mlxk2 list --all --health <org/model>`
+  - Current limitation: Framework may show `PyTorch` for non‑`mlx-community` orgs due to conservative detection. This does not affect content; future M1 will parse model card tags (`mlx`) to classify MLX across orgs.
+
+Notes
+- Ensure tokenizer files exist (tokenizer.json/tokenizer.model) and optional generation_config.json for runnable chat contexts.
+- Avoid pushing unwanted files; use `.hfignore` for project‑specific filters.
+
+### 1.x Legacy Test Suite (separate)
+
+- Location: `tests/` (stable 1.x release on `main`).
+- Not part of the 2.0 default run; execute explicitly with `pytest tests/ -v`.
+- Contains extensive integration/server tests unrelated to the 2.0 JSON CLI.
 
 ## 3-Category Test Strategy (MLX Knife 1.1.0+)
 
@@ -392,6 +590,30 @@ mypy mlx_knife/
 # Complete development workflow
 ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
 ```
+
+## Mini‑Matrix: What runs by default vs markers
+
+| Target | How to Run | Markers / Env | Includes | Network |
+|---|---|---|---|---|
+| Default 2.0 suite | `pytest -v` | — | JSON‑API (list/show/health), Human‑Output, Model‑Resolution, Health‑Policy, Push Offline (`--check-only`, `--dry-run`), Spec/Schema checks | No |
+| Spec‑only | `pytest -m spec -v` | `spec` | Schema/contract tests, version sync, docs example validation | No |
+| Exclude Spec | `pytest -m "not spec" -v` | `not spec` | Everything except spec/schema checks | No |
+| Live Push (opt‑in) | `pytest -m live_push -v` (or all live tests: `pytest -m wet -v`) | `live_push` (subset of `wet`) + Env: `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
+| Issue #27 real‑model (opt‑in) | `pytest tests_2.0/test_issue_27.py -v` | Env: `MLXK2_USER_HF_HOME` (user cache with multi‑shard models) | Strict health policy on real index‑based models | No (uses local cache) |
+| Server/run (separate) | `pytest tests/integration -m server -v` | `server` | Heavy server/run tests, RAM‑dependent, longer duration | No (models local) |
+
+Useful commands
+- Only Spec: `pytest -m spec -v`
+- Offline Push only: `pytest -k "push and not live" -v`
+- Exclude Spec: `pytest -m "not spec" -v`
+- Live Push only: `MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v`
+- All live tests (umbrella): `pytest -m wet -v` (may include future live tests beyond push)
+
+Markers: wet vs live_push
+- `wet`: umbrella marker for any opt‑in “live” test that may require network, credentials, or user environment. Use to run all live tests.
+- `live_push`: narrow marker for push‑specific live tests only. Use to target push live checks without running other live suites.
+
+Note: Without the required env vars, live tests remain SKIPPED.
 
 ### Development Workflow
 

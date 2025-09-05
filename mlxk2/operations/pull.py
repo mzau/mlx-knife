@@ -44,6 +44,27 @@ def pull_operation(model_spec):
     }
     
     try:
+        # Early validation before any network/library usage
+        if not model_spec or not str(model_spec).strip():
+            result["status"] = "error"
+            result["error"] = {
+                "type": "ValidationError",
+                "message": "Invalid model name: empty",
+            }
+            result["data"]["download_status"] = "error"
+            return result
+
+        base_spec = str(model_spec).split("@", 1)[0]
+        # HF repo id soft rules (MVP): length, bad slashes; allow single-segment as fuzzy/alias
+        if len(base_spec) > 96 or base_spec.startswith("/") or base_spec.endswith("/") or "//" in base_spec:
+            result["status"] = "error"
+            result["error"] = {
+                "type": "ValidationError",
+                "message": "Invalid model name: must be <= 96 chars and not contain leading/trailing or double slashes",
+            }
+            result["data"]["download_status"] = "error"
+            return result
+
         # Use model resolution for fuzzy matching and expansion
         resolved_name, commit_hash, ambiguous_matches = resolve_model_for_operation(model_spec)
         

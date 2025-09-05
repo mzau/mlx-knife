@@ -189,3 +189,62 @@ def render_rm(data: Dict[str, Any]) -> str:
         return f"rm: {model} — {action}: {msg}".rstrip()
     err = data.get("error", {})
     return f"rm: {model} — {err.get('message', msg)}".rstrip()
+
+
+def render_push(data: Dict[str, Any], verbose: bool = False) -> str:
+    d = data.get("data", {})
+    status = data.get("status", "error")
+    repo = d.get("repo_id", "-")
+    branch = d.get("branch", "-")
+    cs = d.get("commit_sha")
+    h7 = cs[:7] if isinstance(cs, str) and len(cs) >= 7 else "-"
+    prefix = "push (experimental):"
+    # Dry-run handling
+    if d.get("dry_run"):
+        if d.get("no_changes") is True:
+            return f"{prefix} {repo}@{branch} — dry-run: no changes".rstrip()
+        summ = d.get("dry_run_summary") or d.get("change_summary") or {}
+        added = summ.get("added")
+        modified = summ.get("modified")
+        deleted = summ.get("deleted")
+        mod_part = str(modified) if isinstance(modified, int) else "?"
+        line = f"{prefix} {repo}@{branch} — dry-run: +{added or 0} ~{mod_part} -{deleted or 0}"
+        if verbose and (d.get("would_create_repo") or d.get("would_create_branch")):
+            hints = []
+            if d.get("would_create_repo"):
+                hints.append("create repo")
+            if d.get("would_create_branch"):
+                hints.append("create branch")
+            if hints:
+                line = f"{line} ({', '.join(hints)})"
+        return line.rstrip()
+    if status == "success":
+        if d.get("no_changes"):
+            msg = d.get("message")
+            base = f"{prefix} {repo}@{branch} — no changes"
+            if verbose and isinstance(msg, str) and msg and "no changes" not in msg.lower():
+                return f"{base} ({msg})".rstrip()
+            return base.rstrip()
+        # If we have a commit, show it and include a compact summary when available
+        if isinstance(cs, str) and cs:
+            summary = d.get("change_summary") or {}
+            added = summary.get("added")
+            modified = summary.get("modified")
+            deleted = summary.get("deleted")
+            if all(isinstance(x, int) for x in (added, modified, deleted)):
+                line = f"{prefix} {repo}@{branch} — commit {h7} (+{added} ~{modified} -{deleted})"
+            else:
+                line = f"{prefix} {repo}@{branch} — commit {h7}"
+            if verbose:
+                url = d.get("commit_url")
+                if isinstance(url, str) and url:
+                    line = f"{line} <{url}>"
+            return line.rstrip()
+        # Fallback
+        msg = d.get("message")
+        if isinstance(msg, str) and msg:
+            return f"{prefix} {repo}@{branch} — {msg}".rstrip()
+        return f"{prefix} {repo}@{branch} — done".rstrip()
+    err = data.get("error", {})
+    msg = err.get("message", "")
+    return f"{prefix} {repo}@{branch} — {msg}".rstrip()

@@ -6,6 +6,27 @@
   - Recognize both safetensors (`model.safetensors.index.json`) and PyTorch (`pytorch_model.bin.index.json`) JSON indices.
   - Validate only the present format’s shards (exist, non-empty, not LFS pointers) to avoid false negatives.
   - Aligns 1.x health behavior with 2.0.0-alpha.1 policy.
+ - Planned (Issue #31, under #29): Detect Framework/Type via HF Model Card (README front matter) and tokenizer config for non-`mlx-community` repos (lenient parsing). No CLI/JSON schema changes; focused unit tests; target 1.1.1-b2.
+
+## 2.0.0-alpha.2 — 2025-09-05
+
+Experimental `push` (upload only) and documentation/testing refinements.
+
+### Added
+- `push` (experimental, M0): Upload a local folder to Hugging Face using `upload_folder`.
+  - Safety: `--private` required in alpha.
+  - Quiet JSON: With `--json` (without `--verbose`) suppress progress bars/console logs; hub logs are captured in `data.hf_logs`.
+  - No-op detection: Prefer hub signal (“No files have been modified… Skipping…”). Sets `no_changes: true`, clears `commit_sha/commit_url`, and sets `uploaded_files_count: 0`.
+  - Offline preflight: `--check-only` analyzes the local workspace and returns `data.workspace_health` (index/weights/LFS/partials) without network.
+  - Dry-run planning: `--dry-run` computes a plan vs remote (uses `list_repo_files`), returns `dry_run: true`, `dry_run_summary {added, modified:null, deleted}`, and sample `added_files`/`deleted_files` (up to 20). Honors default ignores and merges `.hfignore`.
+  - Uploaded file count: Remains `null` when hub does not return per-file operations; no heuristic guessing.
+
+### Docs
+- TESTING.md: Added “Reference: Push CLI and JSON”, `--dry-run` examples, and a mini matrix (default vs markers/opt-in).
+- CLAUDE.md: Updated Current Focus/Decisions + session summary for push quiet mode, no-op, `--dry-run`.
+
+### Tests
+- Offline push tests added/extended, including dry-run planning; live push remains opt-in via `wet`/`live_push` markers and required env vars.
 
 ## 2.0.0-alpha.1 — 2025-08-31
 
@@ -257,3 +278,8 @@
 
 ## Known Issues
 - See GitHub Issues for tracking
+## 2.0.0-alpha.2 — 2025-09-04
+- Experimental: add `push` command (M0 upload-only) with hard excludes and `.hfignore` support
+- Safety: require `--private` in CLI for alpha.2 to avoid accidental public uploads
+- JSON: add `push` to schema; examples updated; short experimental disclaimer in responses
+- Robustness: early validation for `pull` model names; improved CLI JSON errors for missing args

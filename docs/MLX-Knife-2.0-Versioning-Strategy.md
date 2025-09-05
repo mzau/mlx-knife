@@ -1,7 +1,7 @@
 # MLX-Knife 2.0 Versioning Strategy
 
-**Document Status:** Approved Session 3 (2025-08-28)  
-**Purpose:** Clear versioning scheme and deployment strategy for MLX-Knife 2.0
+**Document Status:** Living (pre-release)  
+**Purpose:** Principles for versioning and deployment of MLX‑Knife 2.0 until stable
 
 ## Versioning Schema
 
@@ -12,10 +12,11 @@
 - ✅ All 5 Operations: `list`, `health`, `show`, `pull`, `rm`
 - ✅ JSON API fully implemented per specification
 - ✅ Core functionality working (broke-cluster compatible)
-- ❌ **Not robustly tested** - Mock fixtures have issues
+- ⚠️ Experimental features MAY be present; they MUST be clearly labeled "experimental", safe by default, and must not break existing behavior
+- ❌ Pre-release level testing
 - ❌ No `server` or `run` commands
 
-**Quality Gate:**
+**Quality Gate (alpha):**
 - Core operations functional in isolation
 - JSON schema stable and documented
 - Basic edge case handling
@@ -90,7 +91,7 @@
 pip install mlx-knife==1.1.0
 
 # Local development: MLX-Knife 2.0.0-alpha (JSON management)
-pip install -e /path/to/mlx-knife-2.0  # Local install
+pip install -e /path/to/mlx-knife  # Local install (current 2.0 feature branch)
 ```
 
 **Usage Pattern:**
@@ -114,7 +115,7 @@ mlxk-json pull "new-model" --json
 
 **Development Phase:**
 - `mlx-knife` (1.1.0) - Stable production version
-- `mlxk2` / `mlxk-json` - Development 2.0.0-alpha local install
+- `mlxk2` / `mlxk-json` - Development 2.0.0-alpha local install (single long‑lived 2.0 branch; releases via annotated tags)
 
 **Production Phase:**
 - `mlx-knife` (2.0.0+) - New major version
@@ -157,11 +158,11 @@ mlxk-json pull "new-model" --json
 
 ## Timeline Estimates
 
-**Current Status (2025-08-28):** Session 3 Complete
-- Feature-complete alpha with test issues
+**Current Status:** Active alpha cycle with tagged pre‑releases
+  - JSON CLI stable for broke‑cluster use
 
 **Projected Milestones:**
-- **2.0.0-alpha**: 1-2 weeks (fix test fixtures)
+- **2.0.0-alpha**: rolling alphas (tagged), experimental features allowed but clearly marked and safe by default
 - **2.0.0-beta**: 4-6 weeks (robust testing)
 - **2.0.0-rc**: 8-12 weeks (server/run implementation)  
 - **2.0.0-stable**: 16-20 weeks (community validation)
