@@ -8,9 +8,12 @@ ruff_*.log
 __pycache__/
 *.pyc
 .DS_Store
+.claude/
+mymodel_test_workspace/
 build/
 dist/
 *.egg-info/
 CLAUDE.md
 TODO_REAL_TESTS.md
 server.log
+.claude/

@@ -1,4 +1,4 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-alpha.1
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-alpha.2
 
 <p align="center">
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="1000">
@@ -6,11 +6,11 @@
 
 ## New: JSON-First Model Management for Automation & Scripting
 
-> **🚧 Alpha Development:** Server and run are not included yet in 2.0.0-alpha.1. Use [MLX-Knife 1.1.0](https://github.com/mzau/mlx-knife/tree/main) for those features.
+> **🚧 Alpha Development:** Server and run are not included yet in 2.0.0-alpha.2. Use [MLX-Knife 1.1.0](https://github.com/mzau/mlx-knife/tree/main) for those features.
 
 **Stable Version: 1.1.0**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.0--alpha.1-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0--alpha.2-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -73,8 +73,8 @@ mlxk2 show "Phi-3-mini" --json | jq '.data.model'
 - Output: human output by default; add `--json` for machine-readable responses (new vs 1.0.0).
 - List formatting: improved compact table with relative times in the Modified column (e.g., 3h ago) and a new Type column; compact MLX-only view by default.
 - Flags (human-only): `--all` (all frameworks), `--health` (add Health column), `--verbose` (show full `org/model`).
-- JSON API: unchanged schema vs spec v0.1.2; CLI accepts `--json` after subcommands.
-- Missing features (compared to 1.0.0): server and run are not included in 2.0 alpha.1 (use `mlxk` 1.x).
+- JSON API: current spec v0.1.3; CLI accepts `--json` after subcommands.
+- Missing features (compared to 1.0.0): server and run are not included in 2.0 alpha.2 (use `mlxk` 1.x).
 
 ## ⚠️ Alpha Status Disclaimer
 
@@ -96,6 +96,7 @@ Status:
 | ✅ `show` | **Complete** | Detailed model information with --files, --config |
 | ✅ `pull` | **Complete** | HuggingFace model downloads with corruption detection |
 | ✅ `rm` | **Complete** | Model deletion with lock cleanup and fuzzy matching |
+| 🧪 `push` | **Experimental (alpha)** | Upload-only; quiet JSON; supports `--check-only` and `--dry-run` |
 
 ## What's Coming Later
 
@@ -103,8 +104,34 @@ Status:
 |---------|----------------|---------|
 | 🔄 `server` | 2.0.0-rc | OpenAI-compatible API server |
 | 🔄 `run` | 2.0.0-rc | Interactive model execution |
-| ✅ Human-readable output | 2.0.0-alpha.1 | CLI formatting layer |
+| ✅ Human-readable output | 2.0.0-alpha.2 | CLI formatting layer |
 | 🔄 `embed` | TBD | Embedding generation (if merged from 1.x) |
+
+## Experimental: `push` (upload only)
+
+`mlxk2 push` is experimental (M0). It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
+
+- Requires `HF_TOKEN` (write-enabled).
+- Default branch: `main` (explicitly override with `--branch`).
+- Alpha safety: `--private` is required to avoid accidental public uploads.
+- No validation or manifests. Basic hard excludes are applied by default: `.git/**`, `.DS_Store`, `__pycache__/`, common virtualenv folders (`.venv/`, `venv/`), and `*.pyc`.
+- `.hfignore` (gitignore-like) in the workspace is supported and merged with the defaults.
+- Repo creation: use `--create` if the target repo does not exist; harmless on existing repos. Missing branches are created during upload.
+- JSON-first: output includes `commit_sha`, `commit_url`, `no_changes`, `uploaded_files_count` (when available), `local_files_count` (approx), `change_summary` and a short `message`.
+- Quiet JSON by default: with `--json` (without `--verbose`) progress bars/console logs are suppressed; hub logs are still captured in `data.hf_logs`.
+- Human output: derived from JSON; add `--verbose` to include extras such as the commit URL or a short message variant. JSON schema is unchanged.
+- Local workspace check: use `--check-only` to validate a workspace without uploading. Produces `workspace_health` in JSON (no token/network required).
+- Dry-run planning: use `--dry-run` to compute a plan vs remote without uploading. Returns `dry_run: true`, `dry_run_summary {added, modified:null, deleted}`, and sample `added_files`/`deleted_files`.
+- Testing: see TESTING.md ("Push Testing (2.0)") for offline tests and opt-in live checks with markers/env.
+- Intended for early testers only. Carefully review the result on the Hub after pushing.
+- Responsibility: You are responsible for complying with Hugging Face Hub policies and applicable laws (e.g., copyright/licensing) for any uploaded content.
+
+Example:
+```bash
+mlxk2 push --private ./workspace org/model --create --commit "init"
+```
+
+This feature is not final and may change or be removed.
 
 ## Installation & Parallel Usage
 
@@ -115,8 +142,8 @@ Status:
 pip install -e /path/to/mlx-knife
 
 # Verify installation
-mlxk-json --version  # → mlxk2 2.0.0-alpha.1
-mlxk2 --version      # → mlxk2 2.0.0-alpha.1
+mlxk-json --version  # → mlxk2 2.0.0-alpha.2
+mlxk2 --version      # → mlxk2 2.0.0-alpha.2
 ```
 
 ### Parallel with MLX-Knife 1.x
@@ -142,7 +169,7 @@ python -m mlxk2.cli list     # 2.0 - Module invocation
 
 ## JSON API Documentation
 
-> **📋 Complete API Specification**: See the JSON API spec on GitHub for comprehensive schema, error codes, and examples: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
+> **📋 Complete API Specification**: See the JSON API spec for comprehensive schema, error codes, and examples: [JSON API Specification](docs/json-api-specification.md)
 
 ### Command Structure
 
@@ -151,7 +178,7 @@ All commands follow this JSON response format:
 ```json
 {
     "status": "success|error", 
-    "command": "list|health|show|pull|rm",
+    "command": "list|health|show|pull|rm|push",
     "data": { /* command-specific data */ },
     "error": null | { "message": "...", "details": "..." }
 }
@@ -159,7 +186,7 @@ All commands follow this JSON response format:
 
 ### Examples
 
-For full, up-to-date examples for every command, refer to the spec on GitHub: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
+For full, up-to-date examples for every command, refer to the spec: [JSON API Specification](docs/json-api-specification.md)
 
 #### List Models
 ```bash
@@ -270,7 +297,7 @@ mlxk-json health --json | jq '.data.summary'
 
 ## Real-World Examples
 
-> **🔗 Integration Reference**: External projects should implement against the JSON API spec on GitHub — this alpha phase validates that implementation matches documentation: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
+> **🔗 Integration Reference**: External projects should implement against the JSON API spec — this alpha phase validates that implementation matches documentation: [JSON API Specification](docs/json-api-specification.md)
 
 ### Broke-Cluster Integration
 ```bash
@@ -385,7 +412,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 - **Issues**: [GitHub Issues](https://github.com/mzau/mlx-knife/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/mzau/mlx-knife/discussions)
-- **API Specification**: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/feature/2.0.0-alpha.1/docs/json-api-specification.md)
+- **API Specification**: [JSON API Specification](docs/json-api-specification.md)
 - **Documentation**: See `docs/` directory for technical details
 
 **For production use**: Consider MLX-Knife 1.1.0 until 2.0.0-beta is available.
@@ -408,8 +435,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
   </a>
 </div>
 
-Support this project: [GitHub Sponsors → mlx-knife](https://github.com/sponsors/mzau)
-
 Special thanks to early supporters and users providing feedback during the 2.0 alpha.
 
 
@@ -423,6 +448,6 @@ Special thanks to early supporters and users providing feedback during the 2.0 a
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 2.0.0-alpha.1 | September 2025</i><br>
+  <i>Version 2.0.0-alpha.2 | September 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p> 

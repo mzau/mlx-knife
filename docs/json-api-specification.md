@@ -1,6 +1,6 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.2
+**Specification Version:** 0.1.3
 **Status:** Alpha - Subject to change  
 **Target:** MLX-Knife 2.0.0
 
@@ -91,6 +91,7 @@ Notes:
 | `health` | Check model integrity and corruption | ✅ |
 | `pull` | Download models from HuggingFace | ✅ |
 | `rm` | Delete models from cache | ✅ |
+| `push` | Upload a local folder to Hugging Face (experimental) | ✅ |
 | `run` | Execute model inference | ❌ Not in 2.0 |
 | `server` | OpenAI-compatible API server | ❌ Not in 2.0 |
 
@@ -598,6 +599,119 @@ mlxk-json rm "locked-model" --json               # Error: requires --force due t
   "error": {
     "type": "PermissionError",
     "message": "Permission denied: Cannot delete read-only files"
+  }
+}
+```
+
+### `mlxk-json push <dir> <org/model> [--create] [--private] [--branch <b>] [--commit "..."] [--verbose] [--check-only] --json`
+
+Status: experimental (M0: upload-only; no validation, no filters)
+
+Behavior:
+- Requires `HF_TOKEN` env.
+- Default branch: `main` (subject to change).
+- Fails if repo missing unless `--create` is provided.
+- Sends folder as-is to the specified branch using `huggingface_hub.upload_folder`.
+ - `--verbose` affects only human output; JSON remains unchanged in structure.
+ - `--check-only` performs a local, content-oriented workspace validation and does not contact the Hub (no token required). Results are included under `data.workspace_health`.
+
+Successful Upload (with changes):
+```json
+{
+  "status": "success",
+  "command": "push",
+  "data": {
+    "repo_id": "org/model",
+    "branch": "main",
+    "commit_sha": "abcdef1234567890abcdef1234567890abcdef12",
+    "commit_url": "https://huggingface.co/org/model/commit/abcdef1",
+    "repo_url": "https://huggingface.co/org/model",
+    "uploaded_files_count": 3,
+    "local_files_count": 11,
+    "no_changes": false,
+    "created_repo": false,
+    "change_summary": {"added": 1, "modified": 2, "deleted": 0},
+    "message": "Committed 3 files (+1 ~2 -0).",
+    "experimental": true,
+    "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review on the Hub."
+  },
+  "error": null
+}
+```
+
+No Changes (no-op commit avoided):
+```json
+{
+  "status": "success",
+  "command": "push",
+  "data": {
+    "repo_id": "org/model",
+    "branch": "main",
+    "commit_sha": null,
+    "commit_url": null,
+    "repo_url": "https://huggingface.co/org/model",
+    "uploaded_files_count": 0,
+    "local_files_count": 11,
+    "no_changes": true,
+    "created_repo": false,
+    "message": "No files changed; skipped empty commit.",
+    "experimental": true,
+    "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review on the Hub.",
+    "hf_logs": ["No files have been modified since last commit. Skipping to prevent empty commit."]
+  },
+  "error": null
+}
+```
+
+Check-only (no network):
+```json
+{
+  "status": "success",
+  "command": "push",
+  "data": {
+    "repo_id": "org/model",
+    "branch": "main",
+    "commit_sha": null,
+    "commit_url": null,
+    "repo_url": "https://huggingface.co/org/model",
+    "local_files_count": 11,
+    "no_changes": null,
+    "created_repo": false,
+    "message": "Check-only: no upload performed.",
+    "workspace_health": {
+      "files_count": 11,
+      "total_bytes": 289612345,
+      "config": {"exists": true, "valid_json": true, "path": "/path/to/config.json"},
+      "weights": {"count": 3, "formats": ["safetensors"], "index": {"has_index": true, "missing": []}, "pattern_complete": true},
+      "anomalies": [],
+      "healthy": true
+    },
+    "experimental": true,
+    "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review on the Hub."
+  },
+  "error": null
+}
+```
+
+Missing Token:
+```json
+{
+  "status": "error",
+  "command": "push",
+  "data": {
+    "repo_id": "org/model",
+    "branch": "main",
+    "repo_url": "https://huggingface.co/org/model",
+    "uploaded_files_count": null,
+    "local_files_count": null,
+    "no_changes": null,
+    "created_repo": false,
+    "experimental": true,
+    "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review on the Hub."
+  },
+  "error": {
+    "type": "auth_error",
+    "message": "HF_TOKEN not set"
   }
 }
 ```
