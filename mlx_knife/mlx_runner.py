@@ -773,28 +773,34 @@ def run_model_enhanced(
             if stream:
                 # Streaming generation
                 response_tokens = []
-                for token in runner.generate_streaming(
-                    prompt=prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                    use_chat_template=use_chat_template,
-                ):
-                    print(token, end="", flush=True)
-                    response_tokens.append(token)
-
+                try:
+                    for token in runner.generate_streaming(
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                        use_chat_template=use_chat_template,
+                    ):
+                        print(token, end="", flush=True)
+                        response_tokens.append(token)
+                except KeyboardInterrupt:
+                    print("\n[INFO] Generation interrupted by user.")
                 response = "".join(response_tokens)
             else:
                 # Batch generation
-                response = runner.generate_batch(
-                    prompt=prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                    use_chat_template=use_chat_template,
-                )
+                try:
+                    response = runner.generate_batch(
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                        use_chat_template=use_chat_template,
+                    )
+                except KeyboardInterrupt:
+                    print("\n[INFO] Generation interrupted by user.")
+                    response = ""
                 print(response)
 
             # Show memory usage if verbose

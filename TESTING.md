@@ -2,7 +2,7 @@
 
 ## Current Status
 
-✅ **160/160 tests passing** (September 2025) - **STABLE RELEASE + Pre-release** 🚀  
+✅ **166/166 tests passing** (September 2025) - **STABLE RELEASE + Pre-release** 🚀  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
 ✅ **Production ready** - comprehensive testing with real model execution
@@ -55,11 +55,12 @@ tests/
 │   ├── test_end_token_issue.py             # Issue #20: End-token filtering (@server)
 │   ├── test_issue_14.py                    # Issue #14: Chat self-conversation (@server)
 │   └── test_issue_15_16.py                 # Issues #15/#16: Dynamic token limits (@server)
-└── unit/                              # Module-level unit tests (82 tests)
+└── unit/                              # Module-level unit tests (88 tests)
     ├── test_cache_utils.py                 # Cache management & Issue #21/#23 tests
     ├── test_cli.py                         # CLI argument parsing
     ├── test_health_multishard.py           # Strict multi-shard/index health (Issue #27)
-    └── test_mlx_runner_memory.py           # Memory management tests
+    ├── test_mlx_runner_memory.py           # Memory management tests
+    └── test_model_card_detection.py        # Issue #31: README/tokenizer hints for framework/type
 ```
 
 
@@ -222,8 +223,8 @@ pytest -k "health" -v
 ### Timeout and Performance
 
 ```bash
-# Set custom timeout (default: 300s)
-pytest --timeout=60
+# Set custom timeout (default: 300s, method=thread)
+pytest --timeout=60 --timeout-method=thread
 
 # Show slowest tests
 pytest --durations=10
@@ -255,19 +256,50 @@ pytest tests/integration/test_server_functionality.py -v
 - **Models**: Multiple 4-bit quantized models (1B-30B parameters)
 - **Coverage**: Streaming vs non-streaming consistency, token limits, API compliance
 
+### Memory Gating for Large Models
+
+- The integration tests avoid loading oversized models by estimating RAM usage based on model size and quantization.
+- Quantization detection uses common markers in the model name (e.g., `-4bit`, `q4`, `int4`) and, when available, details from `mlxk show <model>`.
+- Two estimation maps are used: one for 4‑bit and one conservative for FP16/BF16.
+- Safety margin: By default, tests use a RAM safety factor to keep headroom.
+  - Configure via `MLXK_TEST_RAM_SAFETY` (float in `0.1..1.0`).
+  - Examples:
+    - `MLXK_TEST_RAM_SAFETY=0.8` (default in some tests): use ~80% of available RAM.
+    - `MLXK_TEST_RAM_SAFETY=1.0`: use up to available RAM (minus 4 GB guard).
+  - This allows FP16 models to be included when they truly fit in memory.
+  
+- Unknown size fallback: tests call `mlxk show <model>` and parse `Size:` and `Quantization:` for more accurate estimates (prevents `unknown → 999GB`).
+  
+- Advanced tuning (optional):
+  - `MLXK_TEST_DISK_TO_RAM_FACTOR`: base factor for converting disk size (GB) to RAM estimate (default: 0.6).
+  - `MLXK_TEST_FACTOR_4BIT`: override factor for 4‑bit models (falls back to `MLXK_TEST_DISK_TO_RAM_FACTOR`).
+  - `MLXK_TEST_FACTOR_FP16`: override factor for FP16/BF16 models (falls back to `MLXK_TEST_DISK_TO_RAM_FACTOR`).
+
+### Robust Server Process Cleanup
+
+- Server tests install a process guard in their managers (not session-wide) and clean up `mlxk server` processes on Ctrl-C, SIGTERM, or teardown.
+- Implementation: `tests/support/process_guard.py`; installed explicitly in server managers.
+- Test code registers processes automatically:
+  - `MLXKnifeServerManager`/`MLXKnifeServer` call `register_popen(...)` when starting `mlxk server`.
+  - The generic `mlx_knife_process` fixture also registers its subprocesses.
+- Environment toggles:
+  - `MLXK_TEST_DISABLE_PROCESS_GUARD=1` disables guard registration (not recommended).
+  - `MLXK_TEST_KILL_ZOMBIES_AT_START=1` sweeps stale servers at session start.
+  - `MLXK_TEST_DETACH_PGRP=1` (advanced): detach runner into its own process group to isolate from stray group-kills.
+
 ## Python Version Compatibility
 
-### Verification Results (August 2025)
+### Verification Results (September 2025)
 
-**✅ 150/150 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
+**✅ 166/166 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 150/150 |
-| 3.10.x         | ✅ Verified | 150/150 |
-| 3.11.x         | ✅ Verified | 150/150 |
-| 3.12.x         | ✅ Verified | 150/150 |
-| 3.13.x         | ✅ Verified | 150/150 |
+| 3.9.6 (macOS)  | ✅ Verified | 166/166 |
+| 3.10.x         | ✅ Verified | 166/166 |
+| 3.11.x         | ✅ Verified | 166/166 |
+| 3.12.x         | ✅ Verified | 166/166 |
+| 3.13.x         | ✅ Verified | 166/166 |
 
 All versions tested with isolated cache system.
 Real MLX execution verified separately with server/run commands.
@@ -453,6 +485,8 @@ Some tests require a running MLX Knife server with loaded models. These tests ar
 - **Large memory requirements** - need different models for different RAM sizes  
 - **Longer execution time** - each model needs to load individually
 - **Manual setup required** - need to download appropriate models first
+  
+Note: If your shell prints a termination message after a successful run (e.g., "Terminated: 15" or "Killed: 9"), this can be caused by a stray SIGTERM/SIGKILL delivered to the test runner at teardown time by the environment. The suite installs a session handler that exits cleanly on SIGTERM to avoid this cosmetic noise. Disable for debugging with `MLXK_TEST_DISABLE_CATCH_TERM=1`.
 
 ### Prerequisites for Server Tests
 

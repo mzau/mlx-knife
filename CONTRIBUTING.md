@@ -172,9 +172,8 @@ MLX Knife has comprehensive test coverage. For detailed testing documentation in
 - Type hints are encouraged (checked with `mypy`)
 - Follow existing patterns in the codebase
 - **IMPORTANT**: Keep Python 3.9 compatibility!
-  - Use `Union[str, List[str]]` not `str | List[str]`
-  - Use `Optional[str]` not `str | None`
-  - Import from `typing` module for type hints
+  - Prefer `typing.Optional`/`typing.Union` over `|` syntax
+  - Import from `typing` for hints
   - Test with native macOS Python if possible
 
 ## Documentation

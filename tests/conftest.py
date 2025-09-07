@@ -7,11 +7,58 @@ import shutil
 import pytest
 import subprocess
 import signal
+import sys
 import time
 from pathlib import Path
 from typing import Generator, List
 import psutil
+import signal
 
+
+def _safe_detach_process_group():
+    """Detach pytest runner into its own process group to avoid stray group kills.
+
+    Some cleanup routines or external tools may send signals to a whole process
+    group. By making the test runner the leader of a fresh group, we reduce the
+    chance that a misdirected killpg() affects the runner. Disable with
+    MLXK_TEST_DISABLE_DETACH_PGRP=1 if undesired.
+    """
+    if os.environ.get("MLXK_TEST_DISABLE_DETACH_PGRP") == "1":
+        return
+    try:
+        os.setpgrp()  # equivalent to setpgid(0,0)
+    except Exception:
+        pass
+
+
+# Detach early at import time only if explicitly requested
+if os.environ.get("MLXK_TEST_DETACH_PGRP") == "1":
+    _safe_detach_process_group()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _optional_zombie_sweep():
+    """Optional best-effort sweep for stale servers at session start.
+
+    Controlled via MLXK_TEST_KILL_ZOMBIES_AT_START=1.
+    No signal handlers installed here to avoid interfering with non-server runs.
+    """
+    if os.environ.get("MLXK_TEST_KILL_ZOMBIES_AT_START") == "1":
+        try:
+            for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmd = ' '.join(p.info.get('cmdline') or [])
+                    if ('mlxk' in cmd and 'server' in cmd) or ('mlx_knife.server:app' in cmd):
+                        p.terminate()
+                        try:
+                            p.wait(timeout=5)
+                        except psutil.TimeoutExpired:
+                            p.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+    yield
 
 @pytest.fixture
 def temp_cache_dir() -> Generator[Path, None, None]:
@@ -96,6 +143,12 @@ def mlx_knife_process():
             text=True,
             **kwargs
         )
+        # Register with process guard for robust cleanup on Ctrl-C
+        try:
+            from tests.support import process_guard as pg
+            pg.register_popen(proc, label="mlxk-cli")
+        except Exception:
+            pass
         processes.append(proc)
         return proc
     
@@ -110,6 +163,12 @@ def mlx_knife_process():
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+            finally:
+                try:
+                    from tests.support import process_guard as pg
+                    pg.unregister(proc.pid)
+                except Exception:
+                    pass
 
 
 @pytest.fixture
@@ -194,3 +253,34 @@ def mock_model_cache(temp_cache_dir):
             # tokenizer.json is missing
     
     return _create_mock_model
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _catch_term_and_exit_cleanly():
+    """Catch SIGTERM and exit cleanly to avoid 'Terminated: 15/9' noise.
+
+    We install a simple handler that exits with code 0 when SIGTERM is received.
+    This avoids the shell printing a termination message after a fully passed
+    test run. If you want to disable this behavior for debugging, set
+    MLXK_TEST_DISABLE_CATCH_TERM=1.
+    """
+    if os.environ.get("MLXK_TEST_DISABLE_CATCH_TERM") == "1":
+        yield
+        return
+
+    def _term_handler(signum, frame):
+        try:
+            print("\n[INFO] Received SIGTERM, exiting cleanly.")
+        except Exception:
+            pass
+        try:
+            sys.exit(0)
+        except SystemExit:
+            os._exit(0)
+
+    # Install handler for the lifetime of the session (no restore on teardown)
+    try:
+        signal.signal(signal.SIGTERM, _term_handler)
+    except Exception:
+        pass
+    yield

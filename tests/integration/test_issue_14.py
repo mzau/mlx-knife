@@ -8,7 +8,11 @@ This test is self-contained and manages its own MLX Knife server instance.
 """
 
 import logging
+import os
 import re
+import math
+import subprocess
+from functools import lru_cache
 import signal
 import subprocess
 import time
@@ -17,16 +21,63 @@ from typing import List, Tuple
 import psutil
 import pytest
 import requests
+try:
+    from tests.support import process_guard as pg  # pytest-run path
+except Exception:
+    try:
+        # Direct-script fallback: add tests/ to sys.path and import support
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from support import process_guard as pg  # type: ignore
+    except Exception:
+        # No-op fallback
+        class _PG:
+            @staticmethod
+            def register_popen(*args, **kwargs):
+                pass
+
+            @staticmethod
+            def unregister(*args, **kwargs):
+                pass
+
+            @staticmethod
+            def install_signal_handlers():
+                pass
+
+            @staticmethod
+            def kill_all(*args, **kwargs):
+                pass
+
+        pg = _PG()
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Realistic RAM requirements for 4-bit quantized models (in GB)
-# Based on actual testing on Apple Silicon Macs
-MODEL_RAM_REQUIREMENTS = {
+"""Model RAM estimation helpers.
+
+We need to avoid loading extremely large FP16 models during server tests.
+Previously, we applied 4-bit RAM heuristics to all models by parsing only the
+size string (e.g., "8x7B"). This incorrectly marked non-quantized models like
+"Mixtral-8x7B-Instruct-v0.1" as fitting in 16GB, leading to massive swap usage.
+
+Fix: detect 4-bit quantization in the model name and use separate maps for
+4-bit vs FP16 estimates. Non-quantized Mixtral-8x7B is treated as ~180GB to
+ensure it is skipped on typical machines.
+"""
+
+# 4-bit quantized models (GB)
+MODEL_RAM_REQUIREMENTS_4BIT = {
     "0.5B": 1,   "1B": 2,    "3B": 4,    "4B": 5,
-    "7B": 8,     "8x7B": 16, "24B": 20,  "30B": 24, 
-    "70B": 40,   "480B": 180  # MoE with overhead, needs 96GB+
+    "7B": 8,     "8x7B": 16, "24B": 20,  "30B": 24,
+    "70B": 40,   "480B": 180,
+}
+
+# Approximate FP16/BF16 models (GB) — conservative, intentionally high
+MODEL_RAM_REQUIREMENTS_FP16 = {
+    "0.5B": 2,   "1B": 4,    "3B": 8,    "4B": 12,
+    "7B": 16,    "8x7B": 180, "24B": 48,  "30B": 60,
+    "70B": 140,  "480B": 960,
 }
 
 # Self-conversation patterns to detect Issue #14
@@ -67,6 +118,125 @@ def extract_model_size(model_name: str) -> str:
     return "unknown"
 
 
+def is_quantized_4bit_from_text(text: str) -> bool:
+    t = text.lower()
+    markers = ["4bit", "4-bit", "q4", "int4", "gguf q4", "q4_k", "k_m q4", "q4_"]
+    return any(m in t for m in markers)
+
+
+def is_quantized_4bit(model_name: str) -> bool:
+    """Detect 4-bit quantization using name and `mlxk show` output if available."""
+    # Quick name-based check first
+    name = model_name.lower()
+    if any(m in name for m in ("4bit", "q4", "int4")):
+        return True
+    # Try to refine using show output
+    info = get_model_info_via_show(model_name)
+    if info and info.get("quantization"):
+        return is_quantized_4bit_from_text(info["quantization"])
+    return False
+
+
+def estimate_required_ram_gb(model_name: str, size_str: str) -> int:
+    """Estimate RAM using a combination of show-based disk size and size maps.
+
+    Strategy:
+    - Prefer `mlxk show` disk size and convert to RAM via quantization-specific factor.
+    - If a size token is known, also compute map-based estimate and take the max for safety.
+    - If no disk info and no size token, return a high sentinel to skip.
+    """
+    info = get_model_info_via_show(model_name)
+    q4 = is_quantized_4bit(model_name)
+
+    # Quantization-specific disk→RAM factor
+    try:
+        if q4:
+            factor = float(os.getenv("MLXK_TEST_FACTOR_4BIT", os.getenv("MLXK_TEST_DISK_TO_RAM_FACTOR", "0.6")))
+        else:
+            factor = float(os.getenv("MLXK_TEST_FACTOR_FP16", os.getenv("MLXK_TEST_DISK_TO_RAM_FACTOR", "0.6")))
+        factor = max(0.1, min(2.0, factor))
+    except Exception:
+        factor = 0.6
+
+    disk_ram_est = None
+    if info and info.get("size_gb") is not None:
+        disk_ram_est = max(1, math.ceil(info["size_gb"] * factor))
+    else:
+        # Fallback to list-based size if show failed
+        disk_gb = get_model_disk_size_gb(model_name)
+        if disk_gb is not None:
+            disk_ram_est = max(1, math.ceil(disk_gb * factor))
+
+    map_est = None
+    if size_str != "unknown":
+        if q4:
+            map_est = MODEL_RAM_REQUIREMENTS_4BIT.get(size_str)
+        else:
+            map_est = MODEL_RAM_REQUIREMENTS_FP16.get(size_str)
+
+    # Combine estimates conservatively
+    if disk_ram_est is not None and map_est is not None:
+        return max(disk_ram_est, map_est)
+    if disk_ram_est is not None:
+        return disk_ram_est
+    if map_est is not None:
+        return map_est
+    return 999
+
+
+def parse_size_to_gb(size_str: str) -> float:
+    """Parse a human size like '579.2 MB' or '8.5 GB' to GB as float."""
+    try:
+        parts = size_str.strip().split()
+        if len(parts) < 2:
+            return None
+        value = float(parts[0])
+        unit = parts[1].upper()
+        if unit.startswith('KB'):
+            return value / (1024 ** 2)
+        if unit.startswith('MB'):
+            return value / 1024
+        if unit.startswith('GB'):
+            return value
+        if unit.startswith('TB'):
+            return value * 1024
+        return None
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=128)
+def get_model_info_via_show(model_name: str) -> dict:
+    """Use `mlxk show <model>` to obtain size and quantization info.
+
+    Returns a dict like {"size_gb": float|None, "quantization": str|None}.
+    """
+    try:
+        res = subprocess.run(["mlxk", "show", model_name], capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return {}
+        size_gb = None
+        quant_info = None
+        for raw in res.stdout.splitlines():
+            line = raw.strip()
+            if line.startswith("Size:"):
+                # Format: Size: 579.2 MB
+                size_text = line.split("Size:", 1)[1].strip()
+                val = parse_size_to_gb(size_text)
+                if val is not None:
+                    size_gb = val
+            elif line.startswith("Quantization:"):
+                quant_info = line.split("Quantization:", 1)[1].strip()
+        return {"size_gb": size_gb, "quantization": quant_info}
+    except Exception:
+        return {}
+
+
+def get_model_disk_size_gb(model_name: str) -> float:
+    info = get_model_info_via_show(model_name)
+    return info.get("size_gb") if info else None
+
+
 def get_available_models() -> List[str]:
     """Get list of available models from MLX Knife server."""
     try:
@@ -82,9 +252,16 @@ def get_safe_models_for_system() -> List[Tuple[str, str, int]]:
     """Get models that fit safely in available system RAM."""
     total_ram_gb = psutil.virtual_memory().total // (1024**3)
     available_ram_gb = psutil.virtual_memory().available // (1024**3)
-    
-    # Safety margin: use max 80% of available RAM, keep 4GB free minimum
-    max_usable_gb = min(available_ram_gb * 0.8, total_ram_gb - 4)
+
+    # Safety margin: configurable via MLXK_TEST_RAM_SAFETY (default 0.8)
+    try:
+        safety_factor = float(os.getenv("MLXK_TEST_RAM_SAFETY", "0.8"))
+        safety_factor = max(0.1, min(1.0, safety_factor))
+    except Exception:
+        safety_factor = 0.8
+
+    # Keep 4GB headroom as hard minimum
+    max_usable_gb = min(available_ram_gb * safety_factor, total_ram_gb - 4)
     
     logger.info(f"System RAM: {total_ram_gb}GB total, {available_ram_gb}GB available")
     logger.info(f"Safe limit for model testing: {max_usable_gb:.1f}GB")
@@ -94,8 +271,8 @@ def get_safe_models_for_system() -> List[Tuple[str, str, int]]:
     
     for model in all_models:
         size_str = extract_model_size(model)
-        required_ram = MODEL_RAM_REQUIREMENTS.get(size_str, 999)
-        
+        required_ram = estimate_required_ram_gb(model, size_str)
+
         if required_ram <= max_usable_gb:
             safe_models.append((model, size_str, required_ram))
             logger.info(f"✅ {model} ({size_str}) - fits in {required_ram}GB")
@@ -242,6 +419,11 @@ class MLXKnifeServerManager:
     def start_server(self) -> bool:
         """Start MLX Knife server and wait for it to be ready."""
         try:
+            # Ensure signal handlers are installed for robust cleanup (server-only)
+            try:
+                pg.install_signal_handlers()
+            except Exception:
+                pass
             # First, clean up any zombies or port conflicts
             cleanup_zombie_servers(self.port)
             
@@ -258,8 +440,11 @@ class MLXKnifeServerManager:
                 [sys.executable, "-m", "mlx_knife.cli", "server", "--port", str(self.port)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None
             )
+            # Track for robust cleanup on Ctrl-C or failures
+            pg.register_popen(self.process, label="mlxk-server")
             
             logger.info(f"📋 Started process PID: {self.process.pid}")
             
@@ -307,13 +492,29 @@ class MLXKnifeServerManager:
         """Stop MLX Knife server if running."""
         if self.process:
             logger.info("🛑 Stopping MLX Knife server")
-            self.process.terminate()
+            try:
+                self.process.terminate()
+            except Exception:
+                pass
             try:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 logger.warning("⚠️  Server didn't stop gracefully, killing...")
-                self.process.kill()
-                self.process.wait()
+                # Try process group kill first
+                try:
+                    if hasattr(os, "killpg"):
+                        os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+                try:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
+                except Exception:
+                    pass
+            try:
+                pg.unregister(self.process.pid)
+            except Exception:
+                pass
             self.process = None
     
     def is_server_running(self) -> bool:

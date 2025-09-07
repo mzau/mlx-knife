@@ -1,1 +1,2 @@
-"""MLX Knife Test Suite"""
+"""Test package initializer (enables support module imports)."""
+
