@@ -2,7 +2,7 @@
 
 ## Overview
 
-MLX Knife is designed to run locally on your Apple Silicon Mac. It prioritizes user privacy and security by keeping all model execution local. The only network activity is downloading models from HuggingFace (a trusted source).
+MLX Knife is designed to run locally on your Apple Silicon Mac. It prioritizes user privacy and security by keeping all model execution local. Network activity is limited to explicit interactions with Hugging Face: downloading models (pull) and, in 2.0 alpha, an opt‑in experimental upload (push) when you run it explicitly. No background network traffic.
 
 ## Security Model
 
@@ -11,13 +11,16 @@ MLX Knife is designed to run locally on your Apple Silicon Mac. It prioritizes u
 - ✅ Downloads models only from HuggingFace (trusted repository)
 - ✅ API server binds to localhost by default
 - ✅ No telemetry or usage tracking
-- ✅ No external API calls (except HuggingFace for downloads)
+- ✅ No external API calls (except explicit Hugging Face interactions: downloads via pull; optional upload via experimental push)
+- ✅ Can upload a local workspace to Hugging Face only when you explicitly run `mlxk2 push` (experimental, opt‑in)
 
 ### What MLX Knife Doesn't Do
-- ❌ No data is sent to external servers
+- ❌ No data is sent to external servers automatically or in the background
 - ❌ No model outputs are logged or transmitted
 - ❌ No user tracking or analytics
 - ❌ No automatic updates or phone-home features
+  
+  Note: The experimental `push` command will upload files from a user‑selected local folder to Hugging Face only when you run it explicitly and provide credentials. It never runs implicitly.
 
 ## Reporting Security Vulnerabilities
 
@@ -83,6 +86,36 @@ mlxk server --host 0.0.0.0 --port 8000
 - HF_HOME: set explicitly for user work if needed; tests should not override user HF_HOME by default
 - Safe operations: reads (`list`, `health`, `show`) are always safe; coordinate writes (`pull`, `rm`) in maintenance windows
 - Test safeguards: the test suite places a sentinel in the test cache and enforces deletion guards to prevent accidental user-cache modification
+
+### Experimental Push (`mlxk2 push`)
+
+The 2.0 alpha introduces an experimental upload capability. Treat it as opt‑in, with explicit user control.
+
+#### Scope and defaults
+- Upload‑only (M0): pushes a specified local folder to a Hugging Face model repo via `huggingface_hub.upload_folder`.
+- Requires `HF_TOKEN`; in alpha, `--private` is required to reduce accidental exposure.
+- Default branch is `main` (overridable with `--branch`). No manifests or content validation yet.
+- Honors default ignore patterns and merges project `.hfignore` when present (e.g., excludes `.git/`, `.venv/`, `__pycache__/`, `.DS_Store`).
+
+#### Privacy and boundaries
+- Only files under the path you provide are considered; push does not scan your global caches or home directory.
+- No prompts, logs, or runtime telemetry are uploaded.
+- No background activity: nothing is sent unless you invoke `mlxk2 push`.
+
+#### Safety controls
+- Preflight without network: `--check-only` analyzes the local folder for obvious issues (e.g., missing shards, LFS pointers).
+- Plan without committing: `--dry-run` lists prospective adds/deletes vs remote (no upload performed).
+- Use restricted tokens and test repos when validating; prefer `--private` and organization/user repos you control.
+
+#### Risks and mitigations
+- Risk: Accidental upload of sensitive files included in the folder.
+  - Mitigate with a minimal, dedicated workspace, `.hfignore`, and `--check-only`/`--dry-run` before pushing.
+- Risk: Pushing incomplete or corrupted weights.
+  - Mitigate by reviewing `workspace_health` from `--check-only` and model card requirements before uploading.
+
+#### Network and logging
+- Network egress targets only Hugging Face over HTTPS; no third‑party endpoints.
+- In `--json` mode, hub logs may be captured in output for diagnostics; they are not transmitted elsewhere by MLX Knife.
 
 ## Security Best Practices
 

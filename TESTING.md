@@ -2,10 +2,10 @@
 
 ## Current Status
 
-✅ **150/150 tests passing** (August 2025) - **STABLE RELEASE** 🚀  
+✅ **98/98 tests passing** (September 2025) — 2.0.0-alpha.3; 9 skipped (opt-in)  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
-✅ **Production ready** - comprehensive testing with real model execution
+✅ **Alpha (CLI/JSON)** — default suite green locally (no inference)
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
@@ -15,32 +15,34 @@
 # Install package + tests
 pip install -e .[test]
 
-# Download test model (optional - most tests use isolated cache)
-mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
+# Download test model (optional; most 2.0 tests use isolated cache)
+# Only needed for opt-in live tests or local experiments
+# mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
-# Run 2.0 tests (default: tests_2.0/)
+# Run 2.0 tests (default discovery: tests_2.0/)
 pytest -v
 
-# Run legacy 1.x suite explicitly (not maintained here)
-pytest tests/ -v
-
-# Fast unit tests only
-pytest tests/unit/
+# Live tests (opt-in; not part of default):
+# - Live push (requires env):
+#   export MLXK2_LIVE_PUSH=1
+#   export HF_TOKEN=...; export MLXK2_LIVE_REPO=org/model; export MLXK2_LIVE_WORKSPACE=/abs/path
+#   pytest -q -m live_push
+# - Live list (uses your HF_HOME; requires at least one MLX chat + one MLX base in cache):
+#   export HF_HOME=/path/to/huggingface/cache
+#   pytest -q -m live_list
 
 # Before committing
-ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
+ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 ```
 
 ## Why Local Testing?
 
-MLX Knife requires **Apple Silicon hardware** and **real MLX models** for comprehensive testing:
+MLX Knife tests fall into two categories for 2.0:
 
-- **Hardware Requirement**: MLX framework only runs on Apple Silicon (M1/M2/M3)
-- **Model Requirement**: Tests use actual models (4GB+) for realistic validation
-- **Industry Standard**: Local testing is normal for MLX projects
-- **Quality Assurance**: Real hardware testing ensures actual functionality
+- CLI/JSON tests (default): Run on any supported Python on macOS; no model inference required; use an isolated HF cache (no network).
+- Live/Inference tests (opt-in; future RC for server/run): Require Apple Silicon (M1/M2/M3) and real models.
 
-This approach ensures our tests reflect real-world usage, not mocked behavior.
+For push/list live tests in 2.0 alpha, see the opt-in commands above.
 
 ## Test Structure
 
@@ -49,22 +51,34 @@ This approach ensures our tests reflect real-world usage, not mocked behavior.
 ```
 tests_2.0/
 ├── __init__.py
-├── conftest.py                      # Isolated test cache, fixtures
-├── test_edge_cases_adr002.py        # Edge-case naming, ADR-002
-├── test_health_multifile.py         # Multi-file health completeness
-├── test_integration.py              # Model resolution, health integration
-├── test_issue_27.py                 # Health policy consistency
-├── test_model_naming.py             # Pattern/@hash parsing and resolution
-├── test_robustness.py               # General robustness tests
-├── test_json_api_list.py            # JSON API v0.1.2 (list contract)
-├── test_json_api_show.py            # JSON API v0.1.2 (show contract)
-└── spec/
-    ├── test_cli_version_output.py   # version command JSON shape
-    ├── test_spec_doc_examples_validate.py # docs examples vs schema (jsonschema)
-    └── test_spec_version_sync.py    # docs version == code constant
+├── conftest.py                          # Isolated test cache, fixtures
+├── test_human_output.py                 # Human rendering (list/health)
+├── test_detection_readme_tokenizer.py   # Issue #31 (README/tokenizer detection)
+├── test_json_api_list.py                # JSON API (list contract)
+├── test_json_api_show.py                # JSON API (show contract)
+├── test_edge_cases_adr002.py            # Edge-case naming, ADR-002
+├── test_health_multifile.py             # Multi-file health completeness
+├── test_integration.py                  # Model resolution, health integration
+├── test_issue_27.py                     # Health policy consistency
+├── test_model_naming.py                 # Pattern/@hash parsing and resolution
+├── test_robustness.py                   # General robustness tests
+├── test_cli_push_args.py                # Push CLI args (offline)
+├── test_push_minimal.py                 # Push minimal (offline)
+├── test_push_extended.py                # Push extended (offline)
+├── test_push_dry_run.py                 # Push dry-run planning (offline)
+├── test_push_workspace_check.py         # Push check-only (offline)
+├── spec/
+│   ├── test_cli_version_output.py               # version command JSON shape
+│   ├── test_spec_doc_examples_validate.py       # docs examples vs schema
+│   ├── test_spec_version_sync.py                # docs version == code constant
+│   ├── test_push_error_matches_schema.py        # push error schema
+│   └── test_push_output_matches_schema.py       # push success schema
+└── live/                                       # Opt-in live tests (markers)
+    ├── test_push_live.py                        # requires MLXK2_LIVE_PUSH, HF_TOKEN
+    └── test_list_human_live.py                  # requires HF_HOME
 ```
 
-Note: This tree is illustrative (not exhaustive). Push-related tests are documented in the dedicated "Push Testing (2.0)" section below to avoid drift.
+Note: Live tests are opt-in via markers (`-m live_push`, `-m live_list`) and environment. Default `pytest` discovery runs only the offline suite above.
 
 ## Push Testing (2.0)
 
@@ -76,7 +90,7 @@ This section summarizes what our test suite covers for the experimental `push` f
 - Args:
   - `--private` (required in alpha): Safety gate to avoid public uploads.
   - `--create`: Create the repository if it does not exist (model repo).
-  - `--branch`: Target branch, default `main`.
+- `--branch`: Target branch, default `main`. Missing branches are tolerated; with `--create`, the branch is proactively created (and upload retried once if the hub initially rejects the revision).
   - `--commit`: Commit message, default `"mlx-knife push"`.
   - `--check-only`: Analyze workspace locally; no network call; returns `data.workspace_health`.
   - `--dry-run`: Compare local workspace to the remote branch and summarize changes without uploading (requires repo read access).
@@ -118,6 +132,7 @@ Notes on output verbosity and behavior
 - Human mode is chatty by default: progress + one‑liner summary. `--verbose` appends the commit URL when present.
 - No‑changes detection: If the hub reports “No files have been modified… Skipping to prevent empty commit.”, JSON sets `no_changes: true`, `uploaded_files_count: 0`, and nulls `commit_sha`/`commit_url`. Human shows “— no changes”. This hub signal is preferred over inferring from file lists.
  - `--dry-run` human output: prints a concise plan line `dry-run: +A ~M -D` (modifications are an approximation and may be `~?` in rare cases).
+ - Branch creation with `--create`: Even if the push is a no‑op, the target branch is created upfront.
 
 Examples (expected)
 - No‑op re‑push (JSON): `commit_sha: null`, `commit_url: null`, `uploaded_files_count: 0`, `no_changes: true`, `message` mirrors hub text, `hf_logs` contains hub lines.
@@ -198,18 +213,19 @@ Spec/Schema
 - **Schema shape:** Push success/error outputs validate against `docs/json-api-schema.json`.
 - **No-op push:** Detects `no_changes: true`, sets `uploaded_files_count: 0`, carries hub message into JSON (`message`/`hf_logs`), and human output shows "no changes" without duplicate logs.
 - **Commit path:** Extracts `commit_sha`, `commit_url`, `change_summary` (+/~/−), correct `uploaded_files_count`; human `--verbose` includes URL.
-- **Repo/Branch handling:** Missing repo requires `--create`; with `--create` sets `created_repo: true`. Missing branch is tolerated; upload creates it.
+- **Repo/Branch handling:** Missing repo requires `--create`; with `--create` sets `created_repo: true`. Missing branch is tolerated; upload attempts proceed. With `--create`, the branch is proactively created and the upload is retried once if the hub rejects the revision (e.g., “Invalid rev id”).
 - **Ignore rules:** `.hfignore` is merged with default ignores and forwarded to the hub.
 
 Files:
 - `tests_2.0/test_cli_push_args.py` (CLI errors and JSON outputs)
-- `tests_2.0/test_push_extended.py` (no-op vs commit, branch/repo, .hfignore, human)
+- `tests_2.0/test_push_extended.py` (no-op vs commit, branch/repo, .hfignore, human; includes retry on invalid revision with `--create`)
 - `tests_2.0/spec/test_push_output_matches_schema.py` (schema success path)
 
 Run (venv39):
 - `source venv39/bin/activate && pip install -e .`
 - `pytest -q tests_2.0/test_cli_push_args.py tests_2.0/test_push_extended.py`
 - `pytest -q tests_2.0/spec/test_push_output_matches_schema.py`
+- Targeted retry test: `pytest -q tests_2.0/test_push_extended.py::test_push_retry_creates_branch_on_upload_revision_error`
 
 **Live (opt-in / wet)**
 - Purpose: sanity-check real HF behavior (auth, no-op vs commit, URLs).
@@ -282,7 +298,7 @@ Notes
 - Not part of the 2.0 default run; execute explicitly with `pytest tests/ -v`.
 - Contains extensive integration/server tests unrelated to the 2.0 JSON CLI.
 
-## 3-Category Test Strategy (MLX Knife 1.1.0+)
+## Legacy 1.x: 3-Category Test Strategy (main)
 
 MLX Knife uses a **3-category test strategy** to balance test isolation, performance, and user cache protection:
 
@@ -722,21 +738,20 @@ When submitting PRs, please include:
    - Python version
    - Which model(s) you tested with
 
-2. **Test results summary**:
-   ```
-   Platform: macOS 14.5, M2 Pro
-   Python: 3.11.6
-   Model: Phi-3-mini-4k-instruct-4bit
-   Results: 150/150 tests passed
-   ```
+2. **Test results summary (2.0)**:
+  ```
+  Platform: macOS 14.5, M2 Pro
+  Python: 3.11.6
+  Results: 98/98 tests passed; 9 skipped (opt-in)
+  ```
 
 3. **Any issues encountered** and how you resolved them
 
 ## Summary
 
-**MLX Knife 1.1.0 STABLE Testing Status:**
+**Legacy 1.x Testing Status (main):**
 
-✅ **Production Ready** - 150/150 tests passing  
+✅ **Stable** - 150/150 tests passing  
 ✅ **Isolated Test System** - User cache stays pristine with temp cache isolation
 ✅ **3-Category Strategy** - Optimized for performance and safety
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
@@ -748,11 +763,11 @@ When submitting PRs, please include:
 ✅ **LibreSSL Warning Fix** - Issue #22: macOS Python 3.9 warning suppression
 ✅ **Lock Cleanup Fix** - Issue #23: Enhanced rm command with lock cleanup
 
-This comprehensive testing framework validates MLX Knife's **production readiness** through isolated testing with automatic model downloads and separate real MLX validation.
+This testing framework validates MLX Knife's stability through isolated testing with automatic model downloads and separate real MLX validation.
 
-## Server-Based Testing (Advanced)
+## Server-Based Testing (Legacy 1.x; 2.0 RC planned)
 
-Some tests require a running MLX Knife server with loaded models. These tests are marked with `@pytest.mark.server` and are **not run by default** with `pytest`.
+In 1.x (main), some tests require a running MLX Knife server with loaded models and are marked with `@pytest.mark.server`. For 2.0, server/run will return in the RC; until then, server tests are legacy-only.
 
 ### Why Separate Server Tests?
 

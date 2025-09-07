@@ -7,4 +7,4 @@ import warnings
 # Issue parity with 1.1.0 (Issue #22)
 warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
 
-__version__ = "2.0.0-alpha.2"
+__version__ = "2.0.0-alpha.3"

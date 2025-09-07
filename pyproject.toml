@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "MLX-Knife 2.0 - JSON-first model management for automation"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Operating System :: MacOS",
     "Environment :: Console",
+    "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
     "huggingface-hub>=0.34.0",
@@ -49,4 +50,10 @@ version = {attr = "mlxk2.__version__"}
 test = [
     "pytest>=7",
     "jsonschema>=4.20",
+]
+
+[tool.setuptools]
+license-files = [
+  "LICENSE",
+  "mlxk2/NOTICE",
 ]

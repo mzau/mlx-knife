@@ -81,14 +81,15 @@ Understanding what goes where:
 
 ```
 Repository structure:
-├── mlx_knife/              # Python package (→ PyPI)
-├── tests/                  # Test suite
-├── simple_chat.html        # Web interface (GitHub only)
-├── README.md               # User documentation  
-├── CONTRIBUTING.md         # This file
-├── TESTING.md              # Testing guide
-├── pyproject.toml          # Build configuration
-└── requirements.txt        # Dependencies
+├── mlxk2/                       # 2.0 implementation (→ PyPI via mlxk-json)
+├── tests_2.0/                   # 2.0 test suite
+├── docs/                        # Documentation / ADRs
+├── README.md                    # User documentation
+├── CONTRIBUTING.md              # This file
+├── TESTING.md                   # Testing guide
+├── pyproject.toml               # Build configuration (dynamic version)
+├── pyproject-mlxk-json.toml     # Alternate build config (local/dev)
+└── requirements.txt             # Dev/test dependencies
 ```
 
 **What goes where:**
@@ -131,9 +132,9 @@ For detailed testing options, troubleshooting, and advanced workflows, see **[TE
 Please ensure all tests pass locally:
 ```bash
 # Complete test workflow
-ruff check mlx_knife/ --fix    # Fix code style
-mypy mlx_knife/                 # Check types
-pytest tests/                   # Run all tests
+ruff check mlxk2/ --fix         # Fix code style
+mypy mlxk2/                     # Check types
+pytest -v                       # Run all 2.0 tests
 ```
 
 Since we don't have CI/CD (MLX requires Apple Silicon), we rely on contributors to verify their changes locally. Please mention in your PR:
@@ -170,8 +171,8 @@ Mention your Python version in the PR description.
    - Update documentation if needed
 
 3. **Before submitting:**
-   - Run the full test suite locally: `pytest tests/`
-   - Run code quality checks: `ruff check mlx_knife/ --fix`
+   - Run the full test suite locally: `pytest -v`
+   - Run code quality checks: `ruff check mlxk2/ --fix`
    - Test with YOUR Python version (3.9+ required)
    - Update README.md if you've added features
 
@@ -241,7 +242,10 @@ Feel free to open an issue with the "question" label or start a discussion. We'r
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+- For 2.x (`mlxk2`, this branch): By contributing, you agree that your contributions will be licensed under the Apache License, Version 2.0.
+- For 1.x (`main`): By contributing, you agree that your contributions will be licensed under the MIT License.
+
+Please ensure you have the right to contribute the code under these terms. We recommend including a Developer Certificate of Origin (DCO) “Signed-off-by” line in commits.
 
 ---
 

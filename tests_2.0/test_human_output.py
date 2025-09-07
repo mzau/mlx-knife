@@ -80,3 +80,97 @@ def test_health_human_summary_and_entries():
     assert "model-a" in out
     assert "model-b" in out
 
+
+def test_list_human_filters_mlx_base_default():
+    from mlxk2.output.human import render_list
+
+    data = {
+        "status": "success",
+        "command": "list",
+        "data": {
+            "models": [
+                {
+                    "name": "org/MLXChat",
+                    "hash": "abcdef0123456789abcdef0123456789abcdef01",
+                    "size_bytes": 1000,
+                    "last_modified": "2025-08-30T12:00:00Z",
+                    "framework": "MLX",
+                    "model_type": "chat",
+                    "capabilities": ["text-generation", "chat"],
+                    "health": "healthy",
+                    "cached": True,
+                },
+                {
+                    "name": "org/MLXBase",
+                    "hash": "abcdef0123456789abcdef0123456789abcdef02",
+                    "size_bytes": 2000,
+                    "last_modified": "2025-08-30T12:00:00Z",
+                    "framework": "MLX",
+                    "model_type": "base",
+                    "capabilities": ["text-generation"],
+                    "health": "healthy",
+                    "cached": True,
+                },
+            ],
+            "count": 2,
+        },
+        "error": None,
+    }
+
+    # Default (compact) should hide MLX base
+    out_default = render_list(data, show_health=False, show_all=False, verbose=False)
+    assert "MLXChat" in out_default
+    assert "MLXBase" not in out_default
+
+    # Verbose (without --all) shows all MLX (chat + base)
+    out_verbose = render_list(data, show_health=False, show_all=False, verbose=True)
+    assert "MLXChat" in out_verbose
+    assert "MLXBase" in out_verbose
+
+
+def test_list_human_verbose_shows_all_mlx_only():
+    from mlxk2.output.human import render_list
+
+    data = {
+        "status": "success",
+        "command": "list",
+        "data": {
+            "models": [
+                {"name": "org/MLXChat", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "chat", "capabilities": ["text-generation", "chat"], "health": "healthy", "cached": True},
+                {"name": "org/MLXBase", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "base", "capabilities": ["text-generation"], "health": "healthy", "cached": True},
+                {"name": "org/OtherPT", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "PyTorch", "model_type": "base", "capabilities": ["text-generation"], "health": "healthy", "cached": True},
+            ],
+            "count": 3,
+        },
+        "error": None,
+    }
+
+    out_verbose = render_list(data, show_health=False, show_all=False, verbose=True)
+    # Shows both MLX models (chat+base)
+    assert "MLXChat" in out_verbose
+    assert "MLXBase" in out_verbose
+    # Hides non-MLX
+    assert "OtherPT" not in out_verbose
+
+
+def test_list_human_all_shows_all_frameworks():
+    from mlxk2.output.human import render_list
+
+    data = {
+        "status": "success",
+        "command": "list",
+        "data": {
+            "models": [
+                {"name": "org/MLXChat", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "chat", "capabilities": ["text-generation", "chat"], "health": "healthy", "cached": True},
+                {"name": "org/OtherGGUF", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "GGUF", "model_type": "base", "capabilities": ["text-generation"], "health": "unhealthy", "cached": True},
+                {"name": "org/OtherPT", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "PyTorch", "model_type": "base", "capabilities": ["text-generation"], "health": "healthy", "cached": True},
+            ],
+            "count": 3,
+        },
+        "error": None,
+    }
+
+    out_all = render_list(data, show_health=False, show_all=True, verbose=False)
+    assert "MLXChat" in out_all
+    assert "OtherGGUF" in out_all
+    assert "OtherPT" in out_all
