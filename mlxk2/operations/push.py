@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Optional
 import json as _json
 
 
@@ -163,7 +163,7 @@ def push_operation(
         # 4) Ensure repo exists (model type). Do not auto-create branch here.
         created_repo = False
         try:
-            # If branch does not exist, this may raise; that is acceptable for M0.
+            # If branch does not exist, this raises RevisionNotFoundError.
             api.repo_info(repo_id=repo_id, repo_type="model", revision=branch)
         except RepositoryNotFoundError:
             if dry_run:
@@ -187,14 +187,25 @@ def push_operation(
                     "message": f"Repository not found: {repo_id} (use --create)",
                 }
                 return result
-            # Try create
+            # Try create repository (exist_ok=True covers races)
             api.create_repo(
                 repo_id=repo_id, repo_type="model", private=private, exist_ok=True
             )
             # After create, no guarantee branch exists; upload_folder below will target revision
             created_repo = True
+            # Ensure target branch exists if not default
+            try:
+                if branch and branch != DEFAULT_PUSH_BRANCH:
+                    api.create_branch(repo_id=repo_id, repo_type="model", branch=branch)
+            except HfHubHTTPError as e:
+                result["status"] = "error"
+                result["error"] = {
+                    "type": "branch_create_failed",
+                    "message": str(e),
+                }
+                return result
         except RevisionNotFoundError:
-            # Repo exists but branch doesn't; allow upload_folder to create the branch/commit.
+            # Repo exists but branch doesn't.
             if dry_run:
                 local_files = _collect_local_files(p, ignore_patterns)
                 result["data"].update({
@@ -208,12 +219,18 @@ def push_operation(
                     "would_create_branch": True,
                 })
                 return result
-            pass
+            # If user asked to create, proactively create the branch to avoid 404 on preupload;
+            # otherwise, tolerate and let upload_folder attempt (offline tests expect this).
+            if create:
+                try:
+                    api.create_branch(repo_id=repo_id, repo_type="model", branch=branch)
+                except HfHubHTTPError:
+                    # Do not fail early; fall through and let upload attempt once
+                    pass
 
         # 4b) If dry-run and repo/branch exist: compute diff vs remote and return
         if dry_run:
             try:
-                from fnmatch import fnmatch
                 remote_files = set(api.list_repo_files(repo_id=repo_id, repo_type="model", revision=branch or DEFAULT_PUSH_BRANCH) or [])
             except Exception:
                 remote_files = set()
@@ -246,7 +263,6 @@ def push_operation(
         try:
             import logging as _logging
             import contextlib as _contextlib
-            import sys as _sys
             _hf_logger = _logging.getLogger("huggingface_hub")
 
             class _BufHandler(_logging.Handler):
@@ -280,20 +296,8 @@ def push_operation(
                     _hf_logger.handlers = [_handler]  # keep only our buffer in quiet mode
 
                 # Silence tqdm progress bars to stderr as an extra safety in quiet mode
-                if quiet:
-                    with open(os.devnull, "w") as _devnull:
-                        with _contextlib.redirect_stderr(_devnull):
-                            info = upload_folder(
-                                repo_id=repo_id,
-                                repo_type="model",
-                                folder_path=str(p),
-                                revision=branch or DEFAULT_PUSH_BRANCH,
-                                commit_message=commit_msg,
-                                token=hf_token,
-                                ignore_patterns=ignore_patterns,
-                            )
-                else:
-                    info = upload_folder(
+                def _do_upload():
+                    return upload_folder(
                         repo_id=repo_id,
                         repo_type="model",
                         folder_path=str(p),
@@ -302,6 +306,13 @@ def push_operation(
                         token=hf_token,
                         ignore_patterns=ignore_patterns,
                     )
+
+                if quiet:
+                    with open(os.devnull, "w") as _devnull:
+                        with _contextlib.redirect_stderr(_devnull):
+                            info = _do_upload()
+                else:
+                    info = _do_upload()
                 hf_logs = getattr(_handler, "buf", None)
             finally:
                 # Restore logger state
@@ -325,12 +336,39 @@ def push_operation(
                 except Exception:
                     pass
         except HfHubHTTPError as he:
-            result["status"] = "error"
-            result["error"] = {
-                "type": "upload_failed",
-                "message": str(he),
-            }
-            return result
+            # In some hub versions, uploading to a non-existent branch raises here.
+            # If --create was given, try to create the branch and retry once.
+            msg = str(he)
+            if create and ("Revision Not Found" in msg or "Invalid rev id" in msg):
+                try:
+                    api.create_branch(repo_id=repo_id, repo_type="model", branch=branch)
+                    # Retry upload once
+                    try:
+                        info = upload_folder(
+                            repo_id=repo_id,
+                            repo_type="model",
+                            folder_path=str(p),
+                            revision=branch or DEFAULT_PUSH_BRANCH,
+                            commit_message=commit_msg,
+                            token=hf_token,
+                            ignore_patterns=ignore_patterns,
+                        )
+                        hf_logs = hf_logs or []
+                    except HfHubHTTPError as he2:
+                        result["status"] = "error"
+                        result["error"] = {"type": "upload_failed", "message": str(he2)}
+                        return result
+                except HfHubHTTPError as ce:
+                    result["status"] = "error"
+                    result["error"] = {"type": "branch_create_failed", "message": str(ce)}
+                    return result
+            else:
+                result["status"] = "error"
+                result["error"] = {
+                    "type": "upload_failed",
+                    "message": str(he),
+                }
+                return result
         except Exception as e:
             result["status"] = "error"
             result["error"] = {

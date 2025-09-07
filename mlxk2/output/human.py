@@ -82,11 +82,26 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
     if show_health:
         headers.append("Health")
 
-    # Human filter: by default only show MLX framework; with --all show everything
+    # Human filter:
+    # - --all: show everything
+    # - default: show only MLX chat models (safer for run/server selection)
+    # - --verbose (without --all): show all MLX models (chat + base)
     filtered: List[Dict[str, Any]] = []
     for m in models:
-        if show_all or str(m.get("framework", "")).upper() == "MLX":
+        fw = str(m.get("framework", "")).upper()
+        typ = str(m.get("model_type", "")).lower()
+        if show_all:
             filtered.append(m)
+        else:
+            if fw != "MLX":
+                continue
+            if verbose:
+                # In verbose mode, show all MLX models
+                filtered.append(m)
+            else:
+                # Default compact mode: only MLX chat
+                if typ == "chat":
+                    filtered.append(m)
 
     rows: List[List[str]] = []
     for m in filtered:

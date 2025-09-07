@@ -213,3 +213,47 @@ def test_push_hfignore_is_merged_with_defaults(tmp_path, monkeypatch):
     # Ensure .hfignore additions are present
     assert ".idea/" in pats and ".vscode/" in pats and "*.ipynb" in pats
 
+
+def test_push_retry_creates_branch_on_upload_revision_error(tmp_path, monkeypatch):
+    """If upload fails with a revision-not-found style error and --create is set,
+    the operation should create the branch and retry once, succeeding offline."""
+    monkeypatch.setenv("HF_TOKEN", "dummy")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "file.txt").write_text("x")
+
+    class _ApiOk(_FakeHfApi):
+        instance = None  # type: ignore[var-annotated]
+
+        def __init__(self, token: str | None = None) -> None:  # type: ignore[override]
+            super().__init__(token)
+            self.created_branches: list[tuple[str, str]] = []
+            _ApiOk.instance = self
+
+        def create_branch(self, repo_id: str, repo_type: str, branch: str):  # type: ignore[override]
+            self.created_branches.append((repo_id, branch))
+            return {"ok": True}
+
+    state = {"attempt": 0}
+
+    def upload_folder(**kwargs):  # type: ignore
+        # First attempt fails with a hub-like error; second succeeds
+        if state["attempt"] == 0:
+            state["attempt"] += 1
+            raise _Errors.HfHubHTTPError("Invalid rev id: test-branch")
+        state["attempt"] += 1
+        return SimpleNamespace(commit_id="0123456789abcdef0123456789abcdef01234567")
+
+    fake = SimpleNamespace(HfApi=_ApiOk, upload_folder=upload_folder, errors=_Errors)
+    sys.modules["huggingface_hub"] = fake  # type: ignore
+    sys.modules["huggingface_hub.errors"] = _Errors  # type: ignore
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake)
+    monkeypatch.setitem(sys.modules, "huggingface_hub.errors", _Errors)
+
+    res = push_operation(str(ws), "user/repo", create=True, private=True, branch="test-branch")
+    assert res["status"] == "success"
+    # Ensure we retried exactly once (two attempts total)
+    assert state["attempt"] == 2
+    # Ensure branch creation was attempted once
+    assert _ApiOk.instance is not None
+    assert ("user/repo", "test-branch") in (_ApiOk.instance.created_branches if _ApiOk.instance else [])

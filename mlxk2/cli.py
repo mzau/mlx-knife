@@ -106,7 +106,7 @@ def main():
     push_parser = subparsers.add_parser("push", help="EXPERIMENTAL: Upload a local folder to Hugging Face")
     push_parser.add_argument("local_dir", help="Local folder to upload")
     push_parser.add_argument("repo_id", help="Target repo as org/model")
-    push_parser.add_argument("--create", action="store_true", help="Create repository if missing")
+    push_parser.add_argument("--create", action="store_true", help="Create repository/branch if missing")
     # Alpha.1 safety: require --private to avoid accidental public uploads
     push_parser.add_argument(
         "--private",

@@ -1,12 +1,74 @@
 # Changelog
 
-## 1.1.1 — Pending
+## 2.0.0-alpha.3 — 2025-09-08
 
-- Fix (Issue #27): Strict health completeness for multi-shard models in 1.x:
-  - Recognize both safetensors (`model.safetensors.index.json`) and PyTorch (`pytorch_model.bin.index.json`) JSON indices.
-  - Validate only the present format’s shards (exist, non-empty, not LFS pointers) to avoid false negatives.
-  - Aligns 1.x health behavior with 2.0.0-alpha.1 policy.
- - Planned (Issue #31, under #29): Detect Framework/Type via HF Model Card (README front matter) and tokenizer config for non-`mlx-community` repos (lenient parsing). No CLI/JSON schema changes; focused unit tests; target 1.1.1-b2.
+Port Issue #31 (lenient MLX detection) to 2.0; refine human list behavior.
+
+Hard split: 1.x code and tests have been removed from this branch to avoid confusion and license duality. Use the `main` branch for 1.x (MIT).
+
+### Added
+- Detection helpers (README front‑matter + tokenizer):
+  - Framework=MLX when README front‑matter `tags` includes `mlx` or `library_name: mlx`, in addition to `mlx-community/*`.
+  - Type=chat when tokenizer has `chat_template`, or name hints (`instruct`/`chat`), or `config.model_type == 'chat'`.
+  - Unified `build_model_object(...)` used by `list` and `show` to ensure consistent fields.
+- Tests:
+  - Offline: front‑matter and tokenizer detection for both `list` and `show`.
+  - Human output: verifies default/verbose/all filtering semantics.
+  - Live (opt-in): `tests_2.0/live/test_list_human_live.py` checks human list variants against a real HF cache (marker `-m live_list`).
+  - Push (offline): branch-missing tolerance and retry on "Invalid rev id" with `--create`.
+
+### Changed
+- Human list (default): shows only MLX chat models (safer for run/server selection).
+- Human list `--verbose`: shows all MLX models (chat + base).
+- Human list `--all`: shows all frameworks (MLX, GGUF, PyTorch).
+- `show` uses the same detection helpers as `list`; respects `HF_HOME` via `get_current_model_cache()`.
+
+### Docs
+- SECURITY.md: clarified experimental push scope and network behavior (explicit only; no background traffic).
+- README.md: added “Privacy & Network” bullet; updated version strings to alpha.3.
+ - README.md: noted hard split — 1.x lives on `main` (MIT), this branch is 2.x (Apache‑2.0).
+
+### Notes
+- No JSON API schema changes; spec remains 0.1.3.
+ 
+### Fixed
+- Push: tolerate missing target branches; with `--create`, proactively create the branch and retry the upload once. No‑op uploads still create the branch when `--create` is provided.
+
+## [1.1.1-beta.2] - 2025-09-06
+
+### Feature: Lenient MLX Detection for Private Repos (Issue #31)
+- Problem: `run` only accepted `mlx-community/*` models; private/cloned MLX repos (in MLX format) appeared as "PyTorch | base" and were rejected.
+- Solution: Added README/tokenizer-based detection to recognize MLX/chat models outside `mlx-community`.
+- Details:
+  - Tokenizer: If `tokenizer_config.json` contains a non-empty `chat_template` → Type = `chat` (highest priority).
+  - README front matter (YAML, lenient parse):
+    - `tags` contains `mlx` OR `library_name: mlx` → Framework = `MLX`.
+    - `pipeline_tag: text-generation` OR `tags` contain `chat`/`instruct` → Type = `chat`.
+    - `pipeline_tag: sentence-similarity` OR `tags` contain `embedding` → Type = `embedding`.
+  - Fallback unchanged: `.gguf` → `GGUF`; else `safetensors/bin` → `PyTorch`; else `Unknown`. Type fallback by name substrings (`instruct/chat` → chat; `embed` → embedding; else base).
+
+### CLI Behavior (Schema Unchanged)
+- `mlxk show` now displays `Type: <chat|embedding|base>` when detected.
+- `mlxk list --all` includes a `TYPE` column; default `mlxk list` now shows chat-capable MLX models only (strict view).
+- `mlxk run` now accepts MLX repos identified via README (not only `mlx-community/*`).
+
+### Implementation
+- New helper: `mlx_knife/model_card.py` (no deps) to read README front matter and tokenizer hints; fully fail-safe.
+- Updated detection in `mlx_knife/cache_utils.py`:
+  - `detect_framework(...)` consults README hints before file-type fallback.
+  - New `detect_model_type(...)` implements priority order.
+  - `run_model(...)` imports runner module for easier test monkeypatching.
+
+### Tests
+- Added unit tests: `tests/unit/test_model_card_detection.py`.
+- Server test stability and safety improvements:
+  - RAM-aware model gating now combines size-token heuristics with `mlxk show` data (disk size + quantization) for more reliable estimates.
+  - Fixed MoE size parsing (prefers tokens like `8x7B` over partial `7B` matches).
+  - Robust server process guard ensures clean shutdown on Ctrl-C/SIGTERM (prevents orphaned Python processes using excessive memory).
+  - Configurable safety/estimation factors via environment variables (see TESTING.md).
+- All tests passing locally on Apple Silicon across Python 3.9–3.13: 166/166.
+
+Note: GitHub tag/version uses `1.1.1-beta.2`. PyPI release uses PEP 440 `1.1.1b2`.
 
 ## 2.0.0-alpha.2 — 2025-09-05
 
@@ -27,6 +89,23 @@ Experimental `push` (upload only) and documentation/testing refinements.
 
 ### Tests
 - Offline push tests added/extended, including dry-run planning; live push remains opt-in via `wet`/`live_push` markers and required env vars.
+
+## [1.1.1-beta.1] - 2025-09-01
+
+### Fix: Strict Health Completeness for Multi‑Shard Models (Issue #27)
+- Problem: Health reported some multi‑part downloads as OK with missing/empty shards (false positives).
+- Solution: Backported 2.0 health rules to 1.x with index‑aware validation, pattern detection, and robust corruption checks.
+- Details:
+  - Config validation: `config.json` must exist and be a non‑empty JSON object.
+  - Index‑aware: If `model.safetensors.index.json` or `pytorch_model.bin.index.json` exists, every referenced shard must exist, be non‑empty, and not be a Git LFS pointer file.
+  - Pattern fallback policy: If pattern shards like `model-XXXXX-of-YYYYY.*` are present but no index file exists, the model is considered unhealthy (parity with 2.0 policy).
+  - Partial/tmp markers: Any `*.partial`, `*.tmp`, or names containing `partial` anywhere under the snapshot mark the model as unhealthy.
+  - LFS detection: Recursive scan flags suspiciously small files (<200B) that contain the Git LFS pointer header.
+  - Single‑file weights: Non‑empty `*.safetensors`, `*.bin`, or `*.gguf` without pattern shards remain supported and healthy if not LFS pointers.
+- Impact: “Healthy” now reliably means “complete and usable” for automation and CLI workflows.
+- Tests: Added `tests/unit/test_health_multishard.py` covering complete/missing/empty shards, pointer detection, pattern‑without‑index policy, partial markers, and PyTorch index parity.
+
+Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1`.
 
 ## 2.0.0-alpha.1 — 2025-08-31
 
@@ -278,8 +357,4 @@ Experimental `push` (upload only) and documentation/testing refinements.
 
 ## Known Issues
 - See GitHub Issues for tracking
-## 2.0.0-alpha.2 — 2025-09-04
-- Experimental: add `push` command (M0 upload-only) with hard excludes and `.hfignore` support
-- Safety: require `--private` in CLI for alpha.2 to avoid accidental public uploads
-- JSON: add `push` to schema; examples updated; short experimental disclaimer in responses
-- Robustness: early validation for `pull` model names; improved CLI JSON errors for missing args
+ 
