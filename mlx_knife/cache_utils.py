@@ -7,6 +7,9 @@ import shutil
 import sys
 from pathlib import Path
 
+# Issue #31 hints reader
+from .model_card import read_readme_front_matter, tokenizer_has_chat_template
+
 DEFAULT_CACHE_ROOT = Path.home() / ".cache/huggingface"
 CACHE_ROOT = Path(os.environ.get("HF_HOME", DEFAULT_CACHE_ROOT))
 MODEL_CACHE = CACHE_ROOT / "hub"
@@ -216,27 +219,68 @@ def get_model_modified(model_path):
         return f"{minutes} minutes ago"
 
 def detect_framework(model_path, hf_name):
+    """Detect model framework with lenient hints (Issue #31)."""
+    # 1) org hint
     if "mlx-community" in hf_name:
         return "MLX"
-    snapshots_dir = model_path / "snapshots"
+
+    # 2) README front matter: tags contains 'mlx' OR library_name == 'mlx'
+    try:
+        tags, pipeline, lib = read_readme_front_matter(Path(model_path))
+        if (lib and lib.lower() == "mlx") or (tags and any((t or '').lower() == "mlx" for t in tags)):
+            return "MLX"
+    except Exception:
+        pass
+
+    # 3) Fallback by file types
+    snapshots_dir = Path(model_path) / "snapshots"
     if not snapshots_dir.exists():
         return "Unknown"
+    has_gguf = any(snapshots_dir.glob("*/*.gguf"))
     has_safetensors = any(snapshots_dir.glob("*/*.safetensors"))
     has_pytorch_bin = any(snapshots_dir.glob("*/pytorch_model.bin"))
-    has_config = any(snapshots_dir.glob("*/config.json"))
-    total_size = get_model_size(model_path)
+    has_config = any(snapshots_dir.glob("*/*.json"))
+    total_size = get_model_size(Path(model_path))
     try:
         size_mb = float(total_size.replace(" GB", "000").replace(" MB", "").replace(" KB", "0").replace(" ", ""))
-    except:
+    except Exception:
         size_mb = 0
+    if has_gguf:
+        return "GGUF"
     if size_mb < 10:
         return "Tokenizer"
-    elif has_safetensors and has_config:
+    if (has_safetensors and has_config) or has_pytorch_bin:
         return "PyTorch"
-    elif has_pytorch_bin:
-        return "PyTorch"
-    else:
-        return "Unknown"
+    return "Unknown"
+
+
+def detect_model_type(model_path, hf_name):
+    """Detect model type with priority hints (Issue #31)."""
+    # 1) tokenizer chat_template
+    try:
+        if tokenizer_has_chat_template(Path(model_path)):
+            return "chat"
+    except Exception:
+        pass
+
+    # 2) README hints
+    try:
+        tags, pipeline, _ = read_readme_front_matter(Path(model_path))
+        tset = {t.lower() for t in (tags or [])}
+        if pipeline == "text-generation" or any(k in tset for k in {"chat", "instruct"}):
+            return "chat"
+        if pipeline == "sentence-similarity" or any(k in tset for k in {"embedding", "embeddings"}):
+            return "embedding"
+    except Exception:
+        pass
+
+    # 3) Fallback by name
+    name = str(hf_name).lower()
+    if "instruct" in name or "chat" in name:
+        return "chat"
+    if "embed" in name:
+        return "embedding"
+    return "base"
 
 def get_model_hash(model_path):
     snapshots_dir = model_path / "snapshots"
@@ -568,12 +612,12 @@ def list_models(show_all=False, framework_filter=None, show_health=False, single
             return
     if show_health:
         if show_all:
-            print(f"{'NAME':<40} {'ID':<10} {'SIZE':<10} {'MODIFIED':<15} {'FRAMEWORK':<10} {'HEALTH':<8}")
+            print(f"{'NAME':<40} {'ID':<10} {'SIZE':<10} {'MODIFIED':<15} {'FRAMEWORK':<10} {'TYPE':<10} {'HEALTH':<8}")
         else:
             print(f"{'NAME':<40} {'ID':<10} {'SIZE':<10} {'MODIFIED':<15} {'HEALTH':<8}")
     else:
         if show_all:
-            print(f"{'NAME':<40} {'ID':<10} {'SIZE':<10} {'MODIFIED':<15} {'FRAMEWORK':<10}")
+            print(f"{'NAME':<40} {'ID':<10} {'SIZE':<10} {'MODIFIED':<15} {'FRAMEWORK':<10} {'TYPE':<10}")
         else:
             print(f"{'NAME':<40} {'ID':<10} {'SIZE':<10} {'MODIFIED':<15}")
     for m in sorted(models, key=lambda x: x.stat().st_mtime, reverse=True):
@@ -582,10 +626,15 @@ def list_models(show_all=False, framework_filter=None, show_health=False, single
         modified = get_model_modified(m)
         model_hash = get_model_hash(m)
         framework = detect_framework(m, hf_name)
+        model_type = detect_model_type(m, hf_name)
         if framework_filter and framework.lower() != framework_filter:
             continue
-        if not show_all and not framework_filter and framework != "MLX":
-            continue
+        # Default (strict) list: show only MLX chat models
+        if not show_all and not framework_filter:
+            if framework != "MLX":
+                continue
+            if model_type != "chat":
+                continue
         # Handle display name based on verbose flag
         display_name = hf_name
         if hf_name.startswith("mlx-community/") and not verbose:
@@ -595,12 +644,12 @@ def list_models(show_all=False, framework_filter=None, show_health=False, single
         if show_health:
             health_status = "[OK]" if is_model_healthy(hf_name) else "[ERR]"
             if show_all:
-                print(f"{display_name:<40} {model_hash:<10} {size:<10} {modified:<15} {framework:<10} {health_status:<8}")
+                print(f"{display_name:<40} {model_hash:<10} {size:<10} {modified:<15} {framework:<10} {model_type:<10} {health_status:<8}")
             else:
                 print(f"{display_name:<40} {model_hash:<10} {size:<10} {modified:<15} {health_status:<8}")
         else:
             if show_all:
-                print(f"{display_name:<40} {model_hash:<10} {size:<10} {modified:<15} {framework:<10}")
+                print(f"{display_name:<40} {model_hash:<10} {size:<10} {modified:<15} {framework:<10} {model_type:<10}")
             else:
                 print(f"{display_name:<40} {model_hash:<10} {size:<10} {modified:<15}")
 
@@ -630,11 +679,11 @@ def run_model(model_spec, prompt=None, interactive=False, temperature=0.7,
         print("Use MLX-Community models: https://huggingface.co/mlx-community")
         sys.exit(1)
 
-    # Try to use the enhanced runner
+    # Try to use the enhanced runner (import module to allow monkeypatching in tests)
     try:
-        from .mlx_runner import run_model_enhanced
+        from . import mlx_runner as _mr
 
-        run_model_enhanced(
+        _mr.run_model_enhanced(
             model_path=str(model_path),
             prompt=prompt,
             interactive=interactive,
@@ -687,9 +736,11 @@ def show_model(model_spec, show_files=False, show_config=False):
     modified = get_model_modified(model_path)
     print(f"Modified: {modified}")
 
-    # Framework
+    # Framework / Type
     framework = detect_framework(model_path.parent.parent, model_name)
+    model_type = detect_model_type(model_path.parent.parent, model_name)
     print(f"Framework: {framework}")
+    print(f"Type: {model_type}")
 
     # Quantization and Precision info
     config_path = model_path / "config.json"

@@ -9,20 +9,22 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
 **Current Version**: 1.1.0 (August 2025) - **STABLE RELEASE** 🚀
-- Pre-release: 1.1.1b1 — strict multi-shard health checks (Issue #27). Install with `pip install --pre mlx-knife`.
-- **Production Ready**: First stable release since 1.0.4 with comprehensive testing
-- **Enhanced Test System**: 150/150 tests passing with real model lifecycle integration tests  
+- Pre-release: 1.1.1b2 — lenient MLX detection for private repos (Issue #31):
+  - README/tokenizer hints (Framework/Type),
+  - `show` displays Type,
+  - default `list` shows chat-capable MLX models; `--all` shows all with TYPE,
+  - server `/v1/models` lists chat-capable MLX models (Chat API).
+  - Details: see CHANGELOG.md. Install with `pip install --pre mlx-knife`.
+- **Enhanced Test System**: 166/166 tests passing across Python 3.9–3.13  
 - **Python 3.9-3.13**: Full compatibility verified across all Python versions
 - **All Critical Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Sponsor mlx-knife](https://img.shields.io/badge/Sponsor-mlx--knife-ff69b4?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/mzau)
-
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-160%2F160%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-166%2F166%20passing-brightgreen.svg)](#testing)
 
 ## Features
 
@@ -171,9 +173,9 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 
 #### `list` - Browse Models
 ```bash
-mlxk list                    # Show MLX models only (short names)
+mlxk list                    # Show chat-capable MLX models (strict view)
 mlxk list --verbose          # Show MLX models with full paths
-mlxk list --all              # Show all models with framework info
+mlxk list --all              # Show all models with framework and TYPE
 mlxk list --all --verbose    # All models with full paths
 mlxk list --health           # Include health status
 mlxk list Phi-3              # Filter by model name
@@ -335,8 +337,6 @@ Copyright (c) 2025 The BROKE team 🦫
     <img src="https://github.com/tileslauncher.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
   </a>
 </div>
-
-Support this project: [GitHub Sponsors → mlx-knife](https://github.com/sponsors/mzau)
 
 ## Acknowledgments
 

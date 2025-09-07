@@ -13,7 +13,7 @@ authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
@@ -89,6 +89,8 @@ markers = [
     "framework_validation: tests that require diverse model frameworks"
 ]
 timeout = 300
+timeout_method = "thread"
+timeout_func_only = true
 norecursedirs = [".git", ".tox", "dist", "build", "*.egg", "venv", "__pycache__"]
 minversion = "6.0"
 

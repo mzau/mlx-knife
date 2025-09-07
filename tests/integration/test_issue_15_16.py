@@ -23,18 +23,50 @@ import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import os
+import math
+from functools import lru_cache
 import psutil
 import pytest
 import requests
+try:
+    from tests.support import process_guard as pg  # pytest path
+except Exception:
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from support import process_guard as pg  # type: ignore
+    except Exception:
+        class _PG:
+            @staticmethod
+            def register_popen(*args, **kwargs):
+                pass
+            @staticmethod
+            def unregister(*args, **kwargs):
+                pass
+            @staticmethod
+            def install_signal_handlers():
+                pass
+            @staticmethod
+            def kill_all(*args, **kwargs):
+                pass
+        pg = _PG()
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Realistic RAM requirements for 4-bit quantized models (in GB)
-MODEL_RAM_REQUIREMENTS = {
+# RAM estimation: separate 4-bit vs FP16 to avoid selecting huge FP16 models
+MODEL_RAM_REQUIREMENTS_4BIT = {
     "0.5B": 1,   "1B": 2,    "3B": 4,    "4B": 5,
-    "7B": 8,     "8x7B": 16, "24B": 20,  "30B": 24, 
-    "70B": 40,   "480B": 180
+    "7B": 8,     "8x7B": 16, "24B": 20,  "30B": 24,
+    "70B": 40,   "480B": 180,
+}
+
+MODEL_RAM_REQUIREMENTS_FP16 = {
+    "0.5B": 2,   "1B": 4,    "3B": 8,    "4B": 12,
+    "7B": 16,    "8x7B": 180, "24B": 48,  "30B": 60,
+    "70B": 140,  "480B": 960,
 }
 
 SERVER_BASE_URL = "http://localhost:8001"  # Different port to avoid conflicts
@@ -68,10 +100,58 @@ def extract_model_size(model_name: str) -> str:
     return "3B"  # Default fallback
 
 
-def get_available_ram_gb() -> int:
-    """Get available system RAM in GB."""
+def is_quantized_4bit(model_name: str) -> bool:
+    name = model_name.lower()
+    return (
+        "4bit" in name or
+        "q4" in name or
+        "int4" in name
+    )
+
+
+def estimate_required_ram_gb(model_name: str, size_str: str) -> int:
+    """Estimate RAM using show-based disk size and quantization-aware maps."""
+    info = get_model_info_via_show(model_name)
+    q4 = is_quantized_4bit(model_name)
+
     try:
-        return int(psutil.virtual_memory().available / (1024**3))
+        if q4:
+            factor = float(os.getenv("MLXK_TEST_FACTOR_4BIT", os.getenv("MLXK_TEST_DISK_TO_RAM_FACTOR", "0.6")))
+        else:
+            factor = float(os.getenv("MLXK_TEST_FACTOR_FP16", os.getenv("MLXK_TEST_DISK_TO_RAM_FACTOR", "0.6")))
+        factor = max(0.1, min(2.0, factor))
+    except Exception:
+        factor = 0.6
+
+    disk_ram_est = None
+    if info and info.get("size_gb") is not None:
+        disk_ram_est = max(1, math.ceil(info["size_gb"] * factor))
+
+    map_est = None
+    if size_str:
+        if q4:
+            map_est = MODEL_RAM_REQUIREMENTS_4BIT.get(size_str)
+        else:
+            map_est = MODEL_RAM_REQUIREMENTS_FP16.get(size_str)
+
+    if disk_ram_est is not None and map_est is not None:
+        return max(disk_ram_est, map_est)
+    if disk_ram_est is not None:
+        return disk_ram_est
+    if map_est is not None:
+        return map_est
+    return 999
+
+
+def get_available_ram_gb() -> int:
+    """Get available system RAM in GB (with optional safety margin)."""
+    try:
+        total = int(psutil.virtual_memory().total / (1024**3))
+        available = int(psutil.virtual_memory().available / (1024**3))
+        safety_factor = float(os.getenv("MLXK_TEST_RAM_SAFETY", "1.0"))
+        safety_factor = max(0.1, min(1.0, safety_factor))
+        safe_usable = min(int(available * safety_factor), total - 4)
+        return max(1, safe_usable)
     except Exception:
         return 8  # Conservative fallback
 
@@ -84,8 +164,8 @@ def get_suitable_models(available_models: List[str]) -> List[str]:
     suitable = []
     for model in available_models:
         size = extract_model_size(model)
-        required_ram = MODEL_RAM_REQUIREMENTS.get(size, 8)
-        
+        required_ram = estimate_required_ram_gb(model, size)
+
         if required_ram <= available_ram:
             suitable.append(model)
             logger.info(f"✓ {model} ({size}, {required_ram}GB) - Suitable")
@@ -118,6 +198,49 @@ def get_cached_models() -> List[str]:
     except Exception as e:
         logger.warning(f"Failed to get cached models: {e}")
         return []
+
+
+def parse_size_to_gb(size_str: str) -> float:
+    try:
+        parts = size_str.strip().split()
+        if len(parts) < 2:
+            return None
+        value = float(parts[0])
+        unit = parts[1].upper()
+        if unit.startswith('KB'):
+            return value / (1024 ** 2)
+        if unit.startswith('MB'):
+            return value / 1024
+        if unit.startswith('GB'):
+            return value
+        if unit.startswith('TB'):
+            return value * 1024
+        return None
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=128)
+def get_model_info_via_show(model_name: str) -> dict:
+    """Use `mlxk show` to fetch size and quantization details for a model."""
+    try:
+        res = subprocess.run(["mlxk", "show", model_name], capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return {}
+        size_gb = None
+        quant_info = None
+        for raw in res.stdout.splitlines():
+            line = raw.strip()
+            if line.startswith("Size:"):
+                size_text = line.split("Size:", 1)[1].strip()
+                val = parse_size_to_gb(size_text)
+                if val is not None:
+                    size_gb = val
+            elif line.startswith("Quantization:"):
+                quant_info = line.split("Quantization:", 1)[1].strip()
+        return {"size_gb": size_gb, "quantization": quant_info}
+    except Exception:
+        return {}
 
 
 def extract_context_length_from_model(model_name: str) -> int:
@@ -173,6 +296,11 @@ class MLXKnifeServer:
     def start(self) -> bool:
         """Start the MLX Knife server."""
         try:
+            # Ensure signal handlers are installed for robust cleanup (server-only)
+            try:
+                pg.install_signal_handlers()
+            except Exception:
+                pass
             cmd = [
                 "mlxk", "server", 
                 "--host", "127.0.0.1",
@@ -185,8 +313,11 @@ class MLXKnifeServer:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None
             )
+            # Track for robust cleanup on Ctrl-C
+            pg.register_popen(self.process, label="mlxk-server")
             
             # Wait for server to start
             for attempt in range(30):
@@ -216,16 +347,31 @@ class MLXKnifeServer:
         if self.process:
             try:
                 # Try graceful shutdown first
-                self.process.terminate()
+                try:
+                    self.process.terminate()
+                except Exception:
+                    pass
                 try:
                     self.process.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     # Force kill if not responding
-                    self.process.kill()
-                    self.process.wait(timeout=5)
+                    try:
+                        if hasattr(os, "killpg"):
+                            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                    except Exception:
+                        pass
+                    try:
+                        self.process.kill()
+                        self.process.wait(timeout=3)
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning(f"Error stopping server: {e}")
             finally:
+                try:
+                    pg.unregister(self.process.pid)
+                except Exception:
+                    pass
                 self.process = None
     
     def chat_completion(self, model: str, messages: List[Dict], max_tokens: int = None) -> Dict:

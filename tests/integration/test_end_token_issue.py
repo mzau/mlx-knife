@@ -11,19 +11,54 @@ import subprocess
 import time
 from typing import Dict, List, Tuple, Any
 import json
+import math
+import subprocess
+from functools import lru_cache
 
+import os
 import psutil
 import pytest
 import requests
+try:
+    from tests.support import process_guard as pg  # pytest path
+except Exception:
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from support import process_guard as pg  # type: ignore
+    except Exception:
+        class _PG:
+            @staticmethod
+            def register_popen(*args, **kwargs):
+                pass
+            @staticmethod
+            def unregister(*args, **kwargs):
+                pass
+            @staticmethod
+            def install_signal_handlers():
+                pass
+            @staticmethod
+            def kill_all(*args, **kwargs):
+                pass
+        pg = _PG()
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Realistic RAM requirements for 4-bit quantized models (in GB)
-MODEL_RAM_REQUIREMENTS = {
+# RAM requirements by quantization level
+# 4-bit (GB)
+MODEL_RAM_REQUIREMENTS_4BIT = {
     "0.5B": 1,   "1B": 2,    "3B": 4,    "4B": 5,
-    "7B": 8,     "8x7B": 16, "24B": 20,  "30B": 24, 
-    "70B": 40,   "480B": 180
+    "7B": 8,     "8x7B": 16, "24B": 20,  "30B": 24,
+    "70B": 40,   "480B": 180,
+}
+
+# FP16/BF16 (GB) — conservative
+MODEL_RAM_REQUIREMENTS_FP16 = {
+    "0.5B": 2,   "1B": 4,    "3B": 8,    "4B": 12,
+    "7B": 16,    "8x7B": 180, "24B": 48,  "30B": 60,
+    "70B": 140,  "480B": 960,
 }
 
 # Model-specific End-Tokens to check for (comprehensive list)
@@ -45,30 +80,127 @@ SERVER_PORT = 8000
 
 
 def extract_model_size(model_name: str) -> str:
-    """Extract model size from model name."""
+    """Extract model size from model name (prefers MoE tokens like 8x7B)."""
     import re
-    
-    # Match patterns like "30B", "8x7B", "480B", "0.5B", "3.2B"
+
+    # Prefer MoE first, then standard sizes; include special cases
     size_patterns = [
-        r'(\d+(?:\.\d+)?B)',  # Standard: 30B, 3.2B, 0.5B
-        r'(\d+x\d+B)',        # MoE: 8x7B
-        r'(480B)',            # Special: 480B
-        r'Phi-3-mini',        # Map to 4B
-        r'small',             # Map to 7B (lowercase)
-        r'Small',             # Map to 7B (capitalized)
+        r'(\d+(?:\.\d+)?(?:x\d+)?B)',  # 30B, 0.5B, 3.2B, 8x7B
+        r'Phi-3-mini',                    # Special case → 4B
+        r'Qwen2\.5-(\d+(?:\.\d+)?)B', # Qwen2.5-0.5B → 0.5B
     ]
-    
+
     for pattern in size_patterns:
-        match = re.search(pattern, model_name, re.IGNORECASE)
+        match = re.search(pattern, model_name)
         if match:
-            size = match.group(1)
-            if 'Phi-3-mini' in size:
+            if 'Phi-3-mini' in model_name:
                 return '4B'
-            elif 'small' in size.lower():
-                return '7B'
-            return size
-    
-    return '7B'  # Default fallback
+            elif 'Qwen2.5' in model_name:
+                return f"{match.group(1)}B"
+            else:
+                return match.group(1)
+
+    return 'unknown'
+
+
+def is_quantized_4bit_from_text(text: str) -> bool:
+    t = text.lower()
+    markers = ["4bit", "4-bit", "q4", "int4", "gguf q4", "q4_k", "q4_"]
+    return any(m in t for m in markers)
+
+
+@lru_cache(maxsize=128)
+def get_model_info_via_show(model_name: str) -> dict:
+    """Use `mlxk show` to fetch size and quantization details for a model."""
+    try:
+        res = subprocess.run(["mlxk", "show", model_name], capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return {}
+        size_gb = None
+        quant_info = None
+        for raw in res.stdout.splitlines():
+            line = raw.strip()
+            if line.startswith("Size:"):
+                size_text = line.split("Size:", 1)[1].strip()
+                val = parse_size_to_gb(size_text)
+                if val is not None:
+                    size_gb = val
+            elif line.startswith("Quantization:"):
+                quant_info = line.split("Quantization:", 1)[1].strip()
+        return {"size_gb": size_gb, "quantization": quant_info}
+    except Exception:
+        return {}
+
+
+def is_quantized_4bit(model_name: str) -> bool:
+    name = model_name.lower()
+    if any(m in name for m in ("4bit", "q4", "int4")):
+        return True
+    info = get_model_info_via_show(model_name)
+    if info and info.get("quantization"):
+        return is_quantized_4bit_from_text(info["quantization"])
+    return False
+
+
+def estimate_required_ram_gb(model_name: str, size_str: str) -> int:
+    """Estimate RAM using show-based disk size and quantization-aware maps."""
+    info = get_model_info_via_show(model_name)
+    q4 = is_quantized_4bit(model_name)
+
+    # Quantization-specific disk→RAM factor
+    try:
+        if q4:
+            factor = float(os.getenv("MLXK_TEST_FACTOR_4BIT", os.getenv("MLXK_TEST_DISK_TO_RAM_FACTOR", "0.6")))
+        else:
+            factor = float(os.getenv("MLXK_TEST_FACTOR_FP16", os.getenv("MLXK_TEST_DISK_TO_RAM_FACTOR", "0.6")))
+        factor = max(0.1, min(2.0, factor))
+    except Exception:
+        factor = 0.6
+
+    disk_ram_est = None
+    if info and info.get("size_gb") is not None:
+        disk_ram_est = max(1, math.ceil(info["size_gb"] * factor))
+
+    map_est = None
+    if size_str and size_str != 'unknown':
+        if q4:
+            map_est = MODEL_RAM_REQUIREMENTS_4BIT.get(size_str)
+        else:
+            map_est = MODEL_RAM_REQUIREMENTS_FP16.get(size_str)
+
+    if disk_ram_est is not None and map_est is not None:
+        return max(disk_ram_est, map_est)
+    if disk_ram_est is not None:
+        return disk_ram_est
+    if map_est is not None:
+        return map_est
+    return 999
+
+
+def parse_size_to_gb(size_str: str) -> float:
+    try:
+        parts = size_str.strip().split()
+        if len(parts) < 2:
+            return None
+        value = float(parts[0])
+        unit = parts[1].upper()
+        if unit.startswith('KB'):
+            return value / (1024 ** 2)
+        if unit.startswith('MB'):
+            return value / 1024
+        if unit.startswith('GB'):
+            return value
+        if unit.startswith('TB'):
+            return value * 1024
+        return None
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=128)
+def get_model_disk_size_gb(model_name: str) -> float:
+    info = get_model_info_via_show(model_name)
+    return info.get("size_gb") if info else None
 
 
 def get_model_family(model_name: str) -> str:
@@ -90,12 +222,70 @@ def get_model_family(model_name: str) -> str:
 
 
 def get_available_ram_gb() -> int:
-    """Get available system RAM in GB."""
-    return psutil.virtual_memory().available // (1024**3)
+    """Get available system RAM in GB (with optional safety margin)."""
+    total = psutil.virtual_memory().total // (1024**3)
+    available = psutil.virtual_memory().available // (1024**3)
+    try:
+        safety_factor = float(os.getenv("MLXK_TEST_RAM_SAFETY", "1.0"))
+        safety_factor = max(0.1, min(1.0, safety_factor))
+    except Exception:
+        safety_factor = 1.0
+    safe_usable = min(int(available * safety_factor), total - 4)
+    return max(1, safe_usable)
+
+
+def find_existing_mlxk_servers() -> List[psutil.Process]:
+    """Find running MLX Knife server processes (best-effort)."""
+    servers = []
+    for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            cmd = ' '.join(p.info.get('cmdline') or [])
+            if 'mlx_knife.server:app' in cmd or ('mlxk' in cmd and 'server' in cmd):
+                servers.append(p)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return servers
+
+
+def cleanup_zombie_servers(port: int):
+    """Clean up any zombie MLX Knife servers on the specified port."""
+    logger.info(f"🧹 Checking for existing servers on port {port}")
+    # Try to find listeners on the port
+    try:
+        conns = psutil.net_connections(kind='inet')
+    except (psutil.AccessDenied, PermissionError):
+        conns = []
+    for c in conns:
+        if c.laddr.port == port and c.status == psutil.CONN_LISTEN and c.pid:
+            try:
+                proc = psutil.Process(c.pid)
+                cmd = ' '.join(proc.cmdline())
+                if 'mlxk' in cmd and 'server' in cmd:
+                    logger.warning(f"⚠️  Killing leftover MLX Knife server PID {proc.pid}")
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                else:
+                    logger.warning(f"Port {port} occupied by non-MLX process {proc.pid}: {cmd}")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    # Also kill any stray MLX Knife servers regardless of port
+    for proc in find_existing_mlxk_servers():
+        try:
+            logger.warning(f"⚠️  Cleaning zombie MLX Knife server PID {proc.pid}")
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                proc.kill()
+        except psutil.NoSuchProcess:
+            pass
 
 
 class MLXKnifeServerManager:
-    """Context manager for MLX Knife server lifecycle."""
+    """Context manager for MLX Knife server lifecycle with zombie cleanup."""
     
     def __init__(self):
         self.process = None
@@ -109,14 +299,23 @@ class MLXKnifeServerManager:
         
     def start_server(self):
         """Start MLX Knife server."""
+        # Ensure signal handlers are installed for robust cleanup (server-only)
+        try:
+            pg.install_signal_handlers()
+        except Exception:
+            pass
+        # Ensure no stale server blocks the port
+        cleanup_zombie_servers(SERVER_PORT)
         logger.info("Starting MLX Knife server...")
         self.process = subprocess.Popen(
             ["mlxk", "server", "--host", "127.0.0.1", "--port", str(SERVER_PORT)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)
+            preexec_fn=os.setsid if hasattr(os, "setsid") else None
         )
+        # Track for robust cleanup on Ctrl-C
+        pg.register_popen(self.process, label="mlxk-server")
         
         # Wait for server to be ready
         for attempt in range(30):
@@ -136,15 +335,31 @@ class MLXKnifeServerManager:
         if self.process:
             logger.info("Stopping server...")
             # Graceful shutdown attempt
-            self.process.terminate()
+            try:
+                self.process.terminate()
+            except Exception:
+                pass
             try:
                 self.process.wait(timeout=10)
                 logger.info("Server stopped gracefully")
             except subprocess.TimeoutExpired:
                 logger.warning("Server did not stop gracefully, force killing...")
-                self.process.kill()
-                self.process.wait()
+                # Kill process group first for immediate stop
+                try:
+                    if hasattr(os, "killpg"):
+                        os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+                try:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
+                except Exception:
+                    pass
                 logger.info("Server force killed")
+            try:
+                pg.unregister(self.process.pid)
+            except Exception:
+                pass
             
             # Wait a bit for port cleanup
             time.sleep(2)
@@ -182,11 +397,11 @@ def get_safe_models_for_system() -> List[Tuple[str, str, int]]:
     
     for model in models:
         size_str = extract_model_size(model)
-        ram_needed = MODEL_RAM_REQUIREMENTS.get(size_str, 8)  # Default 8GB
-        
+        ram_needed = estimate_required_ram_gb(model, size_str)
+
         if ram_needed <= available_ram:
             safe_models.append((model, size_str, ram_needed))
-            
+
     return safe_models
 
 

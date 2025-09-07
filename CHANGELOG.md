@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.1.1-beta.2] - 2025-09-06
+
+### Feature: Lenient MLX Detection for Private Repos (Issue #31)
+- Problem: `run` only accepted `mlx-community/*` models; private/cloned MLX repos (in MLX format) appeared as "PyTorch | base" and were rejected.
+- Solution: Added README/tokenizer-based detection to recognize MLX/chat models outside `mlx-community`.
+- Details:
+  - Tokenizer: If `tokenizer_config.json` contains a non-empty `chat_template` → Type = `chat` (highest priority).
+  - README front matter (YAML, lenient parse):
+    - `tags` contains `mlx` OR `library_name: mlx` → Framework = `MLX`.
+    - `pipeline_tag: text-generation` OR `tags` contain `chat`/`instruct` → Type = `chat`.
+    - `pipeline_tag: sentence-similarity` OR `tags` contain `embedding` → Type = `embedding`.
+  - Fallback unchanged: `.gguf` → `GGUF`; else `safetensors/bin` → `PyTorch`; else `Unknown`. Type fallback by name substrings (`instruct/chat` → chat; `embed` → embedding; else base).
+
+### CLI Behavior (Schema Unchanged)
+- `mlxk show` now displays `Type: <chat|embedding|base>` when detected.
+- `mlxk list --all` includes a `TYPE` column; default `mlxk list` now shows chat-capable MLX models only (strict view).
+- `mlxk run` now accepts MLX repos identified via README (not only `mlx-community/*`).
+
+### Implementation
+- New helper: `mlx_knife/model_card.py` (no deps) to read README front matter and tokenizer hints; fully fail-safe.
+- Updated detection in `mlx_knife/cache_utils.py`:
+  - `detect_framework(...)` consults README hints before file-type fallback.
+  - New `detect_model_type(...)` implements priority order.
+  - `run_model(...)` imports runner module for easier test monkeypatching.
+
+### Tests
+- Added unit tests: `tests/unit/test_model_card_detection.py`.
+- Server test stability and safety improvements:
+  - RAM-aware model gating now combines size-token heuristics with `mlxk show` data (disk size + quantization) for more reliable estimates.
+  - Fixed MoE size parsing (prefers tokens like `8x7B` over partial `7B` matches).
+  - Robust server process guard ensures clean shutdown on Ctrl-C/SIGTERM (prevents orphaned Python processes using excessive memory).
+  - Configurable safety/estimation factors via environment variables (see TESTING.md).
+- All tests passing locally on Apple Silicon across Python 3.9–3.13: 166/166.
+
+Note: GitHub tag/version uses `1.1.1-beta.2`. PyPI release uses PEP 440 `1.1.1b2`.
+
 ## [1.1.1-beta.1] - 2025-09-01
 
 ### Fix: Strict Health Completeness for Multi‑Shard Models (Issue #27)

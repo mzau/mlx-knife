@@ -17,7 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .cache_utils import detect_framework, is_model_healthy
+from .cache_utils import (
+    detect_framework,
+    detect_model_type,
+    get_model_path,
+    is_model_healthy,
+)
 from .mlx_runner import MLXRunner
 
 # Global model cache and configuration
@@ -103,8 +108,16 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> MLXRunner:
 
     # Check if we need to load a different model
     if _current_model_path != model_path_str:
-        # Clear cache if switching models to avoid memory issues
-        _model_cache.clear()
+        # Proactively clean up any previously loaded runner to release memory
+        if _model_cache:
+            try:
+                for _old_runner in list(_model_cache.values()):
+                    try:
+                        _old_runner.cleanup()
+                    except Exception:
+                        pass
+            finally:
+                _model_cache.clear()
 
         # Load new model
         if verbose:
@@ -345,7 +358,14 @@ async def lifespan(app: FastAPI):
     print("MLX Knife Server shutting down...")
     # Clean up model cache
     global _model_cache
-    _model_cache.clear()
+    try:
+        for _runner in list(_model_cache.values()):
+            try:
+                _runner.cleanup()
+            except Exception:
+                pass
+    finally:
+        _model_cache.clear()
 
 
 # Create FastAPI app
@@ -378,7 +398,7 @@ async def health_check():
 
 @app.get("/v1/models")
 async def list_models():
-    """List available models."""
+    """List available models (conservative, unchanged by Issue #31)."""
     from .cache_utils import MODEL_CACHE, cache_dir_to_hf
 
     model_list = []
@@ -389,17 +409,23 @@ async def list_models():
         framework = detect_framework(model_dir, model_name)
 
         if framework == "MLX" and is_model_healthy(model_name):
-            # Get model context length
+            # Only expose chat-capable models for the chat/completions API
+            try:
+                mtype = detect_model_type(model_dir, model_name)
+            except Exception:
+                mtype = "base"
+            if mtype != "chat":
+                continue
+            # Get model context length (best effort)
             context_length = None
             try:
-                from .cache_utils import get_model_path
-                from .mlx_runner import get_model_context_length
                 model_path_tuple = get_model_path(model_name)
                 if model_path_tuple and model_path_tuple[0]:
+                    from .mlx_runner import get_model_context_length
                     context_length = get_model_context_length(str(model_path_tuple[0]))
             except Exception:
-                pass  # Fallback to None if context length cannot be determined
-            
+                pass
+
             model_list.append(ModelInfo(
                 id=model_name,
                 object="model",
