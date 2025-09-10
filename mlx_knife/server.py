@@ -242,8 +242,11 @@ async def generate_chat_stream(
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
-    # Convert messages to prompt
-    prompt = format_chat_messages(messages)
+    # Convert messages to dict format for runner
+    message_dicts = format_chat_messages_for_runner(messages)
+    
+    # Let the runner format with chat templates
+    prompt = runner._format_conversation(message_dicts, use_chat_template=True)
 
     # Yield initial response
     initial_response = {
@@ -270,7 +273,8 @@ async def generate_chat_stream(
             temperature=request.temperature,
             top_p=request.top_p,
             repetition_penalty=request.repetition_penalty,
-            use_chat_template=True
+            use_chat_template=False,  # Already applied in _format_conversation
+            use_chat_stop_tokens=False  # Server mode shouldn't stop on chat markers
         ):
             chunk_response = {
                 "id": completion_id,
@@ -330,19 +334,12 @@ async def generate_chat_stream(
     yield "data: [DONE]\n\n"
 
 
-def format_chat_messages(messages: List[ChatMessage]) -> str:
-    """Convert chat messages to a prompt string."""
-    # Simple format - models with chat templates will format properly
-    formatted = []
-    for message in messages:
-        if message.role == "system":
-            formatted.append(f"System: {message.content}")
-        elif message.role == "user":
-            formatted.append(f"Human: {message.content}")
-        elif message.role == "assistant":
-            formatted.append(f"Assistant: {message.content}")
-
-    return "\n\n".join(formatted)
+def format_chat_messages_for_runner(messages: List[ChatMessage]) -> List[Dict[str, str]]:
+    """Convert chat messages to format expected by MLXRunner.
+    
+    Returns messages in dict format for the runner to apply chat templates.
+    """
+    return [{"role": msg.role, "content": msg.content} for msg in messages]
 
 
 def count_tokens(text: str) -> int:
@@ -515,8 +512,11 @@ async def create_chat_completion(request: ChatCompletionRequest):
             completion_id = f"chatcmpl-{uuid.uuid4()}"
             created = int(time.time())
 
-            # Format messages to prompt
-            prompt = format_chat_messages(request.messages)
+            # Convert messages to dict format for runner
+            message_dicts = format_chat_messages_for_runner(request.messages)
+            
+            # Let the runner format with chat templates
+            prompt = runner._format_conversation(message_dicts, use_chat_template=True)
 
             generated_text = runner.generate_batch(
                 prompt=prompt,
@@ -524,7 +524,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
                 temperature=request.temperature,
                 top_p=request.top_p,
                 repetition_penalty=request.repetition_penalty,
-                use_chat_template=True
+                use_chat_template=False  # Already applied in _format_conversation
             )
 
             # Token counting

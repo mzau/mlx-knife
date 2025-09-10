@@ -2,10 +2,10 @@
 
 ## Current Status
 
-✅ **166/166 tests passing** (September 2025) - **STABLE RELEASE + Pre-release** 🚀  
+✅ **166/166 tests passing** (September 2025) - **STABLE RELEASE + Pre-release 1.1.1-beta.3** 🚀  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
-✅ **Production ready** - comprehensive testing with real model execution
+✅ **Stable for development use** - comprehensive testing with real model execution
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
@@ -291,7 +291,8 @@ pytest tests/integration/test_server_functionality.py -v
 
 ### Verification Results (September 2025)
 
-**✅ 166/166 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
+**✅ 166/166 tests passing** - All standard tests validated on Apple Silicon with isolated cache system  
+**🆕 1.1.1-beta.3** - MXFP4 quantization support and GPT-OSS reasoning model integration
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
@@ -459,9 +460,9 @@ When submitting PRs, please include:
 
 ## Summary
 
-**MLX Knife 1.1.0 STABLE Testing Status:**
+**MLX Knife 1.1.0 STABLE + 1.1.1-beta.3 Testing Status:**
 
-✅ **Production Ready** - 150/150 tests passing  
+✅ **Stable for development use** - 166/166 tests passing  
 ✅ **Isolated Test System** - User cache stays pristine with temp cache isolation
 ✅ **3-Category Strategy** - Optimized for performance and safety
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified  
@@ -473,7 +474,7 @@ When submitting PRs, please include:
 ✅ **LibreSSL Warning Fix** - Issue #22: macOS Python 3.9 warning suppression
 ✅ **Lock Cleanup Fix** - Issue #23: Enhanced rm command with lock cleanup
 
-This comprehensive testing framework validates MLX Knife's **production readiness** through isolated testing with automatic model downloads and separate real MLX validation.
+This comprehensive testing framework validates MLX Knife's **stability for development use** through isolated testing with automatic model downloads and separate real MLX validation.
 
 ## Server-Based Testing (Advanced)
 

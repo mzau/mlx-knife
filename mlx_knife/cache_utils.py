@@ -282,6 +282,19 @@ def detect_model_type(model_path, hf_name):
         return "embedding"
     return "base"
 
+
+def get_quantization_info(model_path):
+    """Extract quantization information from model config."""
+    try:
+        config_path = Path(model_path) / "config.json"
+        if not config_path.exists():
+            return None
+        with open(config_path) as f:
+            cfg = json.load(f)
+        return cfg.get("quantization")
+    except Exception:
+        return None
+
 def get_model_hash(model_path):
     snapshots_dir = model_path / "snapshots"
     if not snapshots_dir.exists():
@@ -655,7 +668,7 @@ def list_models(show_all=False, framework_filter=None, show_health=False, single
 
 def run_model(model_spec, prompt=None, interactive=False, temperature=0.7,
               max_tokens=500, top_p=0.9, repetition_penalty=1.1, stream=True,
-              use_chat_template=True, verbose=False):
+              use_chat_template=True, hide_reasoning=False, verbose=False):
     """Run an MLX model with enhanced features.
     
     Args:
@@ -693,6 +706,7 @@ def run_model(model_spec, prompt=None, interactive=False, temperature=0.7,
             repetition_penalty=repetition_penalty,
             stream=stream,
             use_chat_template=use_chat_template,
+            hide_reasoning=hide_reasoning,
             verbose=verbose,
         )
     except ImportError:
@@ -741,6 +755,26 @@ def show_model(model_spec, show_files=False, show_config=False):
     model_type = detect_model_type(model_path.parent.parent, model_name)
     print(f"Framework: {framework}")
     print(f"Type: {model_type}")
+    
+    # Quantization info (if available)
+    quant_info = get_quantization_info(model_path)
+    if quant_info:
+        if isinstance(quant_info, dict):
+            # Show main quantization config (compact format)
+            main_config = []
+            if "mode" in quant_info:
+                main_config.append(f"mode: {quant_info['mode']}")
+            if "bits" in quant_info:
+                main_config.append(f"{quant_info['bits']}-bit")
+            if "group_size" in quant_info:
+                main_config.append(f"group_size: {quant_info['group_size']}")
+            
+            if main_config:
+                print(f"Quantization: {', '.join(main_config)}")
+                if "mode" in quant_info:
+                    print(f"  Advanced mode '{quant_info['mode']}' (requires MLX ≥0.29.0, MLX-LM ≥0.27.0)")
+        else:
+            print(f"Quantization: {quant_info}")
 
     # Quantization and Precision info
     config_path = model_path / "config.json"
