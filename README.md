@@ -9,15 +9,15 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
 **Current Version**: 1.1.0 (August 2025) - **STABLE RELEASE** 🚀
-- Pre-release: 1.1.1b2 — lenient MLX detection for private repos (Issue #31):
-  - README/tokenizer hints (Framework/Type),
-  - `show` displays Type,
-  - default `list` shows chat-capable MLX models; `--all` shows all with TYPE,
-  - server `/v1/models` lists chat-capable MLX models (Chat API).
+- Pre-release: 1.1.1-beta.3 — MXFP4 support and GPT-OSS reasoning models:
+  - Full MXFP4 quantization support (MLX ≥0.29.0, MLX-LM ≥0.27.0),
+  - GPT-OSS reasoning model formatting with `--hide-reasoning` flag,
+  - Enhanced quantization display in `show` command,
+  - Tested with `gpt-oss-20b-MXFP4-Q8` from mlx-community.
   - Details: see CHANGELOG.md. Install with `pip install --pre mlx-knife`.
-- **Enhanced Test System**: 166/166 tests passing across Python 3.9–3.13  
+- **Reliable Test System**: 166/166 tests passing across Python 3.9–3.13  
 - **Python 3.9-3.13**: Full compatibility verified across all Python versions
-- **All Critical Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
+- **Key Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -115,6 +115,12 @@ mlxk pull mlx-community/Mistral-7B-Instruct-v0.3-4bit
 # Run a model with a prompt
 mlxk run Phi-3-mini "What is the capital of France?"
 
+# GPT-OSS reasoning model with formatted output
+mlxk run gpt-oss-20b-MXFP4-Q8 "Explain quantum computing"
+
+# Hide reasoning steps, show only final answer (GPT-OSS models)
+mlxk run gpt-oss-20b-MXFP4-Q8 "What is 2+2?" --hide-reasoning
+
 # Start interactive chat
 mlxk run Phi-3-mini
 
@@ -204,6 +210,7 @@ mlxk run <model> "prompt" --no-stream  # Batch output
 mlxk run <model> --max-tokens 1000     # Custom length
 mlxk run <model> --temperature 0.9     # Higher creativity
 mlxk run <model> --no-chat-template    # Raw completion mode
+mlxk run <model> --hide-reasoning      # Hide reasoning (GPT-OSS models only)
 ```
 
 #### `rm` - Remove Models

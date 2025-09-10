@@ -46,6 +46,7 @@ def main():
     run_p.add_argument("--repetition-penalty", type=float, default=1.1, help="Penalty for repeated tokens (default: 1.1)")
     run_p.add_argument("--no-stream", action="store_true", help="Disable streaming output")
     run_p.add_argument("--no-chat-template", action="store_true", help="Disable chat template formatting (use raw prompt)")
+    run_p.add_argument("--hide-reasoning", action="store_true", help="Hide reasoning section for reasoning models (show only final answer)")
     run_p.add_argument("--verbose", "-v", action="store_true", help="Show detailed output (model loading, memory usage, token stats)")
 
     # rm
@@ -98,6 +99,7 @@ def main():
             repetition_penalty=args.repetition_penalty,
             stream=not args.no_stream,
             use_chat_template=not args.no_chat_template,
+            hide_reasoning=args.hide_reasoning,
             verbose=args.verbose
         )
     elif args.cmd == "rm":

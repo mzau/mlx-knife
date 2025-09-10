@@ -68,6 +68,7 @@ MODEL_END_TOKENS = {
     "qwen": ["<|im_end|>", "<|endoftext|>", "<|end|>", "</s>"],  # Qwen variants  
     "phi": ["<|endoftext|>", "<|end|>", "</s>"],  # Phi-3 variants
     "mixtral": ["</s>", "<|endoftext|>"],  # Mixtral (Mistral-based)
+    "gpt-oss": ["<|return|>"],  # GPT-OSS reasoning models: <|end|> is NOT a stop token, only <|return|>
     "default": [  # Comprehensive catch-all list
         "</s>", "<|im_end|>", "<|endoftext|>", "<|end_of_text|>", 
         "<|eot_id|>", "<|end|>", "<end>", "</end>", "<eos>", "</eos>",
@@ -217,6 +218,8 @@ def get_model_family(model_name: str) -> str:
         return 'phi'
     elif 'mixtral' in model_lower:
         return 'mixtral'
+    elif 'gpt-oss' in model_lower:
+        return 'gpt-oss'
     else:
         return 'default'
 
@@ -432,6 +435,12 @@ def get_model_aware_token_targets(model_name: str, model_size: str) -> Dict[str,
         target_tokens = min(2048, context_length // 4)
     else:
         target_tokens = min(800, context_length // 6)
+    
+    # Model-specific adjustments for known behaviors
+    model_lower = model_name.lower()
+    if 'phi-3' in model_lower:
+        # Phi-3 models tend to be very concise, adjust expectations
+        target_tokens = min(target_tokens, 200)
     
     return {
         "target_tokens": target_tokens,

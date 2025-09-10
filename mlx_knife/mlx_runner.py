@@ -16,6 +16,8 @@ from mlx_lm import load
 from mlx_lm.generate import generate_step
 from mlx_lm.sample_utils import make_repetition_penalty, make_sampler
 
+from .reasoning_utils import ReasoningExtractor, StreamingReasoningParser
+
 
 def get_model_context_length(model_path: str) -> int:
     """Extract max_position_embeddings from model config.
@@ -70,8 +72,13 @@ class MLXRunner:
         self.tokenizer = None
         self._memory_baseline = None
         self._stop_tokens = None  # Will be populated from tokenizer
+        self._message_end_tokens = None  # Message-end tokens (e.g., <|end|> for MXFP4)
         self._chat_stop_tokens = None  # Chat-specific stop tokens
         self._context_length = None  # Will be populated from model config
+        self._is_reasoning_model = False  # Whether model uses reasoning (MXFP4)
+        self._reasoning_start = None  # Reasoning start marker
+        self._reasoning_end = None  # Reasoning end marker
+        self._final_start = None  # Final answer start marker
         self.verbose = verbose
         self._model_loaded = False
         self._context_entered = False  # Prevent nested context usage
@@ -152,8 +159,15 @@ class MLXRunner:
             raise RuntimeError(f"Failed to load model from {self.model_path}: {e}") from e
 
     def _extract_stop_tokens(self):
-        """Extract stop tokens from the tokenizer dynamically."""
+        """Extract stop tokens from the tokenizer dynamically.
+        
+        This method identifies ALL tokens that should stop generation:
+        1. Official EOS token from tokenizer config
+        2. Message-end tokens from training (e.g., <|end|> for MXFP4)
+        3. Common stop tokens across models
+        """
         self._stop_tokens = set()
+        self._message_end_tokens = set()  # Tokens that end messages but not conversations
 
         # Primary source: eos_token
         eos_token = getattr(self.tokenizer, 'eos_token', None)
@@ -172,10 +186,75 @@ class MLXRunner:
                     # Only add tokens that look like stop/end tokens
                     if any(keyword in token.lower() for keyword in ['end', 'stop', 'eot']):
                         self._stop_tokens.add(token)
+        
+        # MLX-LM 0.27.0+: Extract tokens from added_tokens_decoder (comprehensive source)
+        if hasattr(self.tokenizer, 'added_tokens_decoder'):
+            for _token_id, token_info in self.tokenizer.added_tokens_decoder.items():
+                if isinstance(token_info, dict) and 'content' in token_info:
+                    token_content = token_info['content']
+                    if token_content and isinstance(token_content, str):
+                        token_lower = token_content.lower()
+                        
+                        # NOTE: <|end|> is NOT a stop token for MXFP4 models!
+                        # It's a separator between reasoning and final answer
+                        if token_content == '<|end|>':
+                            self._message_end_tokens.add(token_content)
+                            # Do NOT add as stop token - let model continue to final answer
+                        
+                        # Look for tokens that could be end/stop tokens
+                        # Expanded patterns for MLX-LM 0.27.0 token varieties
+                        # EXCLUDE <|end|> for MXFP4 models as it's a reasoning separator
+                        end_patterns = ['stop', 'eot', 'return', 'finish', 'done', 'im_end']
+                        if any(pattern in token_lower for pattern in end_patterns):
+                            # Decide if it's a message-end or conversation-end token
+                            if 'im_end' in token_lower:
+                                self._message_end_tokens.add(token_content)
+                            self._stop_tokens.add(token_content)
+                        # Special handling for 'end' pattern - more selective
+                        elif 'end' in token_lower and token_content != '<|end|>':
+                            # Only add non-<|end|> tokens with 'end' in them
+                            self._stop_tokens.add(token_content)
+                        
+                        # Special case: control tokens in |..| format
+                        elif token_content.startswith('<|') and token_content.endswith('|>'):
+                            # Be inclusive with control tokens that might stop generation
+                            if any(pattern in token_lower for pattern in ['end', 'return', 'stop', 'finish']):
+                                self._stop_tokens.add(token_content)
+
+        # Model-specific handling based on known patterns
+        # Use reasoning_utils for reasoning model detection and patterns
+        from .reasoning_utils import ReasoningExtractor
+        
+        if hasattr(self.tokenizer, 'name_or_path'):
+            name_or_path = str(getattr(self.tokenizer, 'name_or_path', '')).lower()
+            model_type = ReasoningExtractor.detect_model_type(name_or_path)
+            
+            if model_type:
+                # This is a reasoning model
+                self._is_reasoning_model = True
+                
+                # Get patterns from reasoning_utils
+                if model_type in ReasoningExtractor.PATTERNS:
+                    markers = ReasoningExtractor.PATTERNS[model_type]['markers']
+                    self._reasoning_start = markers.get('reasoning_start')
+                    self._reasoning_end = markers.get('reasoning_end')
+                    self._final_start = markers.get('final_marker')
+                
+                # For reasoning models, remove reasoning_end from stop tokens
+                if self._reasoning_end:
+                    self._stop_tokens.discard(self._reasoning_end)
+                
+                # Add proper stop token for this model type
+                if model_type == 'gpt-oss':
+                    if '<|return|>' not in self._stop_tokens:
+                        self._stop_tokens.add('<|return|>')
+            else:
+                self._is_reasoning_model = False
+        else:
+            self._is_reasoning_model = False
 
         # Add common stop tokens that might not be in special tokens
-        # but are frequently used across models
-        common_stop_tokens = {'</s>', '<|endoftext|>', '<|im_end|>'}
+        common_stop_tokens = {'</s>', '<|endoftext|>', '<|im_end|>', '<|eot_id|>'}
         
         # Add chat-specific stop tokens to prevent model self-conversations
         # Based on our _format_conversation() format: "Human:" and "Assistant:"
@@ -206,12 +285,17 @@ class MLXRunner:
 
         # Remove any None values
         self._stop_tokens.discard(None)
+        self._message_end_tokens.discard(None)
 
         # Convert to list for easier use
         self._stop_tokens = list(self._stop_tokens)
+        self._message_end_tokens = list(self._message_end_tokens)
 
-        if self._stop_tokens and self.verbose:
-            print(f"Stop tokens: {self._stop_tokens}")
+        if self.verbose:
+            if self._stop_tokens:
+                print(f"Stop tokens: {self._stop_tokens}")
+            if self._message_end_tokens:
+                print(f"Message end tokens: {self._message_end_tokens}")
 
     def cleanup(self):
         """Clean up model resources and clear GPU memory.
@@ -226,8 +310,13 @@ class MLXRunner:
         self.model = None
         self.tokenizer = None
         self._stop_tokens = None
+        self._message_end_tokens = None
         self._chat_stop_tokens = None
         self._context_length = None
+        self._is_reasoning_model = False
+        self._reasoning_start = None
+        self._reasoning_end = None
+        self._final_start = None
         self._model_loaded = False
 
         # Force garbage collection and clear MLX cache
@@ -289,6 +378,7 @@ class MLXRunner:
         use_chat_template: bool = True,
         use_chat_stop_tokens: bool = False,
         interactive: bool = False,
+        hide_reasoning: bool = False,
     ) -> Iterator[str]:
         """Generate text with streaming output.
         
@@ -308,6 +398,14 @@ class MLXRunner:
         """
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load_model() first.")
+            
+        # Initialize reasoning parser if this is a reasoning model
+        reasoning_parser = None
+        if self._is_reasoning_model:
+            model_type = ReasoningExtractor.detect_model_type(
+                getattr(self.tokenizer, 'name_or_path', '') or ''
+            )
+            reasoning_parser = StreamingReasoningParser(model_type, hide_reasoning=hide_reasoning)
 
         # Apply context-aware token limits
         effective_max_tokens = self.get_effective_max_tokens(max_tokens, interactive)
@@ -408,7 +506,12 @@ class MLXRunner:
                             # Yield only the new part before stop token
                             new_part_before_stop = text_before_stop[previously_yielded_length:]
                             if new_part_before_stop:
-                                yield new_part_before_stop
+                                if reasoning_parser:
+                                    # Process through reasoning parser for formatting
+                                    for formatted_token in reasoning_parser.process_token(new_part_before_stop):
+                                        yield formatted_token
+                                else:
+                                    yield new_part_before_stop
                         return  # Stop generation without yielding stop token
                 
                 # Only check chat stop tokens if no native stop token found (fallback)
@@ -425,17 +528,32 @@ class MLXRunner:
                                 # Yield only the new part before stop token
                                 new_part_before_stop = text_before_stop[previously_yielded_length:]
                                 if new_part_before_stop:
-                                    yield new_part_before_stop
+                                    if reasoning_parser:
+                                        # Process through reasoning parser for formatting
+                                        for formatted_token in reasoning_parser.process_token(new_part_before_stop):
+                                            yield formatted_token
+                                    else:
+                                        yield new_part_before_stop
                             return  # Stop generation without yielding stop token
 
-                # No stop token found, yield the new text
-                yield new_text
+                # No stop token found, process the new text
+                if reasoning_parser:
+                    # Process through reasoning parser for formatting
+                    for formatted_token in reasoning_parser.process_token(new_text):
+                        yield formatted_token
+                else:
+                    # Normal streaming for non-reasoning models
+                    yield new_text
                 tokens_generated += 1
 
             # Check for EOS token - don't yield it
             if token_id == self.tokenizer.eos_token_id:
                 break
 
+        # Finalize reasoning parser if used
+        if reasoning_parser:
+            yield from reasoning_parser.finalize()
+        
         # Print generation statistics if verbose
         if self.verbose:
             generation_time = time.time() - start_time
@@ -535,6 +653,9 @@ class MLXRunner:
 
         # Apply end-token filtering (same logic as streaming mode for Issue #20)
         response = self._filter_end_tokens_from_response(response, use_chat_stop_tokens=False)
+        
+        # Format reasoning models output
+        response = self._format_reasoning_response(response)
 
         generation_time = time.time() - start_time
 
@@ -553,6 +674,7 @@ class MLXRunner:
         temperature: float = 0.7,
         top_p: float = 0.9,
         repetition_penalty: float = 1.1,
+        use_chat_template: bool = True,
     ):
         """Run an interactive chat session.
         
@@ -562,6 +684,7 @@ class MLXRunner:
             temperature: Sampling temperature
             top_p: Top-p sampling parameter
             repetition_penalty: Penalty for repeated tokens
+            use_chat_template: Use tokenizer's chat template if available
         """
         print("Starting interactive chat. Type 'exit' or 'quit' to end.\n")
 
@@ -584,9 +707,8 @@ class MLXRunner:
                 # Add user message to history
                 conversation_history.append({"role": "user", "content": user_input})
 
-                # Format conversation for the model
-                # This is a simple format - models may need specific chat templates
-                prompt = self._format_conversation(conversation_history)
+                # Format conversation for the model using chat template if available
+                prompt = self._format_conversation(conversation_history, use_chat_template=use_chat_template)
 
                 # Generate response with streaming
                 print("\nAssistant: ", end="", flush=True)
@@ -598,9 +720,11 @@ class MLXRunner:
                     temperature=temperature,
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
+                    use_chat_template=False,  # Already applied in _format_conversation
                     use_chat_stop_tokens=True,  # Enable chat stop tokens in interactive mode
                     interactive=True,  # Enable full context length for interactive mode
                 ):
+                    # Stream all tokens directly (already formatted by generate_streaming)
                     print(token, end="", flush=True)
                     response_tokens.append(token)
 
@@ -617,10 +741,42 @@ class MLXRunner:
                 print(f"\n[ERROR] {e}")
                 continue
 
-    def _format_conversation(self, messages: list) -> str:
+    def _format_conversation(self, messages: list, use_chat_template: bool = True) -> str:
         """Format conversation history into a prompt.
         
-        This is a simple format. Different models may need different templates.
+        Uses the tokenizer's chat template if available, otherwise falls back
+        to the legacy Human:/Assistant: format for compatibility.
+        
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+            use_chat_template: Whether to use chat template if available
+            
+        Returns:
+            Formatted conversation string
+        """
+        # Try to use native chat template if available
+        if use_chat_template and hasattr(self.tokenizer, 'chat_template') and self.tokenizer.chat_template:
+            try:
+                # Apply the tokenizer's chat template
+                formatted_prompt = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+                return formatted_prompt
+            except Exception as e:
+                # If chat template fails, fall back to legacy format
+                if self.verbose:
+                    print(f"[WARNING] Chat template failed, using legacy format: {e}")
+        
+        # Legacy format fallback for compatibility
+        return self._legacy_format_conversation(messages)
+    
+    def _legacy_format_conversation(self, messages: list) -> str:
+        """Legacy conversation formatting for backward compatibility.
+        
+        This format was used in earlier versions and remains as a fallback
+        for models without chat templates.
         """
         formatted = []
 
@@ -660,6 +816,54 @@ class MLXRunner:
             "model_gb": current_memory - self._memory_baseline if self._memory_baseline else 0,
         }
 
+    def _format_reasoning_response(self, response: str) -> str:
+        """Format response from reasoning models for better readability.
+        
+        For MXFP4 models that generate reasoning followed by final answer,
+        format it nicely for display.
+        """
+        if not self._is_reasoning_model:
+            return response
+            
+        # Check if response contains reasoning markers
+        if self._reasoning_start in response and self._final_start in response:
+            # Extract reasoning and final parts
+            try:
+                # Split on the reasoning start
+                before_reasoning, after_start = response.split(self._reasoning_start, 1)
+                
+                # Find the reasoning content (until <|end|>)
+                if self._reasoning_end in after_start:
+                    reasoning_content, after_reasoning = after_start.split(self._reasoning_end, 1)
+                    
+                    # Find the final answer
+                    if self._final_start in after_reasoning:
+                        # Extract everything after final marker
+                        final_parts = after_reasoning.split(self._final_start, 1)
+                        if len(final_parts) > 1:
+                            # Remove the <|channel|>final<|message|> marker
+                            final_answer = final_parts[1].replace('<|channel|>final<|message|>', '', 1)
+                            
+                            # Format with clear markers for parsing but minimal visual impact
+                            formatted = []
+                            formatted.append("\n**[Reasoning]**\n")
+                            formatted.append(reasoning_content.strip())
+                            formatted.append("\n\n---\n\n**[Answer]**\n")
+                            formatted.append(final_answer.strip())
+                            
+                            return '\n'.join(formatted)
+            except Exception:
+                # If parsing fails, return original
+                pass
+        
+        # Fallback: just clean up the control tokens
+        cleaned = response
+        for marker in ['<|channel|>analysis<|message|>', '<|end|>', '<|start|>assistant',
+                      '<|channel|>final<|message|>', '<|return|>']:
+            cleaned = cleaned.replace(marker, '')
+        
+        return cleaned.strip()
+    
     def _filter_end_tokens_from_response(self, response: str, use_chat_stop_tokens: bool = False) -> str:
         """Filter end tokens from a complete response (batch mode).
         
@@ -679,7 +883,10 @@ class MLXRunner:
             if stop_token in response:
                 # Find the stop token position and return everything before it
                 stop_pos = response.find(stop_token)
-                return response[:stop_pos]
+                filtered_response = response[:stop_pos].rstrip()
+                if self.verbose:
+                    print(f"[DEBUG] Filtered stop token '{stop_token}' at position {stop_pos}")
+                return filtered_response
         
         # Only check chat stop tokens if no native stop token found (fallback)
         if use_chat_stop_tokens and self._chat_stop_tokens:
@@ -734,6 +941,7 @@ def run_model_enhanced(
     repetition_penalty: float = 1.1,
     stream: bool = True,
     use_chat_template: bool = True,
+    hide_reasoning: bool = False,
     verbose: bool = False,
 ) -> Optional[str]:
     """Enhanced run function with direct MLX integration.
@@ -762,6 +970,7 @@ def run_model_enhanced(
                     temperature=temperature,
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
+                    use_chat_template=use_chat_template,
                 )
                 return None
 
@@ -781,7 +990,9 @@ def run_model_enhanced(
                         top_p=top_p,
                         repetition_penalty=repetition_penalty,
                         use_chat_template=use_chat_template,
+                        hide_reasoning=hide_reasoning,
                     ):
+                        # Stream all tokens directly (already formatted by generate_streaming)
                         print(token, end="", flush=True)
                         response_tokens.append(token)
                 except KeyboardInterrupt:

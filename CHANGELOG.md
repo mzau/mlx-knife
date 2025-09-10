@@ -1,5 +1,61 @@
 # Changelog
 
+## [1.1.1-beta.3] - 2025-09-09
+
+### 🆕 **Major New Features**
+- **MXFP4 Quantization Support**: Full compatibility with MLX ≥0.29.0 and MLX-LM ≥0.27.0
+  - Support for FP4 quantized models (e.g., `gpt-oss-20b-MXFP4-Q8`)
+  - Tested with `gpt-oss-20b-MXFP4-Q8` from mlx-community
+
+- **GPT-OSS Reasoning Model Support**: Pattern-based implementation for MXFP4 models (Issue #32 - partial)
+  - Real-time streaming with `**[Reasoning]**` and `**[Answer]**` sections
+  - Reverse-engineered from native `<|channel|>analysis<|message|>...` token patterns
+  - Uses `<|return|>` as stop token, `<|end|>` as reasoning/answer separator
+  - Token-by-token streaming parser in `reasoning_utils.py`
+  - Model detection based on `gpt-oss` in model name/path
+  - Intelligent control token filtering during streaming
+  - Consistent behavior between CLI (`mlxk run`) and server API
+  - **`--hide-reasoning` flag**: Show only final answers without reasoning steps
+    - Usage: `mlxk run gpt-oss-model "prompt" --hide-reasoning`
+    - Works in both streaming and batch modes
+  - **Note**: GPT-OSS specific implementation, not generic reasoning model support
+
+### 🔧 **Core Improvements**
+- **Enhanced Streaming Parser**: New generic streaming parser architecture
+  - Token-by-token processing with live formatting
+  - Configurable patterns for different model types
+  - Single source of truth in `reasoning_utils.py`
+
+- **Enhanced Show Command**: Improved quantization display for MXFP4 models
+  - New `get_quantization_info()` function for detailed quantization parsing
+  - Compact display format: "mode: X, Y-bit, group_size: Z"
+  - MLX version requirement warnings: "Advanced mode 'X' (requires MLX ≥0.29.0, MLX-LM ≥0.27.0)"
+  - Better handling of complex quantization schemes in config.json
+
+- **Stop Token Management**: Refined stop token handling (Issue #32)
+  - GPT-OSS models correctly use `<|return|>` as stop token, not `<|end|>`
+  - `<|end|>` treated as reasoning separator for proper flow
+  - Model-specific stop token detection
+
+### 🐛 **Bug Fixes**
+- **GPT-OSS Token Handling**: Fixed streaming end token detection for GPT-OSS models (partial Issue #32)
+- **Consistent Output**: Server and CLI now produce identical formatted responses for GPT-OSS
+- **Control Token Filtering**: Eliminated unwanted GPT-OSS control tokens in final output
+
+### 🏗️ **Architecture & Dependencies**
+- **MLX Compatibility**: Updated for MLX ≥0.29.0 and MLX-LM ≥0.27.0
+- **Modular Design**: Reasoning logic centralized for maintainability
+- **Enhanced Test Coverage**: Comprehensive end token and reasoning model tests
+
+### 📋 **Requirements**
+- MLX ≥0.29.0 (required for MXFP4 support)
+- MLX-LM ≥0.27.0 (required for FP4 quantization)
+
+### 🔮 **Future Development Notes**
+- Pattern-based reasoning architecture designed for extensibility
+- `reasoning_utils.py` structured to support additional reasoning model types  
+- Current implementation: GPT-OSS only, other models (DeepSeek R1, QwQ) remain open
+
 ## [1.1.1-beta.2] - 2025-09-06
 
 ### Feature: Lenient MLX Detection for Private Repos (Issue #31)
