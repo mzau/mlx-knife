@@ -8,13 +8,13 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 
 > **Note**: MLX Knife is designed as a command-line interface tool only. While some internal functions are accessible via Python imports, only CLI usage is officially supported.
 
-**Current Version**: 1.1.0 (August 2025) - **STABLE RELEASE** 🚀
-- Pre-release: 1.1.1-beta.3 — MXFP4 support and GPT-OSS reasoning models:
+**Current Version**: 1.1.1 (September 2025) - **STABLE RELEASE** 🚀
+- Features in 1.1.1 — MXFP4 support and GPT-OSS reasoning models:
   - Full MXFP4 quantization support (MLX ≥0.29.0, MLX-LM ≥0.27.0),
   - GPT-OSS reasoning model formatting with `--hide-reasoning` flag,
   - Enhanced quantization display in `show` command,
   - Tested with `gpt-oss-20b-MXFP4-Q8` from mlx-community.
-  - Details: see CHANGELOG.md. Install with `pip install --pre mlx-knife`.
+  - Details: see CHANGELOG.md. Install with `pip install mlx-knife`.
 - **Reliable Test System**: 166/166 tests passing across Python 3.9–3.13  
 - **Python 3.9-3.13**: Full compatibility verified across all Python versions
 - **Key Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
@@ -340,8 +340,9 @@ Copyright (c) 2025 The BROKE team 🦫
 ## Sponsors
 
 <div align="left" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-  <a href="https://github.com/tileslauncher" title="Tiles Launcher">
-    <img src="https://github.com/tileslauncher.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
+  <a href="https://github.com/tileshq" title="Tiles Launcher" style="display:inline-flex; align-items:center; gap:8px; text-decoration:none;">
+    <img src="https://github.com/tileshq.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
+    <span><strong>Tiles Launcher</strong></span>
   </a>
 </div>
 
@@ -355,6 +356,6 @@ Copyright (c) 2025 The BROKE team 🦫
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 1.1.0 | August 2025</i><br>
+  <i>Version 1.1.1 | September 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>

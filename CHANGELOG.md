@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.1-beta.3] - 2025-09-09
+## [1.1.1] - 2025-09-14
 
 ### 🆕 **Major New Features**
 - **MXFP4 Quantization Support**: Full compatibility with MLX ≥0.29.0 and MLX-LM ≥0.27.0
