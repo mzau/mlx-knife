@@ -8,10 +8,18 @@ and then apply controlled mutations to simulate edge cases.
 import os
 import pytest
 
+# Allow selecting these tests via marker: -m issue27
+pytestmark = [pytest.mark.issue27]
+
+# Capture the original user cache root at import time (before fixtures may
+# override HF_HOME for isolation). This allows using either MLXK2_USER_HF_HOME
+# or HF_HOME as the source of truth for the user's cache path.
+_USER_CACHE_ROOT = os.environ.get("MLXK2_USER_HF_HOME") or os.environ.get("HF_HOME")
+
 
 requires_user_cache = pytest.mark.skipif(
-    not os.environ.get("MLXK2_USER_HF_HOME"),
-    reason="requires MLXK2_USER_HF_HOME (user cache path)"
+    not _USER_CACHE_ROOT,
+    reason="requires MLXK2_USER_HF_HOME or HF_HOME (user cache path)"
 )
 
 
@@ -51,10 +59,10 @@ class TestIssue27Exploration:
 
     def test_index_missing_shards_unhealthy(self, copy_user_model_to_isolated, monkeypatch):
         model = os.environ.get(
-            "MLXK2_ISSUE27_MODEL", "intfloat/multilingual-e5-large"
+            "MLXK2_ISSUE27_INDEX_MODEL",
+            os.environ.get("MLXK2_ISSUE27_MODEL", "intfloat/multilingual-e5-large"),
         )
         # Force subset copy with 0 shards to minimize disk use
-        monkeypatch.setenv("MLXK2_COPY_STRATEGY", "index_subset")
         monkeypatch.setenv("MLXK2_SUBSET_COUNT", "0")
         dst = copy_user_model_to_isolated(model)
         sft_idx = dst / 'model.safetensors.index.json'
@@ -68,7 +76,8 @@ class TestIssue27Exploration:
 
     def test_index_delete_shard_is_unhealthy(self, copy_user_model_to_isolated):
         model = os.environ.get(
-            "MLXK2_ISSUE27_MODEL", "mlx-community/Mistral-7B-Instruct-v0.2-4bit"
+            "MLXK2_ISSUE27_INDEX_MODEL",
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
         )
         dst = copy_user_model_to_isolated(model, mutations=['delete_indexed_shard'])
         # If no index exists, skip this targeted test
@@ -81,7 +90,8 @@ class TestIssue27Exploration:
 
     def test_index_truncate_shard_is_unhealthy(self, copy_user_model_to_isolated):
         model = os.environ.get(
-            "MLXK2_ISSUE27_MODEL", "mlx-community/Mistral-7B-Instruct-v0.2-4bit"
+            "MLXK2_ISSUE27_INDEX_MODEL",
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
         )
         dst = copy_user_model_to_isolated(model, mutations=['truncate_indexed_shard'])
         if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
@@ -93,7 +103,8 @@ class TestIssue27Exploration:
 
     def test_index_lfs_pointer_is_unhealthy(self, copy_user_model_to_isolated):
         model = os.environ.get(
-            "MLXK2_ISSUE27_MODEL", "mlx-community/Mistral-7B-Instruct-v0.2-4bit"
+            "MLXK2_ISSUE27_INDEX_MODEL",
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
         )
         dst = copy_user_model_to_isolated(model, mutations=['lfsify_indexed_shard'])
         if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
@@ -105,9 +116,9 @@ class TestIssue27Exploration:
 
     def test_user_cache_health_ok_readonly(self, monkeypatch):
         """Read-only health OK check directly against user cache (no copy)."""
-        user_hf_home = os.environ.get("MLXK2_USER_HF_HOME")
+        user_hf_home = _USER_CACHE_ROOT
         if not user_hf_home:
-            pytest.skip("MLXK2_USER_HF_HOME not set; skipping user cache health OK test")
+            pytest.skip("User cache root not set; set MLXK2_USER_HF_HOME or HF_HOME")
 
         model = os.environ.get(
             "MLXK2_ISSUE27_MODEL", "intfloat/multilingual-e5-large"

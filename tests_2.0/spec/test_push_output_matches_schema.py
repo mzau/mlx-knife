@@ -7,7 +7,16 @@ We monkeypatch a fake `huggingface_hub` module into sys.modules so that
 from __future__ import annotations
 
 import json
+import os
 import sys
+
+import pytest
+
+# Skip all tests if push is not enabled
+pytestmark = pytest.mark.skipif(
+    not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"),
+    reason="Push tests require MLXK2_ENABLE_EXPERIMENTAL_PUSH=1"
+)
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,8 +63,7 @@ def _install_fake_hf_module(monkeypatch):
         return SimpleNamespace(commit_id="abcdef1234567890abcdef1234567890abcdef12")
 
     fake = SimpleNamespace(HfApi=_FakeHfApi, upload_folder=upload_folder, errors=_Errors)
-    sys.modules["huggingface_hub"] = fake  # type: ignore
-    sys.modules["huggingface_hub.errors"] = _Errors  # type: ignore
+    # Use monkeypatch to ensure automatic restoration after each test
     monkeypatch.setitem(sys.modules, "huggingface_hub", fake)
     monkeypatch.setitem(sys.modules, "huggingface_hub.errors", _Errors)
 

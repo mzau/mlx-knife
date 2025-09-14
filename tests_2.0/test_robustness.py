@@ -120,12 +120,16 @@ class TestPullOperationRobustness:
         # Should fail validation before attempting network operation
         assert "name" in result["error"]["message"].lower() or "invalid" in result["error"]["message"].lower()
     
-    def test_pull_network_timeout_handling(self):
+    def test_pull_network_timeout_handling(self, monkeypatch):
         """Test pull handles network timeouts gracefully."""
-        # Mock network timeout by patching the huggingface_hub function
-        with patch('mlxk2.operations.pull.pull_model_with_huggingface_hub', side_effect=TimeoutError("Network timeout")):
+        # Set dummy token to pass preflight checks
+        monkeypatch.setenv("HF_TOKEN", "dummy-token")
+
+        # Mock preflight to succeed and pull to timeout
+        with patch('mlxk2.operations.pull.preflight_repo_access', return_value=(True, None)), \
+             patch('mlxk2.operations.pull.pull_model_with_huggingface_hub', side_effect=TimeoutError("Network timeout")):
             result = pull_operation("test-model")
-            
+
             assert result["status"] == "error"
             assert "timeout" in result["error"]["message"].lower() or "network" in result["error"]["message"].lower() or "error" in result["error"]["message"].lower()
     

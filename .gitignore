@@ -5,7 +5,9 @@ test_env*/
 test_results*.log
 mypy_*.log
 ruff_*.log
-__pycache__/
+*/__pycache__/*
+__pycache__
+mlx_knife/*
 *.pyc
 .DS_Store
 .claude/
@@ -18,3 +20,5 @@ TODO_REAL_TESTS.md
 server.log
 install_*.log
 .claude/
+openwebui311/bin/
+.gitignore

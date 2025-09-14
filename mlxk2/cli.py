@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import sys
 from typing import Dict, Any
 
@@ -13,6 +14,7 @@ from .operations.pull import pull_operation
 from .operations.rm import rm_operation
 from .operations.push import push_operation
 from .operations.show import show_model_operation
+from .operations.run import run_model_enhanced
 from .spec import JSON_API_SPEC_VERSION
 from .output.human import (
     render_list,
@@ -102,24 +104,60 @@ def main():
     rm_parser.add_argument("-f", "--force", action="store_true", help="Delete without confirmation")
     rm_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
-    # Push command (experimental)
-    push_parser = subparsers.add_parser("push", help="EXPERIMENTAL: Upload a local folder to Hugging Face")
-    push_parser.add_argument("local_dir", help="Local folder to upload")
-    push_parser.add_argument("repo_id", help="Target repo as org/model")
-    push_parser.add_argument("--create", action="store_true", help="Create repository/branch if missing")
-    # Alpha.1 safety: require --private to avoid accidental public uploads
-    push_parser.add_argument(
-        "--private",
-        action="store_true",
-        required=True,
-        help="REQUIRED (alpha.1): Proceed only when targeting a private repo",
+    # Run command
+    run_parser = subparsers.add_parser("run", help="Run model with prompt")
+    run_parser.add_argument("model", help="Model name to run")
+    run_parser.add_argument("prompt", nargs="?", help="Input prompt (optional - triggers interactive mode if omitted)")
+    run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate")
+    run_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature (default: 0.7)")
+    run_parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
+    run_parser.add_argument("--repetition-penalty", type=float, default=1.1, help="Repetition penalty (default: 1.1)")
+    run_parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
+    run_parser.add_argument("--no-chat-template", action="store_true", help="Disable chat template")
+    run_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
+    run_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    # Future features (beta.2)
+    run_parser.add_argument("--system", help="System prompt (future feature)")
+    run_parser.add_argument("--hide-reasoning", action="store_true", help="Hide reasoning output (future feature)")
+
+    # Serve command (primary, ollama-compatible)
+    serve_parser = subparsers.add_parser("serve", help="Start OpenAI-compatible API server")
+    serve_parser.add_argument("--model", help="Specific model to pre-load (optional)")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind server to (default: 8000)")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to (default: 127.0.0.1)")
+    serve_parser.add_argument("--max-tokens", type=int, help="Default maximum tokens for generation")
+    serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
+    serve_parser.add_argument("--log-level", default="info", help="Logging level (default: info)")
+    serve_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
+    serve_parser.add_argument("--json", action="store_true", help="Output startup info in JSON format")
+
+    # Server command (alias for backward compatibility with 1.x)
+    _ = subparsers.add_parser(
+        "server",
+        help="Start OpenAI-compatible API server (alias for serve)",
+        parents=[serve_parser],
+        add_help=False,
     )
-    push_parser.add_argument("--branch", default="main", help="Target branch (default: main)")
-    push_parser.add_argument("--commit", dest="commit_message", default="mlx-knife push", help="Commit message")
-    push_parser.add_argument("--verbose", action="store_true", help="Verbose details (human output)")
-    push_parser.add_argument("--check-only", action="store_true", help="Analyze workspace content; do not upload")
-    push_parser.add_argument("--dry-run", action="store_true", help="Compute changes against remote; do not upload")
-    push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+
+    # Push command (experimental) - only show if explicitly enabled
+    if os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"):
+        push_parser = subparsers.add_parser("push", help="EXPERIMENTAL: Upload a local folder to Hugging Face")
+        push_parser.add_argument("local_dir", help="Local folder to upload")
+        push_parser.add_argument("repo_id", help="Target repo as org/model")
+        push_parser.add_argument("--create", action="store_true", help="Create repository/branch if missing")
+        # Alpha.1 safety: require --private to avoid accidental public uploads
+        push_parser.add_argument(
+            "--private",
+            action="store_true",
+            required=True,
+            help="REQUIRED (alpha.1): Proceed only when targeting a private repo",
+        )
+        push_parser.add_argument("--branch", default="main", help="Target branch (default: main)")
+        push_parser.add_argument("--commit", dest="commit_message", default="mlx-knife push", help="Commit message")
+        push_parser.add_argument("--verbose", action="store_true", help="Verbose details (human output)")
+        push_parser.add_argument("--check-only", action="store_true", help="Analyze workspace content; do not upload")
+        push_parser.add_argument("--dry-run", action="store_true", help="Compute changes against remote; do not upload")
+        push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     
     args = parser.parse_args()
     
@@ -141,6 +179,9 @@ def main():
                 print(f"mlxk2 {__version__}")
             sys.exit(0)
 
+        # Initialize result for all paths
+        result = None
+        
         # Execute command and render per mode
         if args.command == "list":
             result = list_models(pattern=args.pattern)
@@ -175,7 +216,78 @@ def main():
                 print(format_json_output(result))
             else:
                 print(render_rm(result))
+        elif args.command == "run":
+            # Handle run command with proper parameter mapping
+            result_text = run_model_enhanced(
+                model_spec=args.model,
+                prompt=args.prompt,  # Can be None for interactive mode
+                stream=not args.no_stream,
+                max_tokens=getattr(args, "max_tokens", None),
+                temperature=args.temperature,
+                top_p=getattr(args, "top_p", 0.9),
+                repetition_penalty=getattr(args, "repetition_penalty", 1.1),
+                use_chat_template=not getattr(args, "no_chat_template", False),
+                json_output=args.json,
+                verbose=getattr(args, "verbose", False),
+                system_prompt=getattr(args, "system", None),
+                hide_reasoning=getattr(args, "hide_reasoning", False)
+            )
+            
+            # For JSON output, wrap result in standard format (only for single-shot mode)
+            if args.json and result_text is not None and args.prompt is not None:
+                result = {
+                    "status": "success",
+                    "command": "run",
+                    "data": {
+                        "model": args.model,
+                        "prompt": args.prompt,
+                        "response": result_text
+                    },
+                    "error": None
+                }
+                print(format_json_output(result))
+            else:
+                # For non-JSON or interactive mode, set success result
+                result = {"status": "success"}
+        elif args.command in ["serve", "server"]:  # Handle both serve and server aliases
+            # Handle serve command
+            if args.json:
+                # JSON startup info
+                server_info = {
+                    "status": "starting",
+                    "command": "serve",
+                    "data": {
+                        "host": args.host,
+                        "port": args.port,
+                        "model": getattr(args, "model", None),
+                        "max_tokens": getattr(args, "max_tokens", None),
+                    },
+                    "error": None
+                }
+                print(format_json_output(server_info))
+            
+            # Start server (this will run indefinitely)
+            # Lazy import to avoid hard dependency on FastAPI/uvicorn at import time
+            from .operations.serve import start_server
+            start_server(
+                model=getattr(args, "model", None),
+                port=args.port,
+                host=args.host,
+                max_tokens=getattr(args, "max_tokens", None),
+                reload=getattr(args, "reload", False),
+                log_level=getattr(args, "log_level", "info"),
+                verbose=getattr(args, "verbose", False),
+                supervise=True
+            )
+            
+            # Should never reach here (server runs indefinitely)
+            result = {"status": "success"}
         elif args.command == "push":
+            # Check if push is enabled (should not reach here if not, but double-check)
+            if not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"):
+                result = handle_error("CommandError", "Push command requires MLXK2_ENABLE_EXPERIMENTAL_PUSH=1")
+                print(format_json_output(result))
+                sys.exit(1)
             result = push_operation(
                 local_dir=args.local_dir,
                 repo_id=args.repo_id,

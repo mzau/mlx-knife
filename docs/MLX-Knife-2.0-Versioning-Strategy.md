@@ -26,26 +26,31 @@
 - Early adopters for JSON automation
 - Parallel deployment alongside 1.x
 
-### **2.0.0-beta** (Robustly Tested, JSON-Only)
-**Scope:** All alpha features with production-grade testing
+### **2.0.0-beta** (Feature-Complete with Server/Run)
+**Scope:** All alpha features PLUS server/run functionality from 1.x
 
-**Quality Improvements:**
-- ✅ **100% test coverage** - All mock fixtures working correctly
-- ✅ All edge cases from ADR-002 validated
-- ✅ Integration tests with realistic scenarios
-- ✅ Performance benchmarks established
-- ✅ Error handling comprehensive
+**New in Beta:**
+- ✅ `server` command - OpenAI-compatible API from 1.x
+- ✅ `run` command - Interactive model execution from 1.x  
+- ✅ Reasoning model support (GPT-OSS/MXFP4)
+- ✅ Human output backend (already in alpha.3)
+- ✅ **100% test coverage** including server/run tests
+
+**Version Strategy:**
+- `2.0.0-beta.1-local` - Initial server/run port (git tag only)
+- `2.0.0-beta.2-local` - Full reasoning support (git tag only)
+- `2.0.0-beta.3` - First public beta release (PyPI)
 
 **Quality Gate:**
-- Zero test failures on core operations
-- All ADR-002 edge cases handled
-- Performance acceptable for large caches
+- Feature parity with 1.1.1-beta.3
+- All server/run tests passing
+- Reasoning models working
 - Documentation complete
 
 **Target Users:**
-- Production JSON automation
-- CI/CD pipeline integration
-- Broke-cluster production deployment
+- Internal testing and validation
+- Beta.3: Public beta testers
+- Full MLX-Knife functionality seekers
 
 ### **2.0.0-rc** (Feature-Complete vs 1.x)
 **Scope:** Full feature parity with MLX-Knife 1.x

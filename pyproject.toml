@@ -50,6 +50,8 @@ version = {attr = "mlxk2.__version__"}
 test = [
     "pytest>=7",
     "jsonschema>=4.20",
+    "httpx>=0.27.0",
+    "fastapi>=0.116.0",
 ]
 
 [tool.setuptools]

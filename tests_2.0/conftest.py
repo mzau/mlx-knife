@@ -2,6 +2,13 @@ from __future__ import annotations
 
 """Test fixtures for MLX-Knife 2.0 isolated testing."""
 
+# Ensure lightweight stubs are used for heavy deps (mlx, mlx_lm) during unit tests
+import sys
+from pathlib import Path
+_stubs_path = Path(__file__).parent / "stubs"
+if str(_stubs_path) not in sys.path:
+    sys.path.insert(0, str(_stubs_path))
+
 import os
 import tempfile
 import pytest
@@ -36,8 +43,22 @@ def isolated_cache() -> Generator[Path, None, None]:
         hub_path = cache_path / "hub"
         hub_path.mkdir()
         
-        # Store original HF_HOME
+        # Store original HF_HOME and expose it to user-copy helpers as MLXK2_USER_HF_HOME
         old_hf_home = os.environ.get("HF_HOME")
+        injected_user_hf_home = False
+        if not os.environ.get("MLXK2_USER_HF_HOME"):
+            # Prefer original HF_HOME if provided
+            if old_hf_home:
+                os.environ["MLXK2_USER_HF_HOME"] = old_hf_home
+                injected_user_hf_home = True
+            else:
+                # Fall back to common default: ~/.cache/huggingface
+                default_hf = Path.home() / ".cache" / "huggingface"
+                if (default_hf / "hub").exists():
+                    os.environ["MLXK2_USER_HF_HOME"] = str(default_hf)
+                    injected_user_hf_home = True
+
+        # Point HF_HOME to the isolated test cache (code under test will use this)
         os.environ["HF_HOME"] = str(cache_path)
         
         # CRITICAL: Patch MODEL_CACHE to use our isolated cache
@@ -63,6 +84,16 @@ def isolated_cache() -> Generator[Path, None, None]:
                 os.environ["HF_HOME"] = old_hf_home
             elif "HF_HOME" in os.environ:
                 del os.environ["HF_HOME"]
+            # Remove injected MLXK2_USER_HF_HOME if we set it
+            if injected_user_hf_home:
+                # Only remove if it matches our injected values to avoid
+                # deleting a user-provided variable
+                injected_vals = set()
+                if old_hf_home:
+                    injected_vals.add(old_hf_home)
+                injected_vals.add(str(Path.home() / ".cache" / "huggingface"))
+                if os.environ.get("MLXK2_USER_HF_HOME") in injected_vals:
+                    del os.environ["MLXK2_USER_HF_HOME"]
             # Restore strict delete flag
             if old_strict is not None:
                 os.environ["MLXK2_STRICT_TEST_DELETE"] = old_strict
@@ -479,6 +510,9 @@ def copy_user_model_to_isolated(isolated_cache):
     """
     from mlxk2.core.cache import hf_to_cache_dir
 
+    # IMPORTANT: Do NOT use HF_HOME here because the isolated_cache fixture
+    # overrides HF_HOME to point to the test cache. We need the real user cache,
+    # which must be provided via MLXK2_USER_HF_HOME explicitly.
     user_hf_home = os.environ.get("MLXK2_USER_HF_HOME")
     if not user_hf_home:
         pytest.skip("MLXK2_USER_HF_HOME not set; skip user->isolated copy")
@@ -591,78 +625,117 @@ def copy_user_model_to_isolated(isolated_cache):
         if dst.exists():
             shutil.rmtree(dst)
 
-        # Copy strategy controls how much data we copy (to save disk/time)
-        strategy = os.environ.get("MLXK2_COPY_STRATEGY", "full")  # full | index_subset | pattern_subset
-        subset_count = int(os.environ.get("MLXK2_SUBSET_COUNT", "2"))
-        min_free_mb = int(os.environ.get("MLXK2_MIN_FREE_MB", "1024"))
+        # Minimal copy strategy (implicit):
+        # - If an index exists, copy the index and the N smallest referenced shards (default N=1).
+        # - Otherwise, copy shards matching the safetensors pattern and limit to N (default N=1).
+        subset_count = int(os.environ.get("MLXK2_SUBSET_COUNT", "1"))
+        min_free_mb = int(os.environ.get("MLXK2_MIN_FREE_MB", "512"))
 
-        if strategy == "full":
-            shutil.copytree(src, dst)
+        # Create dst structure minimally
+        (dst / "snapshots").mkdir(parents=True, exist_ok=True)
+        src_snap = _latest_snapshot_dir(src)
+        if src_snap is None:
+            pytest.skip("Source model has no snapshots")
+        dst_snap = (dst / "snapshots" / src_snap.name)
+        dst_snap.mkdir(parents=True, exist_ok=True)
+
+        # Decide which files to copy
+        selected: list[Path] = []
+        sft_idx = src_snap / "model.safetensors.index.json"
+        pt_idx = src_snap / "pytorch_model.bin.index.json"
+        idx = sft_idx if sft_idx.exists() else (pt_idx if pt_idx.exists() else None)
+        if idx is not None and idx.exists():
+            try:
+                index = _json.loads(idx.read_text())
+                wm = index.get("weight_map") or {}
+                shard_names = sorted(set(wm.values()))
+            except Exception:
+                shard_names = []
+            # pick N smallest shards by size to minimize copy volume
+            shard_paths = [src_snap / name for name in shard_names]
+            shard_paths = [p for p in shard_paths if p.exists()]
+            shard_paths.sort(key=lambda p: p.stat().st_size)
+            for p in shard_paths[:max(0, subset_count)]:
+                selected.append(p)
+            selected.append(idx)
         else:
-            # Create dst structure minimally
-            (dst / "snapshots").mkdir(parents=True, exist_ok=True)
-            src_snap = _latest_snapshot_dir(src)
-            if src_snap is None:
-                pytest.skip("Source model has no snapshots")
-            dst_snap = (dst / "snapshots" / src_snap.name)
-            dst_snap.mkdir(parents=True, exist_ok=True)
+            # pattern subset: pick shards by filename pattern
+            import re
+            rgx = re.compile(r"model-\d{5}-of-\d{5}\.safetensors$")
+            shard_files = [p for p in src_snap.iterdir() if p.is_file() and rgx.search(p.name)]
+            shard_files.sort()
+            selected.extend(shard_files[:subset_count])
+            # include index if present (unlikely in this branch but safe)
+            if sft_idx.exists():
+                selected.append(sft_idx)
+            elif pt_idx.exists():
+                selected.append(pt_idx)
+        # Always include config.json if present
+        cfg = src_snap / "config.json"
+        if cfg.exists():
+            selected.append(cfg)
 
-            # Decide which files to copy
-            selected: list[Path] = []
-            sft_idx = src_snap / "model.safetensors.index.json"
-            pt_idx = src_snap / "pytorch_model.bin.index.json"
-            idx = sft_idx if sft_idx.exists() else (pt_idx if pt_idx.exists() else None)
-            if strategy == "index_subset" and idx is not None and idx.exists():
-                try:
-                    index = _json.loads(idx.read_text())
-                    wm = index.get("weight_map") or {}
-                    shard_names = sorted(set(wm.values()))
-                except Exception:
-                    shard_names = []
-                # pick N smallest shards by size to minimize copy volume
-                shard_paths = [src_snap / name for name in shard_names]
-                shard_paths = [p for p in shard_paths if p.exists()]
-                shard_paths.sort(key=lambda p: p.stat().st_size)
-                for p in shard_paths[:max(0, subset_count)]:
-                    selected.append(p)
-                selected.append(idx)
-            else:
-                # pattern_subset: pick shards by filename pattern
-                import re
-                rgx = re.compile(r"model-\d{5}-of-\d{5}\.safetensors$")
-                shard_files = [p for p in src_snap.iterdir() if p.is_file() and rgx.search(p.name)]
-                shard_files.sort()
-                selected.extend(shard_files[:subset_count])
-                # include index if present
-                if sft_idx.exists():
-                    selected.append(sft_idx)
-                elif pt_idx.exists():
-                    selected.append(pt_idx)
-            # Always include config.json if present
-            cfg = src_snap / "config.json"
-            if cfg.exists():
-                selected.append(cfg)
+        # Disk space check (on the test cache volume)
+        total_bytes = 0
+        for p in selected:
+            try:
+                total_bytes += p.stat().st_size
+            except FileNotFoundError:
+                pass
+        free_bytes = shutil.disk_usage(str(isolated_cache)).free
+        if free_bytes < total_bytes + (min_free_mb * 1024 * 1024):
+            pytest.skip(f"Not enough free space for subset copy: need ~{(total_bytes/1e6):.1f}MB + safety, have {(free_bytes/1e6):.1f}MB")
 
-            # Disk space check (on the test cache volume)
-            total_bytes = 0
-            for p in selected:
-                try:
-                    total_bytes += p.stat().st_size
-                except FileNotFoundError:
-                    pass
-            free_bytes = shutil.disk_usage(str(isolated_cache)).free
-            if free_bytes < total_bytes + (min_free_mb * 1024 * 1024):
-                pytest.skip(f"Not enough free space for subset copy: need ~{(total_bytes/1e6):.1f}MB + safety, have {(free_bytes/1e6):.1f}MB")
+        # Copy selected files
+        for p in selected:
+            rel = p.relative_to(src_snap)
+            dst_file = dst_snap / rel
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            if p.exists():
+                shutil.copy2(p, dst_file)
 
-            # Copy selected files
-            for p in selected:
-                rel = p.relative_to(src_snap)
-                dst_file = dst_snap / rel
-                dst_file.parent.mkdir(parents=True, exist_ok=True)
-                if p.exists():
-                    shutil.copy2(p, dst_file)
+        # Also place index file at model root so tests can detect it without network
+        if idx is not None and idx.exists():
+            try:
+                shutil.copy2(idx, dst / idx.name)
+            except Exception:
+                pass
 
         mutate_model_dir(dst, mutations)
+
+        # Optional: bootstrap index files into the ISOLATED cache (never user cache)
+        # Enable with MLXK2_BOOTSTRAP_INDEX=1 to reduce SKIPs for Issue #27 when the
+        # selected model doesn't ship an index in your user cache.
+        try_bootstrap = os.environ.get("MLXK2_BOOTSTRAP_INDEX") == "1"
+        if try_bootstrap:
+            # Quick existence check at model root (tests look here first)
+            root_sft = dst / "model.safetensors.index.json"
+            root_pt = dst / "pytorch_model.bin.index.json"
+            if not root_sft.exists() and not root_pt.exists():
+                try:
+                    # Use hf snapshot_download with allow_patterns to fetch ONLY index files
+                    # into the isolated HF_HOME (set by isolated_cache fixture).
+                    from huggingface_hub import snapshot_download
+                    _ = snapshot_download(
+                        repo_id=hf_name,
+                        allow_patterns=[
+                            "**/model.safetensors.index.json",
+                            "**/pytorch_model.bin.index.json",
+                        ],
+                        local_files_only=False,
+                        resume_download=True,
+                        token=(os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")),
+                    )
+                    # Copy any fetched index up to model root so tests can detect it
+                    fetched = list((dst / "snapshots").rglob("*index.json"))
+                    for f in fetched:
+                        try:
+                            shutil.copy2(f, dst / f.name)
+                        except Exception:
+                            pass
+                except Exception:
+                    # Ignore bootstrap failures; tests will skip as before
+                    pass
         return dst
 
     return copier

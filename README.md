@@ -1,16 +1,16 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-alpha.3
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.3
 
 <p align="center">
-  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="1000">
+  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
 ## New: JSON-First Model Management for Automation & Scripting
 
-> **🚧 Alpha Development:** Server and run are not included yet in 2.0.0-alpha.3. Use [MLX-Knife 1.1.0](https://github.com/mzau/mlx-knife/tree/main) for those features.
+> **🚧 Beta:** Server is included and SIGINT-robust (Supervisor). `run` is now complete in 2.0.
 
-**Stable Version: 1.1.0**
+**Stable Version: 1.1.1**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.0--alpha.3-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0--beta.3-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -25,7 +25,7 @@
 - **List & Manage Models**: Browse your HuggingFace cache with MLX-specific filtering
 - **Model Information**: Detailed model metadata including quantization info
 - **Download Models**: Pull models from HuggingFace with progress tracking
-- **Run Models**: Native MLX execution with streaming and chat modes (version 1.1.0 stable only)
+- **Run Models**: Native MLX execution with streaming and chat modes
 - **Health Checks**: Verify model integrity and completeness
 - **Cache Management**: Clean up and organize your model storage
 - **Privacy & Network**: No background network or telemetry; only explicit Hugging Face interactions when you run pull or the experimental push.
@@ -79,46 +79,37 @@ mlxk2 show "Phi-3-mini" --json | jq '.data.model'
 ## Compatibility Notes
 
 - 2.0 CLI is JSON-first with human output by default; use `--json` for API responses.
-- Missing features vs 1.x: server and run are not included yet in 2.0 alpha.3 (use `mlxk` 1.x).
+- Full feature parity with 1.x achieved including `run` command.
+- Streaming note: Some UIs buffer SSE; verify real-time with `curl -N`. Server sends clear interrupt markers on abort.
 
-## ⚠️ Alpha Status Disclaimer
+## Beta Status Summary
 
-This is an alpha because:
-- Not feature-complete vs 1.0.0 (server and run pending).
-- Major internal refactor to a JSON-first CLI (new package `mlxk2`).
+- ✅ Server included and SIGINT-robust (Supervisor). SSE streaming behaves predictably (happy/interrupt). 404/503 mappings preserved.
+- ✅ JSON-first CLI stable: `list`, `health`, `show`, `pull`, `rm`, `run`.
+- 🔒 `push` hidden experimental feature (requires `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`).
 
-Status:
-- ✅ Core commands: `list`, `health`, `show`, `pull`, `rm`.
-- ✅ JSON outputs stable and schema-aligned; human output available by default.
-- ✅ Suitable for automation/integration; can run alongside 1.x for server/run.
-
-## What 2.0.0-alpha Includes
+## What 2.0.0-beta Includes
 
 | Command | Status | Description |
 |---------|--------|-------------|
+| ✅ `server` | **Included** | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
+| ✅ `run` | **Complete** | Interactive and single-shot model execution with streaming/batch modes |
 | ✅ `list` | **Complete** | Model discovery with JSON output |
-| ✅ `health` | **Complete** | Corruption detection and cache analysis |  
+| ✅ `health` | **Complete** | Corruption detection and cache analysis |
 | ✅ `show` | **Complete** | Detailed model information with --files, --config |
 | ✅ `pull` | **Complete** | HuggingFace model downloads with corruption detection |
 | ✅ `rm` | **Complete** | Model deletion with lock cleanup and fuzzy matching |
-| 🧪 `push` | **Experimental (alpha)** | Upload-only; quiet JSON; supports `--check-only` and `--dry-run` |
+| 🔒 `push` | **Hidden Experimental** | Upload-only; requires `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1` to enable |
 
-## What's Coming Later
+ 
 
-| Feature | Target Version | Status |
-|---------|----------------|---------|
-| 🔄 `server` | 2.0.0-rc | OpenAI-compatible API server |
-| 🔄 `run` | 2.0.0-rc | Interactive model execution |
-| ✅ Human-readable output | 2.0.0-alpha.2 | CLI formatting layer |
-| 🔄 `embed` | TBD | Embedding generation (if merged from 1.x) |
+## Hidden Experimental: `push` (upload only)
 
-## Experimental: `push` (upload only)
-
-`mlxk2 push` is experimental (M0). It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
+`mlxk2 push` is a hidden experimental feature (M0). Enable with `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`. It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
 
 - Requires `HF_TOKEN` (write-enabled).
 - Default branch: `main` (explicitly override with `--branch`).
-- Alpha safety: `--private` is required to avoid accidental public uploads.
+- Safety: `--private` is required to avoid accidental public uploads.
 - No validation or manifests. Basic hard excludes are applied by default: `.git/**`, `.DS_Store`, `__pycache__/`, common virtualenv folders (`.venv/`, `venv/`), and `*.pyc`.
 - `.hfignore` (gitignore-like) in the workspace is supported and merged with the defaults.
 - Repo creation: use `--create` if the target repo does not exist; harmless on existing repos. Missing branches are created during upload.
@@ -133,6 +124,10 @@ Status:
 
 Example:
 ```bash
+# Enable experimental push feature
+export MLXK2_ENABLE_EXPERIMENTAL_PUSH=1
+
+# Use push command
 mlxk2 push --private ./workspace org/model --create --commit "init"
 ```
 
@@ -143,12 +138,12 @@ This feature is not final and may change or be removed.
 ### Development Installation
 
 ```bash
-# Install 2.0.0-alpha (this branch)
+# Install 2.0.0-beta (this branch)
 pip install -e /path/to/mlx-knife
 
 # Verify installation
-mlxk-json --version  # → mlxk2 2.0.0-alpha.3
-mlxk2 --version      # → mlxk2 2.0.0-alpha.3
+mlxk-json --version  # → mlxk2 2.0.0-beta.3
+mlxk2 --version      # → mlxk2 2.0.0-beta.3
 ```
 
 ### Parallel with MLX-Knife 1.x
@@ -302,7 +297,7 @@ mlxk-json health --json | jq '.data.summary'
 
 ## Real-World Examples
 
-> **🔗 Integration Reference**: External projects should implement against the JSON API spec — this alpha phase validates that implementation matches documentation: [JSON API Specification](docs/json-api-specification.md)
+> **🔗 Integration Reference**: External projects should implement against the JSON API spec — this beta validates that implementation matches documentation: [JSON API Specification](docs/json-api-specification.md)
 
 ### Broke-Cluster Integration
 ```bash
@@ -369,25 +364,16 @@ pytest tests/ -v
 - **Mock Models** - Realistic test scenarios
 - **Edge Case Coverage** - All documented failure modes tested
 
-## Known Issues & Limitations
+## Known Notes
 
-### Critical Issues
-- **Health Check False Positive**: Health check may report incomplete downloads as healthy during model pull operations (affects both 1.1.0 and 2.0.0-alpha)
-
-### Alpha Limitations
-- Server and run not included (use 1.x)
-- Limited error message UX in some paths (to be refined)
-
-### GitHub Issues
-- **Issue #18**: Server signal handling limitation (known, will fix in 2.0.0-rc)
-- **Issue #24**: Lock cleanup command (planned for future release)
+- Streaming UX: Some UIs buffer SSE; verify real-time with `curl -N`. The server emits a clear interrupt marker on abort.
+- Error handling/logging: Unified error envelope and structured logs are planned post‑beta.3 (see ADR‑004).
 
 ## Development Status
 
 ### Version Roadmap
-- **2.0.0-alpha** ← You are here (JSON API core complete)
-- **2.0.0-beta**: 6-8 weeks robust testing, production validation  
-- **2.0.0-rc**: Server/run features, full 1.x parity; CLI compatibility: `mlxk` alias alongside `mlxk2`
+- **2.0.0-beta.3** ← You are here (feature complete; full 1.x parity achieved; all core commands implemented)
+- **2.0.0-rc**: CLI compatibility improvements: `mlxk` alias alongside `mlxk2`; final production hardening
 - **2.0.0-stable**: Stable release after RC feedback
 
 ### Architecture Decisions
@@ -407,7 +393,7 @@ python test-multi-python.sh  # Tests across Python 3.9-3.13
 
 # Key files:
 mlxk2/                       # 2.0.0 implementation
-tests_2.0/                   # Alpha test suite  
+tests_2.0/                   # 2.0 test suite  
 docs/ADR/                    # Architecture decision records
 ```
 
@@ -430,25 +416,26 @@ Note: This branch is hard‑split for 2.0. The 1.x implementation and tests were
 
 **For production use**: Consider MLX-Knife 1.1.0 until 2.0.0-beta is available.
 
-### Alpha Testing Goals
+### Beta Testing Goals
 - ✅ Validate JSON API specification matches implementation
 - ✅ Real-world integration feedback from external projects  
-- ✅ Edge case discovery through broke-cluster usage
-- ✅ API stability testing before beta release
+- ✅ Edge case coverage (naming, health, token limits)
+- ✅ Server SIGINT robustness, SSE happy/interrupt behavior
 
 ---
 
-*MLX-Knife 2.0.0-alpha — JSON-first CLI for local model management.*
+*MLX-Knife 2.0.0-beta — JSON-first CLI for local model management.*
 
 ## Sponsors
 
 <div align="left" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-  <a href="https://github.com/tileslauncher" title="Tiles Launcher">
-    <img src="https://github.com/tileslauncher.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
+  <a href="https://github.com/tileshq" title="Tiles Launcher" style="display:inline-flex; align-items:center; gap:8px; text-decoration:none;">
+    <img src="https://github.com/tileshq.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
+    <span><strong>Tiles Launcher</strong></span>
   </a>
 </div>
 
-Special thanks to early supporters and users providing feedback during the 2.0 alpha.
+Special thanks to early supporters and users providing feedback during the 2.0 beta.
 
 
 ## Acknowledgments
@@ -461,6 +448,6 @@ Special thanks to early supporters and users providing feedback during the 2.0 a
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 2.0.0-alpha.3 | September 2025</i><br>
+  <i>Version 2.0.0-beta.3 | September 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p> 
