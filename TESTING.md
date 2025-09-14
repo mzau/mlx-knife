@@ -2,7 +2,7 @@
 
 ## Current Status
 
-✅ **166/166 tests passing** (September 2025) - **STABLE RELEASE + Pre-release 1.1.1-beta.3** 🚀  
+✅ **166/166 tests passing** (September 2025) - **STABLE RELEASE 1.1.1** 🚀  
 ✅ **Apple Silicon verified** (M1/M2/M3)  
 ✅ **Python 3.9-3.13 compatible**  
 ✅ **Stable for development use** - comprehensive testing with real model execution
