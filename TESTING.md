@@ -2,12 +2,17 @@
 
 ## Current Status
 
-✅ **98/98 tests passing** (September 2025) — 2.0.0-alpha.3; 9 skipped (opt-in)  
-✅ **Apple Silicon verified** (M1/M2/M3)  
-✅ **Python 3.9-3.13 compatible**  
-✅ **Alpha (CLI/JSON)** — default suite green locally (no inference)
+✅ **184/184 tests passing** (September 2025) — 2.0.0-beta.3; 30 skipped (opt-in)
+✅ **Apple Silicon verified** (M1/M2/M3)
+✅ **Python 3.9-3.13 compatible**
+✅ **Beta (CLI/JSON)** — stable features only, experimental features opt-in
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
+
+### Skipped Tests Breakdown (30 total)
+- **21 Push tests** - Hidden experimental feature (requires `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`)
+- **1 Live push test** - Network-dependent (requires multiple env vars)
+- **8 Other opt-in tests** - Live tests, Issue #27 real-model tests (require specific env setup)
 
 ## Quick Start (2.0 Default)
 
@@ -20,10 +25,14 @@ pip install -e .[test]
 # mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
 # Run 2.0 tests (default discovery: tests_2.0/)
-pytest -v
+pytest -v  # 184 passed, 30 skipped
+
+# Optional: Enable experimental push tests
+MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -v  # 205 passed, 9 skipped
 
 # Live tests (opt-in; not part of default):
-# - Live push (requires env):
+# - Live push (requires experimental push + env):
+#   export MLXK2_ENABLE_EXPERIMENTAL_PUSH=1
 #   export MLXK2_LIVE_PUSH=1
 #   export HF_TOKEN=...; export MLXK2_LIVE_REPO=org/model; export MLXK2_LIVE_WORKSPACE=/abs/path
 #   pytest -q -m live_push
@@ -35,50 +44,82 @@ pytest -v
 ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 ```
 
+Notes
+- Reference environment: venv39 (Apple‑native Python 3.9) is the recommended dev base.
+- Extras `[test]` install httpx/FastAPI so the server minimal tests run.
+- For release smoke across multiple Python versions: `./test-multi-python.sh` (logs: `test_results_3_9.log`, `test_results_3_10.log`, ...).
+- The macOS Python 3.9 LibreSSL warning from urllib3 is suppressed in tests via `pytest.ini`, and at runtime via package init.
+
 ## Why Local Testing?
 
-MLX Knife tests fall into two categories for 2.0:
+MLX Knife tests fall into three categories for 2.0:
 
-- CLI/JSON tests (default): Run on any supported Python on macOS; no model inference required; use an isolated HF cache (no network).
-- Live/Inference tests (opt-in; future RC for server/run): Require Apple Silicon (M1/M2/M3) and real models.
+- **Stable CLI/JSON tests (default)**: Run on any supported Python on macOS; no model inference required; use an isolated HF cache (no network). **184 tests**
+- **Experimental features (opt-in)**: Hidden experimental features like `push` require environment variables to enable. **+21 tests**
+- **Live/Inference tests (opt-in)**: Network-dependent or requiring real models/cache setup. **Various markers/env vars**
 
-For push/list live tests in 2.0 alpha, see the opt-in commands above.
+**Default test run** covers all stable 2.0 features without experimental or live dependencies.
 
 ## Test Structure
 
 ### 2.0 Test Structure (default)
 
+Legend
+- spec/: JSON API spec/contract validation; stays in sync with docs/schema.
+- live/: Opt‑in tests requiring env/config; skipped by default.
+- stubs/: Lightweight MLX/MLX‑LM replacements used only in unit/spec tests.
+- conftest.py: Isolated HF cache (temp), safety sentinel, core fixtures/helpers.
+- conftest_runner.py: Runner‑focused fixtures/mocks for generation tests.
+- *.py.disabled: Intentionally disabled suites (WIP/expanded scenarios, not run).
+
 ```
 tests_2.0/
 ├── __init__.py
-├── conftest.py                          # Isolated test cache, fixtures
-├── test_human_output.py                 # Human rendering (list/health)
-├── test_detection_readme_tokenizer.py   # Issue #31 (README/tokenizer detection)
-├── test_json_api_list.py                # JSON API (list contract)
-├── test_json_api_show.py                # JSON API (show contract)
-├── test_edge_cases_adr002.py            # Edge-case naming, ADR-002
-├── test_health_multifile.py             # Multi-file health completeness
-├── test_integration.py                  # Model resolution, health integration
-├── test_issue_27.py                     # Health policy consistency
-├── test_model_naming.py                 # Pattern/@hash parsing and resolution
-├── test_robustness.py                   # General robustness tests
-├── test_cli_push_args.py                # Push CLI args (offline)
-├── test_push_minimal.py                 # Push minimal (offline)
-├── test_push_extended.py                # Push extended (offline)
-├── test_push_dry_run.py                 # Push dry-run planning (offline)
-├── test_push_workspace_check.py         # Push check-only (offline)
+├── conftest.py                        # Isolated test cache (HF_HOME override), safety sentinel, core fixtures
+├── conftest_runner.py                 # Runner-specific fixtures/mocks
+├── stubs/                             # Minimal mlx/mlx_lm stubs for unit/spec tests
 ├── spec/
-│   ├── test_cli_version_output.py               # version command JSON shape
-│   ├── test_spec_doc_examples_validate.py       # docs examples vs schema
-│   ├── test_spec_version_sync.py                # docs version == code constant
-│   ├── test_push_error_matches_schema.py        # push error schema
-│   └── test_push_output_matches_schema.py       # push success schema
-└── live/                                       # Opt-in live tests (markers)
-    ├── test_push_live.py                        # requires MLXK2_LIVE_PUSH, HF_TOKEN
-    └── test_list_human_live.py                  # requires HF_HOME
+│   ├── test_cli_version_output.py             # Version command JSON shape
+│   ├── test_spec_doc_examples_validate.py     # Docs examples validate against JSON schema
+│   ├── test_spec_version_sync.py              # Code/docs version consistency check
+│   ├── test_push_error_matches_schema.py      # Push error output matches schema
+│   └── test_push_output_matches_schema.py     # Push success output matches schema
+├── live/                                      # Opt-in live tests (markers)
+│   ├── test_push_live.py                      # Live push flow (requires MLXK2_LIVE_PUSH, HF_TOKEN)
+│   └── test_list_human_live.py                # Live list/health against user cache (requires HF_HOME)
+├── test_json_api_list.py                      # JSON API list contract (shape/fields)
+├── test_json_api_show.py                      # JSON API show contract (base/files/config)
+├── test_human_output.py                       # Human rendering of list/health views
+├── test_detection_readme_tokenizer.py         # README/tokenizer-based framework detection
+├── test_edge_cases_adr002.py                  # Naming/health edge cases (ADR-002)
+├── test_health_multifile.py                   # Multi-file health completeness (index vs pattern)
+├── test_model_naming.py                       # Conversion rules, bijection, parsing
+├── test_integration.py                        # Model resolution and health integration
+├── test_issue_27.py                           # Health policy exploration (legacy scenarios)
+├── test_issue_30_preflight.py                 # Preflight for gated/private/not-found repos (Issue #30)
+├── test_robustness.py                         # Robustness for rm/pull/disk/timeout/concurrency
+├── test_cli_push_args.py                      # Push CLI args and JSON error/output handling (offline)
+├── test_push_minimal.py                       # Minimal push scenarios (offline)
+├── test_push_extended.py                      # Extended push: no-op vs commit, branch/retry, .hfignore
+├── test_push_dry_run.py                       # Push dry-run diff planning (added/modified/deleted)
+├── test_push_workspace_check.py               # Push check-only: workspace validation without network
+├── test_ctrl_c_handling.py                    # SIGINT handling during run/interactive flows
+├── test_interactive_mode.py                   # Interactive CLI mode prompts/history/streaming
+├── test_interruption_recovery.py              # Recovery semantics after interruption (flag reset)
+├── test_run_complete.py                       # End-to-end run command (stream/batch/params)
+├── test_runner_core.py                        # MLXRunner core generation/memory/stop tokens
+├── test_token_limits.py                       # Dynamic token calculation; server vs run policies
+├── test_server_api_minimal.py                 # Minimal OpenAI-compatible server endpoints (SSE, JSON)
+└── test_server_api.py.disabled                # Disabled server API tests (WIP/expanded scenarios)
 ```
 
 Note: Live tests are opt-in via markers (`-m live_push`, `-m live_list`) and environment. Default `pytest` discovery runs only the offline suite above.
+
+### MLX/MLX‑LM Stubs (fast offline tests)
+- Purpose: Unit/spec tests run platform‑neutral and without real MLX/MLX‑LM runtime.
+- Mechanics: `tests_2.0/conftest.py` prepends `tests_2.0/stubs/` to `sys.path`, so `import mlx`/`mlx_lm` resolve to minimal stubs.
+- Effect: Fast, deterministic tests without GPU/large RAM footprint; live/heavy path remains opt‑in.
+- Production: CLI/server still use the real packages; stubs are not installed.
 
 ## Push Testing (2.0)
 
@@ -238,6 +279,59 @@ Run (venv39):
 - Command:
   - `pytest -q -m wet tests_2.0/live/test_push_live.py`
   - or `pytest -q -m live_push`
+
+## Pull/Preflight (Issue #30)
+
+Goal: Gated/private/not‑found repos must not pollute the cache and should fail fast.
+
+- Behavior (2.0):
+  - Preflight uses `huggingface_hub.HfApi.model_info()` (metadata only; no download).
+  - Gated/Forbidden/Unauthorized/NotFound → `access_denied` before download; clear hint to set `HF_TOKEN`.
+  - Network timeouts/unspecific HTTP errors in preflight → degrade to a warning; allow the download layer (to surface meaningful error/timeout paths).
+  - Tokens: prefer `HF_TOKEN` (legacy `HUGGINGFACE_HUB_TOKEN` is read, but not promoted).
+  - Tests use isolated caches; the user cache is never touched.
+
+- Relevant tests: `tests_2.0/test_issue_30_preflight.py`
+  - `test_preflight_private_model_without_token`
+  - `test_preflight_nonexistent_model`
+  - `test_preflight_integration_in_pull`
+  - `test_preflight_prevents_cache_pollution`
+
+- Quick checks:
+  - `pytest -q tests_2.0/test_issue_30_preflight.py`
+  - CLI: `unset HF_TOKEN HUGGINGFACE_HUB_TOKEN; mlxk-json pull meta-llama/Llama-2-7b-hf --json`
+
+## Runner: Interruption & Recovery
+
+- Semantics (2.0): A new generation resets `_interrupted = False` at the start (recovery behavior). A previous Ctrl‑C does not block the next generation.
+- Streaming:
+  - During an active generation, the runner yields a line `"[Generation interrupted by user]"` and stops.
+  - Token diffing in streaming is robust against minimal mocks (no StopIteration due to short `decode` sequences).
+- Batch:
+  - Resets the flag at the start of a new generation; filters stop tokens; chat stop tokens optional via `use_chat_stop_tokens=True`.
+- Relevant tests:
+  - `tests_2.0/test_ctrl_c_handling.py` (SIGINT, interruption behavior, interactive)
+  - `tests_2.0/test_interruption_recovery.py` (resetting the flag for new generations)
+  - `tests_2.0/test_runner_core.py` (consistency/batch/streaming, error handling)
+
+## Server Minimal Tests
+
+- Dependencies: `httpx`, `fastapi`, `uvicorn`, `pydantic` (via `[test]`).
+- Scope: OpenAI‑compatible endpoints (minimal smoke); no real models required.
+- Optional for local verification; in CI currently “nice to have” (Backlog, not part of the 2.0 Guide).
+
+## Known Warnings
+
+- urllib3 LibreSSL notice on macOS Python 3.9
+  - Message: “urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3' …”
+  - Status: Harmless for our usage; suppressed in production code (see `mlxk2/__init__.py`, `warnings.filterwarnings(...)`).
+  - Tests: May still appear in pytest summary if third‑party dependencies import `urllib3` before our package.
+  - Optional suppression in tests: add to `pytest.ini`:
+
+    ```ini
+    filterwarnings =
+        ignore:urllib3 v2 only supports OpenSSL 1.1.1+
+    ```
 - Notes:
   - Live test does not use `--create` (safety). If the repo does not exist, create it once manually.
   - Manual create example: `mlxk2 push --private --create "$MLXK2_LIVE_WORKSPACE" "$MLXK2_LIVE_REPO" --json`
@@ -382,17 +476,53 @@ Notes:
 
 ### Enabling Issue #27 Tests (optional)
 
-By default, several Issue #27 tests are skipped because they require a real multi‑shard safetensors model (with `model.safetensors.index.json`) in your user cache and enough free disk space to create an isolated copy.
+Quick start (minimal)
+- Best practice: set your HF cache to an external volume before pytest: `export HF_HOME=/Volumes/your-ssd/huggingface/cache`.
+- Select a model: `export MLXK2_ISSUE27_MODEL="org/model"`.
+  - Tip: choose an upstream repo that provides an index file (`model.safetensors.index.json` or `pytorch_model.bin.index.json`) to avoid SKIPs.
+- Optional: if your cache has no index file for this repo, enable isolated index bootstrap (index‑only, no shards): `export MLXK2_BOOTSTRAP_INDEX=1`.
+- Run: `pytest tests_2.0/test_issue_27.py -v`.
 
-- Set your user cache: `export MLXK2_USER_HF_HOME=/absolute/path/to/your/huggingface/cache`
-- Ensure the cache contains a model with a safetensors index (common for larger Llama/Mistral models).
+Notes
+- Tests read from your user cache and copy a minimal subset into an isolated test cache.
+- Network is only used when `MLXK2_BOOTSTRAP_INDEX=1` and the index file is not present locally.
+
+- Set your user cache:
+  - EITHER set `MLXK2_USER_HF_HOME=/absolute/path/to/your/huggingface/cache`
+  - OR set `HF_HOME=/absolute/path/to/your/huggingface/cache` before running pytest — the test harness preserves this original value and exposes it to the Issue #27 helpers while still isolating `HF_HOME` for the code under test.
+- Select a specific upstream model that includes an index file (strongly recommended):
+  - `export MLXK2_ISSUE27_MODEL="mistralai/Mixtral-8x7B-Instruct-v0.1"`
+  - or another upstream PyTorch repo that contains `model.safetensors.index.json` or `pytorch_model.bin.index.json`.
+  - Note: Many `mlx-community/...` conversions do not ship the upstream safetensors index; prefer the original upstream repo to avoid SKIPs.
+- Minimize copy size (optional):
+  - `export MLXK2_SUBSET_COUNT=1`  (Default 1; erhöht ggf. Shard‑Anzahl)
+  - `export MLXK2_MIN_FREE_MB=512` (Default 512 MB Sicherheitsmarge)
 - Run the focused tests: `PYTHONPATH=. pytest tests_2.0/test_issue_27.py -v`
-- If you see skips:
-  - “No safetensors index found” → pick a model that has `model.safetensors.index.json`.
-  - “Not enough free space” → free disk space; tests create a subset copy into an isolated temp cache.
-  - “User model not found” → verify the exact HF path in your cache and env var points to its `.../huggingface/cache` root.
 
-With a suitable model present and `MLXK2_USER_HF_HOME` set, the Issue #27 tests should run without SKIPs.
+Optional bootstrap (opt-in, minimal workflow):
+- Minimal preconditions to run all Issue #27 tests without SKIPs:
+  - Select models to test:
+    - Healthy check model (read-only): `export MLXK2_ISSUE27_MODEL="org/model"` (should be present and healthy in your user cache; single-shard small models are ideal, e.g., `sshleifer/tiny-gpt2`).
+    - Index tests model (optional, can be different): `export MLXK2_ISSUE27_INDEX_MODEL="org/model-with-index"` (upstream repo that lists an index; not required to be fully downloaded locally).
+- Ensure your user cache root is set via `MLXK2_USER_HF_HOME` (or provide it via `HF_HOME` before pytest; the harness maps it across).
+  - Enable index bootstrap: `export MLXK2_BOOTSTRAP_INDEX=1` (fetches only index files into the ISOLATED test cache; never modifies your user cache).
+  - Then: `pytest tests_2.0/test_issue_27.py -v`
+  - Note: Network is only needed if your user cache does not already contain an index file for the chosen repo. If the index exists in your cache, the tests copy it into the isolated cache and no network is required.
+
+If you still see SKIPs:
+- “No safetensors index found” → The chosen model snapshot lacks an index file. Pick a model that has `model.safetensors.index.json` (or `pytorch_model.bin.index.json`).
+- “Not enough free space” → Free disk space; tests create a subset copy into an isolated temp cache.
+- “User model not found” → Verify your model exists in the user cache and `MLXK2_USER_HF_HOME` points to the `.../huggingface/cache` root.
+
+Quick helper to list index‑bearing models in your user cache:
+
+```bash
+find "$MLXK2_USER_HF_HOME/hub" -type f \
+  \( -name 'model.safetensors.index.json' -o -name 'pytorch_model.bin.index.json' \) \
+| sed 's#.*/hub/models--\(.*\)/snapshots/.*#\1#; s#--#/#g' | sort -u
+```
+
+With a suitable model (i.e., one that includes an upstream safetensors index) present and `MLXK2_USER_HF_HOME` set, the Issue #27 tests should run without SKIPs.
 
 ### When Issue #27 real‑model tests make sense
 
@@ -410,11 +540,10 @@ Run them when
 They are not useful when
 - Your cache only has MLX Community models (no `model.safetensors.index.json`) or GGUF models — the index‑based tests will skip by design. In that case, rely on `tests_2.0/test_health_multifile.py` for deterministic coverage.
 
-Resource considerations
-- Disk: tests copy a subset of files into an isolated cache. Tune size/speed with:
-  - `export MLXK2_COPY_STRATEGY="index_subset"`
-  - `export MLXK2_SUBSET_COUNT="1"`
-  - `export MLXK2_MIN_FREE_MB="512"` (or higher)
+- Resource considerations
+- Disk: tests copy a minimal subset of files into an isolated cache (index + 1 smallest shard, oder 1 Pattern‑Shard). Optional Tuning:
+  - `export MLXK2_SUBSET_COUNT="1"` (Default 1; erhöhe bei Bedarf)
+  - `export MLXK2_MIN_FREE_MB="512"` (Default 512 MB; erhöhe bei knappem Platz)
 - Network: if you need to fetch a candidate model first, prefer downloading only `config.json`, `model.safetensors.index.json`, and 1–2 small shards to keep it light.
 
 Summary
@@ -556,17 +685,17 @@ pytest tests/integration/test_server_functionality.py -v
 
 ## Python Version Compatibility
 
-### Verification Results (August 2025)
+### Verification Results (September 2025)
 
-**✅ 150/150 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
+**✅ 160/160 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
 
 | Python Version | Status | Tests Passing |
 |----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 150/150 |
-| 3.10.x         | ✅ Verified | 150/150 |
-| 3.11.x         | ✅ Verified | 150/150 |
-| 3.12.x         | ✅ Verified | 150/150 |
-| 3.13.x         | ✅ Verified | 150/150 |
+| 3.9.6 (macOS)  | ✅ Verified | 160/160 |
+| 3.10.x         | ✅ Verified | 160/160 |
+| 3.11.x         | ✅ Verified | 160/160 |
+| 3.12.x         | ✅ Verified | 160/160 |
+| 3.13.x         | ✅ Verified | 160/160 |
 
 All versions tested with isolated cache system.
 Real MLX execution verified separately with server/run commands.
@@ -614,16 +743,18 @@ ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
 | Default 2.0 suite | `pytest -v` | — | JSON‑API (list/show/health), Human‑Output, Model‑Resolution, Health‑Policy, Push Offline (`--check-only`, `--dry-run`), Spec/Schema checks | No |
 | Spec‑only | `pytest -m spec -v` | `spec` | Schema/contract tests, version sync, docs example validation | No |
 | Exclude Spec | `pytest -m "not spec" -v` | `not spec` | Everything except spec/schema checks | No |
-| Live Push (opt‑in) | `pytest -m live_push -v` (or all live tests: `pytest -m wet -v`) | `live_push` (subset of `wet`) + Env: `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
-| Issue #27 real‑model (opt‑in) | `pytest tests_2.0/test_issue_27.py -v` | Env: `MLXK2_USER_HF_HOME` (user cache with multi‑shard models) | Strict health policy on real index‑based models | No (uses local cache) |
+| Push (experimental, opt‑in) | `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -k push -v` | Env: `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1` | Push offline tests (`--check-only`, `--dry-run`); push command hidden by default | No |
+| Live Push (opt‑in) | `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -m live_push -v` | `live_push` (subset of `wet`) + Env: `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`, `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
+| Issue #27 real‑model (opt‑in) | `pytest -m issue27 tests_2.0/test_issue_27.py -v` | Marker: `issue27`; Env (required): `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache, read‑only). Env (optional): `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL`, `MLXK2_SUBSET_COUNT=0`. | Copies real models from user cache into isolated test cache; validates strict health policy on index‑based models (no network) | No (uses local cache) |
 | Server/run (separate) | `pytest tests/integration -m server -v` | `server` | Heavy server/run tests, RAM‑dependent, longer duration | No (models local) |
 
 Useful commands
 - Only Spec: `pytest -m spec -v`
-- Offline Push only: `pytest -k "push and not live" -v`
+- Push tests (offline): `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -k "push and not live" -v`
 - Exclude Spec: `pytest -m "not spec" -v`
-- Live Push only: `MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v`
-- All live tests (umbrella): `pytest -m wet -v` (may include future live tests beyond push)
+- Live Push only: `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v`
+- Issue #27 only: `MLXK2_USER_HF_HOME=/path/to/user/cache pytest -m issue27 tests_2.0/test_issue_27.py -v`
+- All live tests (umbrella): `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -m wet -v` (may include future live tests beyond push)
 
 Markers: wet vs live_push
 - `wet`: umbrella marker for any opt‑in “live” test that may require network, credentials, or user environment. Use to run all live tests.

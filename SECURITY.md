@@ -135,14 +135,13 @@ The 2.0 alpha introduces an experimental upload capability. Treat it as opt‑in
 
 ## Supported Versions
 
-| Version | Supported          |
+We provide security updates for these versions:
+
+| Version | Security Support   |
 | ------- | ------------------ |
-| 1.1.0   | :white_check_mark: |
-| 1.0.4   | :white_check_mark: |
-| 1.0.3   | :white_check_mark: |
-| 1.0.2   | :white_check_mark: |
-| 1.0.1   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 2.0.0-beta.3 | :white_check_mark: Current development |
+| 1.1.1   | :white_check_mark: Current stable |
+| < 1.1.1 | :x: Upgrade recommended |
 
 ## Additional Resources
 

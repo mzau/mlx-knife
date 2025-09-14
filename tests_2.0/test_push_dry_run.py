@@ -8,6 +8,14 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+
+import pytest
+
+# Skip all tests if push is not enabled
+pytestmark = pytest.mark.skipif(
+    not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"),
+    reason="Push tests require MLXK2_ENABLE_EXPERIMENTAL_PUSH=1"
+)
 from types import SimpleNamespace
 
 import pytest
@@ -46,8 +54,7 @@ def _install_fake_hf(monkeypatch, *, repo_exists: bool = True, branch_exists: bo
             return {"ok": True}
 
     fake = SimpleNamespace(HfApi=_Api, upload_folder=None, errors=_Errors)
-    sys.modules["huggingface_hub"] = fake  # type: ignore
-    sys.modules["huggingface_hub.errors"] = _Errors  # type: ignore
+    # Use monkeypatch to ensure automatic restoration after each test
     monkeypatch.setitem(sys.modules, "huggingface_hub", fake)
     monkeypatch.setitem(sys.modules, "huggingface_hub.errors", _Errors)
 
@@ -116,4 +123,3 @@ def test_dry_run_existing_with_changes(tmp_path: Path, monkeypatch):
     # Human line should reflect plan
     line = render_push(res)
     assert "dry-run: +1 ~? -1" in line
-

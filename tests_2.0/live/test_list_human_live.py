@@ -1,19 +1,16 @@
 """Opt-in live E2E test for human list rendering using the real HF cache.
 
-This test is skipped by default. Enable by setting:
-- MLXK2_LIVE_LIST=1
-- HF_HOME must point to your Hugging Face cache (read-only)
+Per TESTING.md mini‑matrix, this test is collected by default but
+only runs when explicitly selected with the `live_list` marker.
 
-It validates that:
-- Default list shows only MLX chat models (hides MLX base)
-- list --verbose shows all MLX (chat + base)
-- list --all shows all frameworks
+Run:
+- pytest -m live_list -v
+- umbrella: pytest -m wet -v
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sys
 from typing import List, Dict
 
@@ -85,3 +82,4 @@ def test_live_list_human_variants(capsys, request):
         other_name = other[0]["name"]
         # Non-MLX names are never stripped by default rule
         assert other_name in out_all
+

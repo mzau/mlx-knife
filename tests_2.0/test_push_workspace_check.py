@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
+
+# Skip all tests if push is not enabled
+pytestmark = pytest.mark.skipif(
+    not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"),
+    reason="Push tests require MLXK2_ENABLE_EXPERIMENTAL_PUSH=1"
+)
 
 from mlxk2.operations.push import push_operation, DEFAULT_PUSH_BRANCH
 
