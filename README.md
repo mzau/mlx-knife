@@ -1,7 +1,7 @@
 # <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.3
 
 <p align="center">
-  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
+  <img src="https://github.com/mzau/mlx-knife/raw/feature/2.0.0-alpha.1/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
 ## New: JSON-First Model Management for Automation & Scripting
