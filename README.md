@@ -17,7 +17,6 @@
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
 [![Sponsor mlx-knife](https://img.shields.io/badge/Sponsor-mlx--knife-ff69b4?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/mzau)
 
-[![Tests](https://img.shields.io/badge/tests-98%2F98%20passing-brightgreen.svg)](#testing)
 
 ## Features
 
@@ -79,33 +78,54 @@ mlxk2 show "Phi-3-mini" --json | jq '.data.model'
 ## Compatibility Notes
 
 - 2.0 CLI is JSON-first with human output by default; use `--json` for API responses.
-- Full feature parity with 1.x achieved including `run` command.
+- Full feature parity with 1.x achieved including `run`  and `server` command.
 - Streaming note: Some UIs buffer SSE; verify real-time with `curl -N`. Server sends clear interrupt markers on abort.
 
 ## Beta Status Summary
 
 - ✅ Server included and SIGINT-robust (Supervisor). SSE streaming behaves predictably (happy/interrupt). 404/503 mappings preserved.
-- ✅ JSON-first CLI stable: `list`, `health`, `show`, `pull`, `rm`, `run`.
-- 🔒 `push` hidden experimental feature (requires `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`).
+- ✅ JSON-first CLI stable: `list`, `health`, `show`, `pull`, `rm`, `run`, `server`/`serve`.
+- 🔒 `push` and `clone` hidden alpha features (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`).
 
 ## What 2.0.0-beta Includes
 
 | Command | Status | Description |
 |---------|--------|-------------|
-| ✅ `server` | **Included** | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
+| ✅ `server`/`serve` | **Included** | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
 | ✅ `run` | **Complete** | Interactive and single-shot model execution with streaming/batch modes |
 | ✅ `list` | **Complete** | Model discovery with JSON output |
 | ✅ `health` | **Complete** | Corruption detection and cache analysis |
 | ✅ `show` | **Complete** | Detailed model information with --files, --config |
 | ✅ `pull` | **Complete** | HuggingFace model downloads with corruption detection |
 | ✅ `rm` | **Complete** | Model deletion with lock cleanup and fuzzy matching |
-| 🔒 `push` | **Hidden Experimental** | Upload-only; requires `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1` to enable |
+| 🔒 `push` | **Hidden Alpha** | Upload-only; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` to enable |
+| 🔒 `clone` | **Hidden Alpha** | Model workspace cloning; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` to enable |
 
  
 
-## Hidden Experimental: `push` (upload only)
+## Hidden Alpha Features: `clone` and `push`
 
-`mlxk2 push` is a hidden experimental feature (M0). Enable with `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`. It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
+### `clone` - Model Workspace Creation
+
+`mlxk2 clone` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It creates a local workspace from a cached model for modification and development.
+
+- Creates isolated workspace from cached models
+- Supports APFS copy-on-write optimization on same-volume scenarios
+- Includes health check integration for workspace validation
+- Use case: Fork-modify-push workflows
+
+Example:
+```bash
+# Enable alpha features
+export MLXK2_ENABLE_ALPHA_FEATURES=1
+
+# Clone model to workspace
+mlxk2 clone org/model ./workspace
+```
+
+### `push` - Upload to Hub
+
+`mlxk2 push` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
 
 - Requires `HF_TOKEN` (write-enabled).
 - Default branch: `main` (explicitly override with `--branch`).
@@ -120,18 +140,18 @@ mlxk2 show "Phi-3-mini" --json | jq '.data.model'
 - Dry-run planning: use `--dry-run` to compute a plan vs remote without uploading. Returns `dry_run: true`, `dry_run_summary {added, modified:null, deleted}`, and sample `added_files`/`deleted_files`.
 - Testing: see TESTING.md ("Push Testing (2.0)") for offline tests and opt-in live checks with markers/env.
 - Intended for early testers only. Carefully review the result on the Hub after pushing.
-- Responsibility: You are responsible for complying with Hugging Face Hub policies and applicable laws (e.g., copyright/licensing) for any uploaded content.
+- Responsibility: **You are responsible for complying with Hugging Face Hub policies and applicable laws (e.g., copyright/licensing) for any uploaded content.**
 
 Example:
 ```bash
-# Enable experimental push feature
-export MLXK2_ENABLE_EXPERIMENTAL_PUSH=1
+# Enable alpha features
+export MLXK2_ENABLE_ALPHA_FEATURES=1
 
 # Use push command
 mlxk2 push --private ./workspace org/model --create --commit "init"
 ```
 
-This feature is not final and may change or be removed.
+These features are not final and may change or be removed in future releases.
 
 ## Installation & Parallel Usage
 
@@ -177,10 +197,10 @@ All commands follow this JSON response format:
 
 ```json
 {
-    "status": "success|error", 
-    "command": "list|health|show|pull|rm|push",
+    "status": "success|error",
+    "command": "list|health|show|pull|rm|clone|version|push|run|server",
     "data": { /* command-specific data */ },
-    "error": null | { "message": "...", "details": "..." }
+    "error": null | { "type": "...", "message": "..." }
 }
 ```
 
@@ -199,7 +219,7 @@ mlxk-json list --json
     "models": [
       {
         "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
-        "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
+        "hash": "a5339a41b2e3abcdef1234567890ab12345678ef",
         "size_bytes": 4613734656,
         "last_modified": "2024-10-15T08:23:41Z",
         "framework": "MLX",

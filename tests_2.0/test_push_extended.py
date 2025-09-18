@@ -15,10 +15,7 @@ import os
 import pytest
 
 # Skip all tests if push is not enabled
-pytestmark = pytest.mark.skipif(
-    not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"),
-    reason="Push tests require MLXK2_ENABLE_EXPERIMENTAL_PUSH=1"
-)
+# Push tests now run by default (alpha features included in standard test suite)
 
 import logging
 import sys
@@ -266,3 +263,41 @@ def test_push_retry_creates_branch_on_upload_revision_error(tmp_path, monkeypatc
     # Ensure branch creation was attempted once
     assert _ApiOk.instance is not None
     assert ("user/repo", "test-branch") in (_ApiOk.instance.created_branches if _ApiOk.instance else [])
+
+
+def test_push_apfs_warning_added_for_non_apfs_workspace(tmp_path, monkeypatch):
+    """Test that push adds APFS warning to message for non-APFS workspaces (ADR-007)."""
+    monkeypatch.setenv("HF_TOKEN", "dummy")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "file.txt").write_text("test content")
+
+    # Mock APFS detection to return False (non-APFS workspace)
+    with monkeypatch.context() as m:
+        m.setattr("mlxk2.operations.push._is_apfs_filesystem", lambda path: False)
+
+        _install_fake_hub(monkeypatch, mode="with_changes")
+
+        res = push_operation(str(ws), "user/repo", branch=DEFAULT_PUSH_BRANCH)
+
+        assert res["status"] == "success"
+        assert "Clone operations require APFS filesystem" in res["data"]["message"]
+
+
+def test_push_no_apfs_warning_for_apfs_workspace(tmp_path, monkeypatch):
+    """Test that push does NOT add APFS warning for APFS workspaces (ADR-007)."""
+    monkeypatch.setenv("HF_TOKEN", "dummy")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "file.txt").write_text("test content")
+
+    # Mock APFS detection to return True (APFS workspace)
+    with monkeypatch.context() as m:
+        m.setattr("mlxk2.operations.push._is_apfs_filesystem", lambda path: True)
+
+        _install_fake_hub(monkeypatch, mode="with_changes")
+
+        res = push_operation(str(ws), "user/repo", branch=DEFAULT_PUSH_BRANCH)
+
+        assert res["status"] == "success"
+        assert "Clone operations require APFS filesystem" not in res["data"]["message"]

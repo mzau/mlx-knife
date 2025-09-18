@@ -211,6 +211,46 @@ def check_lfs_corruption(model_path):
     return True, "No LFS corruption detected"
 
 
+def health_from_cache(model_spec, cache_dir):
+    """Health check for a specific model in a specific cache directory.
+
+    This is used by clone operations to check model health in temporary caches
+    without contaminating the user's main cache. Uses the full _check_snapshot_health()
+    logic to ensure identical health validation standards.
+
+    Args:
+        model_spec: Model name/spec to check (e.g., "microsoft/DialoGPT-small")
+        cache_dir: Path to the cache directory containing the model
+
+    Returns:
+        (bool, str): (is_healthy, reason_message)
+    """
+    from pathlib import Path
+    from ..core.cache import hf_to_cache_dir
+
+    cache_path = Path(cache_dir)
+
+    # Convert model spec to cache directory format
+    model_cache_dir = cache_path / hf_to_cache_dir(model_spec)
+    if not model_cache_dir.exists():
+        return False, "Model not in cache"
+
+    # Find the appropriate snapshot to check
+    snapshots_dir = model_cache_dir / "snapshots"
+    if not snapshots_dir.exists():
+        return False, "No snapshots directory found"
+
+    snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+    if not snapshots:
+        return False, "No snapshots found"
+
+    # Use the latest snapshot (by modification time)
+    model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+
+    # Use the same health check logic as regular health operations
+    return _check_snapshot_health(model_path)
+
+
 def health_check_operation(model_pattern=None):
     """Health check operation for JSON API with model resolution support."""
     result = {

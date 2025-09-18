@@ -21,6 +21,7 @@ from .output.human import (
     render_health,
     render_show,
     render_pull,
+    render_clone,
     render_rm,
 )
 
@@ -97,6 +98,16 @@ def main():
     pull_parser = subparsers.add_parser("pull", help="Download a model")
     pull_parser.add_argument("model", help="Model name to download")
     pull_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+
+    # Clone command (alpha) - only show if alpha features enabled
+    if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+        clone_parser = subparsers.add_parser("clone", help="ALPHA: Clone a model to a local workspace")
+        clone_parser.add_argument("model", help="Model name to clone (org/repo[@revision])")
+        clone_parser.add_argument("target_dir", help="Target directory for workspace")
+        clone_parser.add_argument("--branch", help="Specific branch/revision to clone")
+        clone_parser.add_argument("--no-health-check", action="store_true", help="Skip health validation before copy")
+        clone_parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
+        clone_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     
     # Remove command
     rm_parser = subparsers.add_parser("rm", help="Delete a model")
@@ -139,9 +150,9 @@ def main():
         add_help=False,
     )
 
-    # Push command (experimental) - only show if explicitly enabled
-    if os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"):
-        push_parser = subparsers.add_parser("push", help="EXPERIMENTAL: Upload a local folder to Hugging Face")
+    # Push command (alpha) - only show if alpha features enabled
+    if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+        push_parser = subparsers.add_parser("push", help="ALPHA: Upload a local folder to Hugging Face")
         push_parser.add_argument("local_dir", help="Local folder to upload")
         push_parser.add_argument("repo_id", help="Target repo as org/model")
         push_parser.add_argument("--create", action="store_true", help="Create repository/branch if missing")
@@ -210,6 +221,29 @@ def main():
                 print(format_json_output(result))
             else:
                 print(render_pull(result))
+        elif args.command == "clone":
+            # Check if alpha features are enabled (should not reach here if not, but double-check)
+            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+                result = handle_error("CommandError", "Clone command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
+                print(format_json_output(result))
+                sys.exit(1)
+
+            # Handle branch parameter by modifying model spec
+            model_spec = args.model
+            if getattr(args, "branch", None):
+                # If --branch is provided, append it to model spec
+                model_spec = f"{args.model}@{args.branch}"
+
+            from .operations.clone import clone_operation
+            result = clone_operation(
+                model_spec=model_spec,
+                target_dir=args.target_dir,
+                health_check=not getattr(args, "no_health_check", False)
+            )
+            if args.json:
+                print(format_json_output(result))
+            else:
+                print(render_clone(result, quiet=getattr(args, "quiet", False)))
         elif args.command == "rm":
             result = rm_operation(args.model, args.force)
             if args.json:
@@ -283,9 +317,9 @@ def main():
             # Should never reach here (server runs indefinitely)
             result = {"status": "success"}
         elif args.command == "push":
-            # Check if push is enabled (should not reach here if not, but double-check)
-            if not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"):
-                result = handle_error("CommandError", "Push command requires MLXK2_ENABLE_EXPERIMENTAL_PUSH=1")
+            # Check if alpha features are enabled (should not reach here if not, but double-check)
+            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+                result = handle_error("CommandError", "Push command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
                 print(format_json_output(result))
                 sys.exit(1)
             result = push_operation(
