@@ -2,17 +2,18 @@
 
 ## Current Status
 
-✅ **184/184 tests passing** (September 2025) — 2.0.0-beta.3; 30 skipped (opt-in)
+✅ **254/254 tests passing** (September 2025) — 2.0.0-beta.3; 11 skipped (opt-in)
 ✅ **Apple Silicon verified** (M1/M2/M3)
 ✅ **Python 3.9-3.13 compatible**
 ✅ **Beta (CLI/JSON)** — stable features only, experimental features opt-in
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
-### Skipped Tests Breakdown (30 total)
-- **21 Push tests** - Hidden experimental feature (requires `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`)
-- **1 Live push test** - Network-dependent (requires multiple env vars)
-- **8 Other opt-in tests** - Live tests, Issue #27 real-model tests (require specific env setup)
+### Skipped Tests Breakdown (11 total)
+- **3 Live tests** - Network-dependent (requires environment setup: `live_push`, `live_clone`, `live_list`)
+- **3 Alpha feature tests** - Hidden features (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`)
+- **2 Issue #27 tests** - Real-model tests (require user cache setup)
+- **3 Other opt-in tests** - Schema validation, spec compliance (require jsonschema)
 
 ## Quick Start (2.0 Default)
 
@@ -25,17 +26,24 @@ pip install -e .[test]
 # mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
 # Run 2.0 tests (default discovery: tests_2.0/)
-pytest -v  # 184 passed, 30 skipped
+pytest -v  # 254 passed, 11 skipped
 
-# Optional: Enable experimental push tests
-MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -v  # 205 passed, 9 skipped
+# Optional: Enable alpha push and clone tests
+MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -v  # 257 passed, 8 skipped
 
 # Live tests (opt-in; not part of default):
-# - Live push (requires experimental push + env):
-#   export MLXK2_ENABLE_EXPERIMENTAL_PUSH=1
+# - Live push (requires alpha features + env):
+#   export MLXK2_ENABLE_ALPHA_FEATURES=1
 #   export MLXK2_LIVE_PUSH=1
 #   export HF_TOKEN=...; export MLXK2_LIVE_REPO=org/model; export MLXK2_LIVE_WORKSPACE=/abs/path
 #   pytest -q -m live_push
+# - Live clone (ADR-007 Phase 1 - requires alpha features + env + same volume):
+#   export MLXK2_ENABLE_ALPHA_FEATURES=1
+#   export MLXK2_LIVE_CLONE=1
+#   export HF_TOKEN=...
+#   export MLXK2_LIVE_CLONE_MODEL="mlx-community/small-model"
+#   export MLXK2_LIVE_CLONE_WORKSPACE="/path/on/same/volume/as/HF_HOME"  # APFS + same volume required
+#   pytest -q -m live_clone
 # - Live list (uses your HF_HOME; requires at least one MLX chat + one MLX base in cache):
 #   export HF_HOME=/path/to/huggingface/cache
 #   pytest -q -m live_list
@@ -54,15 +62,15 @@ Notes
 
 MLX Knife tests fall into three categories for 2.0:
 
-- **Stable CLI/JSON tests (default)**: Run on any supported Python on macOS; no model inference required; use an isolated HF cache (no network). **184 tests**
-- **Experimental features (opt-in)**: Hidden experimental features like `push` require environment variables to enable. **+21 tests**
+- **Stable CLI/JSON tests (default)**: Run on any supported Python on macOS; no model inference required; use an isolated HF cache (no network). **206 tests**
+- **Alpha features (opt-in)**: Hidden alpha features like `push` and `clone` require environment variables to enable. **+21 tests**
 - **Live/Inference tests (opt-in)**: Network-dependent or requiring real models/cache setup. **Various markers/env vars**
 
 **Default test run** covers all stable 2.0 features without experimental or live dependencies.
 
 ## Test Structure
 
-### 2.0 Test Structure (default)
+### 2.0 Test Structure
 
 Legend
 - spec/: JSON API spec/contract validation; stays in sync with docs/schema.
@@ -78,39 +86,52 @@ tests_2.0/
 ├── conftest.py                        # Isolated test cache (HF_HOME override), safety sentinel, core fixtures
 ├── conftest_runner.py                 # Runner-specific fixtures/mocks
 ├── stubs/                             # Minimal mlx/mlx_lm stubs for unit/spec tests
-├── spec/
+│   ├── mlx/
+│   │   └── core.py
+│   └── mlx_lm/
+│       ├── __init__.py
+│       ├── generate.py
+│       └── sample_utils.py
+├── spec/                              # JSON API spec/contract validation
+│   ├── test_cli_commands_json_flag.py         # CLI JSON flag behavior
 │   ├── test_cli_version_output.py             # Version command JSON shape
-│   ├── test_spec_doc_examples_validate.py     # Docs examples validate against JSON schema
-│   ├── test_spec_version_sync.py              # Code/docs version consistency check
+│   ├── test_code_outputs_validate_against_schema.py  # Code outputs validate against schema
 │   ├── test_push_error_matches_schema.py      # Push error output matches schema
-│   └── test_push_output_matches_schema.py     # Push success output matches schema
-├── live/                                      # Opt-in live tests (markers)
-│   ├── test_push_live.py                      # Live push flow (requires MLXK2_LIVE_PUSH, HF_TOKEN)
-│   └── test_list_human_live.py                # Live list/health against user cache (requires HF_HOME)
-├── test_json_api_list.py                      # JSON API list contract (shape/fields)
-├── test_json_api_show.py                      # JSON API show contract (base/files/config)
-├── test_human_output.py                       # Human rendering of list/health views
-├── test_detection_readme_tokenizer.py         # README/tokenizer-based framework detection
-├── test_edge_cases_adr002.py                  # Naming/health edge cases (ADR-002)
-├── test_health_multifile.py                   # Multi-file health completeness (index vs pattern)
-├── test_model_naming.py                       # Conversion rules, bijection, parsing
-├── test_integration.py                        # Model resolution and health integration
-├── test_issue_27.py                           # Health policy exploration (legacy scenarios)
-├── test_issue_30_preflight.py                 # Preflight for gated/private/not-found repos (Issue #30)
-├── test_robustness.py                         # Robustness for rm/pull/disk/timeout/concurrency
-├── test_cli_push_args.py                      # Push CLI args and JSON error/output handling (offline)
-├── test_push_minimal.py                       # Minimal push scenarios (offline)
-├── test_push_extended.py                      # Extended push: no-op vs commit, branch/retry, .hfignore
-├── test_push_dry_run.py                       # Push dry-run diff planning (added/modified/deleted)
-├── test_push_workspace_check.py               # Push check-only: workspace validation without network
-├── test_ctrl_c_handling.py                    # SIGINT handling during run/interactive flows
-├── test_interactive_mode.py                   # Interactive CLI mode prompts/history/streaming
-├── test_interruption_recovery.py              # Recovery semantics after interruption (flag reset)
-├── test_run_complete.py                       # End-to-end run command (stream/batch/params)
-├── test_runner_core.py                        # MLXRunner core generation/memory/stop tokens
-├── test_token_limits.py                       # Dynamic token calculation; server vs run policies
-├── test_server_api_minimal.py                 # Minimal OpenAI-compatible server endpoints (SSE, JSON)
-└── test_server_api.py.disabled                # Disabled server API tests (WIP/expanded scenarios)
+│   ├── test_push_output_matches_schema.py     # Push success output matches schema
+│   ├── test_spec_doc_examples_validate.py     # Docs examples validate against JSON schema
+│   └── test_spec_version_sync.py              # Code/docs version consistency check
+├── live/                              # Opt-in live tests (markers)
+│   ├── test_clone_live.py                     # Live clone flow (requires MLXK2_LIVE_CLONE, HF_TOKEN)
+│   ├── test_list_human_live.py                # Live list/health against user cache (requires HF_HOME)
+│   └── test_push_live.py                      # Live push flow (requires MLXK2_LIVE_PUSH, HF_TOKEN)
+├── test_cli_push_args.py              # Push CLI args and JSON error/output handling (offline)
+├── test_clone_operation.py            # Clone operations with APFS optimization
+├── test_ctrl_c_handling.py            # SIGINT handling during run/interactive flows
+├── test_detection_readme_tokenizer.py # README/tokenizer-based framework detection
+├── test_edge_cases_adr002.py          # Naming/health edge cases (ADR-002)
+├── test_health_multifile.py           # Multi-file health completeness (index vs pattern)
+├── test_human_output.py               # Human rendering of list/health views
+├── test_integration.py                # Model resolution and health integration
+├── test_interactive_mode.py           # Interactive CLI mode prompts/history/streaming
+├── test_interruption_recovery.py      # Recovery semantics after interruption (flag reset)
+├── test_issue_27.py                   # Health policy exploration with real models (marker: issue27)
+├── test_issue_30_preflight.py         # Preflight for gated/private/not-found repos (Issue #30)
+├── test_json_api_list.py              # JSON API list contract (shape/fields)
+├── test_json_api_show.py              # JSON API show contract (base/files/config)
+├── test_model_naming.py               # Conversion rules, bijection, parsing
+├── test_push_dry_run.py               # Push dry-run diff planning (added/modified/deleted)
+├── test_push_extended.py              # Extended push: no-op vs commit, branch/retry, .hfignore
+├── test_push_minimal.py               # Minimal push scenarios (offline)
+├── test_push_workspace_check.py       # Push check-only: workspace validation without network
+├── test_robustness.py                 # Robustness for rm/pull/disk/timeout/concurrency
+├── test_run_complete.py               # End-to-end run command (stream/batch/params)
+├── test_runner_core.py                # MLXRunner core generation/memory/stop tokens
+├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
+├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
+├── test_server_models_and_errors.py   # Server model loading and error handling
+├── test_server_streaming_minimal.py   # Server SSE streaming functionality
+├── test_server_token_limits_api.py    # Server token limit enforcement
+└── test_token_limits.py               # Dynamic token calculation; server vs run policies
 ```
 
 Note: Live tests are opt-in via markers (`-m live_push`, `-m live_list`) and environment. Default `pytest` discovery runs only the offline suite above.
@@ -197,7 +218,7 @@ Examples (expected)
       "created_repo": false,
       "message": "Dry-run: no changes",
       "experimental": true,
-      "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review results on the Hub.",
+      "disclaimer": "Alpha feature (upload only). No validation/filters; review results on the Hub.",
       "dry_run": true,
       "dry_run_summary": {"added": 0, "modified": null, "deleted": 0},
       "change_summary": {"added": 0, "modified": 0, "deleted": 0},
@@ -227,7 +248,7 @@ Examples (expected)
       "created_repo": false,
       "message": "Dry-run: +2 ~? -1",
       "experimental": true,
-      "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review results on the Hub.",
+      "disclaimer": "Alpha feature (upload only). No validation/filters; review results on the Hub.",
       "dry_run": true,
       "dry_run_summary": {"added": 2, "modified": null, "deleted": 1},
       "change_summary": {"added": 2, "modified": 0, "deleted": 1},
@@ -386,75 +407,69 @@ Notes
 - Ensure tokenizer files exist (tokenizer.json/tokenizer.model) and optional generation_config.json for runnable chat contexts.
 - Avoid pushing unwanted files; use `.hfignore` for project‑specific filters.
 
-### 1.x Legacy Test Suite (separate)
+## 2.0 Test Strategy
 
-- Location: `tests/` (stable 1.x release on `main`).
-- Not part of the 2.0 default run; execute explicitly with `pytest tests/ -v`.
-- Contains extensive integration/server tests unrelated to the 2.0 JSON CLI.
+MLX Knife 2.0 uses a **3-category test strategy** with enhanced isolation and sentinel protection:
 
-## Legacy 1.x: 3-Category Test Strategy (main)
+### 🏠 CATEGORY 1: ISOLATED CACHE (Default Tests - ~230+ tests)
+**✅ User cache stays pristine** - Tests use `isolated_cache` fixture with sentinel protection
 
-MLX Knife uses a **3-category test strategy** to balance test isolation, performance, and user cache protection:
+**Current 2.0 Test Files:**
+- ✅ `test_json_api_*.py` - JSON API contract validation
+- ✅ `test_human_output.py` - Human output formatting
+- ✅ `test_health_multifile.py` - Multi-file health completeness
+- ✅ `test_push_*.py` - Push operations (offline, dry-run, workspace check)
+- ✅ `test_clone_operation.py` - Clone operations with APFS optimization
+- ✅ `test_run_complete.py` / `test_runner_core.py` - Run command and MLX generation
+- ✅ `test_server_*_minimal.py` - Basic server API endpoints
+- ✅ `spec/test_*.py` - Schema validation and spec compliance
 
-### 🏠 CATEGORY 1: ISOLATED CACHE (Most Tests)
-**✅ User cache stays pristine** - Tests use temporary isolated caches with automatic cleanup
-
-**Implemented Tests (78 tests):**
-- ✅ `test_real_model_lifecycle.py` - Full model lifecycle with `tiny-random-gpt2` (~12MB download)
-- ✅ `test_core_functionality.py` - Basic CLI operations with `patch_model_cache` isolation  
-- ✅ `test_process_lifecycle.py` - Process management with isolated cache + MODEL_CACHE patching
-- ✅ `test_run_command_advanced.py` - Run command edge cases with `mock_model_cache` in isolation
-- ✅ `test_lock_cleanup_bug.py` - Lock cleanup testing with temporary MODEL_CACHE override
-- ✅ `test_health_checks.py` - Mock corruption testing with isolated `temp_cache_dir`
-
-**Technical Pattern:**
+**Technical Pattern (2.0):**
 ```python
-@pytest.mark.usefixtures("temp_cache_dir")
-class TestBasicLifecycle:
-    def test_something(self, temp_cache_dir, patch_model_cache):
-        with patch_model_cache(temp_cache_dir / "hub"):
-            # Test operates in complete isolation
-            # User cache never touched, automatic cleanup
+def test_something(isolated_cache):
+    # Test operates in complete isolation with sentinel protection
+    # isolated_cache fixture ensures TEST_SENTINEL exists
+    # MLX stubs enable platform-neutral testing without real MLX
+    assert_is_test_cache(isolated_cache)  # Safety check
+    # Test implementation here
 ```
 
-**Benefits:** 
+**Benefits:**
 - ✅ **Clean User Cache**: No test artifacts or broken models ever
-- ✅ **Parallel Testing**: No cache conflicts between test runs  
+- ✅ **Parallel Testing**: No cache conflicts between test runs
 - ✅ **Reproducible**: No dependency on existing models in user cache
-- ✅ **Fast CI**: Small models (12MB vs 4GB) for most tests
+- ✅ **Platform Neutral**: MLX stubs enable testing without real MLX hardware
+- ✅ **Sentinel Protection**: `TEST_SENTINEL` prevents accidental user cache modification
 
-### 🏥 CATEGORY 2: USER CACHE (Framework Diversity)
-**📋 Reserved for future** - Real model diversity that cannot be mocked
+### 🌐 CATEGORY 2: LIVE TESTS (Network/User Cache - Opt-in)
+**🔒 Require explicit environment setup** - Located in `live/` directory
 
-**Future Framework Validation Tests:**
-- Multiple framework detection (MLX + PyTorch + Tokenizer-only models)
-- Health check diversity testing with naturally corrupted models
-- Cross-framework model compatibility validation
+**Live Test Files:**
+- 🔒 `live/test_push_live.py` - Real HuggingFace push operations
+- 🔒 `live/test_clone_live.py` - APFS same-volume clone workflows
+- 🔒 `live/test_list_human_live.py` - Tests against user cache models
+- 🔒 `test_issue_27.py` - Real multi-shard model health validation (marker: `issue27`)
 
-**Currently**: All health/framework tests use `mock_model_cache` and are Category 1 (isolated)
+**Markers:** `live_push`, `live_clone`, `live_list`, `wet` (umbrella), `issue27`
 
-### 🖥️ CATEGORY 3: SERVER CACHE (Performance Tests)  
-**🔒 Large models, user cache expected** - Marked with `@pytest.mark.server`
+### 🖥️ CATEGORY 3: SERVER TESTS (2.0 Minimal)
+**✅ Basic server functionality** - Lightweight API validation
 
-**Server Tests (Excluded from default `pytest`):**
-- 🔒 `test_issue_14.py` - Chat self-conversation regression tests
-- 🔒 `test_issue_15_16.py` - Dynamic token limit validation  
-- 🔒 `test_end_token_issue.py` - End-token filtering consistency
-- 🔒 `test_server_functionality.py` - OpenAI API compliance (basic tests only)
+**Server Test Files:**
+- ✅ `test_server_api_minimal.py` - Basic OpenAI-compatible endpoints
+- ✅ `test_server_streaming_minimal.py` - SSE streaming functionality
+- ✅ `test_server_models_and_errors.py` - Model loading and error handling
+- ✅ `test_server_token_limits_api.py` - Token limit enforcement
 
-**Technical Pattern:**
-```python
-@pytest.mark.server  # Excluded from default pytest
-def test_server_feature(mlx_server, model_name: str):
-    # Uses real models in user cache
-    # Requires significant RAM and time
-```
+**Characteristics (2.0):**
+- ✅ **Included by default** - Part of standard test suite
+- 🏠 **Uses isolated cache** - Same safety as Category 1
+- ⚡ **Fast execution** - Uses MLX stubs, no real model loading
+- 🎯 **API compliance focus** - OpenAI compatibility validation
 
-**Characteristics:**
-- 🔒 **Not run by default** - Must use `pytest -m server`
-- 💾 **RAM-aware** - Auto-skip models exceeding available memory
-- ⏱️ **Longer execution** - 20-40 minutes for full suite
-- 🎯 **Model diversity** - Tests across different model sizes/architectures
+**Run specifically:** `pytest -k server -v` (optional, included in default anyway)
+
+**Note:** Heavy server tests with real models documented in "Future" section above
 
 ## Test Prerequisites
 
@@ -687,18 +702,22 @@ pytest tests/integration/test_server_functionality.py -v
 
 ### Verification Results (September 2025)
 
-**✅ 160/160 tests passing** - All standard tests validated on Apple Silicon with isolated cache system
+**✅ 254/254 tests passing** - All standard tests validated on Apple Silicon with enhanced isolation
 
-| Python Version | Status | Tests Passing |
-|----------------|--------|---------------|
-| 3.9.6 (macOS)  | ✅ Verified | 160/160 |
-| 3.10.x         | ✅ Verified | 160/160 |
-| 3.11.x         | ✅ Verified | 160/160 |
-| 3.12.x         | ✅ Verified | 160/160 |
-| 3.13.x         | ✅ Verified | 160/160 |
+| Python Version | Status | Tests Passing | Skipped |
+|----------------|--------|---------------|---------|
+| 3.9.6 (macOS)  | ✅ Verified | 254/254 | 11 |
+| 3.10.x         | ✅ Verified | 254/254 | 11 |
+| 3.11.x         | ✅ Verified | 254/254 | 11 |
+| 3.12.x         | ✅ Verified | 254/254 | 11 |
+| 3.13.x         | ✅ Verified | 254/254 | 11 |
 
-All versions tested with isolated cache system.
-Real MLX execution verified separately with server/run commands.
+**Note:** 11 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
+- Without `HF_TOKEN`: +1 skip (live push test)
+- Without `MLXK2_ENABLE_ALPHA_FEATURES=1`: +3 skips (alpha feature tests)
+- Without `jsonschema`: +1 skip (spec validation test)
+
+All versions tested with `isolated_cache` system and MLX stubs for platform-neutral execution.
 
 ### Manual Multi-Python Testing
 
@@ -743,22 +762,28 @@ ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
 | Default 2.0 suite | `pytest -v` | — | JSON‑API (list/show/health), Human‑Output, Model‑Resolution, Health‑Policy, Push Offline (`--check-only`, `--dry-run`), Spec/Schema checks | No |
 | Spec‑only | `pytest -m spec -v` | `spec` | Schema/contract tests, version sync, docs example validation | No |
 | Exclude Spec | `pytest -m "not spec" -v` | `not spec` | Everything except spec/schema checks | No |
-| Push (experimental, opt‑in) | `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -k push -v` | Env: `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1` | Push offline tests (`--check-only`, `--dry-run`); push command hidden by default | No |
-| Live Push (opt‑in) | `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -m live_push -v` | `live_push` (subset of `wet`) + Env: `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`, `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
+| Push (alpha, opt‑in) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -k push -v` | Env: `MLXK2_ENABLE_ALPHA_FEATURES=1` | Push offline tests (`--check-only`, `--dry-run`); push command hidden by default | No |
+| Live Push (opt‑in) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_push -v` | `live_push` (subset of `wet`) + Env: `MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
+| Live List (opt‑in) | `pytest -m live_list -v` | `live_list` (subset of `wet`) + Env: `HF_HOME` (user cache with models) | Tests list/health against user cache models | No (uses local cache) |
+| Clone (alpha, opt‑in) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -k clone -v` | Env: `MLXK2_ENABLE_ALPHA_FEATURES=1` | Clone offline tests (Pull+Copy+Cleanup workflow, APFS optimization); clone command hidden by default | No |
+| Live Clone (ADR-007) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK2_LIVE_CLONE_WORKSPACE` | Real clone workflow: pull→temp cache→APFS same-volume clone→workspace (ADR-007 Phase 1 constraints: same volume + APFS required) | Yes |
 | Issue #27 real‑model (opt‑in) | `pytest -m issue27 tests_2.0/test_issue_27.py -v` | Marker: `issue27`; Env (required): `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache, read‑only). Env (optional): `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL`, `MLXK2_SUBSET_COUNT=0`. | Copies real models from user cache into isolated test cache; validates strict health policy on index‑based models (no network) | No (uses local cache) |
-| Server/run (separate) | `pytest tests/integration -m server -v` | `server` | Heavy server/run tests, RAM‑dependent, longer duration | No (models local) |
+| Server tests (included) | `pytest -k server -v` | — | Basic server API tests (minimal, uses MLX stubs) | No |
 
 Useful commands
 - Only Spec: `pytest -m spec -v`
-- Push tests (offline): `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -k "push and not live" -v`
+- Push tests (offline): `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -k "push and not live" -v`
 - Exclude Spec: `pytest -m "not spec" -v`
-- Live Push only: `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v`
+- Live Push only: `MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v`
+- Live Clone only: `MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK2_LIVE_CLONE=1 HF_TOKEN=... MLXK2_LIVE_CLONE_MODEL=... MLXK2_LIVE_CLONE_WORKSPACE=... pytest -m live_clone -v`
+- Live List only: `HF_HOME=/path/to/user/cache pytest -m live_list -v`
 - Issue #27 only: `MLXK2_USER_HF_HOME=/path/to/user/cache pytest -m issue27 tests_2.0/test_issue_27.py -v`
-- All live tests (umbrella): `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1 pytest -m wet -v` (may include future live tests beyond push)
+- All live tests (umbrella): `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m wet -v` (includes live_push, live_clone, live_list)
 
-Markers: wet vs live_push
-- `wet`: umbrella marker for any opt‑in “live” test that may require network, credentials, or user environment. Use to run all live tests.
+Markers: wet vs specific live tests
+- `wet`: umbrella marker for any opt‑in "live" test that may require network, credentials, or user environment. Use to run all live tests.
 - `live_push`: narrow marker for push‑specific live tests only. Use to target push live checks without running other live suites.
+- `live_clone`: narrow marker for clone‑specific live tests only. Use to target ADR-007 Phase 1 real workflow validation.
 
 Note: Without the required env vars, live tests remain SKIPPED.
 
@@ -880,131 +905,83 @@ When submitting PRs, please include:
 
 ## Summary
 
-**Legacy 1.x Testing Status (main):**
+**MLX Knife 2.0 Testing Status:**
 
-✅ **Stable** - 150/150 tests passing  
-✅ **Isolated Test System** - User cache stays pristine with temp cache isolation
-✅ **3-Category Strategy** - Optimized for performance and safety
-✅ **Multi-Python Support** - Python 3.9-3.13 verified  
-✅ **Code Quality** - ruff/mypy integration working  
-✅ **Real Model Testing** - Server/run commands validated with multiple models
-✅ **Memory Management** - Context managers prevent leaks  
-✅ **Exception Safety** - Context managers ensure cleanup  
-✅ **Cache Directory Fix** - Issue #21: Empty cache crash resolved
-✅ **LibreSSL Warning Fix** - Issue #22: macOS Python 3.9 warning suppression
-✅ **Lock Cleanup Fix** - Issue #23: Enhanced rm command with lock cleanup
+✅ **Feature Complete** - 254/254 tests passing (2.0.0-beta.3)
+✅ **Enhanced Isolation** - Sentinel protection with `isolated_cache` fixture
+✅ **3-Category Strategy** - Isolated/Live/Server tests optimized for 2.0
+✅ **Multi-Python Support** - Python 3.9-3.13 verified
+✅ **Platform Neutral** - MLX stubs enable testing without real MLX hardware
+✅ **Alpha Feature Separation** - Clean boundaries for beta/alpha functionality
+✅ **JSON API Validation** - Complete schema compliance testing
+✅ **Clone Implementation** - Full ADR-007 Phase 1 validation (APFS optimization)
+✅ **Push Operations** - Comprehensive offline testing (dry-run, workspace check)
 
-This testing framework validates MLX Knife's stability through isolated testing with automatic model downloads and separate real MLX validation.
+This testing framework validates MLX Knife 2.0's JSON-first architecture through comprehensive isolated testing with minimal live dependencies.
 
-## Server-Based Testing (Legacy 1.x; 2.0 RC planned)
+## Future: Real-Model Server Testing (TODO)
 
-In 1.x (main), some tests require a running MLX Knife server with loaded models and are marked with `@pytest.mark.server`. For 2.0, server/run will return in the RC; until then, server tests are legacy-only.
+**Status:** Currently not implemented in 2.0, but valuable for comprehensive model validation
 
-### Why Separate Server Tests?
+### Rationale
+While 2.0 uses MLX stubs for fast testing, real-model server tests validate:
+- Model compatibility across different architectures (Llama, Mistral, Qwen, etc.)
+- Memory management with actual model weights
+- Generation quality and stop token behavior
+- Performance characteristics under load
 
-- **Test count varies** by loaded models (makes CI reporting inconsistent)
-- **Large memory requirements** - need different models for different RAM sizes  
-- **Longer execution time** - each model needs to load individually
-- **Manual setup required** - need to download appropriate models first
+### RAM-Aware Model Selection Strategy
 
-### Prerequisites for Server Tests
+**Methodology:** Automatically select test models based on available system RAM to ensure tests don't fail due to insufficient memory.
 
-| System RAM | Recommended Models | Commands |
-|------------|-------------------|----------|
-| **16GB**   | Small models only | `mlxk pull mlx-community/Qwen2.5-0.5B-Instruct-4bit`<br>`mlxk pull mlx-community/Llama-3.2-1B-Instruct-4bit`<br>`mlxk pull mlx-community/Llama-3.2-3B-Instruct-4bit` |
-| **32GB**   | + Medium models | `mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit`<br>`mlxk pull mlx-community/Mistral-7B-Instruct-v0.2-4bit`<br>`mlxk pull mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit` |
-| **64GB**   | + Large models | `mlxk pull mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit`<br>`mlxk pull mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit`<br>`mlxk pull mlx-community/Llama-3.3-70B-Instruct-4bit` |
-| **96GB+**  | + Huge models | `mlxk pull mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit` |
-
-### Running Server Tests
-
-**Issue #14 Regression Tests** (Chat Self-Conversation Bug):
-
-```bash
-# Set environment
-export HF_HOME=/path/to/your/cache
-
-# Smoke test first (see which models are available)
-python tests/integration/test_issue_14.py
-
-# Run server tests only (excluded from default pytest)
-pytest -m server -v
-
-# Run specific Issue #14 tests
-pytest tests/integration/test_issue_14.py -m server -v
-```
-
-**Expected Output:**
-```
-🦫 MLX Knife Issue #14 Test - Smoke Test
-==================================================
-📊 Safe models for this system: 6
-💾 System RAM: 64GB total, 40GB available
-
-  🎯 mlx-community/Mistral-7B-Instruct-v0.2-4bit
-     └─ Size: 7B, RAM needed: 8GB
-  🎯 mlx-community/Llama-3.2-3B-Instruct-4bit  
-     └─ Size: 3B, RAM needed: 4GB
-  [...]
-
-========== test session starts ==========
-tests/integration/test_issue_14.py::test_server_health[mlx_server] PASSED
-tests/integration/test_issue_14.py::test_issue_14_self_conversation_regression_original[mlx-community/Mistral-7B-Instruct-v0.2-4bit-7B-8] PASSED
-[...6 more model tests...]
-========== 7 passed in 45.23s ==========
-```
-
-### Additional Server Tests
-
-**Issues #15 & #16** - Dynamic Token Limits (Implemented in 1.1.0-beta1):
-```bash
-pytest tests/integration/test_issue_15_16.py -v
-```
-
-**Issue #20** - End-Token Filtering (Implemented in 1.1.0-beta2):
-```bash
-pytest tests/integration/test_end_token_issue.py -m server -v
-```
-
-### Troubleshooting Server Tests
-
-**Permission warnings are normal:**
-```
-WARNING: ⚠️  Cannot scan network connections (permission denied)
-INFO: 🔧 Falling back to process-based cleanup only
-```
-This is expected on macOS - the tests continue with process-based cleanup.
-
-**Memory issues:**
-- Tests automatically skip models exceeding 80% available RAM
-- Use smaller models if you see consistent memory failures  
-- Consider external SSD for model cache to reduce memory pressure
-
-**Server startup failures:**
-```bash
-# Debug server manually
-python -m mlx_knife.cli server --port 8000
-
-# Check model health  
-mlxk health
-
-# Verify environment
-echo $HF_HOME
-```
-
-### Adding New Server Tests
-
-When contributing server-based tests:
-
+**Model RAM Requirements (Rough Estimates):**
 ```python
-@pytest.mark.server
-def test_new_feature(mlx_server, model_name: str, size_str: str, ram_needed: int):
-    """Test new feature with MLX models.""" 
-    # Use mlx_server fixture for automatic server management
-    # Test implementation here
+MODEL_RAM_ESTIMATES = {
+    "0.5B-4bit": 1,      # ~1GB RAM needed
+    "1B-4bit": 2,        # ~2GB RAM needed
+    "3B-4bit": 4,        # ~4GB RAM needed
+    "7B-4bit": 8,        # ~8GB RAM needed
+    "8x7B-4bit": 32,     # ~32GB RAM needed (MoE)
+    "30B-4bit": 40,      # ~40GB RAM needed
+    "70B-4bit": 80,      # ~80GB RAM needed
+}
 ```
 
-1. **Mark with `@pytest.mark.server`** - excludes from default `pytest`
-2. **Use `mlx_server` fixture** - automatic server lifecycle management
-3. **Test RAM requirements** - use `get_safe_models_for_system()` helper
-4. **Document in TESTING.md** - add to this guide
+**Test Model Matrix by System RAM:**
+
+| System RAM | Test Models | Purpose |
+|------------|-------------|---------|
+| **16GB**   | Qwen2.5-0.5B-Instruct-4bit<br>Llama-3.2-1B-Instruct-4bit<br>Llama-3.2-3B-Instruct-4bit | Basic functionality, small model validation |
+| **32GB**   | + Phi-3-mini-4k-instruct-4bit<br>+ Mistral-7B-Instruct-v0.2-4bit<br>+ Mixtral-8x7B-Instruct-v0.1-4bit | Medium model validation, MoE architecture |
+| **64GB**   | + Qwen3-30B-A3B-Instruct-2507-4bit<br>+ Llama-3.3-70B-Instruct-4bit | Large model validation, context handling |
+| **96GB+**  | + Qwen3-Coder-480B-A35B-Instruct-4bit | Huge model validation, memory limits |
+
+### Implementation Approach (Future)
+
+**Test Structure:**
+```python
+@pytest.mark.server_real  # Future marker for real-model tests
+@pytest.mark.parametrize("model", get_safe_models_for_system())
+def test_model_generation_quality(model_name: str, ram_needed: int):
+    """Validate model generates appropriate responses."""
+    # Auto-skip if insufficient RAM
+    # Test actual generation quality
+    # Validate stop tokens work correctly
+    # Check memory cleanup
+```
+
+**Benefits:**
+- ✅ **Real-world validation** - Catches issues MLX stubs cannot
+- ✅ **Architecture diversity** - Tests across different model families
+- ✅ **Memory management** - Validates actual RAM usage patterns
+- ✅ **Performance benchmarking** - Real generation speed metrics
+- ✅ **RAM-aware** - Tests adapt to available system resources
+
+**Implementation Status:**
+- 🚧 **TODO for post-beta.3** - Requires real MLX integration in test environment
+- 📋 **Design preserved** - RAM-aware filtering logic documented for future use
+- 🎯 **Target**: Optional `pytest -m server_real` for comprehensive model validation
+
+---
+
+*MLX-Knife 2.0.0-beta.3 — Comprehensive testing for JSON-first model management.*

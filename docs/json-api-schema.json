@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "status": {"type": "string", "enum": ["success", "error"]},
-    "command": {"type": "string", "enum": ["list", "show", "health", "pull", "rm", "version", "push", "run"]},
+    "command": {"type": "string", "enum": ["list", "show", "health", "pull", "rm", "clone", "version", "push", "run", "server"]},
     "api_version": {"type": "string", "pattern": "^json-[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "data": {"type": ["object", "null"]},
     "error": {
@@ -246,6 +246,30 @@
                   "disclaimer": {"type": "string"}
                 },
                 "required": ["repo_id", "branch", "repo_url"]
+              }
+            }
+          },
+          "else": {}
+        },
+        {
+          "if": {
+            "allOf": [
+              {"properties": {"status": {"const": "success"}}},
+              {"properties": {"command": {"const": "run"}}}
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "model": {"type": "string"},
+                  "prompt": {"type": "string"},
+                  "response": {"type": "string"},
+                  "tokens_generated": {"type": "integer"},
+                  "generation_time_s": {"type": "number"}
+                }
               }
             }
           },

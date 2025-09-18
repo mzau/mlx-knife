@@ -206,6 +206,44 @@ def render_rm(data: Dict[str, Any]) -> str:
     return f"rm: {model} — {err.get('message', msg)}".rstrip()
 
 
+def render_clone(data: Dict[str, Any], quiet: bool = False) -> str:
+    """Render clone operation result for human output."""
+    d = data.get("data", {})
+    status = data.get("status", "error")
+    model = d.get("model", "-")
+    target_dir = d.get("target_dir", "-")
+    msg = d.get("message", "")
+    clone_status = d.get("clone_status", "unknown")
+
+    if status == "success":
+        if quiet:
+            return f"clone: {model} → {target_dir}"
+
+        # Show additional info for successful clone
+        cache_cleanup = d.get("cache_cleanup", False)
+        health_check = d.get("health_check", True)
+
+        status_parts = []
+        if health_check:
+            status_parts.append("✓ health")
+        if cache_cleanup:
+            status_parts.append("✓ cleanup")
+
+        status_info = f" ({', '.join(status_parts)})" if status_parts else ""
+        return f"clone: {model} → {target_dir}{status_info} — {msg}".rstrip()
+
+    # Error case
+    err = data.get("error", {})
+    error_msg = err.get("message", msg)
+
+    # Show the specific phase where it failed
+    if clone_status in ["pull_failed", "health_check_failed", "copy_failed", "cache_not_found"]:
+        phase = clone_status.replace("_", " ")
+        return f"clone: {model} → {target_dir} — {phase}: {error_msg}".rstrip()
+
+    return f"clone: {model} → {target_dir} — {error_msg}".rstrip()
+
+
 def render_push(data: Dict[str, Any], verbose: bool = False) -> str:
     d = data.get("data", {})
     status = data.get("status", "error")
@@ -250,6 +288,12 @@ def render_push(data: Dict[str, Any], verbose: bool = False) -> str:
                 line = f"{prefix} {repo}@{branch} — commit {h7} (+{added} ~{modified} -{deleted})"
             else:
                 line = f"{prefix} {repo}@{branch} — commit {h7}"
+
+            # Workaround: Show important warnings from message (e.g., APFS warning)
+            msg = d.get("message", "")
+            if isinstance(msg, str) and "Clone operations require APFS filesystem" in msg:
+                line = f"{line} (Clone operations require APFS filesystem)"
+
             if verbose:
                 url = d.get("commit_url")
                 if isinstance(url, str) and url:

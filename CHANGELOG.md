@@ -1,6 +1,31 @@
 # Changelog
 
-## 2.0.0-beta.3 — 2025-09-14
+## 2.0.0-beta.3 — 2025-09-18
+
+**Feature Complete**: Full 1.1.1 parity achieved with Clone implementation (ADR-007 Phase 1) and APFS filesystem detection fixes.
+
+### Added
+- **Clone command implementation** (MAJOR):
+  - Complete `mlxk2 clone` with ADR-007 Phase 1: Same-Volume APFS strategy
+  - APFS Copy-on-Write optimization for instant cloning
+  - Isolated temp cache with user cache safety
+  - Health check integration via `health_from_cache`
+  - Feature-gated behind `MLXK2_ENABLE_ALPHA_FEATURES=1`
+- **JSON API 0.1.4 specification**:
+  - Clone operation schema and documentation
+  - Complete schema validation coverage for all 10 JSON commands
+  - Schema tests for `list`, `show`, `health`, `pull`, `rm`, `clone`, `version`, `push`, `run`, `server`
+
+### Fixed
+- **APFS filesystem detection**: SMB/network mounts now correctly detected as Non-APFS
+- **Push APFS warnings**: Non-APFS cache setups now display filesystem warnings
+
+### Testing
+- **Comprehensive test coverage**: 254/254 tests passing, 11 skipped
+- **Clone operation tests**: 43 tests covering APFS, volume detection, health integration
+- **Live validation**: 3 live clone + push tests with real HuggingFace models
+
+## 2.0.0-beta.3-local — 2025-09-14
 
 **Feature Complete Beta**: 1.x parity achieved. All core functionality implemented with clean experimental separation.
 

@@ -11,11 +11,7 @@ from pathlib import Path
 
 import pytest
 
-# Skip all tests if push is not enabled
-pytestmark = pytest.mark.skipif(
-    not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"),
-    reason="Push tests require MLXK2_ENABLE_EXPERIMENTAL_PUSH=1"
-)
+# Push tests now run by default (alpha features included in standard test suite)
 from types import SimpleNamespace
 
 import pytest

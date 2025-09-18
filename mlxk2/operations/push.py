@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json as _json
 
+# Import APFS check from clone operation and cache utilities
+from mlxk2.operations.clone import _is_apfs_filesystem
+from mlxk2.core.cache import get_current_cache_root
+
 
 DEFAULT_PUSH_BRANCH = "main"
 
@@ -473,6 +477,20 @@ def push_operation(
             result["data"]["message"] = f"Committed {uploaded_count} files (+{cs['added']} ~{cs['modified']} -{cs['deleted']})."
         else:
             result["data"]["message"] = "Commit created."
+
+        # ADR-007 Response Matrix: Add APFS hint to push success message (Alpha only)
+        try:
+            cache_root = get_current_cache_root()
+            if not _is_apfs_filesystem(cache_root):
+                result["data"]["message"] += " Clone operations require APFS filesystem."
+        except Exception as e:
+            # Safe fallback - don't fail push if APFS check fails
+            # Debug: Log the exception to understand what's failing
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"APFS warning check failed: {e}")
+            pass
+
         return result
 
     except Exception as e:

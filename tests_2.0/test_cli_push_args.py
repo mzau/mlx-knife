@@ -11,10 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 # Skip all tests if push is not enabled
-pytestmark = pytest.mark.skipif(
-    not os.getenv("MLXK2_ENABLE_EXPERIMENTAL_PUSH"),
-    reason="Push tests require MLXK2_ENABLE_EXPERIMENTAL_PUSH=1"
-)
+# Push tests now run by default (alpha features included in standard test suite)
 
 
 def _run_cli(argv: list[str], capsys):
@@ -32,8 +29,9 @@ def _run_cli(argv: list[str], capsys):
     return out
 
 
-def test_cli_push_missing_args_json_error(capsys):
+def test_cli_push_missing_args_json_error(capsys, monkeypatch):
     # Missing required positional args but with --json should emit JSON error
+    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     out = _run_cli(["mlxk2", "push", "--private", "--json"], capsys)
     data = json.loads(out)
     assert data["status"] == "error"
@@ -43,6 +41,7 @@ def test_cli_push_missing_args_json_error(capsys):
 
 def test_cli_push_workspace_missing_json_error(tmp_path, monkeypatch, capsys):
     # Provide missing workspace; ensure JSON error and specific error type
+    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
     missing = str(tmp_path / "nope")
     out = _run_cli(["mlxk2", "push", "--private", missing, "user/repo", "--json"], capsys)
@@ -88,6 +87,7 @@ def test_cli_push_no_changes_json_output(tmp_path, monkeypatch, capsys):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "x.txt").write_text("x")
+    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
 
     _install_fake_hf(monkeypatch, mode="no_changes")
@@ -105,6 +105,7 @@ def test_cli_push_with_changes_json_output(tmp_path, monkeypatch, capsys):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "x.txt").write_text("x")
+    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
 
     _install_fake_hf(monkeypatch, mode="with_changes")

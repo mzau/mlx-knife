@@ -99,24 +99,28 @@ def preflight_repo_access(model_name, hf_api=None):
         return False, f"Access denied or gated/private (preflight failed: {str(e)}). Set HF_TOKEN if needed."
 
 
-def pull_model_with_huggingface_hub(model_name):
-    """Use huggingface-hub to pull a model."""
+def pull_model_with_huggingface_hub(model_name, cache_dir=None):
+    """Use huggingface-hub to pull a model to specified cache directory."""
     try:
         # Just-in-time suppression for macOS Python 3.9 LibreSSL warning
         import warnings as _warnings
         _warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
         # Use direct Python API instead of CLI
         from huggingface_hub import snapshot_download
-        
-        # Download model to cache (default behavior)
-        local_dir = snapshot_download(
-            repo_id=model_name,
-            local_files_only=False,
-            resume_download=True
-        )
-        
+
+        # Download model to specified cache or default
+        kwargs = {
+            "repo_id": model_name,
+            "local_files_only": False,
+            "resume_download": True
+        }
+        if cache_dir:
+            kwargs["cache_dir"] = str(cache_dir)
+
+        local_dir = snapshot_download(**kwargs)
+
         return True, f"Downloaded to {local_dir}"
-    
+
     except ImportError:
         return False, "huggingface-hub not installed (pip install huggingface-hub)"
     except Exception as e:
@@ -241,5 +245,87 @@ def pull_operation(model_spec):
             "message": str(e)
         }
         result["data"]["download_status"] = "error"
-    
+
+    return result
+
+
+def pull_to_cache(model_spec, cache_dir):
+    """Pull model to specific cache directory - used by clone operation."""
+    result = {
+        "status": "success",
+        "command": "pull",
+        "error": None,
+        "data": {
+            "model": None,
+            "download_status": "unknown",
+            "message": "",
+            "expanded_name": None
+        }
+    }
+
+    try:
+        # Basic validation
+        if not model_spec or not str(model_spec).strip():
+            result["status"] = "error"
+            result["error"] = {
+                "type": "ValidationError",
+                "message": "Invalid model name: empty",
+            }
+            result["data"]["download_status"] = "error"
+            return result
+
+        base_spec = str(model_spec).split("@", 1)[0]
+        if len(base_spec) > 96 or base_spec.startswith("/") or base_spec.endswith("/") or "//" in base_spec:
+            result["status"] = "error"
+            result["error"] = {
+                "type": "ValidationError",
+                "message": "Invalid model name: must be <= 96 chars and not contain leading/trailing or double slashes",
+            }
+            result["data"]["download_status"] = "error"
+            return result
+
+        # For clone operations, use model spec as-is (no fuzzy resolution)
+        model_name = model_spec
+        result["data"]["model"] = model_name
+        result["data"]["expanded_name"] = model_name
+
+        # Preflight check for repository access (Issue #30)
+        result["data"]["download_status"] = "checking_access"
+        preflight_success, preflight_error = preflight_repo_access(model_name)
+
+        if not preflight_success:
+            result["status"] = "error"
+            result["data"]["download_status"] = "access_denied"
+            result["error"] = {
+                "type": "access_denied",
+                "message": preflight_error
+            }
+            return result
+        elif preflight_error:
+            # Warning case - log but continue
+            result["data"]["preflight_warning"] = preflight_error
+
+        # Download to specified cache directory
+        result["data"]["download_status"] = "downloading"
+        success, message = pull_model_with_huggingface_hub(model_name, cache_dir)
+
+        if success:
+            result["data"]["download_status"] = "success"
+            result["data"]["message"] = message
+        else:
+            result["status"] = "error"
+            result["error"] = {
+                "type": "DownloadError",
+                "message": message
+            }
+            result["data"]["download_status"] = "error"
+
+    except Exception as e:
+        result["status"] = "error"
+        result["error"] = {
+            "type": "OperationError",
+            "message": f"Unexpected error during pull: {str(e)}"
+        }
+        result["data"]["download_status"] = "error"
+
     return result

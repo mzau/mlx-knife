@@ -1,6 +1,6 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.3
+**Specification Version:** 0.1.4
 **Status:** Alpha - Subject to change  
 **Target:** MLX-Knife 2.0.0
 
@@ -15,15 +15,9 @@ MLX Knife is promoted as a "scriptable" tool, but formatted terminal output make
 All commands require the `--json` flag for JSON output:
 
 ```bash
-mlxk-json list --json                  # JSON output (2.0.0-alpha+)
-mlxk list --json                       # JSON output (2.0.0+)
-mlxk list                              # Human-readable output (2.0.0+)
+mlxk2 list --json                      # JSON output
+mlxk2 list                             # Human-readable output
 ```
-
-**Version Support:**
-- **2.0.0-alpha:** Only `mlxk-json --json` available (JSON-only implementation)
-- **2.0.0+:** Both `mlxk --json` and `mlxk-json --json` for JSON output
-- **2.0.0+:** `mlxk` without `--json` for human-readable output
 
 ### Version Reporting
 
@@ -57,7 +51,7 @@ All commands support consistent JSON output with standardized error handling and
 ```jsonc
 {
   "status": "success" | "error",
-  "command": "list" | "show" | "health" | "pull" | "rm" | "version",
+  "command": "list" | "show" | "health" | "pull" | "rm" | "clone" | "version" | "push" | "run" | "server",
   "data": { /* command-specific data */ },
   "error": null | { "type": "string", "message": "string" }
 }
@@ -84,16 +78,19 @@ Notes:
 
 ### Supported Commands
 
-| Command | Description | JSON-Only in 2.0 |
-|---------|-------------|------------------|
-| `list` | List models with metadata and hash codes | ✅ |
-| `show` | Detailed model inspection with files/config | ✅ |
-| `health` | Check model integrity and corruption | ✅ |
-| `pull` | Download models from HuggingFace | ✅ |
-| `rm` | Delete models from cache | ✅ |
-| `push` | Upload a local folder to Hugging Face (experimental) | ✅ |
-| `run` | Execute model inference | ❌ Not in 2.0 |
-| `server` | OpenAI-compatible API server | ❌ Not in 2.0 |
+| Command | Description | JSON-Only in 2.0 | Alpha Feature |
+|---------|-------------|------------------|---------------|
+| `list` | List models with metadata and hash codes | ✅ | - |
+| `show` | Detailed model inspection with files/config | ✅ | - |
+| `health` | Check model integrity and corruption | ✅ | - |
+| `pull` | Download models from HuggingFace | ✅ | - |
+| `rm` | Delete models from cache | ✅ | - |
+| `clone` | Clone models to workspace directory | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| `push` | Upload a local folder to Hugging Face (experimental) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| `run` | Execute model inference | ✅ | - |
+| `serve`/`server` | OpenAI-compatible API server | ✅ | - |
+
+**Note:** Commands marked with Alpha Feature require `MLXK2_ENABLE_ALPHA_FEATURES=1` environment variable to be available.
 
 ## Model Discovery & Metadata
 
@@ -603,9 +600,104 @@ mlxk-json rm "locked-model" --json               # Error: requires --force due t
 }
 ```
 
+### `mlxk-json clone <model> <target_dir> --json`
+
+**Requires:** `MLXK2_ENABLE_ALPHA_FEATURES=1`
+
+**Usage:**
+```bash
+mlxk-json clone "Phi-3-mini" ./workspace --json              # Clone to workspace directory
+mlxk-json clone "mlx-community/Phi-3-mini" ./my-model --json # Full name to custom directory
+mlxk-json clone "microsoft/DialoGPT-small" ./workspace --json # Non-MLX model
+```
+
+**Successful Clone:**
+```json
+{
+  "status": "success",
+  "command": "clone",
+  "data": {
+    "model": "mlx-community/Phi-3-mini-4k-instruct-4bit",
+    "clone_status": "success",
+    "message": "Cloned to ./workspace",
+    "target_dir": "./workspace",
+    "expanded_name": "mlx-community/Phi-3-mini-4k-instruct-4bit"
+  },
+  "error": null
+}
+```
+
+**Target Directory Not Empty:**
+```json
+{
+  "status": "error",
+  "command": "clone",
+  "data": {
+    "model": null,
+    "clone_status": "error",
+    "target_dir": "./workspace"
+  },
+  "error": {
+    "type": "ValidationError",
+    "message": "Target directory './workspace' already exists and is not empty"
+  }
+}
+```
+
+**Clone Failed:**
+```json
+{
+  "status": "error",
+  "command": "clone",
+  "data": {
+    "model": "nonexistent/model",
+    "clone_status": "failed",
+    "target_dir": "./workspace"
+  },
+  "error": {
+    "type": "clone_failed",
+    "message": "Repository not found for url: https://huggingface.co/api/models/nonexistent/model"
+  }
+}
+```
+
+**Access Denied:**
+```json
+{
+  "status": "error",
+  "command": "clone",
+  "data": {
+    "model": "gated/model",
+    "clone_status": "access_denied",
+    "target_dir": "./workspace"
+  },
+  "error": {
+    "type": "access_denied",
+    "message": "Access denied: gated/private model 'gated/model'. Accept terms and set HF_TOKEN."
+  }
+}
+```
+
+**APFS Filesystem Error:**
+```json
+{
+  "status": "error",
+  "command": "clone",
+  "data": {
+    "model": "org/model",
+    "clone_status": "filesystem_error",
+    "target_dir": "./workspace"
+  },
+  "error": {
+    "type": "FilesystemError",
+    "message": "APFS required for clone operations."
+  }
+}
+```
+
 ### `mlxk-json push <dir> <org/model> [--create] [--private] [--branch <b>] [--commit "..."] [--verbose] [--check-only] --json`
 
-Status: experimental (M0: upload-only; no validation, no filters)
+**Requires:** `MLXK2_ENABLE_ALPHA_FEATURES=1`
 
 Behavior:
 - Requires `HF_TOKEN` env.
@@ -631,7 +723,7 @@ Successful Upload (with changes):
     "no_changes": false,
     "created_repo": false,
     "change_summary": {"added": 1, "modified": 2, "deleted": 0},
-    "message": "Committed 3 files (+1 ~2 -0).",
+    "message": "Push successful. Clone operations require APFS filesystem.",
     "experimental": true,
     "disclaimer": "Experimental feature (M0: upload only). No validation/filters; review on the Hub."
   },
@@ -866,4 +958,5 @@ All commands use consistent exit codes for scripting:
 ## Version History
 
 - **2.0.0-alpha:** JSON-only implementation with `mlxk-json --json`
-- **2.0.0:** Full implementation with both JSON and human-readable output
+- **2.0.0-alphha.1:** Full implementation with both JSON and human-readable output
+- **2.0.0-alphha.2:** Push function protocol extension (json-0.1.3)
