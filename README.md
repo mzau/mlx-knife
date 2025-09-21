@@ -44,12 +44,24 @@ MLX Knife has been comprehensively tested and verified on:
 
 ## Quick Start
 
+### Beta Release Installation (Recommended)
+
+```bash
+# Install latest beta release directly from GitHub
+pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0-beta.3/mlxk_json-2.0.0b3-py3-none-any.whl
+
+# Verify installation
+mlxk2 --version  # → mlxk2 2.0.0b3
+```
+
+### Development Installation
+
 ```bash
 # Installation (local development)
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 pip install -e .
-```
+
 # Install with development tools (ruff, mypy, tests)
 pip install -e ".[dev,test]"
 ```
