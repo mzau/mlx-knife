@@ -20,11 +20,9 @@ A lightweight, ollama-like CLI for managing and running MLX models on Apple Sili
 - **Key Issues Resolved**: Issues #21, #22, #23 fixed and thoroughly tested
 
 [![GitHub Release](https://img.shields.io/github/v/release/mzau/mlx-knife)](https://github.com/mzau/mlx-knife/releases)
+[![MLX](https://img.shields.io/badge/MLX-macOS-green.svg)](https://github.com/ml-explore/mlx-lm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
-[![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Tests](https://img.shields.io/badge/tests-166%2F166%20passing-brightgreen.svg)](#testing)
 
 ## Features
 
@@ -336,15 +334,6 @@ MLX Knife runs entirely locally - no data is sent to external servers except whe
 MIT License - see [LICENSE](LICENSE) file for details
 
 Copyright (c) 2025 The BROKE team 🦫
-
-## Sponsors
-
-<div align="left" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-  <a href="https://github.com/tileshq" title="Tiles Launcher" style="display:inline-flex; align-items:center; gap:8px; text-decoration:none;">
-    <img src="https://github.com/tileshq.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
-    <span><strong>Tiles Launcher</strong></span>
-  </a>
-</div>
 
 ## Acknowledgments
 
