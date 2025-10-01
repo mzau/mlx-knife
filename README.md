@@ -15,7 +15,6 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
-[![Sponsor mlx-knife](https://img.shields.io/badge/Sponsor-mlx--knife-ff69b4?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/mzau)
 
 
 ## Features
@@ -82,6 +81,7 @@ mlxk2 show "mlx-community/Phi-3-mini-4k-instruct-4bit"
 Note: JSON output is unaffected by these human-only filters.
 
 ## JSON API
+```bash
 mlxk2 list --json | jq '.data.models[].name'
 mlxk2 health --json | jq '.data.summary'
 mlxk2 show "Phi-3-mini" --json | jq '.data.model'
@@ -457,18 +457,6 @@ Note: This branch is hard‑split for 2.0. The 1.x implementation and tests were
 ---
 
 *MLX-Knife 2.0.0-beta — JSON-first CLI for local model management.*
-
-## Sponsors
-
-<div align="left" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-  <a href="https://github.com/tileshq" title="Tiles Launcher" style="display:inline-flex; align-items:center; gap:8px; text-decoration:none;">
-    <img src="https://github.com/tileshq.png" alt="Tiles Launcher" width="48" style="width:48px; height:auto; max-width:100%;">
-    <span><strong>Tiles Launcher</strong></span>
-  </a>
-</div>
-
-Special thanks to early supporters and users providing feedback during the 2.0 beta.
-
 
 ## Acknowledgments
 
