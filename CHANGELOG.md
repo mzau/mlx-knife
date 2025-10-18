@@ -1,5 +1,61 @@
 # Changelog
 
+## 2.0.0-beta.4 — 2025-10-18
+
+**Health Check Enhancement**: Separate integrity and runtime compatibility validation (Issue #36).
+
+### Changed
+- **JSON API 0.1.5 specification**:
+  - Added `runtime_compatible: boolean` field to `modelObject` (always present)
+  - Added `reason: string | null` field to `modelObject` (describes first problem found)
+  - `list`/`show` JSON output performs both integrity and runtime compatibility checks
+  - Gate logic: Runtime check requires integrity check first; `reason` shows first problem (integrity > runtime priority)
+- **Health check concepts documented**:
+  - Integrity Check (`health` field): File-level validation (required files, no LFS pointers, valid JSON)
+  - Runtime Compatibility Check (`runtime_compatible` field): MLX framework + architecture validation with mlx-lm
+  - Framework detection: GGUF/PyTorch models marked as runtime-incompatible
+  - Architecture detection: Unsupported model types (e.g., `qwen3_next` with mlx-lm < 0.28.0) detected
+  - Respects `MODEL_REMAPPING` for aliased architectures (e.g., `mistral` → `llama`)
+
+### Implementation Status
+- ✅ **Phase 1 Complete**: JSON API Specification 0.1.5
+  - `docs/json-api-schema.json` updated with new fields
+  - `docs/json-api-specification.md` extended with health check concepts and examples
+- ✅ **Phase 2 Complete**: JSON Implementation
+  - `mlxk2/spec.py` bumped to 0.1.5
+  - `mlxk2/operations/health.py`: `check_runtime_compatibility()` with gate logic
+  - `mlxk2/operations/common.py`: `build_model_object()` always computes `runtime_compatible` + `reason`
+  - mlx-lm API compatibility: Supports both 0.27.x (`mlx_lm.utils._get_classes`) and 0.28.x APIs
+  - Log suppression: mlx-lm ERROR logs redirected to `reason` field only
+- ✅ **Phase 3 Complete**: Human Output Specification
+  - Compact mode: `healthy` / `healthy*` / `unhealthy` (single column)
+  - Verbose mode: "Integrity" | "Runtime" | "Reason" (split columns)
+  - ASCII-only output (no UTF-8 symbols for parsing compatibility)
+  - README.md fully documented with examples and design philosophy
+  - JSON examples verified for consistency with schema and code
+- ✅ **Phase 4 Complete**: Human Output Implementation in `mlxk2/output/human.py`
+
+### Dependencies
+- **mlx-lm requirement updated**: `>=0.27.0` → `>=0.28.3`
+  - Now uses official mlx-lm 0.28.3 release with Python 3.9 compatibility fixes for `qwen3_next`
+  - Adds support for newer architectures (Klear, qwen3_next, etc.)
+  - Git pin removed in favor of stable PyPI release
+
+### Validation
+- ✅ All 256 tests pass (9 skipped)
+- ✅ Runtime compatibility correctly detects:
+  - GGUF/PyTorch models → `runtime_compatible: false` (framework mismatch)
+  - Supported MLX models → `runtime_compatible: true`
+  - Unsupported architectures → `runtime_compatible: false` with descriptive `reason`
+  - Klear-46B verified working with mlx-lm 0.28.2
+
+### Known Issues
+- None
+
+### Notes
+- Human output columns controlled by CLI flags (documentation in README.md, separate from JSON spec)
+- This addresses the root cause discovered in Issue #36: GGUF models show "healthy" but are not executable with mlx-lm
+
 ## 2.0.0-beta.3 — 2025-09-18
 
 **Feature Complete**: Full 1.1.1 parity achieved with Clone implementation (ADR-007 Phase 1) and APFS filesystem detection fixes.

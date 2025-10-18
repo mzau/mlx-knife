@@ -1,14 +1,88 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.4
-**Status:** Alpha - Subject to change  
-**Target:** MLX-Knife 2.0.0
+**Specification Version:** 0.1.5
+**Status:** Alpha - Subject to change
+**Target:** MLX-Knife 2.0.0-beta.4
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
 ## Motivation
 
 MLX Knife is promoted as a "scriptable" tool, but formatted terminal output makes automation difficult. JSON output enables robust scripting integration and broke-cluster compatibility.
+
+## Health Check Concepts (0.1.5)
+
+MLX Knife distinguishes between two levels of model validation:
+
+### Integrity Check (`health` field)
+- **Purpose:** Verify that downloaded model files are complete and uncorrupted
+- **Scope:** File-level validation only
+- **Checks:**
+  - Required files present (config.json, weights, tokenizer files)
+  - No Git LFS pointers instead of actual files
+  - JSON files are valid JSON
+- **States:** `"healthy"` | `"unhealthy"`
+- **Always included:** In all `modelObject` instances
+
+### Runtime Compatibility Check (`runtime_compatible` field)
+- **Purpose:** Verify that model can be executed with `mlx-lm`
+- **Scope:** Framework and model architecture validation
+- **Checks:**
+  - Framework is MLX (GGUF/PyTorch models fail)
+  - Model architecture supported by current mlx-lm version
+  - Respects `MODEL_REMAPPING` (e.g., `mistral` → `llama`)
+- **States:** `true` | `false`
+- **Always included:** In all `modelObject` instances
+
+### Gate Logic & Reason Field
+- Runtime compatibility check **requires** integrity check first
+- If integrity check fails (`health: "unhealthy"`), runtime check is skipped (`runtime_compatible: false`)
+- `reason` field describes the **first problem found**:
+  - Integrity problems take precedence
+  - Runtime problems only shown if files are healthy
+  - `null` when both checks pass (`health: "healthy"` AND `runtime_compatible: true`)
+
+### Example Scenarios
+
+**Healthy MLX Model (Compatible):**
+```json
+/* Illustrative snippet - not a complete response */
+{
+  "health": "healthy",
+  "runtime_compatible": true,
+  "reason": null
+}
+```
+
+**GGUF Model (Files OK, Not Executable):**
+```json
+/* Illustrative snippet - not a complete response */
+{
+  "health": "healthy",
+  "runtime_compatible": false,
+  "reason": "Framework GGUF not executable with mlx-lm (requires MLX)"
+}
+```
+
+**Unsupported Architecture:**
+```json
+/* Illustrative snippet - not a complete response */
+{
+  "health": "healthy",
+  "runtime_compatible": false,
+  "reason": "Model architecture 'qwen3_next' requires mlx-lm >= 0.28.0 (current: 0.27.1)"
+}
+```
+
+**Incomplete Download (Runtime Check Skipped):**
+```json
+/* Illustrative snippet - not a complete response */
+{
+  "health": "unhealthy",
+  "runtime_compatible": false,
+  "reason": "config.json missing"
+}
+```
 
 ## CLI Usage
 
@@ -68,13 +142,16 @@ All commands that return model information use the same minimal model object.
 - `framework`: "MLX" | "GGUF" | "PyTorch" | "Unknown".
 - `model_type`: "chat" | "embedding" | "base" | "unknown".
 - `capabilities`: e.g., ["text-generation", "chat"] or ["embeddings"].
-- `health`: "healthy" | "unhealthy".
+- `health`: "healthy" | "unhealthy" (always present).
+- `runtime_compatible`: `true` | `false` (0.1.5+, always present).
+- `reason`: `string | null` (0.1.5+, describes first problem found, null when both checks pass).
 - `cached`: true.
 
 Notes:
 - No human-readable `size` field; only `size_bytes`.
 - No human-readable "modified" field; `last_modified` is authoritative.
 - No absolute filesystem paths are exposed.
+- `runtime_compatible` and `reason` fields added in spec version 0.1.5 (Issue #36).
 
 ### Supported Commands
 
@@ -112,27 +189,21 @@ Notes:
 
 **Basic Usage:**
 ```bash
-mlxk-json list --json                        # All models with health status
-mlxk-json list "mlx-community" --json        # Filter by pattern  
+mlxk-json list --json                        # All models with full validation
+mlxk-json list "mlx-community" --json        # Filter by pattern
 mlxk-json list "Llama" --json                # Fuzzy matching
 ```
 
 **Behavior:**
-- Equivalent to 1.1.0 columns (NAME/ID/SIZE/MODIFIED/FRAMEWORK/HEALTH) with JSON mapping:
-  - NAME → `name`
-  - ID → `hash`
-  - SIZE → `size_bytes` (bytes, integer)
-  - MODIFIED → `last_modified` (ISO-8601 UTC)
-  - FRAMEWORK → `framework`
-  - HEALTH → `health`
-- Health status is always included.
-- Pattern filter is a case-insensitive substring match on `name`.
+- Returns all cached models with complete metadata
+- Performs both integrity and runtime compatibility checks (0.1.5+)
+- Pattern filter is a case-insensitive substring match on `name`
 
 **JSON Schema:**
 ```json
 {
   "status": "success",
-  "command": "list", 
+  "command": "list",
   "data": {
     "models": [
       {
@@ -144,6 +215,8 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
         "health": "healthy",
+        "runtime_compatible": true,
+        "reason": null,
         "cached": true
       },
       {
@@ -155,6 +228,8 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "model_type": "embedding",
         "capabilities": ["embeddings"],
         "health": "healthy",
+        "runtime_compatible": true,
+        "reason": null,
         "cached": true
       },
       {
@@ -165,7 +240,35 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "framework": "GGUF",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
+        "health": "healthy",
+        "runtime_compatible": false,
+        "reason": "Framework GGUF not executable with mlx-lm (requires MLX)",
+        "cached": true
+      },
+      {
+        "name": "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit",
+        "hash": "f1234a5f90abcdef1234567890abcdef12345678",
+        "size_bytes": 45000000000,
+        "last_modified": "2024-10-01T09:15:30Z",
+        "framework": "MLX",
+        "model_type": "chat",
+        "capabilities": ["text-generation", "chat"],
+        "health": "healthy",
+        "runtime_compatible": false,
+        "reason": "Model architecture 'qwen3_next' requires mlx-lm >= 0.28.0 (current: 0.27.1)",
+        "cached": true
+      },
+      {
+        "name": "corrupted/incomplete-download",
+        "hash": "c9876a5f90abcdef1234567890abcdef12345678",
+        "size_bytes": 2500000000,
+        "last_modified": "2024-09-15T12:00:00Z",
+        "framework": "MLX",
+        "model_type": "unknown",
+        "capabilities": [],
         "health": "unhealthy",
+        "runtime_compatible": false,
+        "reason": "config.json missing",
         "cached": true
       }
     ],
@@ -293,6 +396,8 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
       "capabilities": ["text-generation", "chat"],
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
+      "runtime_compatible": true,
+      "reason": null,
       "cached": true
     },
     "metadata": {
@@ -324,6 +429,8 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
       "capabilities": ["text-generation", "chat"],
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
+      "runtime_compatible": true,
+      "reason": null,
       "cached": true
     },
     "files": [
@@ -356,6 +463,8 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
       "capabilities": ["text-generation", "chat"],
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
+      "runtime_compatible": true,
+      "reason": null,
       "cached": true
     },
     "config": {
@@ -408,6 +517,20 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
   }
 }
 ```
+
+## Changes in 0.1.5 (Alpha)
+
+**Issue #36: Separate Integrity and Runtime Compatibility Checks**
+
+- Added `runtime_compatible: boolean` field to `modelObject`
+- Added `reason: string | null` field to `modelObject`
+- Both fields always present in JSON output
+- `runtime_compatible` checks:
+  - Framework must be MLX (GGUF/PyTorch fail)
+  - Model architecture must be supported by installed mlx-lm version
+  - Respects `MODEL_REMAPPING` for aliased architectures
+- Gate logic: Runtime check requires passing integrity check first
+- `reason` field describes first problem found (integrity > runtime priority)
 
 ## Changes in 0.1.2 (Alpha)
 

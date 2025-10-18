@@ -1,4 +1,4 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.3
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.4
 
 <p align="center">
   <img src="https://github.com/mzau/mlx-knife/raw/feature/2.0.0-alpha.1/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
@@ -10,7 +10,7 @@
 
 **Stable Version: 1.1.1**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.0--beta.3-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0--beta.4-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -24,7 +24,7 @@
 - **Model Information**: Detailed model metadata including quantization info
 - **Download Models**: Pull models from HuggingFace with progress tracking
 - **Run Models**: Native MLX execution with streaming and chat modes
-- **Health Checks**: Verify model integrity and completeness
+- **Health Checks**: Verify model integrity and MLX runtime compatibility
 - **Cache Management**: Clean up and organize your model storage
 - **Privacy & Network**: No background network or telemetry; only explicit Hugging Face interactions when you run pull or the experimental push.
 
@@ -47,10 +47,10 @@ MLX Knife has been comprehensively tested and verified on:
 
 ```bash
 # Install latest beta release directly from GitHub
-pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0-beta.3/mlxk_json-2.0.0b3-py3-none-any.whl
+pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0-beta.4/mlxk_json-2.0.0b4-py3-none-any.whl
 
 # Verify installation
-mlxk2 --version  # → mlxk2 2.0.0b3
+mlxk2 --version  # → mlxk2 2.0.0b4
 ```
 
 ### Development Installation
@@ -68,17 +68,63 @@ pip install -e ".[dev,test]"
 ## Human output (default)
 mlxk2 list
 mlxk2 list --health
-mlxk2 list --all --verbose
 mlxk2 health
 mlxk2 show "mlx-community/Phi-3-mini-4k-instruct-4bit"
 
 ### List filters (human)
-- `list`: shows MLX chat models only (safe default for run/server selection)
-- `list --verbose`: shows all MLX models (chat + base)
+- `list`: shows MLX chat models only (compact names, safe default)
+- `list --verbose`: shows all MLX models (chat + base) with full org/names and Framework column
 - `list --all`: shows all frameworks (MLX, GGUF, PyTorch)
-- `list --all --verbose`: same selection as `--all`, with fuller names/details
+- Flags are combinable: `--all --verbose`, `--all --health`, `--verbose --health`
 
-Note: JSON output is unaffected by these human-only filters.
+### Health status display (--health flag)
+
+The `--health` flag adds health status information to the output:
+
+**Compact mode** (default, `--all`):
+- Shows single "Health" column with values:
+  - `healthy` - File integrity OK and MLX runtime compatible
+  - `healthy*` - File integrity OK but not MLX runtime compatible (use `--verbose` for details)
+  - `unhealthy` - File integrity failed or unknown format
+
+**Verbose mode** (`--verbose --health`):
+- Splits into "Integrity" and "Runtime" columns:
+  - **Integrity:** `healthy` / `unhealthy`
+  - **Runtime:** `yes` / `no` / `-` (dash = gate blocked by failed integrity)
+  - **Reason:** Explanation when problems detected (wrapped at 26 chars for readability)
+
+**Examples:**
+
+```bash
+# Compact health view
+mlxk2 list --health
+# Output:
+# Name                    | Hash    | Size   | Modified | Type | Health
+# Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | chat | healthy
+# Qwen2-7B-Instruct       | 1a2b3c4 | 4.8GB  | 3d ago   | chat | healthy*
+
+# Verbose health view with details
+mlxk2 list --verbose --health
+# Output:
+# Name                    | Hash    | Size   | Modified | Framework | Type | Integrity | Runtime | Reason
+# Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | MLX       | chat | healthy   | yes     | -
+# Qwen2-7B-Instruct       | 1a2b3c4 | 4.8GB  | 3d ago   | PyTorch   | chat | healthy   | no      | Incompatible: PyTorch
+
+# All frameworks with health status
+mlxk2 list --all --health
+# Output:
+# Name                    | Hash    | Size   | Modified | Framework | Type    | Health
+# Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | MLX       | chat    | healthy
+# llama-3.2-gguf-q4       | b2c3d4e | 1.8GB  | 3d ago   | GGUF      | unknown | healthy*
+# broken-download         | -       | 500MB  | 1h ago   | Unknown   | unknown | unhealthy
+```
+
+**Design Philosophy:**
+- `unhealthy` is a catch-all for anything not understood/supported (broken downloads, unknown formats, creative HuggingFace structures)
+- `healthy` guarantees the model will work with `mlxk2 run`
+- `healthy*` means files are intact but MLX runtime can't execute them (e.g., GGUF/PyTorch models, incompatible model_type, or mlx-lm version too old)
+
+Note: JSON output is unaffected by these human-only filters and always includes full health/runtime data.
 
 ## JSON API
 ```bash
@@ -174,8 +220,8 @@ These features are not final and may change or be removed in future releases.
 pip install -e /path/to/mlx-knife
 
 # Verify installation
-mlxk-json --version  # → mlxk2 2.0.0-beta.3
-mlxk2 --version      # → mlxk2 2.0.0-beta.3
+mlxk-json --version  # → mlxk2 2.0.0-beta.4
+mlxk2 --version      # → mlxk2 2.0.0-beta.4
 ```
 
 ### Parallel with MLX-Knife 1.x
@@ -238,6 +284,8 @@ mlxk-json list --json
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
         "health": "healthy",
+        "runtime_compatible": true,
+        "reason": null,
         "cached": true
       }
     ],
@@ -256,7 +304,11 @@ mlxk-json health --json
   "command": "health",
   "data": {
     "healthy": [
-      { "name": "mlx-community/Phi-3-mini-4k-instruct-4bit", "status": "healthy", "reason": "Model is healthy" }
+      {
+        "name": "mlx-community/Phi-3-mini-4k-instruct-4bit",
+        "status": "healthy",
+        "reason": "Model is healthy"
+      }
     ],
     "unhealthy": [],
     "summary": { "total": 1, "healthy_count": 1, "unhealthy_count": 0 }
@@ -282,6 +334,8 @@ mlxk-json show "Phi-3-mini" --json --files
       "capabilities": ["text-generation", "chat"],
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
+      "runtime_compatible": true,
+      "reason": null,
       "cached": true
     },
     "files": [
@@ -399,12 +453,12 @@ pytest tests/ -v
 ## Known Notes
 
 - Streaming UX: Some UIs buffer SSE; verify real-time with `curl -N`. The server emits a clear interrupt marker on abort.
-- Error handling/logging: Unified error envelope and structured logs are planned post‑beta.3 (see ADR‑004).
+- Error handling/logging: Unified error envelope and structured logs are planned post‑beta.4 (see ADR‑004).
 
 ## Development Status
 
 ### Version Roadmap
-- **2.0.0-beta.3** ← You are here (feature complete; full 1.x parity achieved; all core commands implemented)
+- **2.0.0-beta.4** ← You are here (runtime compatibility checks; separates file integrity from MLX execution capability)
 - **2.0.0-rc**: CLI compatibility improvements: `mlxk` alias alongside `mlxk2`; final production hardening
 - **2.0.0-stable**: Stable release after RC feedback
 
@@ -468,6 +522,6 @@ Note: This branch is hard‑split for 2.0. The 1.x implementation and tests were
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 2.0.0-beta.3 | September 2025</i><br>
+  <i>Version 2.0.0-beta.4 | October 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p> 

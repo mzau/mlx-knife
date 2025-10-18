@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://example.com/mlxk-json-api.schema.json",
-  "title": "MLX-Knife 2.0 JSON API (current)",
+  "title": "MLX-Knife 2.0 JSON API 0.1.5 (current)",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -52,12 +52,15 @@
           "items": {"type": "string", "enum": ["text-generation", "chat", "embeddings", "completion"]}
         },
         "health": {"type": "string", "enum": ["healthy", "unhealthy"]},
+        "runtime_compatible": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]},
         "cached": {"type": "boolean"}
       },
       "required": [
         "name", "hash", "size_bytes", "last_modified", "framework",
-        "model_type", "capabilities", "health", "cached"
-      ]
+        "model_type", "capabilities", "health", "runtime_compatible", "cached"
+      ],
+      "description": "Extended in 0.1.5: added runtime_compatible (boolean) and reason (string|null) fields. Both checks always performed in JSON mode. reason describes the first problem found (integrity or runtime). Gate logic: runtime check requires integrity check first. CLI flags (--health, --runtime-check) control human output columns only, not JSON data collection."
     },
     "fileEntry": {
       "type": "object",

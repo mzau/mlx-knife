@@ -2,18 +2,18 @@
 
 ## Current Status
 
-✅ **254/254 tests passing** (September 2025) — 2.0.0-beta.3; 11 skipped (opt-in)
-✅ **Apple Silicon verified** (M1/M2/M3)
-✅ **Python 3.9-3.13 compatible**
+✅ **253/253 tests passing** (October 2025) — 2.0.0-beta.4; 12 skipped (opt-in)
+✅ **Test environment:** macOS 14.x, M2 Max, Python 3.9-3.13
+✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
 ✅ **Beta (CLI/JSON)** — stable features only, experimental features opt-in
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
-### Skipped Tests Breakdown (11 total)
-- **3 Live tests** - Network-dependent (requires environment setup: `live_push`, `live_clone`, `live_list`)
-- **3 Alpha feature tests** - Hidden features (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`)
-- **2 Issue #27 tests** - Real-model tests (require user cache setup)
-- **3 Other opt-in tests** - Schema validation, spec compliance (require jsonschema)
+### Skipped Tests Breakdown (12 total, standard run without HF_HOME)
+- **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
+- **1 Live List test** - Tests against user cache (requires HF_HOME with models)
+- **1 Live Push test** - Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
+- **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
 ## Quick Start (2.0 Default)
 
@@ -907,7 +907,7 @@ When submitting PRs, please include:
 
 **MLX Knife 2.0 Testing Status:**
 
-✅ **Feature Complete** - 254/254 tests passing (2.0.0-beta.3)
+✅ **Feature Complete** - 253/253 tests passing (2.0.0-beta.4)
 ✅ **Enhanced Isolation** - Sentinel protection with `isolated_cache` fixture
 ✅ **3-Category Strategy** - Isolated/Live/Server tests optimized for 2.0
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified
@@ -978,10 +978,10 @@ def test_model_generation_quality(model_name: str, ram_needed: int):
 - ✅ **RAM-aware** - Tests adapt to available system resources
 
 **Implementation Status:**
-- 🚧 **TODO for post-beta.3** - Requires real MLX integration in test environment
+- 🚧 **TODO for post-beta.4** - Requires real MLX integration in test environment
 - 📋 **Design preserved** - RAM-aware filtering logic documented for future use
 - 🎯 **Target**: Optional `pytest -m server_real` for comprehensive model validation
 
 ---
 
-*MLX-Knife 2.0.0-beta.3 — Comprehensive testing for JSON-first model management.*
+*MLX-Knife 2.0.0-beta.4 — Comprehensive testing for JSON-first model management.*

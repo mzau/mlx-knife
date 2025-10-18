@@ -1,4 +1,7 @@
 import json
+import logging
+from pathlib import Path
+from typing import Tuple, Optional
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
 
@@ -249,6 +252,68 @@ def health_from_cache(model_spec, cache_dir):
 
     # Use the same health check logic as regular health operations
     return _check_snapshot_health(model_path)
+
+
+def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool, Optional[str]]:
+    """Check if model is executable with mlx-lm.
+
+    Gate logic:
+    1. Framework must be "MLX" (GGUF/PyTorch → incompatible)
+    2. model_type must be supported by current mlx-lm version
+
+    Returns:
+        (is_compatible, reason): reason is None if compatible, error message otherwise
+    """
+    # Gate 1: Framework check
+    if framework != "MLX":
+        return False, f"Incompatible: {framework}"
+
+    # Gate 2: model_type support check via mlx-lm
+    config_path = model_path / "config.json"
+    if not config_path.exists():
+        return False, "config.json missing (required for model_type detection)"
+
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+        model_type = config.get("model_type")
+        if not model_type:
+            return False, "config.json missing model_type field"
+    except (OSError, json.JSONDecodeError) as e:
+        return False, f"Failed to read config.json: {e}"
+
+    # Check if mlx-lm supports this model_type
+    try:
+        # Suppress mlx-lm's ERROR logs during detection
+        # mlx-lm uses root logger, so we need to suppress both mlx_lm and root
+        mlx_logger = logging.getLogger("mlx_lm")
+        root_logger = logging.getLogger()
+        original_mlx_level = mlx_logger.level
+        original_root_level = root_logger.level
+        mlx_logger.setLevel(logging.CRITICAL)
+        root_logger.setLevel(logging.CRITICAL)
+
+        try:
+            # Try mlx-lm >= 0.28.0 API first (mlx_lm.models.base._get_classes)
+            try:
+                from mlx_lm.models.base import _get_classes
+                model_class, _ = _get_classes(config=config, model_config=config)
+            except ImportError:
+                # Fall back to mlx-lm 0.27.x API (mlx_lm.utils._get_classes)
+                from mlx_lm.utils import _get_classes
+                model_class, _ = _get_classes(config)
+
+            if model_class is None:
+                return False, f"model_type '{model_type}' not supported by mlx-lm"
+
+            return True, None
+        finally:
+            mlx_logger.setLevel(original_mlx_level)
+            root_logger.setLevel(original_root_level)
+
+    except Exception as e:
+        # Pass through the actual error for debugging
+        return False, str(e) if str(e) else "Runtime check failed"
 
 
 def health_check_operation(model_pattern=None):

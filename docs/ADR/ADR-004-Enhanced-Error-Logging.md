@@ -1,6 +1,8 @@
 # ADR-004: Enhanced Error Handling & Logging
 
-Status: Proposal (post-beta.3)
+Status: Accepted (Implementation: beta.5+)
+
+Note: Error type taxonomy and rate-limiting parameters may be refined during implementation based on real-world usage patterns.
 
 Context
 - 2.0 currently has working error paths and minimal logs. We want a unified error envelope, structured logging, and consistent HTTP/CLI mapping without overcomplicating local workflows.
@@ -43,9 +45,15 @@ Specification (phase 1)
   - Hot-swap logging: "Switching to model", "Model loaded", cleanup results (freed memory, optional).
 
 Rollout plan
-- Beta.3: keep current behavior; add tests (done) and reduce noisy logs (done).
-- Post-beta.3 (minor): add request_id generation and propagation; envelope for HTTP errors; optional JSON logs via env; minimal redaction.
-- Post-beta.3 (follow-up): SSE error finalization parity across endpoints; rate-limit error floods.
+- Beta.3: ✅ Keep current behavior; add tests (done) and reduce noisy logs (done).
+- Beta.4 (KW 41 2024): Runtime Check (Issue #36) - separate bugfix, not part of ADR-004.
+- Beta.5+ (Q4 2024): ADR-004 Phase 1 implementation
+  - Add request_id generation and propagation
+  - Unified error envelope for HTTP errors
+  - Optional JSON logs via env `MLXK2_LOG_JSON=1`
+  - Minimal redaction (HF_TOKEN, paths)
+- Beta.5+ (follow-up): SSE error finalization parity across endpoints; rate-limit error floods.
+- 2.0.0 Final (Q1 2026): Production-ready with full error/logging infrastructure.
 
 - CLI operations
   - Exit codes: success=0; any status:error → 1 (no special codes per type).
