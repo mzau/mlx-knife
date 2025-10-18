@@ -232,7 +232,7 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     may be the model_root. Commit hash is taken from selected_path.name if it looks
     like a 40-char hex string, else None.
     """
-    from ..operations.health import is_model_healthy  # local import to avoid cycle
+    from ..operations.health import is_model_healthy, check_runtime_compatibility  # local import to avoid cycle
 
     # Compute commit hash if selected path is a snapshot dir
     commit_hash: Optional[str] = None
@@ -252,7 +252,19 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     capabilities = detect_capabilities(model_type, hf_name, tok, config)
 
     # Health: rely on existing operation (name-based)
-    healthy, _reason = is_model_healthy(hf_name)
+    healthy, health_reason = is_model_healthy(hf_name)
+
+    # Runtime compatibility: ALWAYS computed (gate logic applies)
+    # Gate: Only check runtime if file integrity is healthy
+    if healthy:
+        runtime_compatible, runtime_reason = check_runtime_compatibility(probe, framework)
+    else:
+        # File integrity failed → skip runtime check
+        runtime_compatible = False
+        runtime_reason = None  # health_reason takes precedence
+
+    # Reason field: First problem encountered (health → runtime)
+    reason = health_reason if not healthy else runtime_reason
 
     # Size/Modified computed from selected path (snapshot preferred)
     base = selected_path if selected_path is not None else model_root
@@ -265,6 +277,8 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         "model_type": model_type,
         "capabilities": capabilities,
         "health": "healthy" if healthy else "unhealthy",
+        "runtime_compatible": runtime_compatible,
+        "reason": reason,
         "cached": True,
     }
     return model_obj

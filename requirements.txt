@@ -3,7 +3,7 @@
 
 huggingface-hub>=0.34.0
 requests>=2.32.0
-mlx-lm>=0.27.0  # For running MLX models with streaming support
+mlx-lm>=0.28.3
 mlx>=0.29.0     # Core MLX library
 
 # API Server dependencies (for 'mlxk server' command)
