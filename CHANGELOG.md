@@ -1,5 +1,112 @@
 # Changelog
 
+## 2.0.0-beta.5 — 2025-10-20
+
+**Enhanced Error Handling & Logging (ADR-004)**: Unified error envelope, structured logging with JSON support, and request correlation.
+
+**Legacy Model Format Detection**: Models with outdated weight file formats are detected and marked as runtime-incompatible (Issue #37).
+
+### Added
+
+- **Error envelope and structured logging** (ADR-004 Phase 1):
+  - Unified error envelope for CLI/Server: `{"status": "error", "error": {"type", "message", "detail", "retryable"}, "request_id"}`
+  - Request correlation via `request_id` (UUID4) in all server responses and logs
+  - HTTP status mapping: 400 (validation), 403 (access denied), 404 (not found), 500 (internal), 503 (shutdown)
+  - Structured logging with INFO/WARN/ERROR/DEBUG levels (replaces ad-hoc print statements)
+  - Optional JSON logs via `MLXK2_LOG_JSON=1` for machine-readable output
+  - **Log-level control**: `--log-level` (debug/info/warning/error) controls MLXKLogger, root logger, and Uvicorn access logs
+  - **`--log-json` CLI flag**: User-friendly alternative to `MLXK2_LOG_JSON=1` environment variable
+  - **Uvicorn JSON formatting**: Access logs (`GET /v1/models`, etc.) also formatted as JSON when `--log-json` is used
+  - **Root logger JSON formatting**: External libraries (mlx-lm, transformers) also log as JSON in JSON mode
+  - Automatic redaction of sensitive data (HF tokens, user paths)
+  - Error rate limiting (max 1 error per 5s for duplicate errors)
+  - New modules: `mlxk2/errors.py`, `mlxk2/logging.py`, `mlxk2/context.py`
+  - FastAPI middleware: Request ID injection, custom exception handler
+  - **User documentation**: README.md "Logging & Debugging" section (log levels, JSON format, redaction examples)
+  - Test coverage: 22 new tests in `test_adr004_error_logging.py`
+
+- **Legacy format detection in runtime compatibility check** (Issue #37):
+  - Gate 2 in `check_runtime_compatibility()`: Validates weight file naming conventions
+  - Detects legacy patterns: `weights.*.safetensors` (e.g., `weights.00.safetensors`), `pytorch_model-*.safetensors`
+  - Accepts modern patterns: `model.safetensors`, `model-XXXXX-of-YYYYY.safetensors`
+  - Clear error message: `"Legacy format not supported by mlx-lm"`
+- **Pre-flight check in `run` command**:
+  - Validates runtime compatibility before attempting model load
+  - Prevents cryptic mlx-lm errors: `"ERROR:root:No safetensors found in..."`
+  - Returns user-friendly error: `"Model 'X' is not compatible: Legacy format not supported by mlx-lm"`
+  - Best-effort check: gracefully skips if model not in cache (preserves test compatibility)
+
+### Changed
+- **Runtime compatibility validation extended**:
+  - Gate 1: Framework check (MLX vs GGUF/PyTorch) - from Beta.4
+  - Gate 2: **NEW** - Weight file format check (modern vs legacy patterns)
+  - Gate 3: Model type support check (mlx-lm compatibility) - from Beta.4
+- **CLI description**: "HuggingFace model management for MLX" (removed "JSON-first" and version number)
+- **README reorganization**: Better section flow, merged duplicate sections, removed beta-specific content (550 lines)
+
+### Fixed
+- **Legacy format detection** (Issue #37, bug):
+  - Models with legacy weight file formats (`weights.*.safetensors`, `pytorch_model-*.safetensors`) now correctly detected as runtime-incompatible
+  - Health output: `healthy` (file integrity OK) but `runtime_compatible: false`
+  - `reason` field describes incompatibility: `"Legacy format not supported by mlx-lm"`
+  - Human output: `healthy*` in compact mode, `healthy | no | Legacy format...` in verbose mode
+  - Pre-flight check in `run` command prevents cryptic mlx-lm errors
+- **CLI error handling** (regression since 19a6667): Running `mlxk2` without arguments now shows help text (like git/docker) instead of JSON error, `--json` flag properly respected for automation
+- **Code quality**: Removed 7 unused imports, ruff checks pass
+
+### Implementation
+- `mlxk2/operations/health.py`:
+  - `check_runtime_compatibility()` Gate 2 implementation (lines 272-304)
+  - Regex patterns for legacy format detection
+  - Mixed legacy/modern: prefers modern if both present
+- `mlxk2/operations/run.py`:
+  - Pre-flight runtime compatibility check (lines 45-89)
+  - Clear error messages before mlx-lm loading
+
+### Testing
+- **Current Status**: 293 passed, 14 skipped, 1 warning (urllib3/LibreSSL)
+- **New Tests** (25 total):
+  - `tests_2.0/test_adr004_error_logging.py` (22 tests):
+    - Error envelope structure and serialization
+    - Error type to HTTP status mapping (8 error types validated)
+    - Request ID generation and propagation (UUID4 validation, context nesting)
+    - Log redaction (HF tokens, home directory paths)
+    - Structured logging (plain text vs JSON modes, log levels, rate limiting)
+  - `tests_2.0/test_legacy_formats.py` (3 tests):
+    - `test_weights_numeric_safetensors_is_runtime_incompatible`: Validates `weights.00.safetensors` detection
+    - `test_pytorch_model_numeric_safetensors_is_runtime_incompatible`: Validates `pytorch_model-*.safetensors` detection
+    - `test_modern_model_safetensors_passes_legacy_gate`: Ensures modern formats are not rejected
+- **Regression**: All existing tests pass (zero breaking changes)
+
+### Known Issues
+- **Missing tests for Issue #36** (Beta.4 gap):
+  - No dedicated tests for Gate 1 (framework check)
+  - No dedicated tests for Gate 3 (model_type support)
+  - Runtime compatibility tested indirectly via Issue #37 tests and schema validation
+  - TODO: Add explicit tests for Beta.4 runtime compatibility feature
+
+### User Experience Example
+```bash
+# Before (Beta.4): Cryptic mlx-lm error
+$ mlxk2 run TinyLlama-1.1B-Chat-v1.0-4bit "Hello"
+ERROR:root:No safetensors found in /Volumes/.../snapshots/01a7088...
+
+# After (Beta.5): Clear error message
+$ mlxk2 run TinyLlama-1.1B-Chat-v1.0-4bit "Hello"
+Error: Model 'mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit' is not compatible: Legacy format not supported by mlx-lm
+
+# Health status shows details
+$ mlxk2 show TinyLlama-1.1B-Chat-v1.0-4bit
+Health: healthy (files OK, runtime incompatible)
+Reason: Legacy format not supported by mlx-lm
+```
+
+### Notes
+- Legacy models are file-complete (healthy integrity) but use outdated naming conventions incompatible with modern mlx-lm
+- Pre-flight check improves UX by catching incompatibility before expensive model loading
+
+---
+
 ## 2.0.0-beta.4 — 2025-10-18
 
 **Health Check Enhancement**: Separate integrity and runtime compatibility validation (Issue #36).
@@ -49,8 +156,6 @@
   - Unsupported architectures → `runtime_compatible: false` with descriptive `reason`
   - Klear-46B verified working with mlx-lm 0.28.2
 
-### Known Issues
-- None
 
 ### Notes
 - Human output columns controlled by CLI flags (documentation in README.md, separate from JSON spec)

@@ -97,7 +97,7 @@ def start_server(
     supervise: bool = True,
 ) -> None:
     """Start OpenAI-compatible API server for MLX models.
-    
+
     Args:
         model: Specific model to load on startup (optional)
         port: Port to bind the server to
@@ -115,6 +115,8 @@ def start_server(
         print(f"Server will bind to: http://{host}:{port}")
 
     if supervise:
+        # Pass log_level via environment to subprocess (ADR-004)
+        os.environ["MLXK2_LOG_LEVEL"] = log_level
         # Delegate to subprocess-managed uvicorn
         _ = _run_supervised_uvicorn(host=host, port=port, log_level=log_level, reload=reload)
         return

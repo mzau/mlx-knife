@@ -87,13 +87,12 @@ Repository structure:
 ├── README.md                    # User documentation
 ├── CONTRIBUTING.md              # This file
 ├── TESTING.md                   # Testing guide
-├── pyproject.toml               # Build configuration (dynamic version)
-├── pyproject-mlxk-json.toml     # Alternate build config (local/dev)
+├── pyproject.toml               # Build configuration (dynamic version, optional test deps)
 └── requirements.txt             # Dev/test dependencies
 ```
 
 **What goes where:**
-- **PyPI Package**: Only `mlx_knife/` + build files (`pyproject.toml`, `requirements.txt`)
+- **PyPI Package**: Only `mlxk2/` + `pyproject.toml` (optional dependencies excluded from release wheel)
 - **GitHub Repository**: Everything else (documentation, tests, web interface)
 
 This helps ensure contributors commit files to the right place and understand the package vs. repository distinction.

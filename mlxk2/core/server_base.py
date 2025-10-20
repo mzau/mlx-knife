@@ -11,14 +11,21 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from .cache import get_current_model_cache
 from .runner import MLXRunner
 from .. import __version__
+from ..errors import (
+    ErrorType,
+    MLXKError,
+    error_envelope,
+)
+from ..logging import get_logger, set_log_level
+from ..context import generate_request_id
 
 # Global model cache and configuration
 _model_cache: Dict[str, MLXRunner] = {}
@@ -27,6 +34,9 @@ _default_max_tokens: Optional[int] = None  # Use dynamic model-aware limits by d
 _model_lock = threading.Lock()  # Thread-safe model switching
 # Global shutdown flag to interrupt in-flight generations promptly
 _shutdown_event = threading.Event()
+
+# Global logger instance (ADR-004)
+logger = get_logger()
 
 
 class CompletionRequest(BaseModel):
@@ -99,9 +109,8 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> MLXRunner:
             raise HTTPException(status_code=503, detail="Server is shutting down")
         # Simple approach like run command - let MLXRunner handle everything
         if _current_model_path != model_spec:
-            if verbose:
-                print(f"[Server] Switching to model: {model_spec}")
-            
+            logger.info(f"Switching to model: {model_spec}", model=model_spec)
+
             # Clean up previous model
             if _model_cache:
                 try:
@@ -109,8 +118,7 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> MLXRunner:
                         try:
                             _old_runner.cleanup()
                         except Exception as e:
-                            if verbose:
-                                print(f"[Server] Warning during cleanup: {e}")
+                            logger.warning(f"Warning during cleanup: {e}")
                 finally:
                     _model_cache.clear()
                     _current_model_path = None
@@ -124,22 +132,21 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> MLXRunner:
                 runner.load_model()
                 if _shutdown_event.is_set():
                     raise KeyboardInterrupt()
-                
+
                 _model_cache[model_spec] = runner
                 _current_model_path = model_spec
-                
-                if verbose:
-                    print(f"[Server] Model loaded successfully: {model_spec}")
-                    
+
+                logger.info(f"Model loaded successfully: {model_spec}", model=model_spec)
+
             except KeyboardInterrupt:
                 # Handle interruption during model loading
-                if verbose:
-                    print("[Server] Model loading interrupted")
+                logger.warning("Model loading interrupted")
                 _model_cache.clear()
                 _current_model_path = None
                 raise HTTPException(status_code=503, detail="Server interrupted during model load")
             except Exception as e:
                 # Clean up on failed load
+                logger.error(f"Model load failed: {model_spec}", error_key=f"model_load_{model_spec}", detail=str(e))
                 _model_cache.clear()
                 _current_model_path = None
                 raise HTTPException(status_code=404, detail=f"Model '{model_spec}' not found or failed to load: {str(e)}")
@@ -474,9 +481,14 @@ def count_tokens(text: str) -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
-    print("MLX Knife Server 2.0 starting up...")
+    # Configure log level early (from environment if subprocess mode)
+    import os
+    env_log_level = os.environ.get("MLXK2_LOG_LEVEL", "info")
+    set_log_level(env_log_level)
+
+    logger.info("MLX Knife Server 2.0 starting up...")
     yield
-    print("MLX Knife Server 2.0 shutting down...")
+    logger.info("MLX Knife Server 2.0 shutting down...")
     # Ensure shutdown flag is set so any in-flight generations stop quickly
     try:
         _request_global_interrupt()
@@ -497,7 +509,7 @@ async def lifespan(app: FastAPI):
         try:
             import mlx.core as mx
             mx.clear_cache()
-            print("MLX memory cleared")
+            logger.info("MLX memory cleared")
         except Exception:
             pass
 
@@ -518,6 +530,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Request ID middleware (ADR-004)
+@app.middleware("http")
+async def add_request_id_middleware(request: Request, call_next):
+    """Add request_id to all requests for correlation."""
+    request_id = generate_request_id()
+    request.state.request_id = request_id
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+# Custom exception handler for MLXKError (ADR-004)
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Convert HTTPException to error envelope."""
+    request_id = getattr(request.state, "request_id", None)
+
+    # Map HTTP status to error type
+    error_type_map = {
+        403: ErrorType.ACCESS_DENIED,
+        404: ErrorType.MODEL_NOT_FOUND,
+        400: ErrorType.VALIDATION_ERROR,
+        503: ErrorType.SERVER_SHUTDOWN,
+        500: ErrorType.INTERNAL_ERROR,
+    }
+
+    error_type = error_type_map.get(exc.status_code, ErrorType.INTERNAL_ERROR)
+    error = MLXKError(
+        type=error_type,
+        message=exc.detail,
+        retryable=(exc.status_code == 503)
+    )
+
+    envelope = error_envelope(error, request_id=request_id)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=envelope
+    )
 
 
 @app.get("/health")
@@ -718,8 +771,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
 def cleanup_server():
     """Manual cleanup function for emergency situations."""
     global _model_cache, _current_model_path
-    print("\nForcing server cleanup...")
-    
+    logger.warning("Forcing server cleanup...")
+
     # Thread-safe cleanup
     with _model_lock:
         try:
@@ -727,18 +780,18 @@ def cleanup_server():
                 try:
                     _runner.cleanup()
                 except Exception as e:
-                    print(f"Warning during runner cleanup: {e}")
+                    logger.warning(f"Warning during runner cleanup: {e}")
         finally:
             _model_cache.clear()
             _current_model_path = None
-            
+
             # Force MLX memory cleanup
             try:
                 import mlx.core as mx
                 mx.clear_cache()
-                print("MLX memory cleared")
+                logger.info("MLX memory cleared")
             except Exception as e:
-                print(f"Warning during MLX cleanup: {e}")
+                logger.warning(f"Warning during MLX cleanup: {e}")
 
 
 def _request_global_interrupt() -> None:
@@ -768,6 +821,8 @@ def run_server(
     log_level: str = "info"
 ):
     """Run the MLX Knife server 2.0."""
+    import os
+
     # Import uvicorn lazily to keep module import light when server isn't used
     try:
         import uvicorn  # type: ignore
@@ -776,12 +831,58 @@ def run_server(
     global _default_max_tokens
     _default_max_tokens = max_tokens
 
+    # Check for log level from environment (subprocess mode)
+    env_log_level = os.environ.get("MLXK2_LOG_LEVEL")
+    if env_log_level:
+        log_level = env_log_level
+
+    # Configure logging level for MLXKLogger and root logger (ADR-004)
+    set_log_level(log_level)
+
     # Rely on Uvicorn's own signal handling; manage shutdown via lifespan
 
-    print(f"Starting MLX Knife Server 2.0 on http://{host}:{port}")
-    print(f"API docs available at http://{host}:{port}/docs")
-    print(f"Default max tokens: {'model-aware dynamic limits' if max_tokens is None else max_tokens}")
-    print("Press Ctrl-C to stop the server")
+    logger.info(f"Starting MLX Knife Server 2.0 on http://{host}:{port}")
+    logger.info(f"API docs available at http://{host}:{port}/docs")
+    logger.info(f"Default max tokens: {'model-aware dynamic limits' if max_tokens is None else max_tokens}")
+    logger.info("Press Ctrl-C to stop the server")
+
+    # Enable access logs only at debug/info level (reduces noise at warning/error)
+    access_log_enabled = log_level.lower() in ["debug", "info"]
+
+    # Configure Uvicorn log format (JSON if MLXK2_LOG_JSON=1)
+    json_mode = os.environ.get("MLXK2_LOG_JSON", "0") == "1"
+    log_config = None
+    if json_mode:
+        # Use custom log config for JSON formatting
+        log_config = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "()": "mlxk2.logging.JSONFormatter",
+                },
+                "access": {
+                    "()": "mlxk2.logging.JSONFormatter",
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stderr",
+                },
+                "access": {
+                    "formatter": "access",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stderr",
+                },
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["default"], "level": log_level.upper()},
+                "uvicorn.error": {"level": log_level.upper()},
+                "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+            },
+        }
 
     try:
         uvicorn.run(
@@ -790,17 +891,19 @@ def run_server(
             port=port,
             reload=reload,
             log_level=log_level,
+            log_config=log_config,
+            access_log=access_log_enabled,
             workers=1,
             timeout_graceful_shutdown=5,
             timeout_keep_alive=5,
             lifespan="on"
         )
     except KeyboardInterrupt:
-        print("\nServer interrupted by user")
+        logger.info("Server interrupted by user")
         _request_global_interrupt()
         cleanup_server()
     except Exception as e:
-        print(f"\nServer error: {e}")
+        logger.error(f"Server error: {e}", error_key="server_error")
         _request_global_interrupt()
         cleanup_server()
         raise

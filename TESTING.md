@@ -2,14 +2,14 @@
 
 ## Current Status
 
-✅ **253/253 tests passing** (October 2025) — 2.0.0-beta.4; 12 skipped (opt-in)
+✅ **295/295 tests passing** (October 2025) — 2.0.0-beta.5; 14 skipped (opt-in)
 ✅ **Test environment:** macOS 14.x, M2 Max, Python 3.9-3.13
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
 ✅ **Beta (CLI/JSON)** — stable features only, experimental features opt-in
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
-### Skipped Tests Breakdown (12 total, standard run without HF_HOME)
+### Skipped Tests Breakdown (14 total, standard run without HF_HOME)
 - **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
 - **1 Live List test** - Tests against user cache (requires HF_HOME with models)
 - **1 Live Push test** - Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
@@ -26,10 +26,10 @@ pip install -e .[test]
 # mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
 # Run 2.0 tests (default discovery: tests_2.0/)
-pytest -v  # 254 passed, 11 skipped
+pytest -v  # 295 passed, 14 skipped
 
 # Optional: Enable alpha push and clone tests
-MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -v  # 257 passed, 8 skipped
+MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -v  # 298 passed, 11 skipped
 
 # Live tests (opt-in; not part of default):
 # - Live push (requires alpha features + env):
@@ -118,6 +118,7 @@ tests_2.0/
 ├── test_issue_30_preflight.py         # Preflight for gated/private/not-found repos (Issue #30)
 ├── test_json_api_list.py              # JSON API list contract (shape/fields)
 ├── test_json_api_show.py              # JSON API show contract (base/files/config)
+├── test_legacy_formats.py             # Legacy model format detection (Issue #37)
 ├── test_model_naming.py               # Conversion rules, bijection, parsing
 ├── test_push_dry_run.py               # Push dry-run diff planning (added/modified/deleted)
 ├── test_push_extended.py              # Extended push: no-op vs commit, branch/retry, .hfignore
@@ -126,6 +127,7 @@ tests_2.0/
 ├── test_robustness.py                 # Robustness for rm/pull/disk/timeout/concurrency
 ├── test_run_complete.py               # End-to-end run command (stream/batch/params)
 ├── test_runner_core.py                # MLXRunner core generation/memory/stop tokens
+├── test_runtime_compatibility_reason_chain.py  # Runtime compatibility reason field decision chain (Issue #36)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
 ├── test_server_models_and_errors.py   # Server model loading and error handling
@@ -141,6 +143,7 @@ Note: Live tests are opt-in via markers (`-m live_push`, `-m live_list`) and env
 - Mechanics: `tests_2.0/conftest.py` prepends `tests_2.0/stubs/` to `sys.path`, so `import mlx`/`mlx_lm` resolve to minimal stubs.
 - Effect: Fast, deterministic tests without GPU/large RAM footprint; live/heavy path remains opt‑in.
 - Production: CLI/server still use the real packages; stubs are not installed.
+- **Stub Limitations:** Tests requiring real mlx-lm integration (e.g., `_get_classes` API) use `@requires_mlx_lm` marker and skip on CI. Guideline: Avoid mocks when Mock:Production LOC ratio >30% (maintenance burden > value). [Note: Details will be documented in Issue #36 closing comment]
 
 ## Push Testing (2.0)
 
@@ -700,19 +703,19 @@ pytest tests/integration/test_server_functionality.py -v
 
 ## Python Version Compatibility
 
-### Verification Results (September 2025)
+### Verification Results (October 2025)
 
-**✅ 254/254 tests passing** - All standard tests validated on Apple Silicon with enhanced isolation
+**✅ 295/295 tests passing** - All standard tests validated on Apple Silicon with enhanced isolation
 
 | Python Version | Status | Tests Passing | Skipped |
 |----------------|--------|---------------|---------|
-| 3.9.6 (macOS)  | ✅ Verified | 254/254 | 11 |
-| 3.10.x         | ✅ Verified | 254/254 | 11 |
-| 3.11.x         | ✅ Verified | 254/254 | 11 |
-| 3.12.x         | ✅ Verified | 254/254 | 11 |
-| 3.13.x         | ✅ Verified | 254/254 | 11 |
+| 3.9.6 (macOS)  | ✅ Verified | 295/295 | 14 |
+| 3.10.x         | ✅ Verified | 295/295 | 14 |
+| 3.11.x         | ✅ Verified | 295/295 | 14 |
+| 3.12.x         | ✅ Verified | 295/295 | 14 |
+| 3.13.x         | ✅ Verified | 295/295 | 14 |
 
-**Note:** 11 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
+**Note:** 14 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
 - Without `HF_TOKEN`: +1 skip (live push test)
 - Without `MLXK2_ENABLE_ALPHA_FEATURES=1`: +3 skips (alpha feature tests)
 - Without `jsonschema`: +1 skip (spec validation test)
@@ -907,7 +910,7 @@ When submitting PRs, please include:
 
 **MLX Knife 2.0 Testing Status:**
 
-✅ **Feature Complete** - 253/253 tests passing (2.0.0-beta.4)
+✅ **Feature Complete** - 295/295 tests passing (2.0.0-beta.5)
 ✅ **Enhanced Isolation** - Sentinel protection with `isolated_cache` fixture
 ✅ **3-Category Strategy** - Isolated/Live/Server tests optimized for 2.0
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified
@@ -984,4 +987,4 @@ def test_model_generation_quality(model_name: str, ram_needed: int):
 
 ---
 
-*MLX-Knife 2.0.0-beta.4 — Comprehensive testing for JSON-first model management.*
+*MLX-Knife 2.0.0-beta.5*

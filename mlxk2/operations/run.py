@@ -6,6 +6,10 @@ Ported from 1.x with 2.0 architecture integration.
 from typing import Optional
 
 from ..core.runner import MLXRunner
+from ..core.cache import get_current_model_cache, hf_to_cache_dir
+from ..core.model_resolution import resolve_model_for_operation
+from ..operations.health import check_runtime_compatibility
+from ..operations.common import detect_framework
 
 
 def run_model(
@@ -21,7 +25,7 @@ def run_model(
     verbose: bool = False
 ) -> Optional[str]:
     """Execute model with prompt - supports both single-shot and interactive modes.
-    
+
     Args:
         model_spec: Model specification or path
         prompt: Input prompt (None = interactive mode)
@@ -33,10 +37,57 @@ def run_model(
         use_chat_template: Apply tokenizer's chat template if available
         json_output: Return JSON format instead of printing
         verbose: Show detailed output
-        
+
     Returns:
         Generated text if json_output=True, None otherwise
     """
+    # Pre-flight check: Verify runtime compatibility before attempting to load
+    # This is a "best effort" check - if the model is in cache, verify it's compatible
+    # If not in cache or check fails, let the runner handle it (for tests and edge cases)
+    try:
+        resolved_name, commit_hash, ambiguous = resolve_model_for_operation(model_spec)
+
+        if ambiguous:
+            error_msg = f"Ambiguous model specification '{model_spec}'. Could be: {ambiguous}"
+            if json_output:
+                return f"Error: {error_msg}"
+            else:
+                print(f"Error: {error_msg}")
+                return None
+
+        # Only perform compatibility check if model is actually in cache
+        if resolved_name:
+            model_cache = get_current_model_cache()
+            model_cache_dir = model_cache / hf_to_cache_dir(resolved_name)
+
+            if model_cache_dir.exists():
+                snapshots_dir = model_cache_dir / "snapshots"
+                if snapshots_dir.exists():
+                    if commit_hash:
+                        model_path = snapshots_dir / commit_hash
+                    else:
+                        snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                        if snapshots:
+                            model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+
+                            # Check runtime compatibility
+                            framework = detect_framework(resolved_name, model_path)
+                            compatible, reason = check_runtime_compatibility(model_path, framework)
+
+                            if not compatible:
+                                error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
+                                if json_output:
+                                    return f"Error: {error_msg}"
+                                else:
+                                    print(f"Error: {error_msg}")
+                                    return None
+
+    except Exception:
+        # Pre-flight check failed - let the runner handle it
+        # This preserves backward compatibility with tests and edge cases
+        pass
+
+    # Runtime compatibility verified, proceed with model loading
     try:
         with MLXRunner(model_spec, verbose=verbose) as runner:
             # Interactive mode: no prompt provided

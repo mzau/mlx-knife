@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MLX-Knife 2.0 CLI - JSON-first architecture."""
+"""MLX-Knife CLI - HuggingFace model management for MLX."""
 
 import argparse
 import json
@@ -64,7 +64,7 @@ def main():
     """Main CLI entry point."""
     parser = MLXKArgumentParser(
         prog="mlxk2",
-        description="MLX-Knife 2.0 - JSON-first model management"
+        description="MLX-Knife - HuggingFace model management for MLX"
     )
     
     # Add version argument (supports --json)
@@ -138,7 +138,8 @@ def main():
     serve_parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to (default: 127.0.0.1)")
     serve_parser.add_argument("--max-tokens", type=int, help="Default maximum tokens for generation")
     serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
-    serve_parser.add_argument("--log-level", default="info", help="Logging level (default: info)")
+    serve_parser.add_argument("--log-level", default="info", help="Logging level (debug/info/warning/error, default: info)")
+    serve_parser.add_argument("--log-json", action="store_true", help="Output logs in JSON format (for log aggregation)")
     serve_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
     serve_parser.add_argument("--json", action="store_true", help="Output startup info in JSON format")
 
@@ -300,6 +301,10 @@ def main():
                 }
                 print(format_json_output(server_info))
             
+            # Set MLXK2_LOG_JSON if --log-json flag is present
+            if getattr(args, "log_json", False):
+                os.environ["MLXK2_LOG_JSON"] = "1"
+
             # Start server (this will run indefinitely)
             # Lazy import to avoid hard dependency on FastAPI/uvicorn at import time
             from .operations.serve import start_server
@@ -340,13 +345,25 @@ def main():
                 from .output.human import render_push
                 print(render_push(result, verbose=getattr(args, "verbose", False)))
         elif args.command is None:
-            result = handle_error("CommandError", "No command specified")
-            print(format_json_output(result))
+            # No command specified - show help or JSON error depending on --json flag
+            if args.json:
+                result = handle_error("CommandError", "No command specified")
+                print(format_json_output(result))
+                sys.exit(1)
+            else:
+                parser.print_help()
+                sys.exit(2)
         else:
-            result = handle_error("CommandError", f"Unknown command: {args.command}")
-            print(format_json_output(result))
+            # Unknown command - show help or JSON error depending on --json flag
+            if args.json:
+                result = handle_error("CommandError", f"Unknown command: {args.command}")
+                print(format_json_output(result))
+                sys.exit(1)
+            else:
+                parser.print_help()
+                sys.exit(2)
 
-        # Exit with appropriate code
+        # Exit with appropriate code (only reached for successful commands)
         sys.exit(0 if result.get("status") == "success" else 1)
             
     except Exception as e:
