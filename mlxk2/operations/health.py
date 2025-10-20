@@ -259,7 +259,8 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
 
     Gate logic:
     1. Framework must be "MLX" (GGUF/PyTorch → incompatible)
-    2. model_type must be supported by current mlx-lm version
+    2. Weight files must use mlx-lm compatible naming (not legacy formats)
+    3. model_type must be supported by current mlx-lm version
 
     Returns:
         (is_compatible, reason): reason is None if compatible, error message otherwise
@@ -268,7 +269,41 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
     if framework != "MLX":
         return False, f"Incompatible: {framework}"
 
-    # Gate 2: model_type support check via mlx-lm
+    # Gate 2: Weight file format check (legacy format detection)
+    # mlx-lm only accepts:
+    # - model.safetensors (single file)
+    # - model-XXXXX-of-YYYYY.safetensors (sharded, with index)
+    # Legacy formats are rejected: weights.*.safetensors, pytorch_model-*.safetensors
+    import re
+
+    # Check for legacy weight file patterns
+    legacy_patterns = [
+        re.compile(r'^weights\.\d+\.safetensors$'),  # weights.00.safetensors
+        re.compile(r'^pytorch_model-\d+\.safetensors$'),  # pytorch_model-00001.safetensors
+    ]
+
+    # Check for valid mlx-lm weight file patterns
+    valid_patterns = [
+        re.compile(r'^model\.safetensors$'),  # Single file
+        re.compile(r'^model-\d{5}-of-\d{5}\.safetensors$'),  # Sharded
+    ]
+
+    weight_files = list(model_path.glob("*.safetensors"))
+    if weight_files:
+        has_valid = any(
+            any(pattern.match(f.name) for pattern in valid_patterns)
+            for f in weight_files
+        )
+        has_legacy = any(
+            any(pattern.match(f.name) for pattern in legacy_patterns)
+            for f in weight_files
+        )
+
+        if has_legacy and not has_valid:
+            # Found only legacy format files, no valid mlx-lm files
+            return False, "Legacy format not supported by mlx-lm"
+
+    # Gate 3: model_type support check via mlx-lm
     config_path = model_path / "config.json"
     if not config_path.exists():
         return False, "config.json missing (required for model_type detection)"
