@@ -45,6 +45,7 @@ def mock_mlx_runner_environment(temp_cache_dir, model_name="test-model", context
         mock_tokenizer = Mock()
         mock_tokenizer.eos_token = "</s>"
         mock_tokenizer.eos_token_id = 2
+        mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
         mock_tokenizer.pad_token = None
         mock_tokenizer.additional_special_tokens = []
         mock_tokenizer.added_tokens_decoder = {}

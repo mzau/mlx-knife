@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0-beta.6 — 2025-10-22
+
+### Fixed
+- **Stop token detection for multi-EOS models** (Issue #32, ADR-009): MXFP4 and Qwen models no longer generate visible stop tokens (`<|end|>`) or chat template markers in output
+- **Private/org MLX model detection** (Issue #37): `mlxk run` now correctly detects MLX models outside `mlx-community/*` namespace
+- **Commit-pinned compatibility checks**: Models with `@commit_hash` syntax now correctly validated before inference
+- **Packaging dependencies** (P0): `pip install -e .` now installs all required dependencies (`mlx-lm`, `mlx`, `fastapi`, etc.) via `pyproject.toml`
+
+### Documentation
+- Simplified installation instructions in README.md and TESTING.md (consistent `pip install -e ".[dev,test]"` recommendation)
+
+### Testing
+- 297 passed, 20 skipped (317 total)
+- Added 6 new tests: 4 stop token validation tests (opt-in), 2 compatibility check tests
+
 ## 2.0.0-beta.5 — 2025-10-20
 
 **Enhanced Error Handling & Logging (ADR-004)**: Unified error envelope, structured logging with JSON support, and request correlation.

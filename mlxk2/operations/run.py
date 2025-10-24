@@ -9,7 +9,7 @@ from ..core.runner import MLXRunner
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from ..operations.health import check_runtime_compatibility
-from ..operations.common import detect_framework
+from ..operations.common import detect_framework, read_front_matter
 
 
 def run_model(
@@ -63,6 +63,8 @@ def run_model(
             if model_cache_dir.exists():
                 snapshots_dir = model_cache_dir / "snapshots"
                 if snapshots_dir.exists():
+                    # Resolve snapshot path (commit-pinned or latest)
+                    model_path = None
                     if commit_hash:
                         model_path = snapshots_dir / commit_hash
                     else:
@@ -70,17 +72,20 @@ def run_model(
                         if snapshots:
                             model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
 
-                            # Check runtime compatibility
-                            framework = detect_framework(resolved_name, model_path)
-                            compatible, reason = check_runtime_compatibility(model_path, framework)
+                    # Check runtime compatibility for both pinned and unpinned models
+                    if model_path and model_path.exists():
+                        # Read README front-matter for framework hints (e.g., private MLX models)
+                        fm = read_front_matter(model_path)
+                        framework = detect_framework(resolved_name, model_cache_dir, selected_path=model_path, fm=fm)
+                        compatible, reason = check_runtime_compatibility(model_path, framework)
 
-                            if not compatible:
-                                error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
-                                if json_output:
-                                    return f"Error: {error_msg}"
-                                else:
-                                    print(f"Error: {error_msg}")
-                                    return None
+                        if not compatible:
+                            error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
+                            if json_output:
+                                return f"Error: {error_msg}"
+                            else:
+                                print(f"Error: {error_msg}")
+                                return None
 
     except Exception:
         # Pre-flight check failed - let the runner handle it

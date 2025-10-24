@@ -464,8 +464,8 @@ class MLXRunner:
                     yield new_text
                 tokens_generated += 1
 
-            # Check for EOS token
-            if token_id == self.tokenizer.eos_token_id:
+            # Check for EOS token (ADR-009: use eos_token_ids Set for multi-EOS models)
+            if token_id in self.tokenizer.eos_token_ids:
                 break
 
         # Finalize reasoning parser if used
@@ -586,7 +586,8 @@ class MLXRunner:
             generated_tokens.append(token_id)
             all_tokens.append(token_id)
 
-            if token_id == self.tokenizer.eos_token_id:
+            # Check for EOS token (ADR-009: use eos_token_ids Set for multi-EOS models)
+            if token_id in self.tokenizer.eos_token_ids:
                 break
 
         # Decode full response

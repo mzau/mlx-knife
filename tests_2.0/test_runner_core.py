@@ -37,6 +37,7 @@ def mock_runner_environment(temp_cache_dir, model_name="test-model"):
         mock_tokenizer = Mock()
         mock_tokenizer.eos_token = "</s>"
         mock_tokenizer.eos_token_id = 2
+        mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
         mock_tokenizer.pad_token = None
         mock_tokenizer.additional_special_tokens = []
         mock_tokenizer.added_tokens_decoder = {}
@@ -98,6 +99,7 @@ class TestMLXRunnerBasic:
                 # Mock tokenizer methods
                 mocks['mock_tokenizer'].encode.return_value = [100, 101]  # Prompt tokens
                 mocks['mock_tokenizer'].eos_token_id = 999  # Don't trigger EOS
+                mocks['mock_tokenizer'].eos_token_ids = {mocks['mock_tokenizer'].eos_token_id}
                 mocks['mock_tokenizer'].chat_template = None  # Disable chat template
                 
                 # Mock decode to return consistent strings based on token list length/content
@@ -136,6 +138,7 @@ class TestMLXRunnerBasic:
                 mocks['mock_tokenizer'].encode.return_value = [100, 101]  # Prompt
                 mocks['mock_tokenizer'].decode.side_effect = lambda tokens: " ".join([f"token{t}" for t in tokens])
                 mocks['mock_tokenizer'].eos_token_id = 999  # Don't trigger EOS
+                mocks['mock_tokenizer'].eos_token_ids = {mocks['mock_tokenizer'].eos_token_id}
                 mocks['mock_tokenizer'].chat_template = None
                 
                 with MLXRunner(model_name) as runner:
@@ -278,7 +281,15 @@ class TestMLXRunnerMemorySafety:
         model_name = "test-model"
         
         with patch('mlxk2.core.runner.load') as mock_load:
-            mock_load.return_value = (Mock(), Mock())
+            mock_model = Mock()
+            mock_tokenizer = Mock()
+            mock_tokenizer.encode.return_value = [1]
+            mock_tokenizer.decode.return_value = "ok"
+            mock_tokenizer.eos_token_id = 2
+            mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
+            mock_tokenizer.additional_special_tokens = []
+            mock_tokenizer.added_tokens_decoder = {}
+            mock_load.return_value = (mock_model, mock_tokenizer)
             
             # First runner
             with MLXRunner(model_name) as runner1:
@@ -317,12 +328,20 @@ class TestMLXRunnerDynamicTokens:
         model_name = "test-model"
         
         with patch('mlxk2.core.runner.load') as mock_load:
-            mock_load.return_value = (Mock(), Mock())
+            mock_model = Mock()
+            mock_tokenizer = Mock()
+            mock_tokenizer.encode.return_value = [1]
+            mock_tokenizer.decode.return_value = "ok"
+            mock_tokenizer.eos_token_id = 2
+            mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
+            mock_tokenizer.additional_special_tokens = []
+            mock_tokenizer.added_tokens_decoder = {}
+            mock_load.return_value = (mock_model, mock_tokenizer)
             
             with MLXRunner(model_name) as runner:
                 # When max_tokens is explicitly set, should respect it
                 with patch('mlxk2.core.runner.generate_step') as mock_gen:
-                    mock_gen.return_value = ([1], mx.zeros(1))
+                    mock_gen.return_value = iter([(mx.array([1]), mx.zeros(1))])
                     
                     # Mock to check that max_tokens is passed through
                     result = runner.generate_batch("test", max_tokens=100)
@@ -355,6 +374,7 @@ class TestMLXRunnerErrorHandling:
             mock_tokenizer.encode.return_value = [1]
             mock_tokenizer.decode.return_value = "ok"
             mock_tokenizer.eos_token_id = 2
+            mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
             mock_tokenizer.additional_special_tokens = []
             mock_tokenizer.added_tokens_decoder = {}
             mock_load.return_value = (mock_model, mock_tokenizer)
