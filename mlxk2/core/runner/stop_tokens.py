@@ -47,6 +47,12 @@ def extract_stop_tokens(tokenizer: Any, verbose: bool = False) -> StopTokenInfo:
                 if isinstance(token_content, str) and token_content:
                     token_lower = token_content.lower()
                     if token_content == '<|end|>':
+                        add_eos_token = getattr(tokenizer, 'add_eos_token', None)
+                        if callable(add_eos_token):
+                            try:
+                                add_eos_token(token_content)
+                            except Exception:
+                                pass
                         continue
                     end_patterns = ['stop', 'eot', 'return', 'finish', 'done', 'im_end']
                     if any(pattern in token_lower for pattern in end_patterns):
@@ -115,4 +121,3 @@ def extract_stop_tokens(tokenizer: Any, verbose: bool = False) -> StopTokenInfo:
         reasoning_end=reasoning_end,
         final_start=final_start,
     )
-

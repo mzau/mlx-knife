@@ -2,51 +2,60 @@
 
 ## Current Status
 
-✅ **295/295 tests passing** (October 2025) — 2.0.0-beta.5; 14 skipped (opt-in)
+✅ **297/317 tests passing** (October 2025) — 2.0.0-beta.6; 20 skipped (opt-in)
 ✅ **Test environment:** macOS 14.x, M2 Max, Python 3.9-3.13
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
 ✅ **Beta (CLI/JSON)** — stable features only, experimental features opt-in
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
-### Skipped Tests Breakdown (14 total, standard run without HF_HOME)
+### Skipped Tests Breakdown (20 total, standard run without HF_HOME)
+- **4 Live Stop Tokens tests** - Stop token validation with real models (requires `pytest -m live_stop_tokens`, ADR-009)
+- **1 Live Run test** - Private/org model detection (requires `pytest -m live_run`, Issue #37)
 - **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
 - **1 Live List test** - Tests against user cache (requires HF_HOME with models)
 - **1 Live Push test** - Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
 - **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
+- **3 Additional opt-in tests** - Various live validation scenarios
 
 ## Quick Start (2.0 Default)
 
 ```bash
-# Install package + tests
-pip install -e .[test]
+# Install package + development tools (required for ruff/mypy/pytest)
+pip install -e ".[dev,test]"
 
 # Download test model (optional; most 2.0 tests use isolated cache)
 # Only needed for opt-in live tests or local experiments
 # mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
 # Run 2.0 tests (default discovery: tests_2.0/)
-pytest -v  # 295 passed, 14 skipped
+pytest -v  # Runs ~300 tests (isolated, no live downloads)
 
 # Optional: Enable alpha push and clone tests
-MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -v  # 298 passed, 11 skipped
+MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -v  # Activates alpha features (clone/push)
 
-# Live tests (opt-in; not part of default):
+# Live tests (opt-in; not part of default suite):
+# - Live stop tokens (ADR-009 - requires models in HF_HOME):
+#   pytest -m live_stop_tokens
+#   # Tests: MXFP4, Qwen 2.5, Llama 3.2 stop token behavior
+# - Live run (requires models in HF_HOME):
+#   pytest -m live_run
+#   # Tests: Issue #37 private/org model detection
 # - Live push (requires alpha features + env):
 #   export MLXK2_ENABLE_ALPHA_FEATURES=1
 #   export MLXK2_LIVE_PUSH=1
 #   export HF_TOKEN=...; export MLXK2_LIVE_REPO=org/model; export MLXK2_LIVE_WORKSPACE=/abs/path
-#   pytest -q -m live_push
+#   pytest -m live_push
 # - Live clone (ADR-007 Phase 1 - requires alpha features + env + same volume):
 #   export MLXK2_ENABLE_ALPHA_FEATURES=1
 #   export MLXK2_LIVE_CLONE=1
 #   export HF_TOKEN=...
 #   export MLXK2_LIVE_CLONE_MODEL="mlx-community/small-model"
 #   export MLXK2_LIVE_CLONE_WORKSPACE="/path/on/same/volume/as/HF_HOME"  # APFS + same volume required
-#   pytest -q -m live_clone
+#   pytest -m live_clone
 # - Live list (uses your HF_HOME; requires at least one MLX chat + one MLX base in cache):
 #   export HF_HOME=/path/to/huggingface/cache
-#   pytest -q -m live_list
+#   pytest -m live_list
 
 # Before committing
 ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
@@ -54,7 +63,7 @@ ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 
 Notes
 - Reference environment: venv39 (Apple‑native Python 3.9) is the recommended dev base.
-- Extras `[test]` install httpx/FastAPI so the server minimal tests run.
+- Extras `[dev,test]` install ruff/mypy (code quality) and pytest/jsonschema (testing).
 - For release smoke across multiple Python versions: `./test-multi-python.sh` (logs: `test_results_3_9.log`, `test_results_3_10.log`, ...).
 - The macOS Python 3.9 LibreSSL warning from urllib3 is suppressed in tests via `pytest.ini`, and at runtime via package init.
 
@@ -705,17 +714,17 @@ pytest tests/integration/test_server_functionality.py -v
 
 ### Verification Results (October 2025)
 
-**✅ 295/295 tests passing** - All standard tests validated on Apple Silicon with enhanced isolation
+**✅ 297/317 tests passing** - All standard tests validated on Apple Silicon with enhanced isolation
 
 | Python Version | Status | Tests Passing | Skipped |
 |----------------|--------|---------------|---------|
-| 3.9.6 (macOS)  | ✅ Verified | 295/295 | 14 |
-| 3.10.x         | ✅ Verified | 295/295 | 14 |
-| 3.11.x         | ✅ Verified | 295/295 | 14 |
-| 3.12.x         | ✅ Verified | 295/295 | 14 |
-| 3.13.x         | ✅ Verified | 295/295 | 14 |
+| 3.9.6 (macOS)  | ✅ Verified | 297/317 | 20 |
+| 3.10.x         | ✅ Verified | 297/317 | 20 |
+| 3.11.x         | ✅ Verified | 297/317 | 20 |
+| 3.12.x         | ✅ Verified | 297/317 | 20 |
+| 3.13.x         | ✅ Verified | 297/317 | 20 |
 
-**Note:** 14 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
+**Note:** 20 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
 - Without `HF_TOKEN`: +1 skip (live push test)
 - Without `MLXK2_ENABLE_ALPHA_FEATURES=1`: +3 skips (alpha feature tests)
 - Without `jsonschema`: +1 skip (spec validation test)
@@ -770,6 +779,8 @@ ruff check mlx_knife/ --fix && mypy mlx_knife/ && pytest
 | Live List (opt‑in) | `pytest -m live_list -v` | `live_list` (subset of `wet`) + Env: `HF_HOME` (user cache with models) | Tests list/health against user cache models | No (uses local cache) |
 | Clone (alpha, opt‑in) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -k clone -v` | Env: `MLXK2_ENABLE_ALPHA_FEATURES=1` | Clone offline tests (Pull+Copy+Cleanup workflow, APFS optimization); clone command hidden by default | No |
 | Live Clone (ADR-007) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK2_LIVE_CLONE_WORKSPACE` | Real clone workflow: pull→temp cache→APFS same-volume clone→workspace (ADR-007 Phase 1 constraints: same volume + APFS required) | Yes |
+| Live Stop Tokens (opt‑in, ADR-009) | `pytest -m live_stop_tokens -v` | `live_stop_tokens` + Env: `HF_HOME` (user cache with MXFP4/Qwen/Llama models) | Issue #32: Validates multi-EOS token stop behavior with real models (MXFP4 no visible `<|end|>`, Qwen no self-conversation, Llama baseline) | No (uses local cache) |
+| Live Run (opt‑in) | `pytest -m live_run -v` | `live_run` + Env: `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache with `mlx-community/Phi-3-mini-4k-instruct-4bit`) | Regression tests for Issue #37: Validates private/org MLX model framework detection in run command (renames Phi-3 to simulate private-org model) | No (uses local cache) |
 | Issue #27 real‑model (opt‑in) | `pytest -m issue27 tests_2.0/test_issue_27.py -v` | Marker: `issue27`; Env (required): `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache, read‑only). Env (optional): `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL`, `MLXK2_SUBSET_COUNT=0`. | Copies real models from user cache into isolated test cache; validates strict health policy on index‑based models (no network) | No (uses local cache) |
 | Server tests (included) | `pytest -k server -v` | — | Basic server API tests (minimal, uses MLX stubs) | No |
 
@@ -780,6 +791,8 @@ Useful commands
 - Live Push only: `MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v`
 - Live Clone only: `MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK2_LIVE_CLONE=1 HF_TOKEN=... MLXK2_LIVE_CLONE_MODEL=... MLXK2_LIVE_CLONE_WORKSPACE=... pytest -m live_clone -v`
 - Live List only: `HF_HOME=/path/to/user/cache pytest -m live_list -v`
+- Live Stop Tokens only (ADR-009): `HF_HOME=/path/to/user/cache pytest -m live_stop_tokens -v` (requires MXFP4, Qwen 2.5, Llama 3.2 models in cache)
+- Live Run only: `HF_HOME=/path/to/user/cache pytest -m live_run -v` (requires `mlx-community/Phi-3-mini-4k-instruct-4bit` in cache)
 - Issue #27 only: `MLXK2_USER_HF_HOME=/path/to/user/cache pytest -m issue27 tests_2.0/test_issue_27.py -v`
 - All live tests (umbrella): `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m wet -v` (includes live_push, live_clone, live_list)
 
@@ -787,6 +800,8 @@ Markers: wet vs specific live tests
 - `wet`: umbrella marker for any opt‑in "live" test that may require network, credentials, or user environment. Use to run all live tests.
 - `live_push`: narrow marker for push‑specific live tests only. Use to target push live checks without running other live suites.
 - `live_clone`: narrow marker for clone‑specific live tests only. Use to target ADR-007 Phase 1 real workflow validation.
+- `live_stop_tokens`: narrow marker for stop token validation tests with real models (ADR-009). Use to validate Issue #32 fix (multi-EOS models).
+- `live_run`: narrow marker for run command tests with real models. Use to validate Issue #37 framework detection regression fix (private/org MLX models).
 
 Note: Without the required env vars, live tests remain SKIPPED.
 
@@ -897,11 +912,11 @@ When submitting PRs, please include:
    - Python version
    - Which model(s) you tested with
 
-2. **Test results summary (2.0)**:
+2. **Test results summary (2.0)** (example format):
   ```
   Platform: macOS 14.5, M2 Pro
-  Python: 3.11.6
-  Results: 98/98 tests passed; 9 skipped (opt-in)
+  Python: 3.9.6
+  Results: 297 passed, 20 skipped
   ```
 
 3. **Any issues encountered** and how you resolved them
@@ -910,7 +925,7 @@ When submitting PRs, please include:
 
 **MLX Knife 2.0 Testing Status:**
 
-✅ **Feature Complete** - 295/295 tests passing (2.0.0-beta.5)
+✅ **Feature Complete** - 300+ tests (2.0 Beta, see CHANGELOG.md for current release counts)
 ✅ **Enhanced Isolation** - Sentinel protection with `isolated_cache` fixture
 ✅ **3-Category Strategy** - Isolated/Live/Server tests optimized for 2.0
 ✅ **Multi-Python Support** - Python 3.9-3.13 verified
@@ -987,4 +1002,4 @@ def test_model_generation_quality(model_name: str, ram_needed: int):
 
 ---
 
-*MLX-Knife 2.0.0-beta.5*
+*MLX-Knife 2.0.0-beta.6*

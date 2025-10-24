@@ -26,6 +26,7 @@ class TestInterruptionRecovery:
         mock_tokenizer = Mock()
         mock_tokenizer.eos_token = "</s>"
         mock_tokenizer.eos_token_id = 2
+        mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
         mock_tokenizer.additional_special_tokens = []
         mock_tokenizer.added_tokens_decoder = {}
         mock_tokenizer.encode.return_value = [1, 2, 3]
@@ -63,6 +64,7 @@ class TestInterruptionRecovery:
         mock_tokenizer = Mock()
         mock_tokenizer.eos_token = "</s>"
         mock_tokenizer.eos_token_id = 2
+        mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
         mock_tokenizer.additional_special_tokens = []
         mock_tokenizer.added_tokens_decoder = {}
         mock_tokenizer.encode.return_value = [1, 2, 3]

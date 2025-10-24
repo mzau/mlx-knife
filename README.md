@@ -1,4 +1,4 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.5
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.6
 
 <p align="center">
   <img src="https://github.com/mzau/mlx-knife/raw/feature/2.0.0-alpha.1/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
@@ -6,7 +6,7 @@
 
 **Stable Version: 1.1.1**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.0--beta.5-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0--beta.6-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -43,10 +43,10 @@ MLX Knife has been comprehensively tested and verified on:
 
 ```bash
 # Install latest beta release directly from GitHub
-pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0-beta.5/mlxk_json-2.0.0b5-py3-none-any.whl
+pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0-beta.6/mlxk_json-2.0.0b6-py3-none-any.whl
 
 # Verify installation
-mlxk2 --version  # → mlxk2 2.0.0b5
+mlxk2 --version  # → mlxk2 2.0.0b6
 ```
 
 ### Development Installation
@@ -56,14 +56,20 @@ mlxk2 --version  # → mlxk2 2.0.0b5
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 git checkout feature/2.0.0-alpha.1
-pip install -e .
 
-# Install with development tools (ruff, mypy, tests)
+# Install with all development dependencies (required for testing and code quality)
 pip install -e ".[dev,test]"
 
 # Verify installation
-mlxk2 --version  # → mlxk2 2.0.0-beta.5
+mlxk2 --version  # → mlxk2 2.0.0-beta.6
+
+# Run tests and quality checks (before committing)
+pytest -v
+ruff check mlxk2/ --fix
+mypy mlxk2/
 ```
+
+**Note:** For minimal user installation without dev tools: `pip install -e .`
 
 
 ## Quick Start
@@ -565,6 +571,6 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 2.0.0-beta.5 | October 2025</i><br>
+  <i>Version 2.0.0-beta.6 | October 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>

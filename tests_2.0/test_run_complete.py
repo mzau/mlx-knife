@@ -371,7 +371,93 @@ class TestStreamingVsBatch:
         # Output should be equivalent (modulo formatting)
         stream_output = stream_out.getvalue().strip()
         batch_output = batch_out.getvalue().strip()
-        
+
         # Both should contain the core content
         assert "Hello world" in stream_output
         assert "Hello world" in batch_output
+
+
+class TestPreflightCompatibilityCheck:
+    """Test runtime compatibility preflight checks in run command."""
+
+    def test_commit_pinned_incompatible_model_blocked(self, isolated_cache):
+        """Commit-pinned models must also pass compatibility check (regression test).
+
+        Regression: Beta.5 introduced preflight compatibility checks, but commit-pinned
+        models bypassed the check due to incorrect if/else scoping.
+
+        This test verifies that `mlxk run org/model@commit_hash` properly validates
+        framework compatibility before attempting to load the model.
+        """
+        import json
+        from unittest.mock import patch
+
+        # Create a PyTorch model in cache with specific commit hash
+        commit_hash = "abc123def456"
+        model_name = "test-org/pytorch-model"
+        cache_dir = isolated_cache / f"models--{model_name.replace('/', '--')}"
+        snapshot_dir = cache_dir / "snapshots" / commit_hash
+        snapshot_dir.mkdir(parents=True)
+
+        # Create valid config.json (healthy model)
+        config = {"model_type": "bert", "architectures": ["BertForSequenceClassification"]}
+        (snapshot_dir / "config.json").write_text(json.dumps(config))
+
+        # Create PyTorch weights (incompatible framework)
+        (snapshot_dir / "pytorch_model.bin").write_bytes(b"fake_pytorch_weights" * 100)
+
+        # Mock resolve_model_for_operation to return our commit hash
+        with patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve:
+            mock_resolve.return_value = (model_name, commit_hash, None)
+
+            # Mock get_current_model_cache to use our isolated cache
+            with patch('mlxk2.operations.run.get_current_model_cache') as mock_cache:
+                mock_cache.return_value = isolated_cache
+
+                # Attempt to run with commit-pinned spec
+                result = run_model(
+                    model_spec=f"{model_name}@{commit_hash}",
+                    prompt="test prompt",
+                    json_output=True
+                )
+
+        # Should be blocked by preflight check
+        assert result is not None
+        assert "Error:" in result
+        assert "not compatible" in result or "Incompatible" in result
+
+    def test_latest_snapshot_incompatible_model_blocked(self, isolated_cache):
+        """Non-pinned models should also be blocked by compatibility check."""
+        import json
+        from unittest.mock import patch
+
+        # Create a PyTorch model in cache (latest snapshot)
+        model_name = "test-org/another-pytorch"
+        cache_dir = isolated_cache / f"models--{model_name.replace('/', '--')}"
+        snapshot_dir = cache_dir / "snapshots" / "latest_snapshot"
+        snapshot_dir.mkdir(parents=True)
+
+        # Create valid config.json (healthy model)
+        config = {"model_type": "gpt2", "architectures": ["GPT2LMHeadModel"]}
+        (snapshot_dir / "config.json").write_text(json.dumps(config))
+
+        # Create PyTorch weights (incompatible framework)
+        (snapshot_dir / "pytorch_model.bin").write_bytes(b"fake_weights" * 100)
+
+        # Mock resolve_model_for_operation (no commit hash)
+        with patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve:
+            mock_resolve.return_value = (model_name, None, None)
+
+            with patch('mlxk2.operations.run.get_current_model_cache') as mock_cache:
+                mock_cache.return_value = isolated_cache
+
+                result = run_model(
+                    model_spec=model_name,
+                    prompt="test prompt",
+                    json_output=True
+                )
+
+        # Should be blocked by preflight check
+        assert result is not None
+        assert "Error:" in result
+        assert "not compatible" in result or "Incompatible" in result

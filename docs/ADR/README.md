@@ -15,6 +15,10 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-005](ADR-005-Clone-Implementation-Beta3.md) | Clone Implementation Beta3 | Superseded by ADR-007 | 2025-09-18 |
 | [ADR-006](ADR-006-Clone-Implementation-Revised.md) | Clone Implementation Revised | Superseded by ADR-007 | 2025-09-18 |
 | [ADR-007](ADR-007-Clone-Implementation-Fixed.md) | Clone Implementation Fixed Strategy | Accepted | 2025-09-18 |
+| [ADR-008](ADR-008-MLXModel-Package-Format.md) | MLXModel Package Format | Accepted | 2025-10-17 |
+| [ADR-009](ADR-009-Stop-Token-Detection-Fix.md) | Stop Token Detection Fix | Accepted | 2025-10-21 |
+| [ADR-010](ADR-010-Reasoning-Content-API.md) | Reasoning Content API | Draft | 2025-10-21 |
+| [ADR-011](ADR-011-E2E-Live-Test-Architecture.md) | E2E Live Test Architecture | Accepted | 2025-10-21 |
 
 ## ADR Format
 

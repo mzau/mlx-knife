@@ -22,3 +22,6 @@ install_*.log
 .claude/
 openwebui311/bin/
 .gitignore
+
+# Test artifacts (generated reports)
+*_report.json
