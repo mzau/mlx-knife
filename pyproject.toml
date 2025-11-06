@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlxk-json"
+name = "mlx-knife"
 dynamic = ["version"]
-description = "MLX-Knife 2.0 - JSON-first model management for automation"
+description = "HuggingFace model management for MLX on Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
@@ -13,12 +13,12 @@ authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10", 
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -38,6 +38,7 @@ dependencies = [
 ]
 
 [project.scripts]
+mlxk = "mlxk2.cli:main"
 mlxk-json = "mlxk2.cli:main"
 mlxk2 = "mlxk2.cli:main"
 
