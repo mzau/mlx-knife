@@ -6,19 +6,17 @@ First off, thank you for considering contributing to MLX Knife! It's people like
 
 We're a small team passionate about making MLX models accessible and easy to use on Apple Silicon. We welcome contributions from everyone who shares this vision.
 
-## 2.0 Alpha (JSON CLI) – Contributor Notes
+## 2.0 Stable – Contributor Notes
 
-- Code path: `mlxk2/` (entry points: `mlxk2`, `mlxk-json`).
-- Default output: human-friendly tables/text; pass `--json` to emit the exact JSON API (spec v0.1.2).
-- Supported commands: `list`, `health`, `show`, `pull`, `rm` (no server/run in 2.0 yet — use `mlxk` 1.x for those).
-- Tests: default suite is `tests_2.0/` (see `pytest.ini`); legacy `tests/` on demand.
-- Human output options:
-  - `list`: `--all` (all frameworks), `--health` (add column), `--verbose` (full org/model names).
-  - Compact default: MLX-only, compact names (strip `mlx-community/`), no Framework column.
-- Cache safety: tests use isolated temp caches; read-only ops are safe; coordinate `pull`/`rm` when using a shared user cache.
-- Spec discipline: JSON schema/spec changes require a version bump in `mlxk2/spec.py` (see CLAUDE.md and docs/).
-
-These 2.0 alpha changes do not affect 1.x (`mlx_knife/`) behavior.
+- **Code path:** `mlxk2/` (entry points: `mlxk`, `mlxk-json`, `mlxk2`)
+- **Default output:** Human-friendly tables/text; pass `--json` for machine-readable JSON API
+- **Full feature parity:** All commands available (`list`, `health`, `show`, `pull`, `rm`, `run`, `serve`)
+- **Tests:** Primary suite is `tests_2.0/` (see `pytest.ini`)
+- **Human output options:**
+  - `list`: `--all` (all frameworks), `--health` (add column), `--verbose` (full org/model names)
+  - Compact default: MLX-only, compact names (strip `mlx-community/`), no Framework column
+- **Cache safety:** Tests use isolated temp caches; read-only ops are safe; coordinate `pull`/`rm` when using a shared user cache
+- **Spec discipline:** JSON schema/spec changes require a version bump in `mlxk2/spec.py` (see docs/)
 
 
 ## How Can I Contribute?
@@ -241,10 +239,19 @@ Feel free to open an issue with the "question" label or start a discussion. We'r
 
 ## License
 
-- For 2.x (`mlxk2`, this branch): By contributing, you agree that your contributions will be licensed under the Apache License, Version 2.0.
-- For 1.x (`main`): By contributing, you agree that your contributions will be licensed under the MIT License.
+**Important:** MLX Knife 2.0+ is licensed under the **Apache License, Version 2.0**.
 
-Please ensure you have the right to contribute the code under these terms. We recommend including a Developer Certificate of Origin (DCO) “Signed-off-by” line in commits.
+By contributing to MLX Knife, you agree that:
+1. Your contributions will be licensed under the Apache License, Version 2.0
+2. You have the right to contribute the code under these terms
+3. You grant the project maintainers a perpetual, worldwide, non-exclusive, royalty-free license to use, reproduce, modify, and distribute your contributions
+
+**Legacy 1.x versions** (MIT License) are maintained in the `1.x-legacy` branch for reference only. All new contributions go to the main branch (Apache 2.0).
+
+We recommend including a Developer Certificate of Origin (DCO) "Signed-off-by" line in your commits:
+```bash
+git commit -s -m "Your commit message"
+```
 
 ---
 

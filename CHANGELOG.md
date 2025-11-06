@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.0.0 — 2025-11-06
+
+**Stable Release**: MLX Knife 2.0 replaces 1.x as the primary version. Full feature parity with 1.1.1 achieved plus major enhancements.
+
+### License Change
+
+- **MIT → Apache License 2.0**: Better patent protection, industry-standard licensing
+- See [MIGRATION.md](MIGRATION.md) for details on license change and user impact
+
+### Highlights
+
+- **Full 1.x Feature Parity**: All commands from 1.1.1 available (`list`, `show`, `pull`, `rm`, `run`, `server`, `health`)
+- **JSON API**: Machine-readable output for automation (`--json` flag on all commands)
+- **Enhanced Error Handling**: Structured errors with request IDs, logging levels, JSON logs
+- **Runtime Compatibility Checks**: Pre-flight validation prevents loading incompatible models
+- **Improved Stop Token Detection**: Multi-EOS support (MXFP4, Qwen, Llama)
+- **Better Human Output**: Improved formatting, relative timestamps, runtime status
+
+### Package Changes
+
+- **Package name**: `mlx-knife` (unchanged from 1.x)
+- **Primary command**: `mlxk` (replaces `mlxk2` from beta)
+- **Aliases**: `mlxk-json`, `mlxk2` (backwards compatibility)
+
+### Breaking Changes
+
+- **Lock file handling**: `mlxk rm` requires `--force` flag when models have active locks (safety improvement)
+- See [MIGRATION.md](MIGRATION.md) for complete migration guide from 1.x
+
+### Installation
+
+```bash
+# PyPI (recommended)
+pip install mlx-knife
+
+# GitHub release
+pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0/mlx_knife-2.0.0-py3-none-any.whl
+
+# Upgrade from 1.x
+pip install --upgrade mlx-knife
+```
+
+### Testing
+
+- 297 passed, 20 skipped (317 total tests)
+- Python 3.9-3.13 compatibility verified
+- Apple Silicon (M1/M2) tested
+
+---
+
 ## 2.0.0-beta.6 — 2025-10-22
 
 ### Fixed

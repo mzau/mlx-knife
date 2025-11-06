@@ -1,15 +1,15 @@
-# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0.0-beta.6
+# <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" style="vertical-align: middle;"> MLX-Knife 2.0
 
 <p align="center">
-  <img src="https://github.com/mzau/mlx-knife/raw/feature/2.0.0-alpha.1/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
+  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Stable Version: 1.1.1**
+**Current Stable Version: 2.0.0**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.0--beta.6-orange.svg)](https://github.com/mzau/mlx-knife/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.0-green.svg)](https://github.com/mzau/mlx-knife/releases)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3-green.svg)](https://support.apple.com/en-us/HT211814)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
 
 
@@ -25,7 +25,7 @@
 - **Privacy & Network**: No background network or telemetry; only explicit Hugging Face interactions when you run pull or the experimental push.
 
 ### Requirements
-- macOS with Apple Silicon (M1/M2/M3)
+- macOS with Apple Silicon
 - Python 3.9+ (native macOS version or newer)
 - 8GB+ RAM recommended + RAM to run LLM
 
@@ -39,14 +39,24 @@ MLX Knife has been comprehensively tested and verified on:
 
 ## Installation
 
-### Beta Release Installation (Recommended)
+### Via PyPI (Recommended)
 
 ```bash
-# Install latest beta release directly from GitHub
-pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0-beta.6/mlxk_json-2.0.0b6-py3-none-any.whl
+# Install stable release from PyPI
+pip install mlx-knife
 
 # Verify installation
-mlxk2 --version  # → mlxk2 2.0.0b6
+mlxk --version  # → mlxk 2.0.0
+```
+
+### Via GitHub Release
+
+```bash
+# Install latest release from GitHub
+pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0/mlx_knife-2.0.0-py3-none-any.whl
+
+# Verify installation
+mlxk --version  # → mlxk 2.0.0
 ```
 
 ### Development Installation
@@ -55,13 +65,12 @@ mlxk2 --version  # → mlxk2 2.0.0b6
 # Clone and install from source
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
-git checkout feature/2.0.0-alpha.1
 
 # Install with all development dependencies (required for testing and code quality)
 pip install -e ".[dev,test]"
 
 # Verify installation
-mlxk2 --version  # → mlxk2 2.0.0-beta.6
+mlxk --version  # → mlxk 2.0.0
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -71,29 +80,33 @@ mypy mlxk2/
 
 **Note:** For minimal user installation without dev tools: `pip install -e .`
 
+### Migrating from 1.x
+
+If you're upgrading from MLX Knife 1.x, see [MIGRATION.md](MIGRATION.md) for important information about the license change (MIT → Apache 2.0) and behavior changes.
+
 
 ## Quick Start
 
 ```bash
 # List models (human-readable)
-mlxk2 list
-mlxk2 list --health
-mlxk2 list --verbose --health
+mlxk list
+mlxk list --health
+mlxk list --verbose --health
 
 # Check cache health
-mlxk2 health
+mlxk health
 
 # Show model details
-mlxk2 show "mlx-community/Phi-3-mini-4k-instruct-4bit"
+mlxk show "mlx-community/Phi-3-mini-4k-instruct-4bit"
 
 # Pull a model
-mlxk2 pull "mlx-community/Llama-3.2-3B-Instruct-4bit"
+mlxk pull "mlx-community/Llama-3.2-3B-Instruct-4bit"
 
 # Run interactive chat
-mlxk2 run "Phi-3-mini" -c
+mlxk run "Phi-3-mini" -c
 
 # Start OpenAI-compatible server
-mlxk2 serve --port 8080
+mlxk serve --port 8080
 ```
 
 
@@ -124,9 +137,9 @@ All commands support both human-readable and JSON output (`--json` flag) for aut
 All commands support JSON output via `--json` flag:
 
 ```bash
-mlxk2 list --json | jq '.data.models[].name'
-mlxk2 health --json | jq '.data.summary'
-mlxk2 show "Phi-3-mini" --json | jq '.data.model'
+mlxk list --json | jq '.data.models[].name'
+mlxk health --json | jq '.data.summary'
+mlxk show "Phi-3-mini" --json | jq '.data.model'
 ```
 
 **Response Format:**
@@ -143,7 +156,7 @@ mlxk2 show "Phi-3-mini" --json | jq '.data.model'
 
 #### List Models
 ```bash
-mlxk2 list --json
+mlxk list --json
 # Output:
 {
   "status": "success",
@@ -172,7 +185,7 @@ mlxk2 list --json
 
 #### Health Check
 ```bash
-mlxk2 health --json
+mlxk health --json
 # Output:
 {
   "status": "success",
@@ -194,7 +207,7 @@ mlxk2 health --json
 
 #### Show Model Details
 ```bash
-mlxk2 show "Phi-3-mini" --json --files
+mlxk show "Phi-3-mini" --json --files
 # Output (simplified):
 {
   "status": "success",
@@ -228,9 +241,9 @@ mlxk2 show "Phi-3-mini" --json --files
 All commands support `@hash` syntax for specific model versions:
 
 ```bash
-mlxk2 health "Qwen3@e96" --json     # Check specific hash
-mlxk2 show "model@3df9bfd" --json   # Short hash matching
-mlxk2 rm "Phi-3@e967" --json --force  # Delete specific version
+mlxk health "Qwen3@e96" --json     # Check specific hash
+mlxk show "model@3df9bfd" --json   # Short hash matching
+mlxk rm "Phi-3@e967" --json --force  # Delete specific version
 ```
 
 ### Integration Examples
@@ -238,39 +251,39 @@ mlxk2 rm "Phi-3@e967" --json --force  # Delete specific version
 #### Broke-Cluster Integration
 ```bash
 # Get available model names for scheduling
-MODELS=$(mlxk2 list --json | jq -r '.data.models[].name')
+MODELS=$(mlxk list --json | jq -r '.data.models[].name')
 
 # Check cache health before deployment
-HEALTH=$(mlxk2 health --json | jq '.data.summary.healthy_count')
+HEALTH=$(mlxk health --json | jq '.data.summary.healthy_count')
 if [ "$HEALTH" -eq 0 ]; then
     echo "No healthy models available"
     exit 1
 fi
 
 # Download required models
-mlxk2 pull "mlx-community/Phi-3-mini-4k-instruct-4bit" --json
+mlxk pull "mlx-community/Phi-3-mini-4k-instruct-4bit" --json
 ```
 
 #### CI/CD Pipeline Usage
 ```bash
 # Verify model integrity in CI
-mlxk2 health --json | jq -e '.data.summary.unhealthy_count == 0'
+mlxk health --json | jq -e '.data.summary.unhealthy_count == 0'
 
 # Clean up CI artifacts
-mlxk2 rm "test-model-*" --json --force
+mlxk rm "test-model-*" --json --force
 
 # Pre-warm cache for deployment
-mlxk2 pull "production-model" --json
+mlxk pull "production-model" --json
 ```
 
 #### Model Management Automation
 ```bash
 # Find models by pattern
-LARGE_MODELS=$(mlxk2 list --json | jq -r '.data.models[] | select(.name | contains("30B")) | .name')
+LARGE_MODELS=$(mlxk list --json | jq -r '.data.models[] | select(.name | contains("30B")) | .name')
 
 # Show detailed info for analysis
 for model in $LARGE_MODELS; do
-    mlxk2 show "$model" --json --config | jq '.data.model_config'
+    mlxk show "$model" --json --config | jq '.data.model_config'
 done
 ```
 
@@ -282,10 +295,10 @@ MLX Knife provides rich human-readable output by default (without `--json` flag)
 ### Basic Usage
 
 ```bash
-mlxk2 list
-mlxk2 list --health
-mlxk2 health
-mlxk2 show "mlx-community/Phi-3-mini-4k-instruct-4bit"
+mlxk list
+mlxk list --health
+mlxk health
+mlxk show "mlx-community/Phi-3-mini-4k-instruct-4bit"
 ```
 
 ### List Filters
@@ -315,21 +328,21 @@ The `--health` flag adds health status information to the output:
 
 ```bash
 # Compact health view
-mlxk2 list --health
+mlxk list --health
 # Output:
 # Name                    | Hash    | Size   | Modified | Type | Health
 # Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | chat | healthy
 # Qwen2-7B-Instruct       | 1a2b3c4 | 4.8GB  | 3d ago   | chat | healthy*
 
 # Verbose health view with details
-mlxk2 list --verbose --health
+mlxk list --verbose --health
 # Output:
 # Name                    | Hash    | Size   | Modified | Framework | Type | Integrity | Runtime | Reason
 # Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | MLX       | chat | healthy   | yes     | -
 # Qwen2-7B-Instruct       | 1a2b3c4 | 4.8GB  | 3d ago   | PyTorch   | chat | healthy   | no      | Incompatible: PyTorch
 
 # All frameworks with health status
-mlxk2 list --all --health
+mlxk list --all --health
 # Output:
 # Name                    | Hash    | Size   | Modified | Framework | Type    | Health
 # Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | MLX       | chat    | healthy
@@ -355,16 +368,16 @@ Control verbosity with `--log-level` (server mode):
 
 ```bash
 # Default: Show startup, model loading, and errors
-mlxk2 serve --log-level info
+mlxk serve --log-level info
 
 # Quiet: Only warnings and errors
-mlxk2 serve --log-level warning
+mlxk serve --log-level warning
 
 # Silent: Only errors
-mlxk2 serve --log-level error
+mlxk serve --log-level error
 
 # Verbose: All logs including HTTP requests
-mlxk2 serve --log-level debug
+mlxk serve --log-level debug
 ```
 
 **Log Level Behavior:**
@@ -379,10 +392,10 @@ Enable structured JSON output for log aggregation tools:
 
 ```bash
 # JSON logs (recommended - CLI flag)
-mlxk2 serve --log-json
+mlxk serve --log-json
 
 # JSON logs (alternative - environment variable)
-MLXK2_LOG_JSON=1 mlxk2 serve
+MLXK2_LOG_JSON=1 mlxk serve
 ```
 
 **Note:** `--log-json` also formats Uvicorn access logs as JSON for consistent output.
@@ -435,14 +448,14 @@ MLX-Knife 2.0 respects standard HuggingFace cache structure and practices:
 ### Example Safe Workflow
 ```bash
 # Check what's in cache (always safe)
-mlxk2 list --json | jq '.data.count'
+mlxk list --json | jq '.data.count'
 
 # Maintenance window - coordinate with team
-mlxk2 rm "corrupted-model" --json --force
-mlxk2 pull "replacement-model" --json
+mlxk rm "corrupted-model" --json --force
+mlxk pull "replacement-model" --json
 
 # Back to normal operations
-mlxk2 health --json | jq '.data.summary'
+mlxk health --json | jq '.data.summary'
 ```
 
 
@@ -450,7 +463,7 @@ mlxk2 health --json | jq '.data.summary'
 
 ### `clone` - Model Workspace Creation
 
-`mlxk2 clone` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It creates a local workspace from a cached model for modification and development.
+`mlxk clone` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It creates a local workspace from a cached model for modification and development.
 
 - Creates isolated workspace from cached models
 - Supports APFS copy-on-write optimization on same-volume scenarios
@@ -463,12 +476,12 @@ Example:
 export MLXK2_ENABLE_ALPHA_FEATURES=1
 
 # Clone model to workspace
-mlxk2 clone org/model ./workspace
+mlxk clone org/model ./workspace
 ```
 
 ### `push` - Upload to Hub
 
-`mlxk2 push` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
+`mlxk push` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
 
 - Requires `HF_TOKEN` (write-enabled).
 - Default branch: `main` (explicitly override with `--branch`).
@@ -491,7 +504,7 @@ Example:
 export MLXK2_ENABLE_ALPHA_FEATURES=1
 
 # Use push command
-mlxk2 push --private ./workspace org/model --create --commit "init"
+mlxk push --private ./workspace org/model --create --commit "init"
 ```
 
 These features are not final and may change or be removed in future releases.
@@ -571,6 +584,6 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" style="vertical-align: middle;"></b><br>
-  <i>Version 2.0.0-beta.6 | October 2025</i><br>
+  <i>Version 2.0.0 | November 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>
