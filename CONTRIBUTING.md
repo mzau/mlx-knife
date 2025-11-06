@@ -6,6 +6,19 @@ First off, thank you for considering contributing to MLX Knife! It's people like
 
 We're a small team passionate about making MLX models accessible and easy to use on Apple Silicon. We welcome contributions from everyone who shares this vision.
 
+## 2.0 Stable – Contributor Notes
+
+- **Code path:** `mlxk2/` (entry points: `mlxk`, `mlxk-json`, `mlxk2`)
+- **Default output:** Human-friendly tables/text; pass `--json` for machine-readable JSON API
+- **Full feature parity:** All commands available (`list`, `health`, `show`, `pull`, `rm`, `run`, `serve`)
+- **Tests:** Primary suite is `tests_2.0/` (see `pytest.ini`)
+- **Human output options:**
+  - `list`: `--all` (all frameworks), `--health` (add column), `--verbose` (full org/model names)
+  - Compact default: MLX-only, compact names (strip `mlx-community/`), no Framework column
+- **Cache safety:** Tests use isolated temp caches; read-only ops are safe; coordinate `pull`/`rm` when using a shared user cache
+- **Spec discipline:** JSON schema/spec changes require a version bump in `mlxk2/spec.py` (see docs/)
+
+
 ## How Can I Contribute?
 
 ### Reporting Bugs
@@ -31,8 +44,8 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 1. Fork the repository and create your branch from `main`
 2. If you've added code, add tests that cover your changes
-3. Ensure the test suite passes locally: `pytest tests/`
-4. Make sure your code follows the existing style: `ruff check mlx_knife/ --fix`
+3. Ensure the test suite passes locally: `pytest tests_2.0/ -v`
+4. Make sure your code follows the existing style: `ruff check mlxk2/ --fix`
 5. Write a clear commit message
 6. Open a Pull Request with a clear title and description
 
@@ -43,18 +56,18 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 
-# Install in development mode with all dependencies
-pip install -e ".[dev,test]"
+# Install in development mode
+pip install -e .
 
 # Download a test model (required for full test suite)
 mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
 
-# Run tests
-pytest
+# Run tests (2.0 default)
+pytest tests_2.0/ -v
 
-# Check code style
-ruff check mlx_knife/
-mypy mlx_knife/
+# Check code style (2.0)
+ruff check mlxk2/
+mypy mlxk2/
 
 # Test with a real model
 mlxk run Phi-3-mini "Hello world"
@@ -66,18 +79,18 @@ Understanding what goes where:
 
 ```
 Repository structure:
-├── mlx_knife/              # Python package (→ PyPI)
-├── tests/                  # Test suite
-├── simple_chat.html        # Web interface (GitHub only)
-├── README.md               # User documentation  
-├── CONTRIBUTING.md         # This file
-├── TESTING.md              # Testing guide
-├── pyproject.toml          # Build configuration
-└── requirements.txt        # Dependencies
+├── mlxk2/                       # 2.0 implementation (→ PyPI via mlxk-json)
+├── tests_2.0/                   # 2.0 test suite
+├── docs/                        # Documentation / ADRs
+├── README.md                    # User documentation
+├── CONTRIBUTING.md              # This file
+├── TESTING.md                   # Testing guide
+├── pyproject.toml               # Build configuration (dynamic version, optional test deps)
+└── requirements.txt             # Dev/test dependencies
 ```
 
 **What goes where:**
-- **PyPI Package**: Only `mlx_knife/` + build files (`pyproject.toml`, `requirements.txt`)
+- **PyPI Package**: Only `mlxk2/` + `pyproject.toml` (optional dependencies excluded from release wheel)
 - **GitHub Repository**: Everything else (documentation, tests, web interface)
 
 This helps ensure contributors commit files to the right place and understand the package vs. repository distinction.
@@ -116,9 +129,9 @@ For detailed testing options, troubleshooting, and advanced workflows, see **[TE
 Please ensure all tests pass locally:
 ```bash
 # Complete test workflow
-ruff check mlx_knife/ --fix    # Fix code style
-mypy mlx_knife/                 # Check types
-pytest tests/                   # Run all tests
+ruff check mlxk2/ --fix         # Fix code style
+mypy mlxk2/                     # Check types
+pytest -v                       # Run all 2.0 tests
 ```
 
 Since we don't have CI/CD (MLX requires Apple Silicon), we rely on contributors to verify their changes locally. Please mention in your PR:
@@ -155,8 +168,8 @@ Mention your Python version in the PR description.
    - Update documentation if needed
 
 3. **Before submitting:**
-   - Run the full test suite locally: `pytest tests/`
-   - Run code quality checks: `ruff check mlx_knife/ --fix`
+   - Run the full test suite locally: `pytest -v`
+   - Run code quality checks: `ruff check mlxk2/ --fix`
    - Test with YOUR Python version (3.9+ required)
    - Update README.md if you've added features
 
@@ -165,6 +178,35 @@ Mention your Python version in the PR description.
 MLX Knife has comprehensive test coverage. For detailed testing documentation including advanced options, test structure, and troubleshooting, see **[TESTING.md](TESTING.md)**.
 
 **When adding new tests**: Please update the test structure documentation in **[TESTING.md](TESTING.md)** if you add new test files or categories.
+
+### Spec Version Discipline (JSON API)
+
+If you change the JSON API spec or schema, bump the spec version and keep code/tests in sync.
+
+- Spec files: `docs/json-api-specification.md`, `docs/json-api-schema.json`
+- Version constant: `mlxk2/spec.py` → `JSON_API_SPEC_VERSION`
+- Guard script: `scripts/check-spec-bump.sh`
+
+Usage examples:
+
+```bash
+# Local check against main
+scripts/check-spec-bump.sh origin/main
+
+# Bypass for editorial-only changes
+SPEC_BUMP_BYPASS=1 scripts/check-spec-bump.sh origin/main
+```
+
+CI suggestion (GitHub Actions step):
+
+```bash
+- name: Check JSON API spec bump
+  run: |
+    git fetch origin main --depth=1
+    scripts/check-spec-bump.sh origin/main
+```
+
+Bypass tokens (commit message): `[no-spec-bump]` or `[skip-spec-bump]` for formatting-only edits.
 
 ## Code Style
 
@@ -196,7 +238,19 @@ Feel free to open an issue with the "question" label or start a discussion. We'r
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+**Important:** MLX Knife 2.0+ is licensed under the **Apache License, Version 2.0**.
+
+By contributing to MLX Knife, you agree that:
+1. Your contributions will be licensed under the Apache License, Version 2.0
+2. You have the right to contribute the code under these terms
+3. You grant the project maintainers a perpetual, worldwide, non-exclusive, royalty-free license to use, reproduce, modify, and distribute your contributions
+
+**Legacy 1.x versions** (MIT License) are maintained in the `1.x-legacy` branch for reference only. All new contributions go to the main branch (Apache 2.0).
+
+We recommend including a Developer Certificate of Origin (DCO) "Signed-off-by" line in your commits:
+```bash
+git commit -s -m "Your commit message"
+```
 
 ---
 

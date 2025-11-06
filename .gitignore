@@ -5,9 +5,13 @@ test_env*/
 test_results*.log
 mypy_*.log
 ruff_*.log
-__pycache__/
+*/__pycache__/*
+__pycache__
+mlx_knife/*
 *.pyc
 .DS_Store
+.claude/
+mymodel_test_workspace/
 build/
 dist/
 *.egg-info/
@@ -15,4 +19,9 @@ CLAUDE.md
 TODO_REAL_TESTS.md
 server.log
 install_*.log
-mymodel_test_workspace/
+.claude/
+openwebui311/bin/
+.gitignore
+
+# Test artifacts (generated reports)
+*_report.json
