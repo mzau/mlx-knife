@@ -1,60 +1,358 @@
 # Changelog
 
-## [1.1.1] - 2025-09-14
+## 2.0.0 — 2025-11-06
 
-### 🆕 **Major New Features**
-- **MXFP4 Quantization Support**: Full compatibility with MLX ≥0.29.0 and MLX-LM ≥0.27.0
-  - Support for FP4 quantized models (e.g., `gpt-oss-20b-MXFP4-Q8`)
-  - Tested with `gpt-oss-20b-MXFP4-Q8` from mlx-community
+**Stable Release**: MLX Knife 2.0 replaces 1.x as the primary version. Full feature parity with 1.1.1 achieved plus major enhancements.
 
-- **GPT-OSS Reasoning Model Support**: Pattern-based implementation for MXFP4 models (Issue #32 - partial)
-  - Real-time streaming with `**[Reasoning]**` and `**[Answer]**` sections
-  - Reverse-engineered from native `<|channel|>analysis<|message|>...` token patterns
-  - Uses `<|return|>` as stop token, `<|end|>` as reasoning/answer separator
-  - Token-by-token streaming parser in `reasoning_utils.py`
-  - Model detection based on `gpt-oss` in model name/path
-  - Intelligent control token filtering during streaming
-  - Consistent behavior between CLI (`mlxk run`) and server API
-  - **`--hide-reasoning` flag**: Show only final answers without reasoning steps
-    - Usage: `mlxk run gpt-oss-model "prompt" --hide-reasoning`
-    - Works in both streaming and batch modes
-  - **Note**: GPT-OSS specific implementation, not generic reasoning model support
+### License Change
 
-### 🔧 **Core Improvements**
-- **Enhanced Streaming Parser**: New generic streaming parser architecture
-  - Token-by-token processing with live formatting
-  - Configurable patterns for different model types
-  - Single source of truth in `reasoning_utils.py`
+- **MIT → Apache License 2.0**: Better patent protection, industry-standard licensing
+- See [MIGRATION.md](MIGRATION.md) for details on license change and user impact
 
-- **Enhanced Show Command**: Improved quantization display for MXFP4 models
-  - New `get_quantization_info()` function for detailed quantization parsing
-  - Compact display format: "mode: X, Y-bit, group_size: Z"
-  - MLX version requirement warnings: "Advanced mode 'X' (requires MLX ≥0.29.0, MLX-LM ≥0.27.0)"
-  - Better handling of complex quantization schemes in config.json
+### Highlights
 
-- **Stop Token Management**: Refined stop token handling (Issue #32)
-  - GPT-OSS models correctly use `<|return|>` as stop token, not `<|end|>`
-  - `<|end|>` treated as reasoning separator for proper flow
-  - Model-specific stop token detection
+- **Full 1.x Feature Parity**: All commands from 1.1.1 available (`list`, `show`, `pull`, `rm`, `run`, `server`, `health`)
+- **JSON API**: Machine-readable output for automation (`--json` flag on all commands)
+- **Enhanced Error Handling**: Structured errors with request IDs, logging levels, JSON logs
+- **Runtime Compatibility Checks**: Pre-flight validation prevents loading incompatible models
+- **Improved Stop Token Detection**: Multi-EOS support (MXFP4, Qwen, Llama)
+- **Better Human Output**: Improved formatting, relative timestamps, runtime status
 
-### 🐛 **Bug Fixes**
-- **GPT-OSS Token Handling**: Fixed streaming end token detection for GPT-OSS models (partial Issue #32)
-- **Consistent Output**: Server and CLI now produce identical formatted responses for GPT-OSS
-- **Control Token Filtering**: Eliminated unwanted GPT-OSS control tokens in final output
+### Package Changes
 
-### 🏗️ **Architecture & Dependencies**
-- **MLX Compatibility**: Updated for MLX ≥0.29.0 and MLX-LM ≥0.27.0
-- **Modular Design**: Reasoning logic centralized for maintainability
-- **Enhanced Test Coverage**: Comprehensive end token and reasoning model tests
+- **Package name**: `mlx-knife` (unchanged from 1.x)
+- **Primary command**: `mlxk` (replaces `mlxk2` from beta)
+- **Aliases**: `mlxk-json`, `mlxk2` (backwards compatibility)
 
-### 📋 **Requirements**
-- MLX ≥0.29.0 (required for MXFP4 support)
-- MLX-LM ≥0.27.0 (required for FP4 quantization)
+### Breaking Changes
 
-### 🔮 **Future Development Notes**
-- Pattern-based reasoning architecture designed for extensibility
-- `reasoning_utils.py` structured to support additional reasoning model types  
-- Current implementation: GPT-OSS only, other models (DeepSeek R1, QwQ) remain open
+- **Lock file handling**: `mlxk rm` requires `--force` flag when models have active locks (safety improvement)
+- See [MIGRATION.md](MIGRATION.md) for complete migration guide from 1.x
+
+### Installation
+
+```bash
+# PyPI (recommended)
+pip install mlx-knife
+
+# GitHub release
+pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0/mlx_knife-2.0.0-py3-none-any.whl
+
+# Upgrade from 1.x
+pip install --upgrade mlx-knife
+```
+
+### Testing
+
+- 297 passed, 20 skipped (317 total tests)
+- Python 3.9-3.13 compatibility verified
+- Apple Silicon (M1/M2) tested
+
+---
+
+## 2.0.0-beta.6 — 2025-10-22
+
+### Fixed
+- **Stop token detection for multi-EOS models** (Issue #32, ADR-009): MXFP4 and Qwen models no longer generate visible stop tokens (`<|end|>`) or chat template markers in output
+- **Private/org MLX model detection** (Issue #37): `mlxk run` now correctly detects MLX models outside `mlx-community/*` namespace
+- **Commit-pinned compatibility checks**: Models with `@commit_hash` syntax now correctly validated before inference
+- **Packaging dependencies** (P0): `pip install -e .` now installs all required dependencies (`mlx-lm`, `mlx`, `fastapi`, etc.) via `pyproject.toml`
+
+### Documentation
+- Simplified installation instructions in README.md and TESTING.md (consistent `pip install -e ".[dev,test]"` recommendation)
+
+### Testing
+- 297 passed, 20 skipped (317 total)
+- Added 6 new tests: 4 stop token validation tests (opt-in), 2 compatibility check tests
+
+## 2.0.0-beta.5 — 2025-10-20
+
+**Enhanced Error Handling & Logging (ADR-004)**: Unified error envelope, structured logging with JSON support, and request correlation.
+
+**Legacy Model Format Detection**: Models with outdated weight file formats are detected and marked as runtime-incompatible (Issue #37).
+
+### Added
+
+- **Error envelope and structured logging** (ADR-004 Phase 1):
+  - Unified error envelope for CLI/Server: `{"status": "error", "error": {"type", "message", "detail", "retryable"}, "request_id"}`
+  - Request correlation via `request_id` (UUID4) in all server responses and logs
+  - HTTP status mapping: 400 (validation), 403 (access denied), 404 (not found), 500 (internal), 503 (shutdown)
+  - Structured logging with INFO/WARN/ERROR/DEBUG levels (replaces ad-hoc print statements)
+  - Optional JSON logs via `MLXK2_LOG_JSON=1` for machine-readable output
+  - **Log-level control**: `--log-level` (debug/info/warning/error) controls MLXKLogger, root logger, and Uvicorn access logs
+  - **`--log-json` CLI flag**: User-friendly alternative to `MLXK2_LOG_JSON=1` environment variable
+  - **Uvicorn JSON formatting**: Access logs (`GET /v1/models`, etc.) also formatted as JSON when `--log-json` is used
+  - **Root logger JSON formatting**: External libraries (mlx-lm, transformers) also log as JSON in JSON mode
+  - Automatic redaction of sensitive data (HF tokens, user paths)
+  - Error rate limiting (max 1 error per 5s for duplicate errors)
+  - New modules: `mlxk2/errors.py`, `mlxk2/logging.py`, `mlxk2/context.py`
+  - FastAPI middleware: Request ID injection, custom exception handler
+  - **User documentation**: README.md "Logging & Debugging" section (log levels, JSON format, redaction examples)
+  - Test coverage: 22 new tests in `test_adr004_error_logging.py`
+
+- **Legacy format detection in runtime compatibility check** (Issue #37):
+  - Gate 2 in `check_runtime_compatibility()`: Validates weight file naming conventions
+  - Detects legacy patterns: `weights.*.safetensors` (e.g., `weights.00.safetensors`), `pytorch_model-*.safetensors`
+  - Accepts modern patterns: `model.safetensors`, `model-XXXXX-of-YYYYY.safetensors`
+  - Clear error message: `"Legacy format not supported by mlx-lm"`
+- **Pre-flight check in `run` command**:
+  - Validates runtime compatibility before attempting model load
+  - Prevents cryptic mlx-lm errors: `"ERROR:root:No safetensors found in..."`
+  - Returns user-friendly error: `"Model 'X' is not compatible: Legacy format not supported by mlx-lm"`
+  - Best-effort check: gracefully skips if model not in cache (preserves test compatibility)
+
+### Changed
+- **Runtime compatibility validation extended**:
+  - Gate 1: Framework check (MLX vs GGUF/PyTorch) - from Beta.4
+  - Gate 2: **NEW** - Weight file format check (modern vs legacy patterns)
+  - Gate 3: Model type support check (mlx-lm compatibility) - from Beta.4
+- **CLI description**: "HuggingFace model management for MLX" (removed "JSON-first" and version number)
+- **README reorganization**: Better section flow, merged duplicate sections, removed beta-specific content (550 lines)
+
+### Fixed
+- **Legacy format detection** (Issue #37, bug):
+  - Models with legacy weight file formats (`weights.*.safetensors`, `pytorch_model-*.safetensors`) now correctly detected as runtime-incompatible
+  - Health output: `healthy` (file integrity OK) but `runtime_compatible: false`
+  - `reason` field describes incompatibility: `"Legacy format not supported by mlx-lm"`
+  - Human output: `healthy*` in compact mode, `healthy | no | Legacy format...` in verbose mode
+  - Pre-flight check in `run` command prevents cryptic mlx-lm errors
+- **CLI error handling** (regression since 19a6667): Running `mlxk2` without arguments now shows help text (like git/docker) instead of JSON error, `--json` flag properly respected for automation
+- **Code quality**: Removed 7 unused imports, ruff checks pass
+
+### Implementation
+- `mlxk2/operations/health.py`:
+  - `check_runtime_compatibility()` Gate 2 implementation (lines 272-304)
+  - Regex patterns for legacy format detection
+  - Mixed legacy/modern: prefers modern if both present
+- `mlxk2/operations/run.py`:
+  - Pre-flight runtime compatibility check (lines 45-89)
+  - Clear error messages before mlx-lm loading
+
+### Testing
+- **Current Status**: 293 passed, 14 skipped, 1 warning (urllib3/LibreSSL)
+- **New Tests** (25 total):
+  - `tests_2.0/test_adr004_error_logging.py` (22 tests):
+    - Error envelope structure and serialization
+    - Error type to HTTP status mapping (8 error types validated)
+    - Request ID generation and propagation (UUID4 validation, context nesting)
+    - Log redaction (HF tokens, home directory paths)
+    - Structured logging (plain text vs JSON modes, log levels, rate limiting)
+  - `tests_2.0/test_legacy_formats.py` (3 tests):
+    - `test_weights_numeric_safetensors_is_runtime_incompatible`: Validates `weights.00.safetensors` detection
+    - `test_pytorch_model_numeric_safetensors_is_runtime_incompatible`: Validates `pytorch_model-*.safetensors` detection
+    - `test_modern_model_safetensors_passes_legacy_gate`: Ensures modern formats are not rejected
+- **Regression**: All existing tests pass (zero breaking changes)
+
+### Known Issues
+- **Missing tests for Issue #36** (Beta.4 gap):
+  - No dedicated tests for Gate 1 (framework check)
+  - No dedicated tests for Gate 3 (model_type support)
+  - Runtime compatibility tested indirectly via Issue #37 tests and schema validation
+  - TODO: Add explicit tests for Beta.4 runtime compatibility feature
+
+### User Experience Example
+```bash
+# Before (Beta.4): Cryptic mlx-lm error
+$ mlxk2 run TinyLlama-1.1B-Chat-v1.0-4bit "Hello"
+ERROR:root:No safetensors found in /Volumes/.../snapshots/01a7088...
+
+# After (Beta.5): Clear error message
+$ mlxk2 run TinyLlama-1.1B-Chat-v1.0-4bit "Hello"
+Error: Model 'mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit' is not compatible: Legacy format not supported by mlx-lm
+
+# Health status shows details
+$ mlxk2 show TinyLlama-1.1B-Chat-v1.0-4bit
+Health: healthy (files OK, runtime incompatible)
+Reason: Legacy format not supported by mlx-lm
+```
+
+### Notes
+- Legacy models are file-complete (healthy integrity) but use outdated naming conventions incompatible with modern mlx-lm
+- Pre-flight check improves UX by catching incompatibility before expensive model loading
+
+---
+
+## 2.0.0-beta.4 — 2025-10-18
+
+**Health Check Enhancement**: Separate integrity and runtime compatibility validation (Issue #36).
+
+### Changed
+- **JSON API 0.1.5 specification**:
+  - Added `runtime_compatible: boolean` field to `modelObject` (always present)
+  - Added `reason: string | null` field to `modelObject` (describes first problem found)
+  - `list`/`show` JSON output performs both integrity and runtime compatibility checks
+  - Gate logic: Runtime check requires integrity check first; `reason` shows first problem (integrity > runtime priority)
+- **Health check concepts documented**:
+  - Integrity Check (`health` field): File-level validation (required files, no LFS pointers, valid JSON)
+  - Runtime Compatibility Check (`runtime_compatible` field): MLX framework + architecture validation with mlx-lm
+  - Framework detection: GGUF/PyTorch models marked as runtime-incompatible
+  - Architecture detection: Unsupported model types (e.g., `qwen3_next` with mlx-lm < 0.28.0) detected
+  - Respects `MODEL_REMAPPING` for aliased architectures (e.g., `mistral` → `llama`)
+
+### Implementation Status
+- ✅ **Phase 1 Complete**: JSON API Specification 0.1.5
+  - `docs/json-api-schema.json` updated with new fields
+  - `docs/json-api-specification.md` extended with health check concepts and examples
+- ✅ **Phase 2 Complete**: JSON Implementation
+  - `mlxk2/spec.py` bumped to 0.1.5
+  - `mlxk2/operations/health.py`: `check_runtime_compatibility()` with gate logic
+  - `mlxk2/operations/common.py`: `build_model_object()` always computes `runtime_compatible` + `reason`
+  - mlx-lm API compatibility: Supports both 0.27.x (`mlx_lm.utils._get_classes`) and 0.28.x APIs
+  - Log suppression: mlx-lm ERROR logs redirected to `reason` field only
+- ✅ **Phase 3 Complete**: Human Output Specification
+  - Compact mode: `healthy` / `healthy*` / `unhealthy` (single column)
+  - Verbose mode: "Integrity" | "Runtime" | "Reason" (split columns)
+  - ASCII-only output (no UTF-8 symbols for parsing compatibility)
+  - README.md fully documented with examples and design philosophy
+  - JSON examples verified for consistency with schema and code
+- ✅ **Phase 4 Complete**: Human Output Implementation in `mlxk2/output/human.py`
+
+### Dependencies
+- **mlx-lm requirement updated**: `>=0.27.0` → `>=0.28.3`
+  - Now uses official mlx-lm 0.28.3 release with Python 3.9 compatibility fixes for `qwen3_next`
+  - Adds support for newer architectures (Klear, qwen3_next, etc.)
+  - Git pin removed in favor of stable PyPI release
+
+### Validation
+- ✅ All 256 tests pass (9 skipped)
+- ✅ Runtime compatibility correctly detects:
+  - GGUF/PyTorch models → `runtime_compatible: false` (framework mismatch)
+  - Supported MLX models → `runtime_compatible: true`
+  - Unsupported architectures → `runtime_compatible: false` with descriptive `reason`
+  - Klear-46B verified working with mlx-lm 0.28.2
+
+
+### Notes
+- Human output columns controlled by CLI flags (documentation in README.md, separate from JSON spec)
+- This addresses the root cause discovered in Issue #36: GGUF models show "healthy" but are not executable with mlx-lm
+
+## 2.0.0-beta.3 — 2025-09-18
+
+**Feature Complete**: Full 1.1.1 parity achieved with Clone implementation (ADR-007 Phase 1) and APFS filesystem detection fixes.
+
+### Added
+- **Clone command implementation** (MAJOR):
+  - Complete `mlxk2 clone` with ADR-007 Phase 1: Same-Volume APFS strategy
+  - APFS Copy-on-Write optimization for instant cloning
+  - Isolated temp cache with user cache safety
+  - Health check integration via `health_from_cache`
+  - Feature-gated behind `MLXK2_ENABLE_ALPHA_FEATURES=1`
+- **JSON API 0.1.4 specification**:
+  - Clone operation schema and documentation
+  - Complete schema validation coverage for all 10 JSON commands
+  - Schema tests for `list`, `show`, `health`, `pull`, `rm`, `clone`, `version`, `push`, `run`, `server`
+
+### Fixed
+- **APFS filesystem detection**: SMB/network mounts now correctly detected as Non-APFS
+- **Push APFS warnings**: Non-APFS cache setups now display filesystem warnings
+
+### Testing
+- **Comprehensive test coverage**: 254/254 tests passing, 11 skipped
+- **Clone operation tests**: 43 tests covering APFS, volume detection, health integration
+- **Live validation**: 3 live clone + push tests with real HuggingFace models
+
+## 2.0.0-beta.3-local — 2025-09-14
+
+**Feature Complete Beta**: 1.x parity achieved. All core functionality implemented with clean experimental separation.
+
+### Added
+- **Run command implementation** (MAJOR):
+  - Complete `mlxk2 run` with interactive and single-shot modes
+  - Streaming and batch generation with parameter controls (`--temperature`, `--top-p`, `--max-tokens`)
+  - Chat template integration and conversation history tracking
+  - Interrupt handling (Ctrl-C) with graceful recovery and session reset
+  - Enhanced run with future features (system prompts, reasoning model support)
+- **MLXRunner core engine** (ported from 1.x):
+  - `mlxk2.core.runner` package with modular architecture
+  - Dynamic token limits (full context for run, half-context for server)
+  - Stop token filtering and reasoning model detection
+  - Thread-safe model loading, memory management, and cleanup
+- **Server implementation**:
+  - OpenAI-compatible endpoints (`/v1/completions`, `/v1/chat/completions`, `/v1/models`, `/health`)
+  - SSE streaming with SIGINT-robust supervisor mode (deterministic shutdown/restart)
+  - Model hot-swapping and thread-safe memory management
+  - Half-context token limits for DoS protection
+- **Experimental feature separation**:
+  - Push command hidden behind `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1` environment variable
+  - Clean beta/experimental boundaries for stable release classification
+
+### Changed
+- **Feature status**: All core commands now complete
+  - README/docs updated: Run status "Pending" → "Complete"
+  - Feature parity with 1.x stable releases achieved
+  - Stable version reference updated to 1.1.1
+- **Test architecture**:
+  - Default suite: **184 passed, 30 skipped** (stable features only)
+  - Experimental: **205 passed, 9 skipped** (with `MLXK2_ENABLE_EXPERIMENTAL_PUSH=1`)
+  - Clean separation ensures beta testing covers stable features only
+- **Runner architecture**:
+  - Modular design with focused helpers: `token_limits.py`, `chat_format.py`, `reasoning_format.py`, `stop_tokens.py`
+  - API compatibility preserved for existing integrations and test patches
+
+### Fixed
+- **Pull operation cache pollution (Issue #30)**:
+  - Added preflight access check with `preflight_repo_access()` to validate repository accessibility
+  - Prevents cache pollution from attempting downloads of gated/private/missing repos
+  - Surfaces clear "Access denied" guidance with `HF_TOKEN` hints before any download
+  - Robust error handling across different `huggingface_hub` versions
+- **Test stability**:
+  - Pull network timeout test fixed for environments without `HF_TOKEN`
+  - All push tests now properly gated behind environment variable (no unexpected failures)
+  - Default test runs require no external dependencies or credentials
+- **Documentation accuracy**:
+  - Feature status corrected across README/TESTING to reflect actual implementation
+  - Test count documentation updated to reflect stable vs experimental separation
+
+### Implementation Milestones
+- **Complete 1.x parity**: All core functionality (list, health, show, pull, rm, run, serve) fully implemented
+- **Production ready**: Comprehensive testing across Python 3.9-3.13 with isolated cache system
+- **Clean architecture**: Experimental features properly isolated, beta definition clarified
+- **GitHub issues resolved**: Run implementation, interactive mode, streaming support, feature parity
+
+### Tests & Docs
+- **Comprehensive test coverage**: 31+ tests for run command (interactive, parameters, error handling)
+- **TESTING.md**: Clear guidance on stable (184) vs experimental (+21) test runs
+- **Multi-Python verification**: All tests passing across supported Python versions
+- **Skip breakdown documented**: 21 push tests, 1 live test, 8 other opt-in tests
+
+### Notes
+- 2.0.0-beta.3 represents **complete feature parity** with 1.x stable releases
+- Ready for production use as comprehensive 1.x alternative
+- Experimental features cleanly separated for future development
+
+## 2.0.0-alpha.3 — 2025-09-08
+
+Port Issue #31 (lenient MLX detection) to 2.0; refine human list behavior.
+
+Hard split: 1.x code and tests have been removed from this branch to avoid confusion and license duality. Use the `main` branch for 1.x (MIT).
+
+### Added
+- Detection helpers (README front‑matter + tokenizer):
+  - Framework=MLX when README front‑matter `tags` includes `mlx` or `library_name: mlx`, in addition to `mlx-community/*`.
+  - Type=chat when tokenizer has `chat_template`, or name hints (`instruct`/`chat`), or `config.model_type == 'chat'`.
+  - Unified `build_model_object(...)` used by `list` and `show` to ensure consistent fields.
+- Tests:
+  - Offline: front‑matter and tokenizer detection for both `list` and `show`.
+  - Human output: verifies default/verbose/all filtering semantics.
+  - Live (opt-in): `tests_2.0/live/test_list_human_live.py` checks human list variants against a real HF cache (marker `-m live_list`).
+  - Push (offline): branch-missing tolerance and retry on "Invalid rev id" with `--create`.
+
+### Changed
+- Human list (default): shows only MLX chat models (safer for run/server selection).
+- Human list `--verbose`: shows all MLX models (chat + base).
+- Human list `--all`: shows all frameworks (MLX, GGUF, PyTorch).
+- `show` uses the same detection helpers as `list`; respects `HF_HOME` via `get_current_model_cache()`.
+
+### Docs
+- SECURITY.md: clarified experimental push scope and network behavior (explicit only; no background traffic).
+- README.md: added “Privacy & Network” bullet; updated version strings to alpha.3.
+ - README.md: noted hard split — 1.x lives on `main` (MIT), this branch is 2.x (Apache‑2.0).
+
+### Notes
+- No JSON API schema changes; spec remains 0.1.3.
+ 
+### Fixed
+- Push: tolerate missing target branches; with `--create`, proactively create the branch and retry the upload once. No‑op uploads still create the branch when `--create` is provided.
 
 ## [1.1.1-beta.2] - 2025-09-06
 
@@ -92,6 +390,26 @@
 
 Note: GitHub tag/version uses `1.1.1-beta.2`. PyPI release uses PEP 440 `1.1.1b2`.
 
+## 2.0.0-alpha.2 — 2025-09-05
+
+Experimental `push` (upload only) and documentation/testing refinements.
+
+### Added
+- `push` (experimental, M0): Upload a local folder to Hugging Face using `upload_folder`.
+  - Safety: `--private` required in alpha.
+  - Quiet JSON: With `--json` (without `--verbose`) suppress progress bars/console logs; hub logs are captured in `data.hf_logs`.
+  - No-op detection: Prefer hub signal (“No files have been modified… Skipping…”). Sets `no_changes: true`, clears `commit_sha/commit_url`, and sets `uploaded_files_count: 0`.
+  - Offline preflight: `--check-only` analyzes the local workspace and returns `data.workspace_health` (index/weights/LFS/partials) without network.
+  - Dry-run planning: `--dry-run` computes a plan vs remote (uses `list_repo_files`), returns `dry_run: true`, `dry_run_summary {added, modified:null, deleted}`, and sample `added_files`/`deleted_files` (up to 20). Honors default ignores and merges `.hfignore`.
+  - Uploaded file count: Remains `null` when hub does not return per-file operations; no heuristic guessing.
+
+### Docs
+- TESTING.md: Added “Reference: Push CLI and JSON”, `--dry-run` examples, and a mini matrix (default vs markers/opt-in).
+- CLAUDE.md: Updated Current Focus/Decisions + session summary for push quiet mode, no-op, `--dry-run`.
+
+### Tests
+- Offline push tests added/extended, including dry-run planning; live push remains opt-in via `wet`/`live_push` markers and required env vars.
+
 ## [1.1.1-beta.1] - 2025-09-01
 
 ### Fix: Strict Health Completeness for Multi‑Shard Models (Issue #27)
@@ -109,6 +427,13 @@ Note: GitHub tag/version uses `1.1.1-beta.2`. PyPI release uses PEP 440 `1.1.1b2
 
 Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1`.
 
+## 2.0.0-alpha.1 — 2025-08-31
+
+- New JSON-first CLI (`mlxk2`, `mlxk-json`); `--json` for machine-readable output (new vs 1.0.0).
+- Human output by default: improved formatting, new Type column, relative Modified; MLX-only compact view with `--all`, `--health`, `--verbose` flags.
+- Stricter health checks for sharded models (Issue #27); robust model resolution (fuzzy, `@hash`); `rm` cleans whole model and locks.
+- Packaging/tooling: dynamic versioning; multi-Python test script; Python 3.9–3.13; timezone-aware datetimes.
+- **Not included yet: server and run** (use 1.x).
 
 ## [1.1.0] - 2025-08-26 - **STABLE RELEASE** 🚀
 
@@ -187,90 +512,31 @@ Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1
   - **Root Cause**: `generate_batch()` lacked End-Token filtering present in `generate_streaming()`
   - **Fix**: Ported filtering logic with new `_filter_end_tokens_from_response()` method
   - **Affected**: `mlxk run model "prompt" --no-stream` and Server API `"stream": false`
-  - **Impact**: Professional clean output - no visible `</s>`, `<|im_end|>`, `<|end|>` tokens
-  - **Test Coverage**: 47/48 comprehensive tests validate fix across all model architectures
+  - **Impact**: No more end tokens appearing in the final output in non-streaming mode
 
-### Test Infrastructure Improvements 🧪
-- **New Test Suite**: `tests/integration/test_end_token_issue.py` with 48 systematic tests
-- **RAM-Aware Testing**: Automatic model selection based on available system memory
-- **Flaky Test Fix**: Improved server lifecycle management with proper port cleanup
-- **Blocking Read Fix**: Fixed timeout issues in server startup validation tests
-- **Test Count**: 132/132 standard tests + 48 server tests (180 total)
+### Enhanced
+- Better default for `--max-tokens`: `None` → model-aware limits
+- Improved consistency between streaming and non-streaming generation
+- Clearer server logs indicating active token policies
 
-### Documentation Updates 📚
-- **TESTING.md**: New server test procedures, updated test counts (132/132), comprehensive server test guide
-- **Test Categories**: Clear separation of standard tests vs resource-intensive server tests
-- **Server Test Documentation**: RAM requirements, timing expectations, model compatibility
-
-### Architecture Quality 🏗️
-- **End-Token Consistency**: Streaming and non-streaming pipelines now identical in behavior
-- **Clean Code**: Unified filtering logic eliminates code duplication between pipelines  
-- **Regression Prevention**: Comprehensive test coverage prevents future End-Token issues
-- **Professional Output**: All models and modes produce clean, professional responses
-- **Test Stability**: Eliminated flaky tests and timeouts for reliable CI/CD
+### Technical
+- 15 new tests across server and CLI to validate token policies
+- Internal refactoring for token handling to avoid duplication
 
 ## [1.1.0-beta1] - 2025-08-21
 
-### Major Features 🚀
-- **Issues #15 & #16**: Dynamic Model-Aware Token Limits
-  - Eliminated hardcoded 500/2000 token defaults with intelligent model-based limits
-  - **Phi-3-mini**: 4096 context → 2048 server tokens, 4096 interactive (8x improvement)
-  - **Qwen2.5-30B**: 262,144 context → 131,072 server tokens, 262,144 interactive (524x improvement!)
-  - Context-aware policies: Interactive mode uses full context, server mode uses context/2 for DoS protection
-  - Automatic adaptation to new models with larger context windows (future-proof)
+### Added
+- Dynamic model-aware token limits (context-length sensitive)
+- CLI `--max-tokens` default changed to `None` (was 2000)
+- Server leverages the same dynamic limits
 
-### Enhanced Web Client 🌐  
-- **Model Token Capacity Display**: Shows "Ready with Mistral-7B (32,768 tokens)" in header
-- **Enhanced `/v1/models` API**: Now exposes `context_length` field for model capabilities
-- **Button State Management**: Clear Chat properly disabled during streaming with CSS styling
-- **Streaming Status Tracking**: Added `isStreaming` flag with "Generating response..." feedback
+### Improved
+- End-token filtering consistency across streaming and non-streaming modes
+- Robustness in model loading and memory management
 
-### Interactive Mode Improvements 💡
-- **Smart CLI Defaults**: `mlxk run <model> "prompt"` automatically uses optimal token limits per model
-- **No Configuration Needed**: Users benefit immediately without changing usage patterns
-- **Explicit Control Preserved**: `--max-tokens` arguments still respected and capped at model context
-- **Clean Type Safety**: Proper `Optional[int]` handling eliminates fragile CLI guessing
-
-### Technical Architecture 🏗️
-- **`get_model_context_length()` function**: Extracts context length from model configs with multiple fallback keys
-- **Enhanced MLXRunner**: `get_effective_max_tokens()` method for context-aware token limiting
-- **Server API Updates**: All endpoints use model-aware limits with DoS protection
-- **Unified Token Logic**: Single source of truth through MLXRunner eliminates duplicate code
-- **Backward Compatible**: All existing CLI arguments and APIs work unchanged
-
-### Performance Impact 📊
-- **Modern Models Unleashed**: Large-context models can now use their full capabilities
-- **Real-World Benefits**: No more artificial 500-token truncation for 100K+ context models  
-- **Smart Server Limits**: Automatic DoS protection while maximizing usable context
-- **Zero Magic Numbers**: Clean architecture with clear `None` vs explicit value semantics
-
-### Testing & Quality Assurance ✅
-- **Comprehensive Coverage**: 131/131 tests passing (expansion from 114 tests)
-- **20 new unit tests**: Covering CLI None-handling, model context extraction, effective token calculation
-- **5 server integration tests**: Real-world validation with actual MLX models
-- **Extreme Model Testing**: Validated with models from 1B to 30B parameters, up to 256K context
-- **Edge Case Handling**: Unknown models, missing configs, CLI argument combinations
-
-### Issue #14 Model Compatibility Validation
-**Chat Self-Conversation Fix tested across model spectrum:**
-
-| Model | Size | RAM (GB) | Context | Status | Architecture |
-|-------|------|----------|---------|--------|-------------|
-| **Llama-3.2-1B-Instruct-4bit** | 1B | 2 | 131,072 | ✅ PASSED | Llama |
-| **Llama-3.2-3B-Instruct-4bit** | 3B | 4 | 131,072 | ✅ PASSED | Llama |
-| **Phi-3-mini-4k-instruct-4bit** | 4B | 5 | 4,096 | ✅ PASSED | Phi-3 |
-| **Mistral-7B-Instruct-v0.2-4bit** | 7B | 8 | 32,768 | ✅ PASSED | Mistral |
-| **Mixtral-8x7B-Instruct-v0.1-4bit** | 8x7B | 16 | 32,768 | ✅ PASSED | Mixtral MoE |
-| **Mistral-Small-3.2-24B-Instruct-2506-4bit** | 24B | 20 | 32,768 | ✅ PASSED | Mistral |
-| **Qwen3-30B-A3B-Instruct-2507-4bit** | 30B | 24 | 262,144 | ✅ PASSED | Qwen |
-
-**Validation Results**: 7/7 models passed - comprehensive coverage from 1B to 30B parameters across all major MLX architectures ensures robust chat stop token handling.
-
-### Beta Status Notes ⚠️
-- **Core Functionality**: Solid foundation with comprehensive test coverage
-- **Known Limitation**: Server deadlock possible under extreme concurrent model loading stress
-- **Workaround**: Avoid simultaneous heavy model operations (normal usage unaffected)  
-- **Real-World Ready**: Significant improvements ready for community testing and feedback
+### Tests
+- 114/114 tests passing
+- Server tests behind `@pytest.mark.server` (opt-in)
 
 ## [1.0.4] - 2025-08-19
 
@@ -290,7 +556,7 @@ Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1
   - 🔄 Smart model switching: Choice to keep or clear chat history when switching models
   - 🌐 Responsive design: Full viewport height utilization, optimized screen space usage
   - 🎯 Clear UX: "Clear Chat" instead of ambiguous "Clear" button
-  - 🏴󠁧󠁢󠁥󠁮󠁧󠁿 English dialogs: Custom modal dialogs replace German OS dialogs
+  - 🏴 English dialogs: Custom modal dialogs replace German OS dialogs
 
 ### Added
 - **Automated Server Testing Infrastructure**:
@@ -411,3 +677,21 @@ Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1
 
 ## Known Issues
 - See GitHub Issues for tracking
+ 
+## 2.0.0‑beta.3 (local)
+
+- Server robustness and API polish
+  - Supervisor default: Uvicorn runs as subprocess in its own process group; Ctrl‑C terminates deterministically and allows immediate restart.
+  - HTTP mapping: 404 for unknown/failed model loads; 503 during shutdown; preserve HTTPException codes from helpers.
+  - Streaming (SSE):
+    - Happy path: initial chunk, per‑token chunks, final chunk, then `[DONE]`.
+    - Interrupt path: on `KeyboardInterrupt` emit clear interrupt marker and close promptly.
+  - Token limits: server mode uses half of context length; explicit `max_tokens` respected.
+  - Noise reduction: chat streaming debug prints gated behind `MLXK2_DEBUG`.
+
+- Testing
+  - Added focused server API tests for `/v1/models`, 404/503 mapping, SSE happy/interrupt, and server‑side token limit propagation.
+  - Global suppression of macOS Python 3.9 `urllib3` LibreSSL warning in tests; runtime already suppressed.
+
+- Docs
+  - README/TESTING touch‑ups pending flip; CLAUDE.md tracks SSE UX roadmap (anti‑buffering headers, optional heartbeats, status/interrupt endpoints).

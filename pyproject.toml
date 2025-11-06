@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mlx-knife"
 dynamic = ["version"]
-description = "ollama-style CLI for MLX models on Apple Silicon"
+description = "HuggingFace model management for MLX on Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
@@ -24,135 +24,48 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Operating System :: MacOS",
     "Environment :: Console",
+    "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
     "huggingface-hub>=0.34.0",
     "requests>=2.32.0",
+    "mlx-lm>=0.28.3",
     "mlx>=0.29.0",
-    "mlx-lm>=0.27.0",
     "fastapi>=0.116.0",
     "uvicorn>=0.35.0",
     "pydantic>=2.11.0",
+    "httpx>=0.27.0",
 ]
 
-[project.optional-dependencies]
-test = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-timeout>=2.1.0",
-    "psutil>=5.9.0",
-    "pytest-mock>=3.11.0",
-    "pytest-cov>=4.1.0"
-]
-dev = [
-    "ruff>=0.1.0",
-    "mypy>=1.7.0",
-    "types-requests>=2.31.0"
-]
+[project.scripts]
+mlxk = "mlxk2.cli:main"
+mlxk-json = "mlxk2.cli:main"
+mlxk2 = "mlxk2.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/mzau/mlx-knife"
+Repository = "https://github.com/mzau/mlx-knife"
 Issues = "https://github.com/mzau/mlx-knife/issues"
 
-[project.scripts]
-mlxk = "mlx_knife.cli:main"
-mlx-knife = "mlx_knife.cli:main"
-mlx_knife = "mlx_knife.cli:main"
-
-[tool.setuptools]
-packages = ["mlx_knife"]
+[tool.setuptools.packages.find]
+include = ["mlxk2*"]
+exclude = ["tests*", "tests_2.0*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "mlx_knife.__version__"}
+version = {attr = "mlxk2.__version__"}
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = "test_*.py"
-python_classes = "Test*"
-python_functions = "test_*"
-addopts = [
-    "-v",
-    "--tb=short", 
-    "--strict-markers",
-    "--disable-warnings",
-    "--durations=10",
-    "-m not server"
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "jsonschema>=4.20",
 ]
-markers = [
-    "integration: integration tests (slower)",
-    "unit: unit tests (faster)",
-    "slow: slow running tests",
-    "requires_model: tests that need actual MLX models",
-    "network: tests that require network access",
-    "server: tests that require MLX Knife server with loaded models (manual setup required)",
-    "timeout: tests with timeout requirements",
-    "framework_validation: tests that require diverse model frameworks"
-]
-timeout = 300
-timeout_method = "thread"
-timeout_func_only = true
-norecursedirs = [".git", ".tox", "dist", "build", "*.egg", "venv", "__pycache__"]
-minversion = "6.0"
-
-[tool.ruff]
-target-version = "py39"
-line-length = 88
-extend-exclude = [
-    ".git",
-    "__pycache__",
-    "venv*",
-    ".venv",
-    "build",
-    "dist"
+dev = [
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
 ]
 
-[tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
+[tool.setuptools]
+license-files = [
+  "LICENSE",
+  "mlxk2/NOTICE",
 ]
-ignore = [
-    "E501",  # line too long (handled by formatter)
-    "B008",  # do not perform function calls in argument defaults
-    # Python 3.9 compatibility policy - keep legacy typing for maximum compatibility
-    "UP006", # Use list instead of List (keep typing.List for Python 3.9 compat)
-    "UP035", # typing.Dict is deprecated (keep typing.Dict for Python 3.9 compat)
-    # Temporary ignores for release - TODO: fix these in future versions
-    "E402",  # Module level import not at top of file
-    "E722",  # Do not use bare except
-    "W293",  # Blank line contains whitespace
-    "C414",  # Unnecessary list() call
-    "B904",  # Exception handling (raise from)
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["B011"]  # assert False in tests is ok
-
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-show_error_codes = true
-
-[[tool.mypy.overrides]]
-module = [
-    "mlx.*",
-    "mlx_lm.*",
-    "huggingface_hub.*"
-]
-ignore_missing_imports = true
