@@ -39,7 +39,7 @@ def run_model(
         verbose: Show detailed output
 
     Returns:
-        Generated text if json_output=True, None otherwise
+        Generated text on success, "Error: ..." string on failure (both modes)
     """
     # Pre-flight check: Verify runtime compatibility before attempting to load
     # This is a "best effort" check - if the model is in cache, verify it's compatible
@@ -49,11 +49,10 @@ def run_model(
 
         if ambiguous:
             error_msg = f"Ambiguous model specification '{model_spec}'. Could be: {ambiguous}"
-            if json_output:
-                return f"Error: {error_msg}"
-            else:
-                print(f"Error: {error_msg}")
-                return None
+            error_result = f"Error: {error_msg}"
+            if not json_output:
+                print(error_result)
+            return error_result
 
         # Only perform compatibility check if model is actually in cache
         if resolved_name:
@@ -81,11 +80,10 @@ def run_model(
 
                         if not compatible:
                             error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
-                            if json_output:
-                                return f"Error: {error_msg}"
-                            else:
-                                print(f"Error: {error_msg}")
-                                return None
+                            error_result = f"Error: {error_msg}"
+                            if not json_output:
+                                print(error_result)
+                            return error_result
 
     except Exception:
         # Pre-flight check failed - let the runner handle it
@@ -125,11 +123,10 @@ def run_model(
                 )
                     
     except Exception as e:
-        if json_output:
-            return f"Error: {e}"
-        else:
-            print(f"Error: {e}")
-            return None
+        error_result = f"Error: {e}"
+        if not json_output:
+            print(error_result)
+        return error_result
 
 
 def interactive_chat(
@@ -313,7 +310,7 @@ def run_model_enhanced(
         hide_reasoning: Hide reasoning output (future feature)
         
     Returns:
-        Generated text if json_output=True, None otherwise
+        Generated text on success, "Error: ..." string on failure (both modes)
     """
     # For now, forward to basic run_model
     # TODO: Add system_prompt and hide_reasoning support in beta.2

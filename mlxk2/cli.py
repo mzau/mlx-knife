@@ -188,7 +188,9 @@ def main():
                 }
                 print(format_json_output(result))
             else:
-                print(f"mlxk2 {__version__}")
+                # Use the actual command name invoked by the user
+                cmd_name = os.path.basename(sys.argv[0])
+                print(f"{cmd_name} {__version__}")
             sys.exit(0)
 
         # Initialize result for all paths
@@ -267,9 +269,25 @@ def main():
                 system_prompt=getattr(args, "system", None),
                 hide_reasoning=getattr(args, "hide_reasoning", False)
             )
-            
-            # For JSON output, wrap result in standard format (only for single-shot mode)
-            if args.json and result_text is not None and args.prompt is not None:
+
+            # Detect errors from run_model_enhanced (returns "Error: ..." string on failure)
+            # This check must happen BEFORE the JSON/text mode split
+            if result_text and isinstance(result_text, str) and result_text.startswith("Error: "):
+                error_message = result_text[7:]  # Strip "Error: " prefix
+                result = {
+                    "status": "error",
+                    "command": "run",
+                    "data": None,
+                    "error": {
+                        "type": "execution_error",
+                        "message": error_message
+                    }
+                }
+                if args.json:
+                    print(format_json_output(result))
+                # Exit code will be 1 (handled by line 369)
+            elif args.json and result_text is not None and args.prompt is not None:
+                # Success case: wrap result in standard format (only for single-shot mode)
                 result = {
                     "status": "success",
                     "command": "run",

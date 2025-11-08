@@ -142,9 +142,9 @@ We provide security updates for these versions:
 
 | Version | Security Support   |
 | ------- | ------------------ |
-| 2.0.0-beta.3 | :white_check_mark: Current development |
-| 1.1.1   | :white_check_mark: Current stable |
-| < 1.1.1 | :x: Upgrade recommended |
+| 2.0.1   | :white_check_mark: Current stable |
+| 2.0.0   | :white_check_mark: Supported |
+| < 2.0.0 | :x: Upgrade recommended |
 
 ## Additional Resources
 
