@@ -20,29 +20,37 @@
 
 ### Portfolio Discovery (Production Validation)
 
-Instead of hard-coded models, iterate over all MLX-compatible models in user cache:
+**Status:** ✅ Implemented (2.0.1)
 
+Instead of hard-coded models, tests iterate over all MLX-compatible models in user cache.
+
+**Implementation:**
+- **Location:** `test_stop_tokens_live.py` (Category 2: Live Tests, read-only user cache)
+- **Function:** `discover_mlx_models_in_user_cache()` (~40 LOC)
+- **Fixture:** `portfolio_models` with fallback to `TEST_MODELS` for backward compatibility
+
+**Discovery Algorithm:**
 ```python
-def discover_mlx_models_in_cache(hf_home: str) -> List[ModelInfo]:
+def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     """Scan HF_HOME/hub/models--*/snapshots/* for MLX models.
 
     Filters:
     - MLX-compatible: Has safetensors + config.json
     - RAM-aware: Estimates model size, skips if exceeds budget
 
-    Returns: List of discovered models with metadata
+    Returns: List of models with: model_id, ram_needed_gb, snapshot_path
     """
 ```
 
-**RAM Gating** (already implemented in `test_stop_tokens_live.py`):
+**RAM Gating** (already implemented):
 - Progressive budget: 40% (16GB), 50% (32GB), 60% (64GB), 70% (96GB+)
 - Auto-skip models exceeding available RAM
 - See `get_safe_ram_budget_gb()`, `should_skip_model()` helpers
 
 **Safety:**
 - Read-only cache access (no pull/rm)
-- Sentinel protection (`TEST-CACHE-SENTINEL`)
-- See ADR-007 for CoW constraints
+- No isolated cache needed (Category 2 pattern)
+- No CoW required (CoW only for Clone/ADR-007, not inference)
 
 ---
 
@@ -121,9 +129,9 @@ pytest tests_2.0/test_stop_tokens_live.py::test_validation -v -m live_stop_token
 ✅ **Phase 3 Complete:** Empirical mapping generated (test artifact: `stop_token_config_report.json`)
 
 **Portfolio Validation (All Models in Cache):**
-⏳ **Portfolio Discovery:** Planned (currently hard-coded 3-model `TEST_MODELS` dict)
-⏳ **Cache Iterator:** Planned (`discover_mlx_models_in_cache()` not yet implemented)
-⏳ **Dynamic Validation:** Planned (scale to all models in user cache, not just 3)
+✅ **Portfolio Discovery:** Implemented (2.0.1) - `discover_mlx_models_in_user_cache()` in `test_stop_tokens_live.py`
+✅ **Cache Iterator:** Implemented - Auto-scans `HF_HOME/hub/models--*/` for MLX-compatible models
+✅ **Dynamic Validation:** Validated - Scales to all models in user cache, RAM-aware skipping, empirical report generation
 
 ---
 

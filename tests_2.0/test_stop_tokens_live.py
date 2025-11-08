@@ -113,13 +113,8 @@ def _use_real_mlx_modules():
         if path_removed and stub_path_str not in sys.path:
             sys.path.insert(0, stub_path_str)
 
-# Skip if HF_HOME not set (required for CoW same-volume, ADR-007)
+# HF_HOME is optional: Portfolio Discovery uses it if set, falls back to hardcoded TEST_MODELS
 _HF_HOME = os.environ.get("HF_HOME")
-
-requires_hf_home = pytest.mark.skipif(
-    not _HF_HOME,
-    reason="requires HF_HOME set to SSD cache for CoW same-volume (ADR-007)"
-)
 
 
 def get_system_ram_gb() -> float:
@@ -169,6 +164,83 @@ def get_safe_ram_budget_gb() -> float:
     return safe_budget
 
 
+def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
+    """Discover MLX chat models in user HF cache (Category 2: read-only).
+
+    Uses production infrastructure (mlxk2.operations.common) to filter:
+    - Framework: MLX only (not GGUF/PyTorch)
+    - Health: healthy only (not broken/incomplete)
+    - Runtime: runtime_compatible only (mlx-lm can load)
+    - Type: chat models only (for stop token testing)
+    - RAM: estimated from file sizes (filtering in should_skip_model)
+
+    Returns:
+        List of dicts with keys: model_id, ram_needed_gb, snapshot_path, weight_count
+    """
+    hf_home = os.environ.get("HF_HOME")
+    if not hf_home:
+        return []
+
+    hub_path = Path(hf_home) / "hub"
+    if not hub_path.exists():
+        return []
+
+    # Use production infrastructure for filtering
+    from mlxk2.operations.common import build_model_object
+    from mlxk2.core.cache import cache_dir_to_hf
+
+    discovered = []
+
+    # Scan models--org--name directories
+    for model_dir in hub_path.glob("models--*--*"):
+        try:
+            # Parse model_id from directory name
+            model_id = cache_dir_to_hf(model_dir.name)
+
+            # Find latest snapshot
+            snapshots_dir = model_dir / "snapshots"
+            if not snapshots_dir.exists():
+                continue
+
+            snapshot_dirs = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+            if not snapshot_dirs:
+                continue
+
+            # Most recent snapshot (by mtime)
+            latest_snapshot = max(snapshot_dirs, key=lambda p: p.stat().st_mtime)
+
+            # Use production filter logic (health + runtime + framework + type)
+            model_obj = build_model_object(model_id, model_dir, latest_snapshot)
+
+            # Filter: MLX + healthy + runtime_compatible + chat only
+            if (model_obj.get("framework") != "MLX" or
+                model_obj.get("health") != "healthy" or
+                model_obj.get("runtime_compatible") is not True or
+                model_obj.get("model_type") != "chat"):
+                continue  # Skip non-chat/unhealthy/incompatible models
+
+            # Estimate RAM (safetensors file sizes + 20% overhead)
+            weight_files = list(latest_snapshot.glob("*.safetensors"))
+            if not weight_files:
+                continue
+
+            total_bytes = sum(f.stat().st_size for f in weight_files if f.is_file())
+            ram_gb = (total_bytes / (1024**3)) * 1.2
+
+            discovered.append({
+                "model_id": model_id,
+                "ram_needed_gb": ram_gb,
+                "snapshot_path": latest_snapshot,
+                "weight_count": len(weight_files)
+            })
+
+        except Exception:
+            # Skip broken models silently (keep portfolio discovery robust)
+            continue
+
+    return discovered
+
+
 # Test models from ADR-009 with RAM requirements
 # RAM estimates from TESTING.md: "RAM-Aware Model Selection Strategy"
 TEST_MODELS = {
@@ -193,13 +265,49 @@ TEST_MODELS = {
 }
 
 
-def should_skip_model(model_key: str) -> tuple[bool, str]:
+@pytest.fixture(scope="module")
+def portfolio_models():
+    """Dynamic model portfolio: discovered models OR hardcoded fallback.
+
+    Enables portfolio testing when HF_HOME is set, falls back to
+    3 hardcoded test models otherwise (backward compatibility).
+    """
+    discovered = discover_mlx_models_in_user_cache()
+
+    if discovered:
+        # Convert discovered models to TEST_MODELS format
+        result = {}
+        for i, model in enumerate(discovered):
+            key = f"discovered_{i:02d}"
+            result[key] = {
+                "id": model["model_id"],
+                "ram_needed_gb": model["ram_needed_gb"],
+                "expected_issue": None,  # Unknown for discovered models
+                "description": f"Discovered: {model['model_id']} ({model['weight_count']} weights)"
+            }
+
+        print(f"\n🔍 Portfolio Discovery: Found {len(result)} MLX models in cache")
+        return result
+    else:
+        # Fallback to hardcoded test models
+        print(f"\n📋 Using hardcoded TEST_MODELS (3 models)")
+        return TEST_MODELS
+
+
+def should_skip_model(model_key: str, models_dict: Dict[str, Any] = None) -> tuple[bool, str]:
     """Check if model should be skipped due to insufficient RAM.
+
+    Args:
+        model_key: Key in models dictionary
+        models_dict: Optional models dict (defaults to TEST_MODELS)
 
     Returns:
         (should_skip, reason)
     """
-    model_info = TEST_MODELS[model_key]
+    if models_dict is None:
+        models_dict = TEST_MODELS
+
+    model_info = models_dict[model_key]
     ram_needed = model_info["ram_needed_gb"]
     ram_budget = get_safe_ram_budget_gb()
     system_ram = get_system_ram_gb()
@@ -221,8 +329,8 @@ MAX_TOKENS = 50
 class TestStopTokensValidation:
     """Validation: Verify stop token handling works correctly (Issue #32, ADR-009)."""
 
-    @requires_hf_home
-    def test_mxfp4_stop_token_filtering(self):
+    @pytest.mark.live_stop_tokens
+    def test_mxfp4_stop_token_filtering(self, request):
         """MXFP4: Stop tokens should be filtered correctly.
 
         After ADR-009 2-LOC fix (eos_token_id → eos_token_ids):
@@ -234,6 +342,11 @@ class TestStopTokensValidation:
         - Root cause: Runner only checked singular eos_token_id
         - Fix: Use eos_token_ids Set to handle multiple EOS tokens
         """
+        # Only run when explicitly selected with -m live_stop_tokens
+        selected = request.config.getoption("-m") or ""
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
+
         # RAM Safety Check
         should_skip, reason = should_skip_model("mxfp4")
         if should_skip:
@@ -264,8 +377,8 @@ class TestStopTokensValidation:
 
         print("✓ MXFP4: Stop tokens correctly filtered")
 
-    @requires_hf_home
-    def test_qwen25_no_self_conversation(self):
+    @pytest.mark.live_stop_tokens
+    def test_qwen25_no_self_conversation(self, request):
         """Qwen 2.5: Should not generate chat template role markers (self-conversation).
 
         Self-Conversation Definition (ADR-009):
@@ -277,6 +390,11 @@ class TestStopTokensValidation:
         - Model stops cleanly after its response
         - No chat template markers in output
         """
+        # Only run when explicitly selected with -m live_stop_tokens
+        selected = request.config.getoption("-m") or ""
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
+
         # RAM Safety Check
         should_skip, reason = should_skip_model("qwen25")
         if should_skip:
@@ -317,8 +435,8 @@ class TestStopTokensValidation:
 
         print("✓ Qwen 2.5: No self-conversation")
 
-    @requires_hf_home
-    def test_llama32_regression_control(self):
+    @pytest.mark.live_stop_tokens
+    def test_llama32_regression_control(self, request):
         """Llama 3.2: Regression control (should work correctly).
 
         Llama 3.2 has 3 eos_token_ids: [128008, 128001, 128009]
@@ -329,6 +447,11 @@ class TestStopTokensValidation:
         - No self-conversation
         - Serves as regression baseline
         """
+        # Only run when explicitly selected with -m live_stop_tokens
+        selected = request.config.getoption("-m") or ""
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
+
         # RAM Safety Check
         should_skip, reason = should_skip_model("llama32")
         if should_skip:
@@ -369,10 +492,11 @@ class TestStopTokensValidation:
 class TestStopTokensEmpiricalMapping:
     """Phase 3: Empirical mapping - document tokenizer configs and observed tokens."""
 
-    @requires_hf_home
-    def test_empirical_mapping_all_models(self):
+    @pytest.mark.live_stop_tokens
+    def test_empirical_mapping_all_models(self, portfolio_models, request):
         """Document tokenizer configs and empirically observed stop tokens.
 
+        Uses portfolio_models fixture for dynamic model discovery.
         Generates report: stop_token_config_report.json
 
         Report Format (ADR-009):
@@ -384,6 +508,11 @@ class TestStopTokensEmpiricalMapping:
           "workaround_needed": True/False
         }
         """
+        # Only run when explicitly selected with -m live_stop_tokens
+        selected = request.config.getoption("-m") or ""
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable portfolio discovery")
+
         from mlxk2.core.runner import MLXRunner
 
         report = {}
@@ -400,11 +529,11 @@ class TestStopTokensEmpiricalMapping:
             "budget_ratio": round(budget_ratio, 2)
         }
 
-        for model_key, model_info in TEST_MODELS.items():
+        for model_key, model_info in portfolio_models.items():
             model_id = model_info["id"]
 
             # Skip models that exceed RAM budget
-            should_skip, skip_reason = should_skip_model(model_key)
+            should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
             if should_skip:
                 print(f"\nSkipping {model_key}: {skip_reason}")
                 report[model_key] = {

@@ -309,7 +309,8 @@ class TestErrorHandling:
             
             output = fake_out.getvalue()
             assert "Error:" in output
-            assert result is None
+            # Issue #38: run_model now returns error string in both text and JSON modes
+            assert result is not None and result.startswith("Error:")
     
     def test_generation_error_json_mode(self):
         """Test error handling in JSON mode"""

@@ -1,5 +1,44 @@
 # Changelog
 
+## 2.0.1 — 2025-11-28
+
+**Bug Fix & Enhancement Release**: CLI exit code propagation fixes + Portfolio Discovery for stop token validation.
+
+### Fixed
+
+- **CLI `run` command exit codes** (GitHub Issue #38): `mlxk run` now correctly returns exit code 1 when model execution fails, enabling proper error detection in shell scripts and automation workflows
+  - **Both modes fixed**: Text mode and JSON mode now properly propagate errors
+  - **JSON mode**: Returns `{"status": "error", "error": {...}}` with exit code 1
+  - **Text mode**: Prints `"Error: ..."` message and returns exit code 1
+  - **Affects**: Shell scripts using `mlxk run && next_step`, batch processing, model validation workflows
+  - **Root cause**: `run_model()` returned `None` in text mode instead of error strings; CLI had no way to detect text-mode failures
+  - **Fix**:
+    - Modified `mlxk2/operations/run.py` to return `"Error: ..."` strings in both modes (lines 50-86, 125-129)
+    - CLI error detection in `mlxk2/cli.py:273-288` now catches errors for both modes
+  - **Examples of fixed scenarios**:
+    - Nonexistent model: `mlxk run bad-model "hi"` → exit 1 (was: exit 0)
+    - Incompatible model: Runtime version mismatch → exit 1 (was: exit 0)
+    - Runtime exceptions: OOM, loading failures → exit 1 (was: exit 0)
+
+- **Stop token validation Portfolio Discovery** (GitHub Issue #32, ADR-009): Live stop token tests now support dynamic model discovery and HF_HOME-optional testing
+  - **Portfolio Discovery**: Auto-discovers all MLX chat models in `HF_HOME` cache (filter: MLX + healthy + runtime_compatible + chat)
+  - **RAM-Aware Testing**: Progressive RAM budgets (40-70%) prevent OOM during multi-model validation
+  - **Empirical Reporting**: Generates `stop_token_config_report.json` with cross-model stop token findings
+  - **Fallback Support**: Tests work without `HF_HOME` using 3 predefined models (MXFP4, Qwen, Llama)
+  - **Marker-Required**: Tests excluded from default suite, use `pytest -m live_stop_tokens` to run
+  - **Implementation**: `tests_2.0/test_stop_tokens_live.py` (~110 LOC for discovery + RAM gating)
+
+### Testing
+
+- 306 passed, 20 skipped (including 4 live stop token tests, marker-required)
+- **New test files**:
+  - `tests_2.0/test_cli_run_exit_codes.py` validates both text and JSON mode exit codes (+9 tests)
+  - `tests_2.0/test_stop_tokens_live.py` implements Portfolio Discovery with HF_HOME-optional fallback (+4 tests)
+- **Updated tests**: `tests_2.0/test_run_complete.py` reflects new error contract
+- Zero regressions in full test suite
+
+---
+
 ## 2.0.0 — 2025-11-06
 
 **Stable Release**: MLX Knife 2.0 replaces 1.x as the primary version. Full feature parity with 1.1.1 achieved plus major enhancements.

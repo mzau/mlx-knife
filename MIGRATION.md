@@ -188,6 +188,23 @@ pip install --upgrade mlx-knife
 mlxk --version  # Should show: mlxk 2.0.0
 ```
 
+### Upgrade from 2.0.0-beta.x
+
+If you've been using beta versions, use a clean reinstall to avoid conflicts:
+
+```bash
+# Clean upgrade from beta
+pip uninstall mlx-knife -y
+pip install mlx-knife
+
+# Verify version
+mlxk --version   # Should show: mlxk 2.0.0
+mlxk2 --version  # Should show: mlxk2 2.0.0 (alias)
+```
+
+**Why clean reinstall for beta users?**
+Beta versions used `mlxk2` as the primary command. A clean reinstall ensures all command aliases are properly installed.
+
 ### Fresh Installation
 
 ```bash
