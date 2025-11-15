@@ -165,80 +165,73 @@ def get_safe_ram_budget_gb() -> float:
 
 
 def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
-    """Discover MLX chat models in user HF cache (Category 2: read-only).
+    """Discover MLX chat models via mlxk list --json (production command).
 
-    Uses production infrastructure (mlxk2.operations.common) to filter:
+    Uses production CLI instead of duplicating cache scanning logic.
+    Leverages official JSON API (docs/json-api-schema.json modelObject).
+
+    Filters for:
     - Framework: MLX only (not GGUF/PyTorch)
-    - Health: healthy only (not broken/incomplete)
+    - Health: healthy only
     - Runtime: runtime_compatible only (mlx-lm can load)
     - Type: chat models only (for stop token testing)
-    - RAM: estimated from file sizes (filtering in should_skip_model)
 
     Returns:
         List of dicts with keys: model_id, ram_needed_gb, snapshot_path, weight_count
+        Note: snapshot_path and weight_count set to None (not needed for tests)
     """
-    hf_home = os.environ.get("HF_HOME")
-    if not hf_home:
+    import subprocess
+    import json
+
+    # Check HF_HOME is set (required for mlxk list)
+    env = os.environ.copy()
+    if not env.get("HF_HOME"):
         return []
 
-    hub_path = Path(hf_home) / "hub"
-    if not hub_path.exists():
+    try:
+        # Call production mlxk list command
+        result = subprocess.run(
+            [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env  # Pass environment with HF_HOME
+        )
+
+        if result.returncode != 0:
+            return []
+
+        # Parse JSON response (docs/json-api-schema.json)
+        data = json.loads(result.stdout)
+
+        # Extract models array from response
+        models = data.get("data", {}).get("models", [])
+
+        # Filter per schema modelObject fields
+        discovered = []
+        for model in models:
+            # Filter: MLX + healthy + runtime_compatible + chat
+            if (model.get("framework") == "MLX" and
+                model.get("health") == "healthy" and
+                model.get("runtime_compatible") is True and
+                model.get("model_type") == "chat"):
+
+                # RAM estimation: size_bytes * 1.2 overhead
+                size_bytes = model.get("size_bytes", 0)
+                ram_gb = (size_bytes / (1024**3)) * 1.2 if size_bytes else 0
+
+                discovered.append({
+                    "model_id": model["name"],  # Per schema: name is the model ID
+                    "ram_needed_gb": ram_gb,
+                    "snapshot_path": None,      # Not provided by list, not needed
+                    "weight_count": None        # Not provided by list, not needed
+                })
+
+        return discovered
+
+    except Exception:
+        # Robust: return empty list on any error (keeps tests runnable)
         return []
-
-    # Use production infrastructure for filtering
-    from mlxk2.operations.common import build_model_object
-    from mlxk2.core.cache import cache_dir_to_hf
-
-    discovered = []
-
-    # Scan models--org--name directories
-    for model_dir in hub_path.glob("models--*--*"):
-        try:
-            # Parse model_id from directory name
-            model_id = cache_dir_to_hf(model_dir.name)
-
-            # Find latest snapshot
-            snapshots_dir = model_dir / "snapshots"
-            if not snapshots_dir.exists():
-                continue
-
-            snapshot_dirs = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-            if not snapshot_dirs:
-                continue
-
-            # Most recent snapshot (by mtime)
-            latest_snapshot = max(snapshot_dirs, key=lambda p: p.stat().st_mtime)
-
-            # Use production filter logic (health + runtime + framework + type)
-            model_obj = build_model_object(model_id, model_dir, latest_snapshot)
-
-            # Filter: MLX + healthy + runtime_compatible + chat only
-            if (model_obj.get("framework") != "MLX" or
-                model_obj.get("health") != "healthy" or
-                model_obj.get("runtime_compatible") is not True or
-                model_obj.get("model_type") != "chat"):
-                continue  # Skip non-chat/unhealthy/incompatible models
-
-            # Estimate RAM (safetensors file sizes + 20% overhead)
-            weight_files = list(latest_snapshot.glob("*.safetensors"))
-            if not weight_files:
-                continue
-
-            total_bytes = sum(f.stat().st_size for f in weight_files if f.is_file())
-            ram_gb = (total_bytes / (1024**3)) * 1.2
-
-            discovered.append({
-                "model_id": model_id,
-                "ram_needed_gb": ram_gb,
-                "snapshot_path": latest_snapshot,
-                "weight_count": len(weight_files)
-            })
-
-        except Exception:
-            # Skip broken models silently (keep portfolio discovery robust)
-            continue
-
-    return discovered
 
 
 # Test models from ADR-009 with RAM requirements

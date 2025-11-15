@@ -437,11 +437,22 @@ class MLXRunner:
                 stop_tokens_to_check = [t for t in stop_tokens_to_check if isinstance(t, str) and t]
                 if use_chat_stop_tokens:
                     stop_tokens_to_check.extend(self._chat_stop_tokens)
-                
-                for stop_token in stop_tokens_to_check:
-                    if stop_token in accumulated_response:
-                        stop_pos = accumulated_response.find(stop_token)
-                        text_before_stop = accumulated_response[:stop_pos]
+
+                # Find earliest stop token in accumulated response (ADR-011: multiple EOS token handling)
+                if stop_tokens_to_check:
+                    earliest_pos = len(accumulated_response)
+                    earliest_token = None
+
+                    for stop_token in stop_tokens_to_check:
+                        if stop_token in accumulated_response:
+                            pos = accumulated_response.find(stop_token)
+                            if pos < earliest_pos:
+                                earliest_pos = pos
+                                earliest_token = stop_token
+
+                    if earliest_token:
+                        # Found stop token - yield remaining text before it and stop
+                        text_before_stop = accumulated_response[:earliest_pos]
                         previously_yielded_length = len(accumulated_response) - len(new_text)
                         if len(text_before_stop) > previously_yielded_length:
                             new_part_before_stop = text_before_stop[previously_yielded_length:]
@@ -593,6 +604,26 @@ class MLXRunner:
         # Decode full response
         full_response = self.tokenizer.decode(all_tokens)
 
+        # Debug: Show raw generated tokens for quality analysis (enabled via --verbose)
+        if self.verbose:
+            print("\n[DEBUG] Token generation analysis:")
+            print(f"[DEBUG]   Generated {len(generated_tokens)} tokens")
+            if len(generated_tokens) >= 3:
+                last_3_ids = generated_tokens[-3:]
+                last_3_decoded = []
+                for tid in last_3_ids:
+                    try:
+                        decoded = self.tokenizer.decode([tid])
+                        last_3_decoded.append(f"{tid}={decoded!r}")
+                    except Exception:
+                        last_3_decoded.append(f"{tid}=<error>")
+                print(f"[DEBUG]   Last 3 tokens: {last_3_decoded}")
+
+                # Check for multiple EOS tokens (quality issue indicator)
+                eos_count = sum(1 for tid in last_3_ids if tid in self.tokenizer.eos_token_ids)
+                if eos_count > 1:
+                    print(f"[DEBUG]   ⚠️ WARNING: Multiple EOS tokens detected ({eos_count}) - model quality issue")
+
         # Remove prompt part (guard types to tolerate mocks)
         if isinstance(full_response, str) and isinstance(formatted_prompt, str) and full_response.startswith(formatted_prompt):
             response = full_response[len(formatted_prompt):]
@@ -601,18 +632,33 @@ class MLXRunner:
             response = decoded if isinstance(decoded, str) else str(decoded)
 
         # Filter stop tokens (strings only)
+        # Find the EARLIEST stop token in the response (not first in list)
         if self._stop_tokens:
-            for stop_token in [t for t in self._stop_tokens if isinstance(t, str) and t]:
-                if stop_token and stop_token in response:
-                    response = response[:response.find(stop_token)]
-                    break
+            stop_tokens_filtered = [t for t in self._stop_tokens if isinstance(t, str) and t]
+            earliest_pos = len(response)
+            earliest_token = None
+
+            for stop_token in stop_tokens_filtered:
+                if stop_token in response:
+                    pos = response.find(stop_token)
+                    if pos < earliest_pos:
+                        earliest_pos = pos
+                        earliest_token = stop_token
+
+            if earliest_token:
+                response = response[:earliest_pos]
 
         # Optionally filter chat stop tokens to prevent self-conversations in batch mode
+        # Find the EARLIEST chat stop token (same logic as above)
         if use_chat_stop_tokens and self._chat_stop_tokens:
+            earliest_pos = len(response)
             for stop_token in self._chat_stop_tokens:
                 if stop_token and stop_token in response:
-                    response = response[:response.find(stop_token)]
-                    break
+                    pos = response.find(stop_token)
+                    if pos < earliest_pos:
+                        earliest_pos = pos
+            if earliest_pos < len(response):
+                response = response[:earliest_pos]
 
         # Format reasoning models output
         response = self._format_reasoning_response(response)
