@@ -583,7 +583,7 @@ async def health_check():
 async def list_models():
     """List available MLX models in the cache."""
     from .cache import cache_dir_to_hf
-    from ..operations.common import detect_framework
+    from ..operations.common import detect_framework, read_front_matter
     from ..operations.health import is_model_healthy
     
     model_list = []
@@ -604,8 +604,12 @@ async def list_models():
                 snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
                 if snapshots:
                     selected_path = snapshots[0]
-            
-            if detect_framework(model_name, model_dir, selected_path) == "MLX" and is_model_healthy(model_name)[0]:
+
+            # Read front-matter for framework detection (align with CLI behavior)
+            probe = selected_path if selected_path is not None else model_dir
+            fm = read_front_matter(probe)
+
+            if detect_framework(model_name, model_dir, selected_path, fm) == "MLX" and is_model_healthy(model_name)[0]:
                 # Get model context length (best effort)
                 context_length = None
                 try:
