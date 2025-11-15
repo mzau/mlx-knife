@@ -47,6 +47,8 @@ def extract_stop_tokens(tokenizer: Any, verbose: bool = False) -> StopTokenInfo:
                 if isinstance(token_content, str) and token_content:
                     token_lower = token_content.lower()
                     if token_content == '<|end|>':
+                        # Always add <|end|> as stop token (fixes Phi-3-mini with eos_token_id=null)
+                        stop_tokens.add(token_content)
                         add_eos_token = getattr(tokenizer, 'add_eos_token', None)
                         if callable(add_eos_token):
                             try:

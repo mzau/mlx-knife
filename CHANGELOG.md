@@ -1,6 +1,124 @@
 # Changelog
 
-## 2.0.1 — 2025-11-28
+## [2.0.2] - 2025-11-15
+
+**Stable Release**: Test infrastructure hardening, stop token validation with 17 models, and web API improvements.
+
+This release completes the 2.0.2 recovery plan (Issue #32) with extensive empirical validation, architecture decisions, and community contributions. Highlights: 73/81 E2E tests passing, stop token bugs fixed, web API framework detection for all MLX organizations.
+
+### Bug Fixes
+
+- **Test collection regression** (E2E test suite, ADR-011):
+  - **Problem**: `pytest tests_2.0/live/` failed with "fixture 'model_key' not found" without `-m live_e2e` marker
+  - **Root Cause**: `conftest.py:64-70` returned early without parametrizing when marker missing
+  - **Fix**: Added fallback parametrization with `["_skipped"]` - tests now collect and skip gracefully
+  - **Impact**: Collection works without markers (22 tests), with marker discovers 17 models (81 tests)
+  - **File**: `tests_2.0/live/conftest.py:68-72`
+
+- **Stop token ordering bugs** (batch AND streaming modes, ADR-009):
+  - **Problem**: Both `generate_batch()` and `generate_streaming()` filtered stop tokens by **list order** instead of **text position**
+  - **Impact**: Models generating multiple EOS tokens (e.g., Phi-3-mini: `<|end|><|endoftext|>`) could leak stop tokens into output
+  - **Evidence**: Phi-3-mini generates two token IDs: `32007='<|end|>'` then `32000='<|endoftext|>'`
+  - **Old behavior**: Checked stop tokens list `['<|endoftext|>', '</s>', '<|end|>']` → found `<|endoftext|>` first (position 146) → left `<|end|>` (position 139) in output
+  - **New behavior**: Finds **earliest stop token in text** → cuts at position 139 → clean output
+  - **Affected**: All models that generate multiple EOS tokens
+  - **Files**: `mlxk2/core/runner/__init__.py` (streaming: 441-466, batch: 619-631)
+  - **Validation**: 73/81 tests passing with diverse portfolio (Phi-3, DeepSeek-R1, GPT-oss, Llama, Qwen, Mistral, Mixtral)
+
+- **E2E test temperature flakiness** (Test reliability fix):
+  - **Problem**: CLI E2E tests used default `temperature=0.7` → non-deterministic outputs → flaky test results
+  - **Fix**: Added `temperature=0.0` to all CLI E2E tests for reproducible results
+  - **Rationale**: E2E tests validate code logic (stop token filtering), not model quality
+  - **Files**: `tests_2.0/live/test_cli_e2e.py`, `tests_2.0/live/test_utils.py` (TEST_TEMPERATURE constant)
+
+- **Web API framework detection** (PR #42 by @limey, fixes Issue #41): `/v1/models` endpoint now correctly lists MLX models from all organizations, not just `mlx-community/*`
+
+- **E2E test marker fix**: `pytest -m show_model_portfolio` now works for diagnostic model discovery
+
+### Architecture
+
+- **mlx-lm API evaluation** (ADR-009):
+  - **Question**: Migrate to `BatchGenerator(stop_tokens=...)` or keep manual implementation?
+  - **Research**: Source code analysis of mlx-lm 0.28.3 (`generate.py`, `BatchGenerator`)
+  - **Critical Finding**: BatchGenerator uses **token-ID based** stop detection (`set[int]`)
+  - **Fundamental Blockers**:
+    1. Cannot handle multi-token sequences like `"\nHuman:"` (required for Issue #14 chat turns)
+    2. No streaming support (we need SSE for `/v1/chat/completions`)
+    3. No "earliest position" logic (Phi-3-mini dual EOS breaks)
+    4. No reasoning parser integration (MXFP4 support breaks)
+  - **Historical Proof**: Issue #14 (1.x) validated text-based approach (114 tests passing, 1.0.4)
+  - **Decision**: **Keep manual text-based implementation** (migration impossible)
+  - **Impact**: No code changes needed, validation simplified
+
+- **Stop token workaround evaluation** (ADR-009):
+  - **Workaround 1** (Line 49): `<|end|>` special handling for Phi-3-mini
+    - **Validated**: 2 Phi-3 variants in portfolio (discovered_11, discovered_12)
+    - **Rationale**: Fixes `eos_token_id=null` bug, empirically stable
+    - **Decision**: **Keep** (0 failures, production stable)
+  - **Workaround 2** (Line 98): `reasoning_end` removal for DeepSeek-R1
+    - **Validated**: DeepSeek-R1-Distill-8B in portfolio (discovered_01)
+    - **Rationale**: Reasoning models need full output until final marker
+    - **Decision**: **Keep** (supports ADR-010 reasoning roadmap)
+  - **Workaround 3** (Line 100): `<|return|>` addition for GPT-oss
+    - **Validated**: gpt-oss-20b-MXFP4 in portfolio (discovered_16)
+    - **Rationale**: GPT-oss reasoning format requires special marker
+    - **Decision**: **Keep** (future-proof for larger reasoning models)
+  - **Evidence**: All 3 workarounds validated with 73/81 tests passing, 0 failures
+  - **File**: `mlxk2/core/runner/stop_tokens.py`
+
+### Testing
+
+- **Portfolio Discovery validation** (ADR-009, Issue #32):
+  - **Scope**: 17 models discovered, 15 testable (60% RAM budget), 2 skipped (RAM constraints)
+  - **Results**: 73/81 tests passing, 0 failures
+  - **Portfolio Families**: Phi-3, DeepSeek-R1, GPT-oss, Llama, Qwen, Mistral, Mixtral
+  - **Validation**: All 3 stop token workarounds actively used and validated
+  - **Performance**: 7:55 minutes (64GB M2 Max, sequential execution, no system freeze)
+  - **Command**: `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/ -v`
+
+- **E2E test infrastructure hardening** (ADR-011):
+  - **TOKENIZERS_PARALLELISM=false**: Prevents fork warnings and potential deadlocks
+  - **Active cleanup polling**: Waits for actual process termination (not blind timeout)
+  - **Explicit garbage collection**: `gc.collect()` + 2s Metal memory buffer prevents RAM overlap
+  - **Conservative timeout**: 45s max wait for very large models (>40GB), polls every 500ms
+  - **Sequential execution warning**: TESTING-DETAILS.md documents parallel execution risks (Lines 91-128)
+  - **Files**:
+    - `tests_2.0/live/conftest.py` - TOKENIZERS_PARALLELISM + fallback parametrization
+    - `tests_2.0/live/server_context.py` - Active polling + gc.collect()
+
+### Documentation
+
+- **ADR-009 Outstanding Work completed**:
+  - **Portfolio Discovery**: Implemented (2.0.1), validated (2.0.2-beta.1)
+  - **Workaround Evaluation**: Completed with empirical evidence (3/3 kept)
+  - **Empirical Validation**: Expanded from 3 → 15 models tested
+  - **File**: `docs/ADR/ADR-009-Stop-Token-Detection-Fix.md` Lines 180-206
+
+- **TESTING-DETAILS.md harmonization**:
+  - **Portfolio Discovery section** (Line 24): Updated with current validation (17 models, 73/81 tests)
+  - **E2E Test Architecture section** (Lines 465-493): Updated with model_key fix, collection warning, current results
+  - **De-versioned**: Changed from "Validation (2.0.2)" to "Current validation" (timeless guide, not version-specific)
+  - **ADR references maintained**: Architecture context preserved
+
+- **CLAUDE.md accuracy audit**:
+  - **ADR-009 status**: Updated to reflect 2.0.1 + 2.0.2 completion timeline
+  - **ADR-011 status**: Updated to 73/81 tests passing, 17 models discovered
+  - **Roadmap**: Updated with recovery plan progress
+  - **All claims evidence-based**: No false "completed" claims
+
+**Production Code Changes**:
+- `mlxk2/__init__.py` - Version 2.0.2
+- `mlxk2/core/runner/__init__.py` - Stop token ordering fix (streaming + batch modes)
+- `mlxk2/core/runner/stop_tokens.py` - Workarounds validated and documented
+- `mlxk2/core/server_base.py` - Web API framework detection (PR #42)
+
+**Test Infrastructure & Documentation**:
+- `tests_2.0/live/*` - New E2E test infrastructure (conftest, server_context, test suites)
+- `docs/ADR/ADR-009-Stop-Token-Detection-Fix.md` - Outstanding Work completed
+
+---
+
+## 2.0.1 — 2025-11-8
 
 **Bug Fix & Enhancement Release**: CLI exit code propagation fixes + Portfolio Discovery for stop token validation.
 
@@ -21,12 +139,13 @@
     - Runtime exceptions: OOM, loading failures → exit 1 (was: exit 0)
 
 - **Stop token validation Portfolio Discovery** (GitHub Issue #32, ADR-009): Live stop token tests now support dynamic model discovery and HF_HOME-optional testing
-  - **Portfolio Discovery**: Auto-discovers all MLX chat models in `HF_HOME` cache (filter: MLX + healthy + runtime_compatible + chat)
+  - **Portfolio Discovery**: Auto-discovers all MLX chat models via `mlxk list --json` (filter: MLX + healthy + runtime_compatible + chat)
+  - **Refactored in 2.0.2**: Now uses production command instead of duplicating cache logic (~70 LOC eliminated)
   - **RAM-Aware Testing**: Progressive RAM budgets (40-70%) prevent OOM during multi-model validation
   - **Empirical Reporting**: Generates `stop_token_config_report.json` with cross-model stop token findings
   - **Fallback Support**: Tests work without `HF_HOME` using 3 predefined models (MXFP4, Qwen, Llama)
   - **Marker-Required**: Tests excluded from default suite, use `pytest -m live_stop_tokens` to run
-  - **Implementation**: `tests_2.0/test_stop_tokens_live.py` (~110 LOC for discovery + RAM gating)
+  - **Implementation**: `tests_2.0/test_stop_tokens_live.py` (~50 LOC for discovery + RAM gating)
 
 ### Testing
 

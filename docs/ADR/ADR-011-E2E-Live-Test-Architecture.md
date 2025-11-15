@@ -1,9 +1,9 @@
 # ADR-011: E2E Live Test Architecture
 
-**Status:** Proposed (Planned for Post-Beta.6 / Stable 2.0)
-**Date:** 2025-10-21
+**Status:** ✅ IMPLEMENTED (2.0.1+)
+**Date:** 2025-10-21 (Updated: 2025-11-12)
 **Supersedes:** 1.1.1 `test_end_token_issue.py` comprehensive testing
-**Affects:** Test Suite (Stable 2.0)
+**Affects:** Test Suite (Stable 2.0.1+)
 **Related:** ADR-009 (Stop Token Detection - provides Portfolio Discovery infrastructure)
 
 ---
@@ -125,41 +125,125 @@ def test_run_command_portfolio():
 **Timeline:** Post-Beta.6, before Stable release
 
 **Tasks:**
-1. ⏳ **Implement ADR-009 Portfolio Discovery** (prerequisite for E2E tests)
+1. ✅ **Implement ADR-009 Portfolio Discovery** (prerequisite for E2E tests)
    - `discover_mlx_models_in_cache()` helper
    - RAM gating logic (`should_skip_model()`)
-2. ⏳ **Server E2E Tests** (`test_server_e2e.py`)
+2. ✅ **Server E2E Tests** (`test_server_e2e.py`)
    - HTTP API validation
    - SSE streaming format
-3. ⏳ **Streaming Parity Tests** (`test_streaming_parity.py`)
+3. ✅ **Streaming Parity Tests** (`test_streaming_parity.py`)
    - Issue #20 regression protection
-4. ⏳ **CLI Integration Tests** (`test_cli_e2e.py`)
+4. ✅ **CLI Integration Tests** (`test_cli_e2e.py`)
    - `mlxk run` validation
    - Exit codes, error messages
-5. ⏳ **Documentation Updates**
+5. ✅ **Documentation Updates**
    - TESTING.md: E2E test coverage section
 
 ---
 
-## Implementation Status (2025-10-21)
+## Implementation Status
 
-**Status: NOT STARTED**
+**Status: ✅ COMPLETED** (2025-11-13)
 
-All tasks above are pending. This ADR documents the **planned architecture** for E2E tests.
+E2E test suite implemented and validated with 17 real MLX chat models.
 
-**Current Reality:**
-- No E2E test suite exists (`tests_2.0/live/test_server_e2e.py` etc. not created)
-- Portfolio discovery not implemented (hard-coded 3 models in `test_stop_tokens_live.py:174`)
-- ADR-009 provides **test plan** for portfolio discovery, but implementation deferred
+### Current Results
 
-**Blocker:**
-- Requires Portfolio Discovery implementation (ADR-009 Step 1, currently incomplete)
+**Command:** `HF_HOME=/path/to/cache pytest -m live_e2e -v`
 
-**Next Steps:**
-1. Complete ADR-009 Portfolio Discovery (Beta.6 scope)
-2. Implement E2E test suite (Post-Beta.6, pre-Stable 2.0)
+- ✅ **72/80 tests passing** (Portfolio: 17 models discovered, 15 testable, 2 RAM-skipped, 8 total skipped)
+- ✅ Server E2E: 35 tests (health, models, chat completions, completions - batch + streaming)
+- ✅ CLI Integration: 30 tests (text + JSON output, exit codes, stop token filtering)
+- ✅ Streaming Parity: 6 tests (Issue #20 protection)
+- ✅ Exit Code Tests: 2 tests (Issue #38 validation)
+- ⏱️ Duration: ~6-7 minutes
 
-**Estimated Effort:** 2-3 sessions (reuses ADR-009 infrastructure)
+### Key Fixes Applied
+
+For detailed bug analysis and fixes, see CHANGELOG.md 2.0.2 section. Summary:
+
+1. **Stop token ordering bug** (production bug) - Both `generate_batch()` and `generate_streaming()` now filter by earliest position in text
+2. **Test temperature flakiness** (test fix) - E2E tests use `temperature=0.0` for deterministic results
+3. **Portfolio Discovery collection** (test fix) - Marker check before discovery (keeps default `pytest` fast)
+4. **SSE sentinel validation** (test fix) - Explicit `[DONE]` check prevents client hangs
+5. **CLI subprocess args** (test fix) - Positional argument instead of `--prompt` flag
+6. **MXFP4 reasoning parity** (documented) - Removed from parity tests (ADR-010 known issue)
+
+### Quality Infrastructure
+
+- **Verbose Mode:** `mlxk run --verbose` shows token generation details including multiple EOS token warnings
+- **Quality Database:** Known Model Quality Issues tracked in TESTING-DETAILS.md
+- **Philosophy:** No hidden workarounds - broken models fail tests and are documented
+- **Note:** Initial `MLXK2_DEBUG_TOKENS` E2E test support removed (caused false positives matching metadata)
+
+---
+
+## Implementation Status (2025-11-12)
+
+**Status: ✅ COMPLETED - E2E Test Suite Refactored & Validated**
+
+E2E test suite successfully refactored with production-grade architecture. Validated with 17 real MLX models (15 passed, 2 skipped).
+
+### Refactoring Summary
+
+**1. Portfolio Discovery Refactored** (~70 LOC eliminated)
+- **Before:** Duplicated `mlxk list` logic (cache scanning, build_model_object, filtering)
+- **After:** Uses `mlxk list --json` via subprocess (production command)
+- **Location:** `tests_2.0/test_stop_tokens_live.py` Lines 167-234
+- **Benefit:** Tests use production code, automatically benefit from fixes
+
+**2. Test Architecture Fixed** (5 files refactored)
+- **Before:** `for model in portfolio:` loops → Server RAM leaks → System freeze
+- **After:** `@pytest.mark.parametrize` → One server per test → Clean lifecycle
+- **Files Modified:**
+  - `tests_2.0/live/server_context.py` - Timeout 5s→30s
+  - `tests_2.0/live/conftest.py` - pytest_generate_tests hook + model_info fixture
+  - `tests_2.0/live/test_server_e2e.py` - 2 tests parametrized
+  - `tests_2.0/live/test_streaming_parity.py` - 2 tests parametrized
+  - `tests_2.0/live/test_cli_e2e.py` - 2 tests parametrized
+
+**3. Marker-Required Fixture Added**
+- **File:** `tests_2.0/live/conftest.py` - Autouse fixture `_skip_unless_live_e2e_marker`
+- **Effect:** E2E tests skipped in default `pytest -v` run (marker-required 🔒)
+- **Test counts:** 306 passed, 46 skipped (26 E2E tests auto-skipped)
+
+### Validation Results
+
+**Test Execution:** `TestChatCompletionsBatch` with 17 discovered MLX models
+- ✅ **15 passed, 2 skipped** in 82.75s
+- ✅ No system freeze, clean RAM cleanup
+- ✅ Models tested: Qwen2.5 0.5B, Llama 3.2 3B, Mistral 7B, Mixtral 8x7B, etc.
+
+### Performance Comparison
+
+| Metric | OLD (Broken) | NEW (Fixed) |
+|--------|--------------|-------------|
+| Architecture | Loop-based | Parametrized |
+| Server timeout | 5s → SIGKILL | 30s → clean |
+| Test isolation | RAM leaks | Clean per test |
+| Discovery | 70 LOC duplicated | `mlxk list --json` |
+| Test success | 6/14 → freeze | **15/17 → success** |
+| Code reduction | — | ~500 LOC removed |
+
+### Infrastructure Delivered
+
+- ✅ `tests_2.0/live/server_context.py` - LocalServer with 30s timeout
+- ✅ `tests_2.0/live/sse_parser.py` - SSE parser utilities
+- ✅ `tests_2.0/live/conftest.py` - pytest_generate_tests + marker-required fixture
+- ✅ `tests_2.0/live/test_utils.py` - Utility functions
+- ✅ `tests_2.0/live/test_server_e2e.py` - Server E2E (parametrized)
+- ✅ `tests_2.0/live/test_streaming_parity.py` - Streaming parity (parametrized)
+- ✅ `tests_2.0/live/test_cli_e2e.py` - CLI integration (parametrized)
+- ✅ Marker: `live_e2e` added to pytest.ini
+- ✅ Documentation: TESTING-DETAILS.md updated
+
+### Reused Infrastructure
+
+- ✅ Portfolio Discovery from ADR-009 (refactored to `mlxk list --json`)
+- ✅ RAM gating logic
+- ✅ MLX modules fixture
+
+**Total Effort:** ~4 hours (refactoring + debugging + validation)
 
 ---
 
@@ -170,9 +254,13 @@ All tasks above are pending. This ADR documents the **planned architecture** for
 tests_2.0/
 ├── test_stop_tokens_live.py       # ADR-009: Runner stop tokens + portfolio
 ├── live/
-│   ├── test_server_e2e.py         # ADR-011: Server/HTTP
-│   ├── test_streaming_parity.py   # ADR-011: Issue #20
-│   └── test_cli_e2e.py            # ADR-011: CLI
+│   ├── conftest.py                # Shared fixtures + pytest_generate_tests
+│   ├── server_context.py          # LocalServer context manager (30s timeout)
+│   ├── sse_parser.py              # SSE parsing utilities
+│   ├── test_utils.py              # Utility functions
+│   ├── test_server_e2e.py         # ADR-011: Server/HTTP (parametrized)
+│   ├── test_streaming_parity.py   # ADR-011: Issue #20 (parametrized)
+│   └── test_cli_e2e.py            # ADR-011: CLI (parametrized)
 ```
 
 **Markers:**
@@ -201,8 +289,9 @@ pytest                      # Unit tests (skips all live)
 - ✅ Reusable infrastructure from ADR-009
 
 ### Negative
-- ⚠️ Portfolio tests may take 10-30 minutes (10-50 models)
+- ⚠️ Portfolio tests take ~80s for 17 models (marker-required to avoid slowing default suite)
 - ⚠️ Maintenance overhead if Server API changes
+- ⚠️ Requires 30s timeout per test (longer than typical unit tests)
 
 ### Trade-offs
 
@@ -246,4 +335,8 @@ pytest                      # Unit tests (skips all live)
 pytest -m live_e2e -v  # All tests pass or skip gracefully
 ```
 
-No failures - only passes or skips (RAM/availability).
+**✅ ACHIEVED (2025-11-12):**
+- 15/17 models tested successfully (2 skipped due to RAM)
+- No test failures, only passes and graceful skips
+- System stability validated (no freeze, clean RAM cleanup)
+- Production-grade architecture (parametrized tests, 30s timeout)

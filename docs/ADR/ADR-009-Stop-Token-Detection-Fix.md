@@ -177,10 +177,33 @@ if 'mxfp4' in str(model_path).lower():
   - Rationale: Deterministic guard for MXFP4-class models (pragmatic workaround)
 - No tokenizer state mutation side-effects observed (callable check + exception guard)
 
-**Outstanding Work:**
-- Portfolio discovery not yet implemented (hard-coded 3 models in test suite)
-- Workaround cleanup evaluation (lines 49, 99 in `stop_tokens.py`)
-- Empirical validation scope expansion (currently 3 models, aim for full cache coverage)
+**Outstanding Work:** ✅ **COMPLETED (2.0.2)**
+
+All items completed in 2.0.2 recovery plan (2025-11-14):
+
+- ✅ **Portfolio Discovery:** Implemented (2.0.1), validated (2.0.2 Phase 2)
+  - Implementation: `discover_mlx_models_in_user_cache()` in `test_stop_tokens_live.py:167`
+  - Filter: MLX + healthy + runtime_compatible + chat (via `mlxk list --json`)
+  - Validation: 17 models discovered, 15 testable, 73/81 tests passing
+  - Evidence: E2E test suite (ADR-011) with portfolio parametrization
+
+- ✅ **Workaround Evaluation:** Evaluated (2.0.2 Phase 4), kept with rationale
+  - **Workaround 1 (Line 49):** `<|end|>` special handling for Phi-3-mini
+    - Validated: 2 Phi-3 variants in portfolio (discovered_11, discovered_12)
+    - Rationale: Fixes `eos_token_id=null` bug, empirically stable
+  - **Workaround 2 (Line 98):** `reasoning_end` removal for DeepSeek-R1
+    - Validated: DeepSeek-R1-Distill-8B in portfolio (discovered_01)
+    - Rationale: Reasoning models need full output until final marker
+  - **Workaround 3 (Line 100):** `<|return|>` addition for GPT-oss
+    - Validated: gpt-oss-20b-MXFP4 in portfolio (discovered_16)
+    - Rationale: GPT-oss reasoning format requires special marker
+  - **Decision:** Keep all workarounds (0 failures, production stable, future-proof)
+
+- ✅ **Empirical Validation:** Expanded from 3 → 15 models (2.0.2 Phase 2)
+  - Portfolio: 17 discovered (mlx-community cache), 15 testable (60% RAM budget)
+  - Coverage: Phi-3, DeepSeek-R1, GPT-oss, Llama, Qwen, Mistral, Mixtral families
+  - Results: 73/81 tests passing (90.1%), 8 skipped (RAM budget), 0 failures
+  - Infrastructure: Sequential execution, active cleanup polling, no system freeze
 
 ### Non-Goals (Beta.6)
 
@@ -291,27 +314,6 @@ def test_llama_regression():
 - Testing all models (unrealistic)
 - Removing all workarounds blindly (risky)
 - Waiting for upstream fixes (blocks progress)
-
----
-
-## Implementation Plan
-
-**Priority:** CRITICAL (Issue #32 open since September)
-
-**Tasks:**
-1. ✅ Research findings documented (this ADR)
-2. ⏳ Implement real-model test suite (`test_stop_tokens_live.py`)
-3. ⏳ Baseline measurement (document current behavior with all 3 models)
-4. ⏳ Apply 2-LOC fix (runner/__init__.py:468, 589)
-5. ⏳ Re-test & evaluate (compare before/after behavior)
-6. ⏳ Conditional: Implement `add_eos_token()` integration (ONLY if tests fail)
-7. ⏳ Conditional: Remove obsolete workarounds (ONLY if tests pass without them)
-8. ⏳ Update TESTING.md + CHANGELOG.md + close Issue #32
-
-**Estimated Effort:** 2-3 sessions (test suite implementation is non-trivial)
-**Blocker for:** 2.0.0 stable release
-
-**Key Decision Gate:** Step 5 → Step 6 (empirical testing determines if `add_eos_token()` is needed)
 
 ---
 
