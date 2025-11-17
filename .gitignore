@@ -19,9 +19,12 @@ CLAUDE.md
 TODO_REAL_TESTS.md
 server.log
 install_*.log
-.claude/
 openwebui311/bin/
 .gitignore
 
 # Test artifacts (generated reports)
 *_report.json
+
+# Benchmark reports (ADR-013 Phase 0)
+# These reports ARE tracked in git for historical data
+!benchmarks/reports/*.jsonl

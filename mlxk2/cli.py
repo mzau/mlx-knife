@@ -31,6 +31,34 @@ def format_json_output(data: Dict[str, Any]) -> str:
     return json.dumps(data, indent=2)
 
 
+def print_result(result: Dict[str, Any], render_func=None, json_mode=False, **render_kwargs):
+    """Print command result to stdout (JSON, success) or stderr (human errors).
+
+    Args:
+        result: Command result dict with 'status' field
+        render_func: Human-mode rendering function (if json_mode=False)
+        json_mode: If True, output JSON format (always to stdout)
+        **render_kwargs: Additional arguments for render_func
+    """
+    is_error = result.get("status") == "error"
+
+    if json_mode:
+        # JSON mode: Always stdout (for scripting/jq)
+        print(format_json_output(result), file=sys.stdout)
+    elif is_error:
+        # Human-mode error: stderr (for pipes)
+        error_info = result.get("error", {})
+        message = error_info.get("message", "Unknown error")
+        command = result.get("command", "command")
+        print(f"{command}: Error: {message}", file=sys.stderr)
+    elif render_func:
+        # Human-mode success: stdout
+        print(render_func(result, **render_kwargs), file=sys.stdout)
+    else:
+        # Fallback: print JSON to stdout
+        print(format_json_output(result), file=sys.stdout)
+
+
 def handle_error(error_type: str, message: str) -> Dict[str, Any]:
     """Format error as JSON response."""
     return {
@@ -55,7 +83,7 @@ class MLXKArgumentParser(argparse.ArgumentParser):
         want_json = "--json" in sys.argv
         if want_json:
             err = handle_error("CommandError", message)
-            print(format_json_output(err))
+            print(format_json_output(err), file=sys.stdout)
             self.exit(2)
         super().error(message)
 
@@ -125,11 +153,9 @@ def main():
     run_parser.add_argument("--repetition-penalty", type=float, default=1.1, help="Repetition penalty (default: 1.1)")
     run_parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
     run_parser.add_argument("--no-chat-template", action="store_true", help="Disable chat template")
+    run_parser.add_argument("--no-reasoning", action="store_true", help="Hide reasoning output for reasoning models (show only final answer)")
     run_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
     run_parser.add_argument("--json", action="store_true", help="Output in JSON format")
-    # Future features (beta.2)
-    run_parser.add_argument("--system", help="System prompt (future feature)")
-    run_parser.add_argument("--hide-reasoning", action="store_true", help="Hide reasoning output (future feature)")
 
     # Serve command (primary, ollama-compatible)
     serve_parser = subparsers.add_parser("serve", help="Start OpenAI-compatible API server")
@@ -199,36 +225,25 @@ def main():
         # Execute command and render per mode
         if args.command == "list":
             result = list_models(pattern=args.pattern)
-            if args.json:
-                print(format_json_output(result))
-            else:
-                show_health = getattr(args, "show_health", False)
-                show_all = getattr(args, "show_all", False)
-                verbose = getattr(args, "verbose", False)
-                print(render_list(result, show_health=show_health, show_all=show_all, verbose=verbose))
+            show_health = getattr(args, "show_health", False)
+            show_all = getattr(args, "show_all", False)
+            verbose = getattr(args, "verbose", False)
+            print_result(result, render_list, args.json,
+                        show_health=show_health, show_all=show_all, verbose=verbose)
         elif args.command == "health":
             result = health_check_operation(args.model)
-            if args.json:
-                print(format_json_output(result))
-            else:
-                print(render_health(result))
+            print_result(result, render_health, args.json)
         elif args.command == "show":
             result = show_model_operation(args.model, args.files, args.config)
-            if args.json:
-                print(format_json_output(result))
-            else:
-                print(render_show(result))
+            print_result(result, render_show, args.json)
         elif args.command == "pull":
             result = pull_operation(args.model)
-            if args.json:
-                print(format_json_output(result))
-            else:
-                print(render_pull(result))
+            print_result(result, render_pull, args.json)
         elif args.command == "clone":
             # Check if alpha features are enabled (should not reach here if not, but double-check)
             if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
                 result = handle_error("CommandError", "Clone command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
-                print(format_json_output(result))
+                print_result(result, None, True)  # Always JSON for this error
                 sys.exit(1)
 
             # Handle branch parameter by modifying model spec
@@ -243,16 +258,11 @@ def main():
                 target_dir=args.target_dir,
                 health_check=not getattr(args, "no_health_check", False)
             )
-            if args.json:
-                print(format_json_output(result))
-            else:
-                print(render_clone(result, quiet=getattr(args, "quiet", False)))
+            print_result(result, render_clone, args.json,
+                        quiet=getattr(args, "quiet", False))
         elif args.command == "rm":
             result = rm_operation(args.model, args.force)
-            if args.json:
-                print(format_json_output(result))
-            else:
-                print(render_rm(result))
+            print_result(result, render_rm, args.json)
         elif args.command == "run":
             # Handle run command with proper parameter mapping
             result_text = run_model_enhanced(
@@ -266,8 +276,8 @@ def main():
                 use_chat_template=not getattr(args, "no_chat_template", False),
                 json_output=args.json,
                 verbose=getattr(args, "verbose", False),
-                system_prompt=getattr(args, "system", None),
-                hide_reasoning=getattr(args, "hide_reasoning", False)
+                system_prompt=None,  # Not yet implemented
+                hide_reasoning=getattr(args, "no_reasoning", False)
             )
 
             # Detect errors from run_model_enhanced (returns "Error: ..." string on failure)
@@ -283,8 +293,9 @@ def main():
                         "message": error_message
                     }
                 }
+                # Note: run_model() already printed error to stderr in text mode
                 if args.json:
-                    print(format_json_output(result))
+                    print_result(result, None, True)
                 # Exit code will be 1 (handled by line 369)
             elif args.json and result_text is not None and args.prompt is not None:
                 # Success case: wrap result in standard format (only for single-shot mode)
@@ -343,7 +354,7 @@ def main():
             # Check if alpha features are enabled (should not reach here if not, but double-check)
             if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
                 result = handle_error("CommandError", "Push command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
-                print(format_json_output(result))
+                print_result(result, None, True)  # Always JSON for this error
                 sys.exit(1)
             result = push_operation(
                 local_dir=args.local_dir,
@@ -357,16 +368,14 @@ def main():
                 # Quiet mode: when emitting JSON without --verbose, suppress hub progress/log noise
                 quiet=(getattr(args, "json", False) and not getattr(args, "verbose", False)),
             )
-            if args.json:
-                print(format_json_output(result))
-            else:
-                from .output.human import render_push
-                print(render_push(result, verbose=getattr(args, "verbose", False)))
+            from .output.human import render_push
+            print_result(result, render_push, args.json,
+                        verbose=getattr(args, "verbose", False))
         elif args.command is None:
             # No command specified - show help or JSON error depending on --json flag
             if args.json:
                 result = handle_error("CommandError", "No command specified")
-                print(format_json_output(result))
+                print(format_json_output(result), file=sys.stdout)
                 sys.exit(1)
             else:
                 parser.print_help()
@@ -375,7 +384,7 @@ def main():
             # Unknown command - show help or JSON error depending on --json flag
             if args.json:
                 result = handle_error("CommandError", f"Unknown command: {args.command}")
-                print(format_json_output(result))
+                print(format_json_output(result), file=sys.stdout)
                 sys.exit(1)
             else:
                 parser.print_help()
@@ -385,8 +394,14 @@ def main():
         sys.exit(0 if result.get("status") == "success" else 1)
             
     except Exception as e:
-        error_result = handle_error("InternalError", str(e))
-        print(format_json_output(error_result))
+        # Check if --json flag was requested
+        want_json = "--json" in sys.argv
+        if want_json:
+            error_result = handle_error("InternalError", str(e))
+            print(format_json_output(error_result), file=sys.stdout)
+        else:
+            # Human-mode error
+            print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

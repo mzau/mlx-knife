@@ -104,11 +104,12 @@ def extract_stop_tokens(tokenizer: Any, verbose: bool = False) -> StopTokenInfo:
                 # Keep any print semantics consistent with previous behavior
                 pass
 
+    # Chat stop tokens to prevent self-conversations in server mode
+    # Only use full-form tokens to avoid false positives in code/markdown
+    # (Short forms like '\nH:' can match code comments, labels, Q&A format)
     chat_stop_tokens = [
         '\nHuman:', '\nAssistant:', '\nYou:',
         '\n\nHuman:', '\n\nAssistant:', '\n\nYou:',
-        '\nH:', '\nA:', '\nY:',
-        '\n\nH:', '\n\nA:', '\n\nY:',
     ]
 
     # Remove None values and normalize to list[str]

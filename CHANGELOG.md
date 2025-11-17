@@ -1,5 +1,102 @@
 # Changelog
 
+## [2.0.3] - 2025-11-17
+
+**Stable Release**: Benchmark infrastructure + Unix stderr fix + reasoning control + dependency hardening.
+
+### Features
+
+- **Benchmark Reporting Infrastructure**:
+  - `--report-output` flag in E2E tests: Writes JSONL benchmark reports with model metadata
+  - `report_benchmark()` fixture: Easy model metadata reporting (family, variant, size_gb, stop_tokens, skip_reason)
+  - Model family detection: `_parse_model_family()` helper extracts family/variant from model IDs
+  - Schema validation: `benchmarks/schemas/report-v0.1.schema.json` + validation script
+  - **Validated**: 17 models with full metadata (Phi-3, Qwen, Llama, Mistral, DeepSeek, etc.)
+  - **Files**: `tests_2.0/live/conftest.py`, `test_cli_e2e.py`, `test_server_e2e.py`
+  - **Documentation**: `benchmarks/README.md`, `benchmarks/TESTING.md`, `benchmarks/schemas/MIGRATIONS.md`
+
+- **Reasoning Model Control** (`--no-reasoning` flag):
+  - CLI toggle to hide reasoning output (Issue #40 Option 1 - partial implementation)
+  - Works in both streaming and batch modes (single-shot + interactive)
+  - Default: Show reasoning (backward compatible)
+  - **Limitations**: Only works with models that auto-generate reasoning tags (GPT-OSS, QwQ-32B via chat templates)
+  - **Not supported**: DeepSeek-R1, Qwen3, and most other reasoning models (require system prompts from Issue #33)
+  - **Issue #40 remains open**: Requires structured API (Option 2) and depends on #33 (System Prompts) for broad model support
+  - **Technical fix**: `review_report.md` - Flag now correctly propagates through `interactive_chat()` in both streaming and batch modes
+  - **Files**: `mlxk2/cli.py`, `mlxk2/operations/run.py`, `mlxk2/core/runner/__init__.py`, `mlxk2/core/runner/reasoning_format.py`
+
+### BREAKING CHANGES
+
+**Error Output to stderr (Human Mode Only)**
+
+Errors are now printed to stderr instead of stdout in human mode. This follows Unix conventions and enables clean pipe workflows. JSON mode remains unchanged (all output to stdout) for scripting/automation use cases.
+
+**What changed:**
+- **Human mode**: Errors → stderr (was stdout)
+- **JSON mode**: Unchanged - all output to stdout (errors + success, for scripting)
+- Exit codes: Unchanged (0=success, 1=error)
+- **Affected commands**: list, health, show, pull, rm, clone, push, run (all commands)
+
+**Migration:**
+
+```bash
+# Human mode: Capture both stdout and stderr if needed
+OUTPUT=$(mlxk list 2>&1)
+
+# Recommended: Separate success and error streams (human mode)
+if mlxk pull model > output.txt 2> error.log; then
+    echo "Success: $(cat output.txt)"
+else
+    echo "Error: $(cat error.log)"
+fi
+
+# JSON mode: No change needed (all output still on stdout)
+OUTPUT=$(mlxk show model --json)
+echo "$OUTPUT" | jq .status  # Works as before
+```
+
+**Not affected:**
+- Interactive terminal users (stderr visible)
+- JSON mode users (all output on stdout)
+- Exit code checks
+- Pipe workflows (actually **fixed** in human mode)
+
+### Bug Fixes
+
+- **stdout/stderr separation** (Issue #43): Errors now correctly go to stderr (human mode only)
+  - **Central implementation**: `print_result()` helper in `cli.py` for consistent error handling
+  - **Run command**: 5 error print statements changed to `file=sys.stderr` in `operations/run.py:57, 88, 102, 132, 229`
+  - **All other commands**: Unified via `print_result()` (list, health, show, pull, rm, clone, push)
+  - **Human mode errors**: Generic format `command: Error: message` (stderr, consistent across all commands)
+  - **JSON mode errors**: Structured JSON on stdout (unchanged, for scripting/jq workflows)
+  - **Rationale**: JSON is for automation/scripting (not piping), human mode is for interactive + pipes
+  - **Test updates**: 2 interactive mode tests updated to check stderr
+    - `tests_2.0/test_interactive_mode.py`: 2 assertions (template fallback, generation error recovery)
+
+- **huggingface-hub 1.x incompatibility** (Critical dependency fix):
+  - **Problem**: `huggingface-hub>=0.34.0` allowed upgrades to 1.x, breaking `transformers` compatibility
+  - **Impact**: All models showed `healthy*` (integrity OK, but runtime failed)
+  - **Fix**: Pin `huggingface-hub>=0.34.0,<1.0` in dependencies
+  - **File**: `pyproject.toml:30`
+
+### Testing Improvements
+
+- **Streaming parity tests refactored to use portfolio discovery**:
+  - **Problem**: Tests had hardcoded model IDs (e.g., `Llama-3.2-3B-Instruct-4bit`) that may not exist in user's cache
+  - **Impact**: Tests failed with cryptic "mock path" errors when models not downloaded
+  - **Fix**: Tests now use portfolio discovery (`mlxk list --json`) to select 2-3 available small models (<6GB)
+  - **Selection strategy**: Smallest models first, exclude reasoning models (known batch/stream inconsistency, fixed in ADR-010)
+  - **Result**: Tests automatically adapt to available models, no more hardcoded dependencies
+  - **File**: `tests_2.0/live/test_streaming_parity.py`
+  - **Custom hook**: `pytest_generate_tests()` parametrizes tests over discovered models at collection time
+
+### Known Issues
+
+- **Large model downloads (>30 GB) can fail overnight**: Connection resets during multi-hour downloads
+- **External SSD I/O deadlocks with parallel downloads**: `huggingface-cli` default `max_workers=8` causes stalls at 99%. Workaround: `--max-workers 1`
+
+---
+
 ## [2.0.2] - 2025-11-15
 
 **Stable Release**: Test infrastructure hardening, stop token validation with 17 models, and web API improvements.

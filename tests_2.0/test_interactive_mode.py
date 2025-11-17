@@ -251,17 +251,18 @@ class TestChatTemplateIntegration:
         """Test behavior when chat template formatting fails"""
         def failing_format(messages):
             raise Exception("Template error")
-        
+
         mock_runner_interactive._format_conversation.side_effect = failing_format
-        
+
         with patch('builtins.input', side_effect=["test", "quit"]):
-            with patch('sys.stdout', new=StringIO()) as fake_out:
+            with patch('sys.stdout', new=StringIO()) as fake_out, \
+                 patch('sys.stderr', new=StringIO()) as fake_err:
                 # Should handle template errors gracefully
                 interactive_chat(mock_runner_interactive)
-        
-        output = fake_out.getvalue()
-        # Should show error but not crash
-        assert "ERROR" in output
+
+        stderr_output = fake_err.getvalue()
+        # Error should be on stderr
+        assert "ERROR" in stderr_output
 
 
 class TestInteractiveParameters:
@@ -277,7 +278,8 @@ class TestInteractiveParameters:
                     max_tokens=100,
                     temperature=0.8,
                     top_p=0.95,
-                    repetition_penalty=1.2
+                    repetition_penalty=1.2,
+                    hide_reasoning=True,
                 )
         
         call_args = mock_runner_interactive.generate_streaming.call_args[1]
@@ -285,6 +287,7 @@ class TestInteractiveParameters:
         assert call_args['temperature'] == 0.8
         assert call_args['top_p'] == 0.95
         assert call_args['repetition_penalty'] == 1.2
+        assert call_args['hide_reasoning'] is True
     
     def test_parameter_passing_batch(self, mock_runner_interactive):
         """Test that parameters are passed to batch generation"""
@@ -296,7 +299,8 @@ class TestInteractiveParameters:
                     max_tokens=200,
                     temperature=0.9,
                     top_p=0.85,
-                    repetition_penalty=1.3
+                    repetition_penalty=1.3,
+                    hide_reasoning=True,
                 )
         
         call_args = mock_runner_interactive.generate_batch.call_args[1]
@@ -304,6 +308,7 @@ class TestInteractiveParameters:
         assert call_args['temperature'] == 0.9
         assert call_args['top_p'] == 0.85
         assert call_args['repetition_penalty'] == 1.3
+        assert call_args['hide_reasoning'] is True
     
     def test_use_chat_template_disabled(self, mock_runner_interactive):
         """Test that use_chat_template is disabled in generation calls"""
@@ -330,15 +335,18 @@ class TestInteractiveErrorHandling:
             RuntimeError("Generation failed"),
             iter(["Success"])
         ]
-        
+
         with patch('builtins.input', side_effect=["first", "second", "quit"]):
-            with patch('sys.stdout', new=StringIO()) as fake_out:
+            with patch('sys.stdout', new=StringIO()) as fake_out, \
+                 patch('sys.stderr', new=StringIO()) as fake_err:
                 interactive_chat(mock_runner_interactive, stream=True)
-        
-        output = fake_out.getvalue()
-        # Should show error for first, success for second
-        assert "ERROR" in output
-        assert "Success" in output
+
+        stdout_output = fake_out.getvalue()
+        stderr_output = fake_err.getvalue()
+        # Error should be on stderr
+        assert "ERROR" in stderr_output
+        # Success should be on stdout
+        assert "Success" in stdout_output
     
     def test_keyboard_interrupt_handling(self, mock_runner_interactive):
         """Test Ctrl-C handling in interactive mode"""

@@ -142,7 +142,8 @@ We provide security updates for these versions:
 
 | Version | Security Support   |
 | ------- | ------------------ |
-| 2.0.2   | :white_check_mark: Current stable |
+| 2.0.3   | :white_check_mark: Current stable |
+| 2.0.2   | :white_check_mark: Supported |
 | 2.0.1   | :white_check_mark: Supported |
 | 2.0.0   | :white_check_mark: Supported |
 | < 2.0.0 | :x: Upgrade recommended |

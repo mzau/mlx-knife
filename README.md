@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Stable Version: 2.0.2**
+**Current Stable Version: 2.0.3**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.2-green.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.3-green.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -46,7 +46,7 @@ MLX Knife has been comprehensively tested and verified on:
 pip install mlx-knife
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.2
+mlxk --version  # → mlxk 2.0.3
 ```
 
 ### Development Installation
@@ -60,7 +60,7 @@ cd mlx-knife
 pip install -e ".[dev,test]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.2
+mlxk --version  # → mlxk 2.0.3
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -281,6 +281,12 @@ done
 ## Human Output
 
 MLX Knife provides rich human-readable output by default (without `--json` flag).
+
+**Error Handling (2.0.3+):** Errors print to stderr for clean pipe workflows:
+```bash
+mlxk show badmodel | grep ...      # Errors don't contaminate stdout
+mlxk pull badmodel > log 2> err    # Capture errors separately
+```
 
 ### Basic Usage
 
@@ -574,6 +580,6 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.2 | November 2025</i><br>
+  <i>Version 2.0.3 | November 2025</i><br>
   <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
 </p>

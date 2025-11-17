@@ -9,10 +9,19 @@ def format_reasoning_response(
     reasoning_start: Optional[str],
     reasoning_end: Optional[str],
     final_start: Optional[str],
+    hide_reasoning: bool = False,
 ) -> str:
     """Format response for reasoning-style models.
 
     Mirrors MLXRunner._format_reasoning_response behavior without changing semantics.
+
+    Args:
+        response: Raw model output
+        is_reasoning_model: Whether this is a reasoning model
+        reasoning_start: Marker for reasoning section start
+        reasoning_end: Marker for reasoning section end
+        final_start: Marker for final answer section
+        hide_reasoning: If True, only return final answer (skip reasoning section)
     """
     if not is_reasoning_model:
         return response
@@ -26,6 +35,12 @@ def format_reasoning_response(
                     final_parts = after_reasoning.split(final_start, 1)
                     if len(final_parts) > 1:
                         final_answer = final_parts[1].replace('<|channel|>final<|message|>', '', 1)
+
+                        # If hiding reasoning, return only final answer
+                        if hide_reasoning:
+                            return final_answer.strip()
+
+                        # Otherwise, format with reasoning section
                         formatted = []
                         formatted.append("\n**[Reasoning]**\n")
                         formatted.append(reasoning_content.strip())

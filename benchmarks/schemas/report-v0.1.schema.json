@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MLX Knife Test Report (Phase 0 - Organic)",
+  "description": "Minimal schema for E2E test reports. Designed to evolve organically based on collected data.",
+  "type": "object",
+  "required": ["schema_version", "timestamp", "mlx_knife_version", "test", "outcome"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Schema version (SemVer). Allows evolution tracking and backward compatibility."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of test execution (UTC recommended)"
+    },
+    "mlx_knife_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "mlx-knife version that generated this report (SemVer, e.g., '2.0.3')"
+    },
+    "test": {
+      "type": "string",
+      "description": "Test identifier (pytest nodeid format: path::test_name[params])"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["passed", "failed", "skipped"],
+      "description": "Test execution result"
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Test duration in seconds"
+    },
+    "model": {
+      "type": "object",
+      "description": "Model under test (if applicable). Optional in Phase 0.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "HuggingFace model ID (org/name format)"
+        },
+        "size_gb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Model size in gigabytes (disk)"
+        },
+        "family": {
+          "type": "string",
+          "description": "Model family (e.g., 'phi-3', 'llama', 'qwen')"
+        },
+        "variant": {
+          "type": "string",
+          "description": "Model variant (e.g., '4k-instruct', 'chat', 'base')"
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "description": "Performance metrics. Optional, evolves based on collected data.",
+      "properties": {
+        "tokens_per_sec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Generation speed (tokens/second)"
+        },
+        "ram_peak_mb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Peak RAM usage in megabytes"
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total inference duration in seconds"
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of prompt tokens"
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of generated tokens"
+        }
+      }
+    },
+    "stop_tokens": {
+      "type": "object",
+      "description": "Stop token behavior (ADR-009 validation data). Tracks configured vs. detected tokens.",
+      "properties": {
+        "configured": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Stop tokens configured for the model"
+        },
+        "detected": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Stop tokens actually found in response"
+        },
+        "workaround": {
+          "type": "string",
+          "description": "Workaround identifier (e.g., 'phi-3-dual-eos', 'none')"
+        },
+        "leaked": {
+          "type": "boolean",
+          "description": "Whether stop tokens leaked into output (bug indicator)"
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "description": "System information. Optional in Phase 0.",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "OS platform (e.g., 'darwin', 'linux')"
+        },
+        "platform_version": {
+          "type": "string",
+          "description": "OS version (e.g., 'macOS 14.6', 'Ubuntu 22.04')"
+        },
+        "python_version": {
+          "type": "string",
+          "description": "Python version (e.g., '3.11.5')"
+        },
+        "mlx_version": {
+          "type": "string",
+          "description": "MLX framework version"
+        },
+        "hardware": {
+          "type": "string",
+          "description": "Hardware identifier (e.g., 'M2 Max', 'M1')"
+        },
+        "ram_total_gb": {
+          "type": "number",
+          "description": "Total system RAM in GB"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Extensible metadata for experimentation. No schema constraints in Phase 0.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
