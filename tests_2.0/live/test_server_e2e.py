@@ -118,7 +118,7 @@ class TestChatCompletionsBatch:
     """
 
     @pytest.mark.live_e2e
-    def test_chat_completions_batch(self, portfolio_models, model_key):
+    def test_chat_completions_batch(self, portfolio_models, model_key, report_benchmark):
         """Validate non-streaming chat completions.
 
         Parametrized test (one instance per model in portfolio).
@@ -182,6 +182,24 @@ class TestChatCompletionsBatch:
 
             print(f"✓ {model_key}: Passed (output: {len(content)} chars)")
 
+            # Benchmark reporting (ADR-013 Phase 0)
+            # Extract usage statistics if available
+            performance = {}
+            if "usage" in data:
+                usage = data["usage"]
+                performance["prompt_tokens"] = usage.get("prompt_tokens", 0)
+                performance["completion_tokens"] = usage.get("completion_tokens", 0)
+
+            report_benchmark(
+                performance=performance if performance else None,
+                stop_tokens={
+                    "configured": stop_tokens,
+                    "detected": found_tokens,
+                    "workaround": "none",
+                    "leaked": len(found_tokens) > 0
+                }
+            )
+
 
 class TestChatCompletionsStreaming:
     """SSE streaming chat completion tests across portfolio.
@@ -191,7 +209,7 @@ class TestChatCompletionsStreaming:
     """
 
     @pytest.mark.live_e2e
-    def test_chat_completions_streaming(self, portfolio_models, model_key):
+    def test_chat_completions_streaming(self, portfolio_models, model_key, report_benchmark):
         """Validate SSE streaming chat completions.
 
         Parametrized test (one instance per model in portfolio).
@@ -263,6 +281,14 @@ class TestChatCompletionsStreaming:
             )
 
             print(f"✓ {model_key}: Passed (streamed: {len(content)} chars)")
+
+            # Benchmark reporting (ADR-013 Phase 0)
+            report_benchmark(stop_tokens={
+                "configured": stop_tokens,
+                "detected": found_tokens,
+                "workaround": "none",
+                "leaked": len(found_tokens) > 0
+            })
 
 
 class TestCompletionsBatch:

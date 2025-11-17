@@ -124,15 +124,16 @@ class TestRunBasic:
     
     def test_run_interactive_json_incompatible(self, mock_runner_complete):
         """Interactive mode should not work with JSON output"""
-        with patch('sys.stdout', new=StringIO()) as fake_out:
+        with patch('sys.stdout', new=StringIO()) as fake_out, \
+             patch('sys.stderr', new=StringIO()) as fake_err:
             result = run_model(
                 model_spec="test-model",
                 prompt=None,  # Interactive mode
                 json_output=True
             )
-        
-        output = fake_out.getvalue()
-        assert "not compatible with JSON output" in output
+
+        error_output = fake_err.getvalue()
+        assert "not compatible with JSON output" in error_output
         assert result is None
 
 
@@ -196,16 +197,50 @@ class TestRunParameters:
         
         call_args = mock_runner_complete.generate_streaming.call_args
         assert call_args[1]['use_chat_template'] is True
-        
+
         # Without chat template
         run_model(
             model_spec="test-model",
             prompt="test",
             use_chat_template=False
         )
-        
+
         call_args = mock_runner_complete.generate_streaming.call_args
         assert call_args[1]['use_chat_template'] is False
+
+
+class TestRunReasoningControl:
+    """Tests for --no-reasoning propagation."""
+
+    def test_interactive_streaming_hide_reasoning(self, mock_runner_complete):
+        """Interactive streaming mode respects hide_reasoning flag."""
+        with patch('builtins.input', side_effect=["hello", "quit"]):
+            with patch('sys.stdout', new=StringIO()):
+                run_model(
+                    model_spec="test-model",
+                    prompt=None,
+                    stream=True,
+                    json_output=False,
+                    hide_reasoning=True,
+                )
+
+        call_args = mock_runner_complete.generate_streaming.call_args[1]
+        assert call_args['hide_reasoning'] is True
+
+    def test_interactive_batch_hide_reasoning(self, mock_runner_complete):
+        """Interactive batch mode respects hide_reasoning flag."""
+        with patch('builtins.input', side_effect=["hello", "quit"]):
+            with patch('sys.stdout', new=StringIO()):
+                run_model(
+                    model_spec="test-model",
+                    prompt=None,
+                    stream=False,
+                    json_output=False,
+                    hide_reasoning=True,
+                )
+
+        call_args = mock_runner_complete.generate_batch.call_args[1]
+        assert call_args['hide_reasoning'] is True
 
 
 class TestConversationHistory:
@@ -299,16 +334,17 @@ class TestErrorHandling:
         """Test handling of model loading failures"""
         with patch('mlxk2.operations.run.MLXRunner') as mock_runner_class:
             mock_runner_class.side_effect = FileNotFoundError("Model not found")
-            
-            with patch('sys.stdout', new=StringIO()) as fake_out:
+
+            with patch('sys.stdout', new=StringIO()) as fake_out, \
+                 patch('sys.stderr', new=StringIO()) as fake_err:
                 result = run_model(
                     model_spec="nonexistent-model",
                     prompt="test",
                     json_output=False
                 )
-            
-            output = fake_out.getvalue()
-            assert "Error:" in output
+
+            error_output = fake_err.getvalue()
+            assert "Error:" in error_output
             # Issue #38: run_model now returns error string in both text and JSON modes
             assert result is not None and result.startswith("Error:")
     

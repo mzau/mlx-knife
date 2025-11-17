@@ -70,7 +70,7 @@ class TestRunCommandBasic:
     """
 
     @pytest.mark.live_e2e
-    def test_run_command(self, portfolio_models, model_key):
+    def test_run_command(self, portfolio_models, model_key, report_benchmark):
         """Validate `mlxk run` with model.
 
         Parametrized test (one instance per model in portfolio).
@@ -116,6 +116,14 @@ class TestRunCommandBasic:
 
         print(f"✓ {model_key}: Passed (output: {len(stdout)} chars)")
 
+        # Benchmark reporting (ADR-013 Phase 0)
+        report_benchmark(stop_tokens={
+            "configured": stop_tokens,
+            "detected": found_tokens,
+            "workaround": "none",
+            "leaked": len(found_tokens) > 0
+        })
+
 
 class TestRunCommandJSON:
     """JSON output mode tests.
@@ -125,7 +133,7 @@ class TestRunCommandJSON:
     """
 
     @pytest.mark.live_e2e
-    def test_run_json_output(self, portfolio_models, model_key):
+    def test_run_json_output(self, portfolio_models, model_key, report_benchmark):
         """Validate `mlxk run --json` output format.
 
         Parametrized test (one instance per model in portfolio).
@@ -177,6 +185,14 @@ class TestRunCommandJSON:
         )
 
         print(f"✓ {model_key}: Passed (JSON output: {len(response)} chars)")
+
+        # Benchmark reporting (ADR-013 Phase 0)
+        report_benchmark(stop_tokens={
+            "configured": stop_tokens,
+            "detected": found_tokens,
+            "workaround": "none",
+            "leaked": len(found_tokens) > 0
+        })
 
 
 class TestRunCommandExitCodes:

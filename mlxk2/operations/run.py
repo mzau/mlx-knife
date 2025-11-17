@@ -3,6 +3,7 @@ Run operation for 2.0 implementation.
 Ported from 1.x with 2.0 architecture integration.
 """
 
+import sys
 from typing import Optional
 
 from ..core.runner import MLXRunner
@@ -22,7 +23,8 @@ def run_model(
     repetition_penalty: float = 1.1,
     use_chat_template: bool = True,
     json_output: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    hide_reasoning: bool = False
 ) -> Optional[str]:
     """Execute model with prompt - supports both single-shot and interactive modes.
 
@@ -37,6 +39,7 @@ def run_model(
         use_chat_template: Apply tokenizer's chat template if available
         json_output: Return JSON format instead of printing
         verbose: Show detailed output
+        hide_reasoning: Hide reasoning output for reasoning models (DeepSeek-R1, QwQ, etc.)
 
     Returns:
         Generated text on success, "Error: ..." string on failure (both modes)
@@ -51,7 +54,7 @@ def run_model(
             error_msg = f"Ambiguous model specification '{model_spec}'. Could be: {ambiguous}"
             error_result = f"Error: {error_msg}"
             if not json_output:
-                print(error_result)
+                print(error_result, file=sys.stderr)
             return error_result
 
         # Only perform compatibility check if model is actually in cache
@@ -82,7 +85,7 @@ def run_model(
                             error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
                             error_result = f"Error: {error_msg}"
                             if not json_output:
-                                print(error_result)
+                                print(error_result, file=sys.stderr)
                             return error_result
 
     except Exception:
@@ -96,36 +99,38 @@ def run_model(
             # Interactive mode: no prompt provided
             if prompt is None:
                 if json_output:
-                    print("Error: Interactive mode not compatible with JSON output")
+                    print("Error: Interactive mode not compatible with JSON output", file=sys.stderr)
                     return None
                 return interactive_chat(
-                    runner, 
-                    stream=stream, 
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                    use_chat_template=use_chat_template,
-                    prepare_next_prompt=False
-                )
-            else:
-                # Single-shot mode: prompt provided  
-                return single_shot_generation(
-                    runner, 
-                    prompt, 
+                    runner,
                     stream=stream,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
                     use_chat_template=use_chat_template,
-                    json_output=json_output
+                    prepare_next_prompt=False,
+                    hide_reasoning=hide_reasoning,
+                )
+            else:
+                # Single-shot mode: prompt provided
+                return single_shot_generation(
+                    runner,
+                    prompt,
+                    stream=stream,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    use_chat_template=use_chat_template,
+                    json_output=json_output,
+                    hide_reasoning=hide_reasoning
                 )
                     
     except Exception as e:
         error_result = f"Error: {e}"
         if not json_output:
-            print(error_result)
+            print(error_result, file=sys.stderr)
         return error_result
 
 
@@ -138,6 +143,7 @@ def interactive_chat(
     repetition_penalty: float = 1.1,
     use_chat_template: bool = True,
     prepare_next_prompt: bool = False,
+    hide_reasoning: bool = False,
 ):
     """Interactive conversation mode with history tracking."""
     print("Starting interactive chat. Type 'exit' or 'quit' to end.\n")
@@ -176,6 +182,7 @@ def interactive_chat(
                     repetition_penalty=repetition_penalty,
                     use_chat_template=False,
                     use_chat_stop_tokens=True,
+                    hide_reasoning=hide_reasoning,
                 )
                 try:
                     iterator = runner.generate_streaming(formatted_prompt, **params)
@@ -197,6 +204,7 @@ def interactive_chat(
                     repetition_penalty=repetition_penalty,
                     use_chat_template=False,
                     use_chat_stop_tokens=True,
+                    hide_reasoning=hide_reasoning,
                 )
                 try:
                     response = runner.generate_batch(formatted_prompt, **params)
@@ -222,7 +230,7 @@ def interactive_chat(
             print("\n\nChat interrupted. Goodbye!")
             break
         except Exception as e:
-            print(f"\n[ERROR] {e}")
+            print(f"\n[ERROR] {e}", file=sys.stderr)
             continue
 
 
@@ -235,7 +243,8 @@ def single_shot_generation(
     top_p: float = 0.9,
     repetition_penalty: float = 1.1,
     use_chat_template: bool = True,
-    json_output: bool = False
+    json_output: bool = False,
+    hide_reasoning: bool = False
 ) -> Optional[str]:
     """Single prompt generation."""
     if stream and not json_output:
@@ -248,6 +257,7 @@ def single_shot_generation(
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             use_chat_template=use_chat_template,
+            hide_reasoning=hide_reasoning,
         ):
             print(token, end="", flush=True)
             generated_text += token
@@ -265,6 +275,7 @@ def single_shot_generation(
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             use_chat_template=use_chat_template,
+            hide_reasoning=hide_reasoning,
         )
         
         if json_output:
@@ -313,10 +324,10 @@ def run_model_enhanced(
         Generated text on success, "Error: ..." string on failure (both modes)
     """
     # For now, forward to basic run_model
-    # TODO: Add system_prompt and hide_reasoning support in beta.2
+    # TODO: Add system_prompt support in future version
     if system_prompt:
-        print("Warning: System prompts not yet implemented in beta.1")
-    
+        print("Warning: System prompts not yet implemented")
+
     return run_model(
         model_spec=model_spec,
         prompt=prompt,
@@ -327,5 +338,6 @@ def run_model_enhanced(
         repetition_penalty=repetition_penalty,
         use_chat_template=use_chat_template,
         json_output=json_output,
-        verbose=verbose
+        verbose=verbose,
+        hide_reasoning=hide_reasoning
     )

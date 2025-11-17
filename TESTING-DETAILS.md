@@ -4,7 +4,7 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **306/306 unit tests passing** (November 2025) — 2.0.2 Stable; 20 skipped (opt-in)
+✅ **308/308 unit tests passing** (November 2025) — 2.0.3 Stable; 35 skipped (opt-in)
 ✅ **73/81 E2E tests passing** (November 2025) — ADR-011 completed; 8 skipped (RAM budget)
 ✅ **Test environment:** macOS 14.x, M2 Max, Python 3.9-3.13
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
@@ -12,14 +12,16 @@ This document contains version-specific details, complete file listings, and imp
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 
-### Skipped Tests Breakdown (20 total, standard run without HF_HOME)
+### Skipped Tests Breakdown (35 total, standard run without HF_HOME)
+- **20 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011)
 - **4 Live Stop Tokens tests** - Stop token validation with real models (requires `pytest -m live_stop_tokens`, ADR-009)
-- **1 Live Run test** - Private/org model detection (requires `pytest -m live_run`, Issue #37)
 - **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
+- **2 Issue #37 tests** - Private/org model detection (requires `pytest -m live_run`, Issue #37)
+- **2 Runtime Compatibility tests** - Reason chain validation (requires specific model types)
 - **1 Live List test** - Tests against user cache (requires HF_HOME with models)
 - **1 Live Push test** - Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
+- **1 Show Portfolio test** - Convenience test to display E2E test models (requires HF_HOME)
 - **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
-- **3 Additional opt-in tests** - Various live validation scenarios
 
 **Portfolio Discovery** (ADR-009) is implemented in `tests_2.0/test_stop_tokens_live.py`. When `HF_HOME` is set, tests auto-discover all MLX chat models in user cache using `mlxk list --json` (production command). This ensures Issue #32 fix is validated across the full model portfolio. **Current validation:** 17 models discovered, 15 testable (60% RAM budget), 73/81 tests passing, 0 failures. Portfolio includes: Phi-3, DeepSeek-R1, GPT-oss, Llama, Qwen, Mistral, Mixtral families.
 
@@ -134,16 +136,15 @@ HF_HOME=/path/to/cache pytest -m live_e2e -n auto  # ← NEVER DO THIS!
 
 | Python Version | Status | Tests Passing | Skipped |
 |----------------|--------|---------------|---------|
-| 3.9.6 (macOS)  | ✅ Verified | 306/306 | 20 |
-| 3.10.x         | ✅ Verified | 306/306 | 20 |
-| 3.11.x         | ✅ Verified | 306/306 | 20 |
-| 3.12.x         | ✅ Verified | 306/306 | 20 |
-| 3.13.x         | ✅ Verified | 306/306 | 20 |
+| 3.9.6 (macOS)  | ✅ Verified | 308/308 | 35 |
+| 3.10.x         | ✅ Verified | 308/308 | 35 |
+| 3.11.x         | ✅ Verified | 308/308 | 35 |
+| 3.12.x         | ✅ Verified | 308/308 | 35 |
+| 3.13.x         | ✅ Verified | 308/308 | 35 |
 
-**Note:** 20 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
-- Without `HF_TOKEN`: +1 skip (live push test)
-- Without `MLXK2_ENABLE_ALPHA_FEATURES=1`: +3 skips (alpha feature tests)
-- Without `jsonschema`: +1 skip (spec validation test)
+**Note:** 35 skipped tests are opt-in (live tests, alpha features). Skipped count may vary by environment:
+- Without `HF_HOME`: Standard 35 skipped (live E2E tests use fallback parametrization)
+- With `HF_HOME`: Live E2E tests run with discovered models (20+ additional tests executed)
 
 All versions tested with `isolated_cache` system and MLX stubs for fast execution without model downloads.
 
@@ -667,6 +668,22 @@ mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cat
 
 ### Version History
 
+### 2.0.3 (2025-11-17)
+- ✅ **Test updates for stderr separation:** 4 test files modified to verify errors go to stderr (human mode)
+  - `test_interactive_mode.py`: 2 tests patching stderr for ERROR messages
+  - `test_run_complete.py`: 2 tests validating stderr error handling
+  - `test_cli_run_exit_codes.py`: 3 tests checking stdout/stderr separation in JSON mode
+  - `test_cli_push_args.py`: 2 tests verifying push stdout/stderr returns
+- ✅ **Benchmark reporting infrastructure:** 4 live test files updated with benchmark fixtures
+  - `live/conftest.py`: +225 lines - `report_benchmark()` fixture, `_parse_model_family()` helper
+  - `live/test_cli_e2e.py`: Benchmark metadata reporting (family, variant, stop_tokens)
+  - `live/test_server_e2e.py`: Benchmark metadata + performance (usage) data
+  - `live/test_streaming_parity.py`: Portfolio Discovery refactoring (uses `mlxk list --json`)
+- ✅ **Interactive mode reasoning control:** 2 new tests added (review_report.md)
+  - `test_interactive_mode.py`: 1 test for `hide_reasoning` parameter passing
+  - `test_run_complete.py`: 1 test for `TestRunReasoningControl` class
+- ✅ **Test count:** 308 passed, 35 skipped (+2 tests from review_report.md fixes)
+
 ### 2.0.2 (2025-11-14)
 - ✅ Test infrastructure hardening (TOKENIZERS_PARALLELISM, active polling, gc.collect())
 - ✅ Portfolio Discovery validation complete (73/81 E2E tests, 17 models discovered)
@@ -693,4 +710,4 @@ mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cat
 
 ---
 
-*MLX-Knife 2.0.2 Testing Details*
+*MLX-Knife 2.0.3 Testing Details*

@@ -71,8 +71,8 @@ class TestRunCommandExitCodes:
                 f"stderr: {stderr}"
             )
 
-            # In text mode, error is printed directly
-            assert "Error:" in stdout, f"Expected error message in stdout, got: {stdout}"
+            # In text mode, error is printed to stderr
+            assert "Error:" in stderr, f"Expected error message in stderr, got: {stderr}"
 
     def test_run_nonexistent_model_json_mode_exit_code(self, capsys):
         """Test that run with invalid model returns non-zero exit code (JSON mode).
@@ -95,10 +95,11 @@ class TestRunCommandExitCodes:
             # Should return non-zero exit code
             assert exit_code == 1, (
                 f"Expected exit code 1 for model error, got {exit_code}\n"
-                f"stdout: {stdout}"
+                f"stdout: {stdout}\n"
+                f"stderr: {stderr}"
             )
 
-            # Parse JSON output
+            # Parse JSON output from stdout (JSON mode always stdout for scripting)
             data = json.loads(stdout)
 
             # Should have status="error"
@@ -128,9 +129,10 @@ class TestRunCommandExitCodes:
 
             assert exit_code == 1, (
                 f"Expected exit code 1 for ambiguous model, got {exit_code}\n"
-                f"stdout: {stdout}"
+                f"stdout: {stdout}\n"
+                f"stderr: {stderr}"
             )
-            assert "Error:" in stdout and "Ambiguous" in stdout
+            assert "Error:" in stderr and "Ambiguous" in stderr
 
     def test_run_ambiguous_model_json_mode(self, capsys):
         """Test ambiguous model specification returns exit code 1 (JSON mode)."""
@@ -143,6 +145,7 @@ class TestRunCommandExitCodes:
             )
 
             assert exit_code == 1
+            # Parse JSON from stdout (JSON mode always stdout)
             data = json.loads(stdout)
             assert data["status"] == "error"
             assert "ambiguous" in data["error"]["message"].lower()
@@ -187,9 +190,10 @@ class TestRunCommandExitCodes:
 
             assert exit_code == 1, (
                 f"Expected exit code 1 for incompatible model, got {exit_code}\n"
-                f"stdout: {stdout}"
+                f"stdout: {stdout}\n"
+                f"stderr: {stderr}"
             )
-            assert "Error:" in stdout and "compatible" in stdout
+            assert "Error:" in stderr and "compatible" in stderr
 
     def test_run_success_text_mode_exit_code(self, capsys):
         """Test that successful run returns zero exit code (text mode).
@@ -267,8 +271,8 @@ class TestRunCommandExitCodes:
                 f"stdout: {stdout}\n"
                 f"stderr: {stderr}"
             )
-            assert "Error:" in stdout
-            assert "failed" in stdout.lower() or "memory" in stdout.lower()
+            assert "Error:" in stderr
+            assert "failed" in stderr.lower() or "memory" in stderr.lower()
 
     def test_run_runtime_exception_json_mode(self, capsys):
         """Test that runtime exceptions are caught and propagated as errors (JSON mode)."""
@@ -281,6 +285,7 @@ class TestRunCommandExitCodes:
             )
 
             assert exit_code == 1
+            # Parse JSON from stdout (JSON mode always stdout)
             data = json.loads(stdout)
             assert data["status"] == "error"
             assert "failed" in data["error"]["message"].lower() or "memory" in data["error"]["message"].lower()

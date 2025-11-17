@@ -25,15 +25,16 @@ def _run_cli(argv: list[str], capsys):
             cli_main()
     finally:
         sys.argv = old_argv
-    out = capsys.readouterr().out
-    return out
+    captured = capsys.readouterr()
+    return captured.out, captured.err
 
 
 def test_cli_push_missing_args_json_error(capsys, monkeypatch):
     # Missing required positional args but with --json should emit JSON error
     monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
-    out = _run_cli(["mlxk2", "push", "--private", "--json"], capsys)
-    data = json.loads(out)
+    stdout, stderr = _run_cli(["mlxk2", "push", "--private", "--json"], capsys)
+    # JSON mode: all output to stdout (for scripting)
+    data = json.loads(stdout)
     assert data["status"] == "error"
     assert data["command"] is None
     assert isinstance(data["error"], dict)
@@ -44,8 +45,9 @@ def test_cli_push_workspace_missing_json_error(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
     missing = str(tmp_path / "nope")
-    out = _run_cli(["mlxk2", "push", "--private", missing, "user/repo", "--json"], capsys)
-    data = json.loads(out)
+    stdout, stderr = _run_cli(["mlxk2", "push", "--private", missing, "user/repo", "--json"], capsys)
+    # JSON mode: all output to stdout (for scripting)
+    data = json.loads(stdout)
     assert data["status"] == "error"
     assert data["command"] == "push"
     assert data["error"]["type"] == "workspace_not_found"
@@ -92,8 +94,9 @@ def test_cli_push_no_changes_json_output(tmp_path, monkeypatch, capsys):
 
     _install_fake_hf(monkeypatch, mode="no_changes")
 
-    out = _run_cli(["mlxk2", "push", "--private", str(ws), "user/repo", "--json"], capsys)
-    data = json.loads(out)
+    stdout, stderr = _run_cli(["mlxk2", "push", "--private", str(ws), "user/repo", "--json"], capsys)
+    # Success goes to stdout
+    data = json.loads(stdout)
     assert data["status"] == "success"
     assert data["command"] == "push"
     assert data["data"]["no_changes"] is True
@@ -110,8 +113,9 @@ def test_cli_push_with_changes_json_output(tmp_path, monkeypatch, capsys):
 
     _install_fake_hf(monkeypatch, mode="with_changes")
 
-    out = _run_cli(["mlxk2", "push", "--private", str(ws), "user/repo", "--json"], capsys)
-    data = json.loads(out)
+    stdout, stderr = _run_cli(["mlxk2", "push", "--private", str(ws), "user/repo", "--json"], capsys)
+    # Success goes to stdout
+    data = json.loads(stdout)
     assert data["status"] == "success"
     assert data["command"] == "push"
     assert data["data"]["no_changes"] is False

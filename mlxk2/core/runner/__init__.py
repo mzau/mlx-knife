@@ -501,9 +501,10 @@ class MLXRunner:
         repetition_context_size: int = 20,
         use_chat_template: bool = True,
         use_chat_stop_tokens: bool = False,
+        hide_reasoning: bool = False,
     ) -> str:
         """Generate text in batch mode (non-streaming).
-        
+
         Args:
             prompt: Input prompt
             max_tokens: Maximum tokens to generate (None for dynamic)
@@ -513,7 +514,8 @@ class MLXRunner:
             repetition_context_size: Context size for repetition penalty
             use_chat_template: Apply tokenizer's chat template if available
             use_chat_stop_tokens: Include chat turn markers as stop tokens (e.g., "\nHuman:")
-            
+            hide_reasoning: Hide reasoning output for reasoning models (DeepSeek-R1, QwQ, etc.)
+
         Returns:
             Generated text
         """
@@ -661,7 +663,7 @@ class MLXRunner:
                 response = response[:earliest_pos]
 
         # Format reasoning models output
-        response = self._format_reasoning_response(response)
+        response = self._format_reasoning_response(response, hide_reasoning=hide_reasoning)
 
         generation_time = time.time() - start_time
 
@@ -679,7 +681,7 @@ class MLXRunner:
         """Format conversation history into a prompt using chat template."""
         return _format_conversation_helper(self.tokenizer, messages)
 
-    def _format_reasoning_response(self, response: str) -> str:
+    def _format_reasoning_response(self, response: str, hide_reasoning: bool = False) -> str:
         """Format response from reasoning models for better readability."""
         return _format_reasoning_helper(
             response,
@@ -687,4 +689,5 @@ class MLXRunner:
             self._reasoning_start,
             self._reasoning_end,
             self._final_start,
+            hide_reasoning=hide_reasoning,
         )
