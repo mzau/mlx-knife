@@ -18,87 +18,486 @@ from contextlib import contextmanager
 import shutil
 import random
 import json as _json
+import subprocess
+import uuid
+import hashlib
 
 TEST_SENTINEL = "models--TEST-CACHE-SENTINEL--mlxk2-safety-check"
 
 
+# =============================================================================
+# Test Session Cleanup: Kill Zombie Servers Before Tests
+# =============================================================================
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_zombie_servers(request):
+    """Kill zombie mlxk test servers ONLY when running live E2E tests.
+
+    SAFETY: Only activates when `-m live_e2e` marker is used. This prevents
+    accidentally killing production/development servers when running unit tests.
+
+    When active, this fixture:
+    - Kills zombie servers from previous interrupted test runs (Ctrl-C, crashes)
+    - Cleans up any leaked servers after the test session completes
+
+    Use case: Prevents RAM exhaustion and port conflicts from accumulated zombies.
+    """
+    # SAFETY: Only cleanup when live_e2e marker is explicitly requested
+    # This prevents killing production/dev servers during unit test runs
+    selected_markers = request.config.getoption("-m") or ""
+    should_cleanup = "live_e2e" in selected_markers
+
+    if should_cleanup:
+        # Pre-test cleanup: Kill zombies from previous runs
+        try:
+            result = subprocess.run(
+                ["pkill", "-9", "-f", "mlxk2.core.server_base"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print("\n[Test Setup] Killed zombie mlxk servers from previous runs")
+        except FileNotFoundError:
+            # pkill not available (e.g., Windows) - skip cleanup
+            pass
+        except Exception as e:
+            # Best-effort cleanup - don't fail tests if this fails
+            print(f"\n[Test Setup] Warning: Failed to kill zombie servers: {e}")
+
+    yield  # Run tests
+
+    if should_cleanup:
+        # Post-test cleanup: Kill any servers that leaked during tests
+        try:
+            result = subprocess.run(
+                ["pkill", "-9", "-f", "mlxk2.core.server_base"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print("\n[Test Teardown] Cleaned up zombie servers after test session")
+        except Exception:
+            # Best-effort cleanup - don't fail tests if this fails
+            pass
+
+
+# =============================================================================
+# CoW (Copy-on-Write) Prerequisite Checking
+# =============================================================================
+
+def _get_volume_root(path: Path) -> Path:
+    """Get the mount point (volume root) for a given path.
+
+    On macOS: /Volumes/SSD, /System/Volumes/Data, etc.
+    On Linux: /, /mnt/data, etc.
+    """
+    path = path.resolve()
+    while not os.path.ismount(str(path)):
+        parent = path.parent
+        if parent == path:  # Reached filesystem root
+            break
+        path = parent
+    return path
+
+
+def _is_apfs_volume(path: Path) -> bool:
+    """Check if the volume containing path uses APFS filesystem.
+
+    Returns False on non-macOS or if detection fails.
+    """
+    if sys.platform != "darwin":
+        return False
+
+    volume_root = _get_volume_root(path)
+    try:
+        result = subprocess.run(
+            ["diskutil", "info", str(volume_root)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Look for APFS in File System Personality or Type
+        return "apfs" in result.stdout.lower()
+    except Exception:
+        return False
+
+
+def _can_use_cow(src: Path, dst_volume_root: Path) -> bool:
+    """Check if CoW copy is possible between src and destination volume.
+
+    Requirements for CoW (clonefile):
+    1. Both must be on the SAME volume (mount point)
+    2. Volume must be APFS (macOS only)
+
+    Args:
+        src: Source file/directory path
+        dst_volume_root: The volume root where destination will be created
+
+    Returns:
+        True if CoW is possible, False otherwise.
+    """
+    src_root = _get_volume_root(src)
+
+    # Must be same volume
+    if src_root != dst_volume_root:
+        return False
+
+    # Must be APFS
+    return _is_apfs_volume(src_root)
+
+# CRITICAL SAFETY: Unique signature file to prevent accidental deletion of user data
+# This file MUST exist before any cleanup of the isolated cache directory
+SAFETY_SIGNATURE_FILENAME = ".mlxk2_test_cache_signature"
+SAFETY_SIGNATURE_MAGIC = "MLXK2_ISOLATED_TEST_CACHE_V1"
+TEST_CACHE_MARKER = "mlxk2_test_"  # Marker in temp dir names for test caches
+
+
+def _create_safety_signature(cache_root: Path) -> str:
+    """Create a unique safety signature file in the cache root.
+
+    This signature MUST be verified before any deletion of the cache directory.
+    The signature contains:
+    - Magic string to identify this as a test cache
+    - Unique UUID generated at creation time
+    - SHA256 hash of the path for extra verification
+
+    Returns:
+        str: The unique signature ID that must be verified before deletion.
+
+    Raises:
+        RuntimeError: If signature file cannot be created atomically.
+    """
+    signature_id = str(uuid.uuid4())
+    path_hash = hashlib.sha256(str(cache_root).encode()).hexdigest()[:16]
+
+    signature_content = {
+        "magic": SAFETY_SIGNATURE_MAGIC,
+        "signature_id": signature_id,
+        "path_hash": path_hash,
+        "created_path": str(cache_root),
+        "created_at": str(Path(cache_root).stat().st_ctime) if cache_root.exists() else "unknown",
+    }
+
+    signature_file = cache_root / SAFETY_SIGNATURE_FILENAME
+    temp_signature = cache_root / f".{SAFETY_SIGNATURE_FILENAME}.tmp.{signature_id}"
+
+    try:
+        # Write to temp file first (atomic on POSIX)
+        temp_signature.write_text(_json.dumps(signature_content, indent=2))
+        # Atomic rename
+        temp_signature.rename(signature_file)
+    except Exception as e:
+        # Clean up temp file if rename failed
+        if temp_signature.exists():
+            temp_signature.unlink()
+        raise RuntimeError(f"CRITICAL: Failed to create safety signature: {e}")
+
+    return signature_id
+
+
+def _verify_safety_signature(cache_root: Path, expected_signature_id: str) -> bool:
+    """Verify the safety signature before allowing deletion.
+
+    This function MUST return True before any rmtree operation on cache_root.
+
+    Args:
+        cache_root: The directory to verify
+        expected_signature_id: The signature ID returned by _create_safety_signature()
+
+    Returns:
+        bool: True if and only if:
+            - Signature file exists
+            - Magic string matches
+            - Signature ID matches the expected value
+            - Path hash matches current path
+    """
+    signature_file = cache_root / SAFETY_SIGNATURE_FILENAME
+
+    if not signature_file.exists():
+        return False
+
+    try:
+        content = _json.loads(signature_file.read_text())
+    except Exception:
+        return False
+
+    # Verify magic string
+    if content.get("magic") != SAFETY_SIGNATURE_MAGIC:
+        return False
+
+    # Verify signature ID matches
+    if content.get("signature_id") != expected_signature_id:
+        return False
+
+    # Verify path hash matches (guards against path manipulation)
+    expected_hash = hashlib.sha256(str(cache_root).encode()).hexdigest()[:16]
+    if content.get("path_hash") != expected_hash:
+        return False
+
+    return True
+
+
+def _safe_rmtree(cache_root: Path, expected_signature_id: str) -> None:
+    """Safely remove a test cache directory after signature verification.
+
+    CRITICAL: This function will REFUSE to delete if signature verification fails.
+
+    Args:
+        cache_root: The directory to remove
+        expected_signature_id: The signature ID from _create_safety_signature()
+
+    Raises:
+        RuntimeError: If signature verification fails - deletion is BLOCKED.
+    """
+    if not _verify_safety_signature(cache_root, expected_signature_id):
+        raise RuntimeError(
+            f"CRITICAL SAFETY ABORT: Refusing to delete '{cache_root}' - "
+            f"signature verification FAILED. This may be user data!"
+        )
+
+    # Additional paranoia checks
+    path_str = str(cache_root)
+    if TEST_CACHE_MARKER not in path_str:
+        raise RuntimeError(
+            f"CRITICAL SAFETY ABORT: Path '{cache_root}' does not contain '{TEST_CACHE_MARKER}' marker"
+        )
+
+    # Only now is it safe to delete
+    shutil.rmtree(cache_root)
+
+
+def _create_isolated_temp_dir(base_dir: str | None) -> tuple[Path, str]:
+    """Atomically create a temp directory with safety signature.
+
+    CRITICAL: This function ensures that a temp directory is NEVER created
+    without its corresponding safety signature. If signature creation fails,
+    the directory is immediately removed.
+
+    Args:
+        base_dir: Base directory for temp creation, or None for system default.
+
+    Returns:
+        Tuple of (temp_dir_path, signature_id)
+
+    Raises:
+        RuntimeError: If atomic creation fails (directory will be cleaned up).
+    """
+    temp_dir = tempfile.mkdtemp(prefix="mlxk2_test_", dir=base_dir)
+    temp_dir_path = Path(temp_dir)
+
+    try:
+        # IMMEDIATELY create signature - this MUST succeed
+        signature_id = _create_safety_signature(temp_dir_path)
+        return temp_dir_path, signature_id
+    except Exception as e:
+        # Signature creation failed - MUST clean up the directory
+        # Use shutil.rmtree directly (not _safe_rmtree) because no signature exists
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass  # Best effort cleanup
+        raise RuntimeError(
+            f"CRITICAL: Failed to create safety signature for '{temp_dir}'. "
+            f"Directory has been removed. Error: {e}"
+        )
+
+
+# =============================================================================
+# Test Cache Context Detection (moved from mlxk2/core/cache.py)
+# =============================================================================
+
+def _is_likely_test_cache(path: Path) -> bool:
+    """Heuristic to detect test caches safely.
+
+    The TEST_CACHE_MARKER ('mlxk2_test_') in the path is the authoritative indicator.
+    Test cache location may vary - /var/folders/ (default temp) or on same volume
+    as user cache (for CoW support with external drives).
+    """
+    return TEST_CACHE_MARKER in str(path)
+
+
+def _verify_cache_context(expected: str, cache_path: Path | None = None):
+    """Verify the cache path matches the expected context.
+
+    Args:
+        expected: "test" or "user"
+        cache_path: Path to verify. If None, uses current HF_HOME model cache.
+
+    Raises:
+        RuntimeError: If context doesn't match expectation.
+    """
+    if cache_path is None:
+        from mlxk2.core.cache import get_current_model_cache
+        cache_path = get_current_model_cache()
+
+    if expected == "test":
+        if not _is_likely_test_cache(cache_path):
+            raise RuntimeError(f"Expected test cache, but using: {cache_path}")
+    elif expected == "user":
+        if _is_likely_test_cache(cache_path):
+            raise RuntimeError(f"Expected user cache, but using test cache: {cache_path}")
+    else:
+        raise ValueError(f"Unknown cache context: {expected}")
+
+
 def assert_is_test_cache(cache_path: Path):
-    """Ensure operations run against the isolated test cache only."""
+    """Ensure operations run against the isolated test cache only.
+
+    Note: Test cache location varies - may be in /var/folders (default) or
+    on same volume as user cache (for CoW support on external drives).
+    The sentinel file is the authoritative safety check.
+    """
     path_str = str(cache_path)
-    if "/var/folders/" not in path_str or "mlxk2_test_" not in path_str:
+    if TEST_CACHE_MARKER not in path_str:
         raise RuntimeError(f"WARNING: Unexpected cache path - should be test cache: {path_str}")
     sentinel_dir = cache_path / TEST_SENTINEL
     if not sentinel_dir.exists():
         raise RuntimeError(f"MISSING CANARY: Test cache sentinel not found in {cache_path}")
 
 
+def _copy_cow(src: Path, dst: Path) -> bool:
+    """Copy file using CoW (Copy-on-Write) if available, else regular copy.
+
+    On macOS/APFS: Uses `cp -c` which calls clonefile(2) - instant, no disk space.
+    On other systems: Falls back to shutil.copy2().
+
+    Note: CoW requires src and dst on the SAME filesystem (volume).
+    The isolated_cache fixture creates temp dirs on the same volume as the
+    user cache to enable CoW for model copies. If volumes differ (e.g., user
+    cache on external SSD, temp on system disk), this falls back to regular copy.
+
+    Returns:
+        bool: True if CoW was used, False if regular copy fallback.
+    """
+    # macOS cp -c uses clonefile(2) for CoW on APFS
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["cp", "-c", str(src), str(dst)],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return True
+            # cp -c failed (e.g., cross-filesystem) - fall through to regular copy
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+    # Fallback to regular copy
+    shutil.copy2(src, dst)
+    return False
+
+
 @pytest.fixture
 def isolated_cache() -> Generator[Path, None, None]:
-    """Create isolated cache for MLX-Knife 2.0 tests - NEVER touches user cache."""
-    with tempfile.TemporaryDirectory(prefix="mlxk2_test_") as temp_dir:
-        cache_path = Path(temp_dir) / "test_cache"
-        cache_path.mkdir()
-        
-        # Create hub subdirectory (HuggingFace standard structure)
-        hub_path = cache_path / "hub"
-        hub_path.mkdir()
-        
-        # Store original HF_HOME and expose it to user-copy helpers as MLXK2_USER_HF_HOME
-        old_hf_home = os.environ.get("HF_HOME")
-        injected_user_hf_home = False
-        if not os.environ.get("MLXK2_USER_HF_HOME"):
-            # Prefer original HF_HOME if provided
-            if old_hf_home:
-                os.environ["MLXK2_USER_HF_HOME"] = old_hf_home
-                injected_user_hf_home = True
-            else:
-                # Fall back to common default: ~/.cache/huggingface
-                default_hf = Path.home() / ".cache" / "huggingface"
-                if (default_hf / "hub").exists():
-                    os.environ["MLXK2_USER_HF_HOME"] = str(default_hf)
-                    injected_user_hf_home = True
+    """Create isolated cache for MLX-Knife 2.0 tests - NEVER touches user cache.
 
-        # Point HF_HOME to the isolated test cache (code under test will use this)
-        os.environ["HF_HOME"] = str(cache_path)
-        
-        # CRITICAL: Patch MODEL_CACHE to use our isolated cache
-        from mlxk2.core import cache
-        original_cache = cache.MODEL_CACHE
-        cache.MODEL_CACHE = hub_path
-        
-        # SAFETY CANARY: Create sentinel model to verify we're in test cache
-        sentinel_dir = hub_path / TEST_SENTINEL
-        sentinel_snapshot = sentinel_dir / "snapshots" / "test123456789abcdef0123456789abcdef0123"
-        sentinel_snapshot.mkdir(parents=True)
-        (sentinel_snapshot / "config.json").write_text('{"model_type": "test_sentinel", "test_cache": true}')
-        # Enable strict deletion safety inside tests
-        old_strict = os.environ.get("MLXK2_STRICT_TEST_DELETE")
-        os.environ["MLXK2_STRICT_TEST_DELETE"] = "1"
-        
-        try:
-            yield hub_path  # Return hub path (where models-- directories go)
-        finally:
-            # Restore everything
-            cache.MODEL_CACHE = original_cache
+    CRITICAL SAFETY: This fixture uses manual directory creation + _safe_rmtree()
+    instead of tempfile.TemporaryDirectory to ensure signature verification
+    before ANY deletion. This prevents accidental deletion of user data.
+
+    CoW OPTIMIZATION: If user cache is on an APFS volume, the temp directory
+    is created on the SAME volume (at volume root level) to enable Copy-on-Write.
+    This makes model copies instant and disk-free.
+
+    Volume detection uses os.path.ismount() and diskutil to verify APFS.
+    """
+    # Determine user cache location FIRST (needed for same-volume temp dir)
+    old_hf_home = os.environ.get("HF_HOME")
+    user_hf_home = os.environ.get("MLXK2_USER_HF_HOME")
+    injected_user_hf_home = False
+
+    if not user_hf_home:
+        if old_hf_home:
+            user_hf_home = old_hf_home
+        else:
+            default_hf = Path.home() / ".cache" / "huggingface"
+            if (default_hf / "hub").exists():
+                user_hf_home = str(default_hf)
+
+    # Determine temp directory location for optimal CoW support
+    # Strategy: Create temp on SAME APFS volume as user cache for CoW
+    temp_base_dir = None
+    user_volume_root = None
+
+    if user_hf_home:
+        user_hf_path = Path(user_hf_home)
+        if user_hf_path.exists():
+            user_volume_root = _get_volume_root(user_hf_path)
+
+            # Only use volume root if it's APFS (CoW requirement)
+            if _is_apfs_volume(user_volume_root):
+                # Try to create temp dir on volume root for CoW support
+                # Use a dedicated subdirectory to avoid cluttering volume root
+                cow_temp_base = user_volume_root / ".mlxk2_test_isolation"
+                try:
+                    cow_temp_base.mkdir(exist_ok=True)
+                    temp_base_dir = str(cow_temp_base)
+                except (PermissionError, OSError):
+                    # No write access to volume root (e.g., read-only system volume)
+                    # Fall back to system default temp directory
+                    temp_base_dir = None
+
+    # CRITICAL: Atomic creation of temp directory WITH safety signature
+    # This ensures a directory is NEVER created without its signature
+    temp_dir_path, signature_id = _create_isolated_temp_dir(temp_base_dir)
+
+    cache_path = temp_dir_path / "test_cache"
+    cache_path.mkdir()
+
+    # Create hub subdirectory (HuggingFace standard structure)
+    hub_path = cache_path / "hub"
+    hub_path.mkdir()
+
+    # Expose user cache path to copy helpers
+    if user_hf_home and not os.environ.get("MLXK2_USER_HF_HOME"):
+        os.environ["MLXK2_USER_HF_HOME"] = user_hf_home
+        injected_user_hf_home = True
+
+    # Point HF_HOME to the isolated test cache (code under test will use this)
+    os.environ["HF_HOME"] = str(cache_path)
+
+    # CRITICAL: Patch MODEL_CACHE to use our isolated cache
+    from mlxk2.core import cache
+    original_cache = cache.MODEL_CACHE
+    cache.MODEL_CACHE = hub_path
+
+    # SAFETY CANARY: Create sentinel model to verify we're in test cache
+    sentinel_dir = hub_path / TEST_SENTINEL
+    sentinel_snapshot = sentinel_dir / "snapshots" / "test123456789abcdef0123456789abcdef0123"
+    sentinel_snapshot.mkdir(parents=True)
+    (sentinel_snapshot / "config.json").write_text('{"model_type": "test_sentinel", "test_cache": true}')
+    # Enable strict deletion safety inside tests
+    old_strict = os.environ.get("MLXK2_STRICT_TEST_DELETE")
+    os.environ["MLXK2_STRICT_TEST_DELETE"] = "1"
+
+    try:
+        yield hub_path  # Return hub path (where models-- directories go)
+    finally:
+        # Restore everything
+        cache.MODEL_CACHE = original_cache
+        if old_hf_home:
+            os.environ["HF_HOME"] = old_hf_home
+        elif "HF_HOME" in os.environ:
+            del os.environ["HF_HOME"]
+        # Remove injected MLXK2_USER_HF_HOME if we set it
+        if injected_user_hf_home:
+            # Only remove if it matches our injected values to avoid
+            # deleting a user-provided variable
+            injected_vals = set()
             if old_hf_home:
-                os.environ["HF_HOME"] = old_hf_home
-            elif "HF_HOME" in os.environ:
-                del os.environ["HF_HOME"]
-            # Remove injected MLXK2_USER_HF_HOME if we set it
-            if injected_user_hf_home:
-                # Only remove if it matches our injected values to avoid
-                # deleting a user-provided variable
-                injected_vals = set()
-                if old_hf_home:
-                    injected_vals.add(old_hf_home)
-                injected_vals.add(str(Path.home() / ".cache" / "huggingface"))
-                if os.environ.get("MLXK2_USER_HF_HOME") in injected_vals:
-                    del os.environ["MLXK2_USER_HF_HOME"]
-            # Restore strict delete flag
-            if old_strict is not None:
-                os.environ["MLXK2_STRICT_TEST_DELETE"] = old_strict
-            elif "MLXK2_STRICT_TEST_DELETE" in os.environ:
-                del os.environ["MLXK2_STRICT_TEST_DELETE"]
+                injected_vals.add(old_hf_home)
+            injected_vals.add(str(Path.home() / ".cache" / "huggingface"))
+            if os.environ.get("MLXK2_USER_HF_HOME") in injected_vals:
+                del os.environ["MLXK2_USER_HF_HOME"]
+        # Restore strict delete flag
+        if old_strict is not None:
+            os.environ["MLXK2_STRICT_TEST_DELETE"] = old_strict
+        elif "MLXK2_STRICT_TEST_DELETE" in os.environ:
+            del os.environ["MLXK2_STRICT_TEST_DELETE"]
+
+        # CRITICAL SAFETY: Use _safe_rmtree() with signature verification
+        # This REFUSES to delete if signature doesn't match
+        _safe_rmtree(temp_dir_path, signature_id)
 
 
 @pytest.fixture 
@@ -457,24 +856,22 @@ def test_health_check_operation(cache_path, model_query=None):
 @contextmanager
 def atomic_cache_context(cache_path: Path, expected_context="test"):
     """Atomic cache switching context manager.
-    
+
     Temporarily switches HF_HOME to use specific cache, with verification.
     """
-    from mlxk2.core.cache import verify_cache_context
-    
     # Store original HF_HOME
     original_hf_home = os.environ.get("HF_HOME")
-    
+
     try:
         # Switch to specified cache
         if cache_path:
             os.environ["HF_HOME"] = str(cache_path.parent)  # cache_path is hub/, we need parent
-        
-        # Verify we're in the right context
-        verify_cache_context(expected_context)
-        
+
+        # Verify we're in the right context (using local function)
+        _verify_cache_context(expected_context)
+
         yield cache_path
-        
+
     finally:
         # Restore original HF_HOME
         if original_hf_home:
@@ -483,15 +880,14 @@ def atomic_cache_context(cache_path: Path, expected_context="test"):
             del os.environ["HF_HOME"]
 
 
-@contextmanager  
+@contextmanager
 def user_cache_context():
     """Context manager for user cache operations."""
-    # User cache doesn't need HF_HOME changes - it's the default
-    from mlxk2.core.cache import get_current_model_cache, verify_cache_context
-    
-    # Just verify we're in user cache context
-    verify_cache_context("user")
-    
+    from mlxk2.core.cache import get_current_model_cache
+
+    # Just verify we're in user cache context (using local function)
+    _verify_cache_context("user")
+
     yield get_current_model_cache()
 
 
@@ -606,6 +1002,19 @@ def copy_user_model_to_isolated(isolated_cache):
                 idx = target_snap / "model.safetensors.index.json"
                 if idx.exists():
                     idx.unlink()
+            # ADR-012 Phase 2: Vision model mutations
+            elif m == 'remove_preprocessor' and target_snap is not None:
+                preprocessor = target_snap / "preprocessor_config.json"
+                if preprocessor.exists():
+                    preprocessor.unlink()
+            elif m == 'inject_invalid_preprocessor' and target_snap is not None:
+                (target_snap / "preprocessor_config.json").write_text('invalid json {')
+            elif m == 'remove_tokenizer_json' and target_snap is not None:
+                tokenizer_json = target_snap / "tokenizer.json"
+                if tokenizer_json.exists():
+                    tokenizer_json.unlink()
+            elif m == 'inject_invalid_tokenizer_config' and target_snap is not None:
+                (target_snap / "tokenizer_config.json").write_text('not json')
 
     def _latest_snapshot_dir(model_dir: Path) -> Path | None:
         snaps = model_dir / "snapshots"
@@ -675,6 +1084,16 @@ def copy_user_model_to_isolated(isolated_cache):
         if cfg.exists():
             selected.append(cfg)
 
+        # ADR-012 Phase 2: Include vision/tokenizer auxiliary assets for health checks
+        for aux_file in [
+            "preprocessor_config.json",  # Vision models
+            "tokenizer_config.json",      # Chat/tokenizer support
+            "tokenizer.json",             # Required if tokenizer_config.json present
+        ]:
+            aux_path = src_snap / aux_file
+            if aux_path.exists():
+                selected.append(aux_path)
+
         # Disk space check (on the test cache volume)
         total_bytes = 0
         for p in selected:
@@ -686,13 +1105,13 @@ def copy_user_model_to_isolated(isolated_cache):
         if free_bytes < total_bytes + (min_free_mb * 1024 * 1024):
             pytest.skip(f"Not enough free space for subset copy: need ~{(total_bytes/1e6):.1f}MB + safety, have {(free_bytes/1e6):.1f}MB")
 
-        # Copy selected files
+        # Copy selected files (CoW on macOS/APFS for instant, disk-free clones)
         for p in selected:
             rel = p.relative_to(src_snap)
             dst_file = dst_snap / rel
             dst_file.parent.mkdir(parents=True, exist_ok=True)
             if p.exists():
-                shutil.copy2(p, dst_file)
+                _copy_cow(p, dst_file)
 
         # Also place index file at model root so tests can detect it without network
         if idx is not None and idx.exists():

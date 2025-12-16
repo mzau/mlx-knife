@@ -160,13 +160,17 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
         if not verbose and name.startswith("mlx-community/"):
             # Compact name without the default org prefix
             name = name.split("/", 1)[1]
+        caps = set(m.get("capabilities") or [])
+        type_label = str(m.get("model_type", "-"))
+        if "vision" in caps and type_label != "-":
+            type_label = f"{type_label}+vision"
         if compact:
             row = [
                 name,
                 fmt_hash7(m.get("hash")),
                 humanize_size(m.get("size_bytes")),
                 fmt_time(m.get("last_modified")),
-                str(m.get("model_type", "-")),
+                type_label,
             ]
         else:
             row = [
@@ -175,7 +179,7 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
                 humanize_size(m.get("size_bytes")),
                 fmt_time(m.get("last_modified")),
                 str(m.get("framework", "-")),
-                str(m.get("model_type", "-")),
+                type_label,
             ]
         if show_health:
             if verbose:

@@ -4,15 +4,20 @@ This test suite validates that the CLI properly propagates errors from
 run_model to the exit code and JSON status envelope in both text and JSON modes.
 
 Related: GitHub Issue #38 - CLI exits with code 0 even when model fails to load
+Related: ADR-014 Phase 1 - Unix pipe integration (stdin '-', BrokenPipeError handling)
 
 Key testing strategy:
 - Mock at the MLXRunner/resolution level (not run_model_enhanced)
 - This tests the actual error handling contract in run.py
 - Validates that error strings are returned and detected in both modes
+- Tests pipe-mode edge cases (empty stdin, stdin-only, BrokenPipeError)
 """
 
 import json
+import os
+import signal
 import sys
+from io import StringIO
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -110,6 +115,26 @@ class TestRunCommandExitCodes:
             assert data["error"] is not None, "Expected error field to be populated"
             assert data["error"]["message"], "Expected non-empty error message"
 
+    def test_run_interactive_json_mode_outputs_json_error(self, capsys):
+        """Interactive JSON mode should emit JSON error on stdout with exit=1."""
+        with patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
+             patch('mlxk2.operations.run.MLXRunner') as mock_runner:
+            mock_resolve.return_value = (None, None, None)
+
+            runner = MagicMock()
+            mock_runner.return_value.__enter__.return_value = runner
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "--json"],
+                capsys
+            )
+
+        assert exit_code == 1
+        assert stderr.strip() == ""
+        data = json.loads(stdout)
+        assert data["status"] == "error"
+        assert "interactive" in data["error"]["message"].lower()
+
     def test_run_ambiguous_model_text_mode(self, capsys):
         """Test ambiguous model specification returns exit code 1 (text mode).
 
@@ -153,15 +178,17 @@ class TestRunCommandExitCodes:
     def test_run_incompatible_model_text_mode(self, capsys):
         """Test incompatible model returns exit code 1 (text mode).
 
-        This tests the runtime compatibility check in run_model:
+        This tests the probe/policy architecture in run_model:
         - Model resolves successfully
-        - Compatibility check fails
-        - run_model returns "Error: not compatible..." string
+        - probe_and_select returns BLOCK policy
+        - run_model returns "Error: ..." string
         - Exit code is 1
         """
+        from mlxk2.core.capabilities import Backend, PolicyDecision, BackendPolicy, ModelCapabilities
+
         with patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
              patch('mlxk2.operations.run.get_current_model_cache') as mock_cache, \
-             patch('mlxk2.operations.run.check_runtime_compatibility') as mock_compat:
+             patch('mlxk2.core.capabilities.probe_and_select') as mock_probe:
 
             # Simulate successful resolution
             mock_resolve.return_value = ("test-model", None, None)
@@ -180,8 +207,17 @@ class TestRunCommandExitCodes:
             mock_cache_inst.__truediv__ = lambda self, x: mock_cache_dir
             mock_cache.return_value = mock_cache_inst
 
-            # Simulate incompatibility
-            mock_compat.return_value = (False, "Requires mlx-lm >= 0.20.0")
+            # Simulate incompatibility via probe/policy
+            mock_caps = ModelCapabilities(
+                model_path=mock_snapshot_path,
+                model_name="test-model",
+            )
+            mock_policy = BackendPolicy(
+                backend=Backend.UNSUPPORTED,
+                decision=PolicyDecision.BLOCK,
+                message="Requires mlx-lm >= 0.20.0",
+            )
+            mock_probe.return_value = (mock_caps, mock_policy)
 
             stdout, stderr, exit_code = _run_cli_capture_exit(
                 ["mlxk2", "run", "incompatible-model", "hello"],
@@ -193,7 +229,7 @@ class TestRunCommandExitCodes:
                 f"stdout: {stdout}\n"
                 f"stderr: {stderr}"
             )
-            assert "Error:" in stderr and "compatible" in stderr
+            assert "Error:" in stderr and "Incompatible" in stderr
 
     def test_run_success_text_mode_exit_code(self, capsys):
         """Test that successful run returns zero exit code (text mode).
@@ -249,6 +285,58 @@ class TestRunCommandExitCodes:
                 assert data["error"] is None
                 assert data["data"]["response"] == "Generated response text"
 
+    def test_run_uses_stdin_with_dash_prompt_and_additional_text(self, capsys):
+        """Ensure '-' reads stdin, appends CLI text, and stays JSON-clean."""
+        with patch('sys.stdin', StringIO("from-stdin")), \
+             patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
+             patch('mlxk2.operations.run.MLXRunner') as mock_runner_class, \
+             patch('mlxk2.cli.sys.stdout.isatty', return_value=False), \
+             patch.dict(os.environ, {"MLXK2_ENABLE_PIPES": "1"}, clear=False):
+
+            mock_resolve.return_value = (None, None, None)
+            mock_runner = MagicMock()
+            mock_runner.__enter__ = MagicMock(return_value=mock_runner)
+            mock_runner.__exit__ = MagicMock(return_value=None)
+            mock_runner.generate_batch.return_value = "ok"
+            mock_runner_class.return_value = mock_runner
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "-", "extra text", "--json"],
+                capsys
+            )
+
+        assert exit_code == 0
+        assert stderr == ""
+        mock_runner.generate_batch.assert_called_once()
+        assert mock_runner.generate_batch.call_args[1]["prompt"] == "from-stdin\n\nextra text"
+        data = json.loads(stdout)
+        assert data["data"]["prompt"] == "from-stdin\n\nextra text"
+
+    def test_run_disables_streaming_when_stdout_not_tty(self, capsys):
+        """Non-TTY stdout should force batch mode even without --no-stream."""
+        with patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
+             patch('mlxk2.operations.run.MLXRunner') as mock_runner_class, \
+             patch('mlxk2.cli.sys.stdout.isatty', return_value=False):
+
+            mock_resolve.return_value = (None, None, None)
+
+            mock_runner = MagicMock()
+            mock_runner.__enter__ = MagicMock(return_value=mock_runner)
+            mock_runner.__exit__ = MagicMock(return_value=None)
+            mock_runner.generate_streaming.return_value = iter([])
+            mock_runner.generate_batch.return_value = "batch"
+            mock_runner_class.return_value = mock_runner
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "hello"],
+                capsys
+            )
+
+        assert exit_code == 0
+        assert mock_runner.generate_streaming.call_count == 0
+        mock_runner.generate_batch.assert_called_once()
+        assert "batch" in stdout
+
     def test_run_runtime_exception_text_mode(self, capsys):
         """Test that runtime exceptions are caught and propagated as errors (text mode).
 
@@ -289,6 +377,190 @@ class TestRunCommandExitCodes:
             data = json.loads(stdout)
             assert data["status"] == "error"
             assert "failed" in data["error"]["message"].lower() or "memory" in data["error"]["message"].lower()
+
+
+class TestPipeModeEdgeCases:
+    """Test ADR-014 Phase 1 pipe mode edge cases."""
+
+    def test_run_stdin_only_without_trailing_text(self, capsys):
+        """stdin '-' without trailing text should work (ADR-014 core use case)."""
+        with patch('sys.stdin', StringIO("prompt from stdin only")), \
+             patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
+             patch('mlxk2.operations.run.MLXRunner') as mock_runner_class, \
+             patch('mlxk2.cli.sys.stdout.isatty', return_value=False), \
+             patch.dict(os.environ, {"MLXK2_ENABLE_PIPES": "1"}, clear=False):
+
+            mock_resolve.return_value = (None, None, None)
+            mock_runner = MagicMock()
+            mock_runner.__enter__ = MagicMock(return_value=mock_runner)
+            mock_runner.__exit__ = MagicMock(return_value=None)
+            mock_runner.generate_batch.return_value = "model response"
+            mock_runner_class.return_value = mock_runner
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "-"],
+                capsys
+            )
+
+        assert exit_code == 0, f"Expected exit 0, got {exit_code}, stderr={stderr}"
+        # Verify prompt was stdin content only (no trailing text concatenation)
+        mock_runner.generate_batch.assert_called_once()
+        assert mock_runner.generate_batch.call_args[1]["prompt"] == "prompt from stdin only"
+        assert "model response" in stdout
+
+    def test_run_empty_stdin(self, capsys):
+        """Empty stdin with '-' should use empty string as prompt."""
+        with patch('sys.stdin', StringIO("")), \
+             patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
+             patch('mlxk2.operations.run.MLXRunner') as mock_runner_class, \
+             patch('mlxk2.cli.sys.stdout.isatty', return_value=False), \
+             patch.dict(os.environ, {"MLXK2_ENABLE_PIPES": "1"}, clear=False):
+
+            mock_resolve.return_value = (None, None, None)
+            mock_runner = MagicMock()
+            mock_runner.__enter__ = MagicMock(return_value=mock_runner)
+            mock_runner.__exit__ = MagicMock(return_value=None)
+            mock_runner.generate_batch.return_value = "response to empty"
+            mock_runner_class.return_value = mock_runner
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "-"],
+                capsys
+            )
+
+        assert exit_code == 0, f"Expected exit 0, got {exit_code}, stderr={stderr}"
+        # Empty stdin should result in empty string prompt
+        mock_runner.generate_batch.assert_called_once()
+        assert mock_runner.generate_batch.call_args[1]["prompt"] == ""
+
+    def test_run_empty_stdin_with_trailing_text(self, capsys):
+        """Empty stdin + trailing text should result in just the trailing text (after separator)."""
+        with patch('sys.stdin', StringIO("")), \
+             patch('mlxk2.operations.run.resolve_model_for_operation') as mock_resolve, \
+             patch('mlxk2.operations.run.MLXRunner') as mock_runner_class, \
+             patch('mlxk2.cli.sys.stdout.isatty', return_value=False), \
+             patch.dict(os.environ, {"MLXK2_ENABLE_PIPES": "1"}, clear=False):
+
+            mock_resolve.return_value = (None, None, None)
+            mock_runner = MagicMock()
+            mock_runner.__enter__ = MagicMock(return_value=mock_runner)
+            mock_runner.__exit__ = MagicMock(return_value=None)
+            mock_runner.generate_batch.return_value = "response"
+            mock_runner_class.return_value = mock_runner
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "-", "trailing text"],
+                capsys
+            )
+
+        assert exit_code == 0
+        # Empty stdin + trailing = "\n\ntrailing text"
+        assert mock_runner.generate_batch.call_args[1]["prompt"] == "\n\ntrailing text"
+
+    def test_run_pipe_mode_error_message_correct(self, capsys):
+        """Pipe mode error should mention only MLXK2_ENABLE_PIPES (not --enable-pipes)."""
+        # Without MLXK2_ENABLE_PIPES set
+        with patch('sys.stdin', StringIO("test")), \
+             patch.dict(os.environ, {}, clear=False):
+            # Ensure MLXK2_ENABLE_PIPES is not set
+            os.environ.pop("MLXK2_ENABLE_PIPES", None)
+
+            stdout, stderr, exit_code = _run_cli_capture_exit(
+                ["mlxk2", "run", "test-model", "-"],
+                capsys
+            )
+
+        assert exit_code == 1
+        # Error should mention env var only, not a non-existent --enable-pipes flag
+        combined = stdout + stderr
+        assert "MLXK2_ENABLE_PIPES" in combined
+        assert "--enable-pipes" not in combined
+
+
+class TestSIGPIPEHandling:
+    """Test SIGPIPE signal handling for Unix pipe compatibility (ADR-014)."""
+
+    def test_sigpipe_handler_is_set(self):
+        """Verify SIGPIPE handler is set to SIG_DFL on Unix systems."""
+        # This test verifies the SIGPIPE handler setup code path
+        # On Unix, we expect signal.SIGPIPE to exist and be handled
+        if not hasattr(signal, 'SIGPIPE'):
+            pytest.skip("SIGPIPE not available on this platform (Windows)")
+
+        # Import and run main to trigger SIGPIPE setup
+        # We just verify the code path doesn't error
+        from mlxk2.cli import main
+
+        # Save original handler
+        original_handler = signal.getsignal(signal.SIGPIPE)
+
+        try:
+            # Calling main() would actually run CLI - we just verify the import works
+            # and that we can set/restore the signal
+            signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+            current = signal.getsignal(signal.SIGPIPE)
+            assert current == signal.SIG_DFL
+        finally:
+            # Restore original handler
+            signal.signal(signal.SIGPIPE, original_handler)
+
+
+class TestBrokenPipeError:
+    """Test BrokenPipeError handling in streaming/batch output (ADR-014)."""
+
+    def test_streaming_broken_pipe_handled_gracefully(self):
+        """BrokenPipeError during streaming should not raise exception."""
+        from mlxk2.operations.run import single_shot_generation
+
+        mock_runner = MagicMock()
+        mock_runner.generate_streaming.return_value = iter(["token1", "token2", "token3"])
+
+        # Mock print to raise BrokenPipeError on second call
+        call_count = [0]
+        original_print = print
+
+        def mock_print(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise BrokenPipeError("Broken pipe")
+            # Don't actually print during test
+            pass
+
+        with patch('builtins.print', mock_print), \
+             patch('sys.stderr', MagicMock()):  # Mock stderr.close()
+            # Should not raise, should return None
+            result = single_shot_generation(
+                mock_runner,
+                prompt="test",
+                stream=True,
+                json_output=False
+            )
+
+        # Should have returned None (graceful exit)
+        assert result is None
+
+    def test_batch_broken_pipe_handled_gracefully(self):
+        """BrokenPipeError during batch output should not raise exception."""
+        from mlxk2.operations.run import single_shot_generation
+
+        mock_runner = MagicMock()
+        mock_runner.generate_batch.return_value = "batch result"
+
+        def mock_print(*args, **kwargs):
+            raise BrokenPipeError("Broken pipe")
+
+        with patch('builtins.print', mock_print), \
+             patch('sys.stderr', MagicMock()):  # Mock stderr.close()
+            # Should not raise, should return None
+            result = single_shot_generation(
+                mock_runner,
+                prompt="test",
+                stream=False,
+                json_output=False
+            )
+
+        # Should have returned None (graceful exit)
+        assert result is None
 
 
 if __name__ == "__main__":

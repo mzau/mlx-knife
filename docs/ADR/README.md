@@ -15,12 +15,16 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-005](ADR-005-Clone-Implementation-Beta3.md) | Clone Implementation Beta3 | Superseded by ADR-007 | 2025-09-18 |
 | [ADR-006](ADR-006-Clone-Implementation-Revised.md) | Clone Implementation Revised | Superseded by ADR-007 | 2025-09-18 |
 | [ADR-007](ADR-007-Clone-Implementation-Fixed.md) | Clone Implementation Fixed Strategy | Accepted | 2025-09-18 |
-| [ADR-008](ADR-008-MLXModel-Package-Format.md) | MLXModel Package Format | Accepted | 2025-10-17 |
+| [ADR-008](ADR-008-MLXModel-Package-Format.md) | MLXModel Package Format | Proposed | 2025-10-17 |
 | [ADR-009](ADR-009-Stop-Token-Detection-Fix.md) | Stop Token Detection Fix | Implemented | 2025-10-21 |
 | [ADR-010](ADR-010-Reasoning-Content-API.md) | Reasoning Content API | Draft | 2025-10-21 |
 | [ADR-011](ADR-011-E2E-Live-Test-Architecture.md) | E2E Live Test Architecture | Implemented | 2025-10-21 |
-| [ADR-012](ADR-012-Vision-Support-Roadmap.md) | Vision Support Roadmap | Draft | 2025-11-12 |
+| [ADR-012](ADR-012-Vision-Support-Roadmap.md) | Vision Support Roadmap | Implemented (Phase 1-3) | 2025-11-12 |
 | [ADR-013](ADR-013-Community-Model-Quality-Database.md) | Community Model Quality Database | Planned | 2025-11-13 |
+| [ADR-014](ADR-014-Unix-Pipe-Integration.md) | Unix Pipe Integration | Implemented (Phase 1) | 2025-11-16 |
+| [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented | 2025-11-20 |
+| ADR-015 | Embeddings API | Planned | (future) |
+| ADR-017 | Image Metadata & RAG | Proposed | (future) |
 
 ## ADR Format
 

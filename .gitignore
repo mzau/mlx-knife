@@ -1,5 +1,6 @@
 venv/
 venv39/
+venv310/
 venv_*/
 test_env*/
 test_results*.log
@@ -24,6 +25,8 @@ openwebui311/bin/
 
 # Test artifacts (generated reports)
 *_report.json
+test-img-collection/
+small-img-collection
 
 # Benchmark reports (ADR-013 Phase 0)
 # These reports ARE tracked in git for historical data

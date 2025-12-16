@@ -4,8 +4,16 @@
 import argparse
 import json
 import os
+import signal
+import subprocess
 import sys
-from typing import Dict, Any
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+# Suppress huggingface_hub progress bars (used by mlx-vlm during model loading)
+# These progress bars are informational only and can confuse users since
+# mlx-knife manages downloads via `pull`, not during `run`
+# os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 from . import __version__
 from .operations.list import list_models
@@ -29,6 +37,26 @@ from .output.human import (
 def format_json_output(data: Dict[str, Any]) -> str:
     """Format output as JSON."""
     return json.dumps(data, indent=2)
+
+
+def _get_system_memory_bytes() -> Optional[int]:
+    """Get total system memory in bytes via sysctl (macOS only).
+
+    Returns:
+        Total memory in bytes, or None if unavailable.
+    """
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
+        pass
+    return None
 
 
 def print_result(result: Dict[str, Any], render_func=None, json_mode=False, **render_kwargs):
@@ -90,9 +118,22 @@ class MLXKArgumentParser(argparse.ArgumentParser):
 
 def main():
     """Main CLI entry point."""
+    # Handle SIGPIPE gracefully for Unix pipe workflows (e.g., `mlxk run model | head -1`)
+    # Without this, Python raises BrokenPipeError when downstream closes the pipe early.
+    # SIG_DFL restores the default behavior (silent termination) expected by Unix tools.
+    # On Windows, SIGPIPE doesn't exist - the signal module handles this gracefully.
+    if hasattr(signal, 'SIGPIPE'):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
     parser = MLXKArgumentParser(
         prog="mlxk2",
-        description="MLX-Knife - HuggingFace model management for MLX"
+        description="MLX-Knife - HuggingFace model management for MLX",
+        epilog=(
+            "Note: mlx-knife can download and run third-party models (e.g. from Hugging Face).\n"
+            "Each model has its own license. You are responsible for reviewing and complying\n"
+            "with those license terms."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
     # Add version argument (supports --json)
@@ -146,7 +187,18 @@ def main():
     # Run command
     run_parser = subparsers.add_parser("run", help="Run model with prompt")
     run_parser.add_argument("model", help="Model name to run")
-    run_parser.add_argument("prompt", nargs="?", help="Input prompt (optional - triggers interactive mode if omitted)")
+    run_parser.add_argument(
+        "prompt",
+        nargs="*",
+        help="Input prompt (optional - interactive if omitted). Use '-' for stdin (requires MLXK2_ENABLE_PIPES=1).",
+    )
+    run_parser.add_argument(
+        "--image",
+        nargs='+',
+        action="append",
+        metavar="FILE",
+        help="Attach image file(s) for vision models. Accepts multiple files per flag or use multiple flags.",
+    )
     run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate")
     run_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature (default: 0.7)")
     run_parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
@@ -203,12 +255,19 @@ def main():
         # Handle top-level version first
         if args.version:
             if args.json:
+                # Build system info object
+                system_info = {}
+                memory_bytes = _get_system_memory_bytes()
+                if memory_bytes is not None:
+                    system_info["memory_total_bytes"] = memory_bytes
+
                 result = {
                     "status": "success",
                     "command": "version",
                     "data": {
                         "cli_version": __version__,
                         "json_api_spec_version": JSON_API_SPEC_VERSION,
+                        "system": system_info if system_info else None,
                     },
                     "error": None,
                 }
@@ -264,11 +323,62 @@ def main():
             result = rm_operation(args.model, args.force)
             print_result(result, render_rm, args.json)
         elif args.command == "run":
+            prompt_parts = args.prompt if isinstance(args.prompt, list) else ([args.prompt] if args.prompt is not None else [])
+            prompt_value = None
+            pipes_enabled = bool(os.getenv("MLXK2_ENABLE_PIPES"))
+
+            if prompt_parts:
+                first_part = prompt_parts[0]
+                additional_text = " ".join(prompt_parts[1:]) if len(prompt_parts) > 1 else None
+
+                if first_part == "-":
+                    if not pipes_enabled:
+                        result = handle_error("CommandError", "Pipe mode requires MLXK2_ENABLE_PIPES=1")
+                        print_result(result, None, True if args.json else False)
+                        sys.exit(1)
+                    stdin_content = sys.stdin.read()
+                    prompt_value = stdin_content
+                    if additional_text:
+                        prompt_value = f"{stdin_content}\n\n{additional_text}"
+                else:
+                    prompt_value = " ".join(prompt_parts)
+
+            image_inputs = []
+            images = getattr(args, "image", None) or []
+            # Flatten nested list from nargs='+' + action='append'
+            # [[a.jpg, b.jpg], [c.jpg]] → [a.jpg, b.jpg, c.jpg]
+            if images and isinstance(images[0], list):
+                images = [item for sublist in images for item in sublist]
+
+            if images:
+                for image_path in images:
+                    img_path = Path(image_path)
+                    if not img_path.exists() or not img_path.is_file():
+                        result = handle_error("CommandError", f"Image not found: {image_path}")
+                        print_result(result, None, True if args.json else False)
+                        sys.exit(1)
+                    data = img_path.read_bytes()
+                    # Increased from 2MB to 10MB after Session 9 validation (mlx-vlm handles larger images fine)
+                    if len(data) > 10 * 1024 * 1024:
+                        result = handle_error("CommandError", f"Image too large (>10MB): {image_path}")
+                        print_result(result, None, True if args.json else False)
+                        sys.exit(1)
+                    image_inputs.append((img_path.name, data))
+                if prompt_value is None:
+                    prompt_value = "Describe the image."
+
+            stream_mode = not args.no_stream
+            if image_inputs:
+                stream_mode = False
+            elif not sys.stdout.isatty() and not args.json:
+                stream_mode = False
+
             # Handle run command with proper parameter mapping
             result_text = run_model_enhanced(
                 model_spec=args.model,
-                prompt=args.prompt,  # Can be None for interactive mode
-                stream=not args.no_stream,
+                prompt=prompt_value,  # Can be None for interactive mode
+                images=image_inputs if images else None,
+                stream=stream_mode,
                 max_tokens=getattr(args, "max_tokens", None),
                 temperature=args.temperature,
                 top_p=getattr(args, "top_p", 0.9),
@@ -297,14 +407,14 @@ def main():
                 if args.json:
                     print_result(result, None, True)
                 # Exit code will be 1 (handled by line 369)
-            elif args.json and result_text is not None and args.prompt is not None:
+            elif args.json and result_text is not None and prompt_value is not None:
                 # Success case: wrap result in standard format (only for single-shot mode)
                 result = {
                     "status": "success",
                     "command": "run",
                     "data": {
                         "model": args.model,
-                        "prompt": args.prompt,
+                        "prompt": prompt_value,
                         "response": result_text
                     },
                     "error": None

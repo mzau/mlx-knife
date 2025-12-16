@@ -6,18 +6,18 @@ echo "🧪 MLX Knife 2.0 (mlxk2) Multi-Python Version Testing"
 echo "=========================================="
 echo "Prerequisites: Python versions should be available as:"
 echo "  - python3 (3.9+ - system default)"
-echo "  - python3.10, python3.11, python3.12, python3.13 (if installed)"
+echo "  - python3.10, python3.11, python3.12, python3.13, python3.14 (if installed)"
 echo ""
 
-# Colors for output  
+# Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Python versions to test (bash 3.2 compatible)
-PYTHON_COMMANDS=("/usr/bin/python3" "python3.10" "python3.11" "python3.12" "python3.13")
-VERSION_NAMES=("3.9" "3.10" "3.11" "3.12" "3.13")
+PYTHON_COMMANDS=("/usr/bin/python3" "python3.10" "python3.11" "python3.12" "python3.13" "python3.14")
+VERSION_NAMES=("3.9" "3.10" "3.11" "3.12" "3.13" "3.14")
 RESULTS=()
 
 # Test function
@@ -55,8 +55,17 @@ test_python_version() {
     echo "📦 Installing MLX Knife (2.0) ..."
     local install_log="install_${version_name//./_}.log"
     pip install --upgrade pip setuptools wheel > "$install_log" 2>&1
-    
-    if pip install -e ".[test]" >> "$install_log" 2>&1; then
+
+    # Install with vision support for Python 3.10+ only (mlx-vlm requires >=3.10)
+    local install_extras=".[test]"
+    if [[ "$version_name" != "3.9" ]]; then
+        install_extras=".[test,vision]"
+        echo "   Including vision support (Python $version_name >= 3.10)"
+    else
+        echo "   Skipping vision support (mlx-vlm requires Python >= 3.10)"
+    fi
+
+    if pip install -e "$install_extras" >> "$install_log" 2>&1; then
         echo -e "${GREEN}✅ Installation successful${NC}"
         echo "🧰 Ensuring tooling (ruff, mypy)..."
         pip install -q "ruff>=0.1.0" "mypy>=1.5.0" >> "$install_log" 2>&1 || true

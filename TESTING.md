@@ -151,7 +151,7 @@ See [TESTING-DETAILS.md](TESTING-DETAILS.md) for complete file listing with desc
 - Deterministic behavior
 
 **Limitations:**
-- Tests requiring real mlx-lm integration use `@requires_mlx_lm` marker (2 tests)
+- Tests requiring real mlx-lm integration use `@requires_mlx_lm` marker
 - Production CLI/server still use real packages (stubs not installed)
 
 ## Common Test Commands
@@ -240,7 +240,7 @@ pytest -m live_stop_tokens -v
 
 ## Python Version Compatibility
 
-**All tests validated on Python 3.9-3.13**
+**All tests validated on Python 3.9-3.14**
 
 Multi-version testing:
 ```bash
@@ -333,9 +333,9 @@ When submitting PRs with test changes, please include:
 
 2. **Test results** (example):
    ```
-   Platform: macOS 14.5, M2 Pro
+   Platform: macOS 14.6, M2 Max
    Python: 3.9.6
-   Results: 306 passed, 20 skipped
+   Results: 476 passed, 65 skipped
    ```
 
 3. **Any issues encountered** and resolutions
@@ -362,10 +362,10 @@ ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 
 **MLX Knife Testing:**
 - ✅ **Isolated by default** - User cache stays pristine
-- ✅ **Fast feedback** - 300+ tests run in seconds without model downloads
+- ✅ **Fast feedback** - 400+ tests run in seconds without model downloads
 - ✅ **Low requirements** - 16GB RAM, ~20MB disk, no HF cache needed
 - ✅ **Opt-in live tests** - Real models/network when needed
-- ✅ **Multi-Python support** - Verified on Python 3.9-3.13
+- ✅ **Multi-Python support** - Verified on Python 3.9-3.14
 
 For detailed information including current test counts, complete file structure, version history, and implementation specifics, see [TESTING-DETAILS.md](TESTING-DETAILS.md).
 

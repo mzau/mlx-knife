@@ -1,6 +1,6 @@
-"""Server E2E tests with real models (ADR-011).
+"""Server E2E tests with real TEXT models (ADR-011 + Portfolio Separation).
 
-Validates server/HTTP API endpoints across model portfolio:
+Validates server/HTTP API endpoints across TEXT-ONLY model portfolio:
 - Health check endpoint
 - Model listing endpoint
 - Chat completions (batch and streaming)
@@ -9,7 +9,8 @@ Validates server/HTTP API endpoints across model portfolio:
 - Error envelopes (ADR-004)
 
 Test Strategy:
-- Uses Portfolio Discovery (ADR-009) for model selection
+- Uses TEXT Portfolio Discovery (text_portfolio fixture)
+- Vision models tested separately in test_vision_server_e2e.py
 - RAM-aware testing (progressive budget: 40%-70%)
 - Subprocess-based server lifecycle (true E2E)
 - OpenAI-compatible API validation
@@ -38,6 +39,10 @@ from .test_utils import (
 )
 # portfolio_models fixture is provided by conftest.py
 
+# Server request timeout (increased from 30s to 45s in Session 22)
+# Accounts for: baseline (15s) + probe/policy overhead (2.7s) + generation + safety margin
+SERVER_REQUEST_TIMEOUT = 45.0
+
 # Opt-in markers
 pytestmark = [
     pytest.mark.live_e2e,
@@ -53,22 +58,22 @@ class TestServerHealthEndpoints:
     """Basic health and metadata endpoints."""
 
     @pytest.mark.live_e2e
-    def test_health_endpoint(self, portfolio_models):
+    def test_health_endpoint(self, text_portfolio):
         """Validate /health endpoint returns 200 OK.
 
         Tests server basic liveness without model dependency.
-        Uses first available model from portfolio to start server.
+        Uses first available TEXT model from portfolio to start server.
         """
         # Use first model that fits in RAM
         test_model = None
-        for model_key, model_info in portfolio_models.items():
-            should_skip, _ = should_skip_model(model_key, portfolio_models)
+        for model_key, model_info in text_portfolio.items():
+            should_skip, _ = should_skip_model(model_key, text_portfolio)
             if not should_skip:
                 test_model = model_info["id"]
                 break
 
         if test_model is None:
-            pytest.skip("No models available within RAM budget")
+            pytest.skip("No text models available within RAM budget")
 
         with LocalServer(test_model) as server_url:
             response = httpx.get(f"{server_url}/health")
@@ -78,21 +83,21 @@ class TestServerHealthEndpoints:
             assert data.get("status") == "healthy"
 
     @pytest.mark.live_e2e
-    def test_v1_models_list(self, portfolio_models):
+    def test_v1_models_list(self, text_portfolio):
         """Validate /v1/models returns loaded model.
 
-        Tests model metadata endpoint with pre-loaded model.
+        Tests model metadata endpoint with pre-loaded TEXT model.
         """
         # Use first model that fits in RAM
         test_model = None
-        for model_key, model_info in portfolio_models.items():
-            should_skip, _ = should_skip_model(model_key, portfolio_models)
+        for model_key, model_info in text_portfolio.items():
+            should_skip, _ = should_skip_model(model_key, text_portfolio)
             if not should_skip:
                 test_model = model_info["id"]
                 break
 
         if test_model is None:
-            pytest.skip("No models available within RAM budget")
+            pytest.skip("No text models available within RAM budget")
 
         with LocalServer(test_model) as server_url:
             response = httpx.get(f"{server_url}/v1/models")
@@ -118,25 +123,25 @@ class TestChatCompletionsBatch:
     """
 
     @pytest.mark.live_e2e
-    def test_chat_completions_batch(self, portfolio_models, model_key, report_benchmark):
+    def test_chat_completions_batch(self, text_portfolio, text_model_key, report_benchmark):
         """Validate non-streaming chat completions.
 
-        Parametrized test (one instance per model in portfolio).
+        Parametrized test (one instance per TEXT model in portfolio).
 
         Tests:
         - Response structure (OpenAI-compatible)
         - Stop token filtering (Issue #32)
         - Error handling
         """
-        model_info = portfolio_models[model_key]
+        model_info = text_portfolio[text_model_key]
         model_id = model_info["id"]
 
         # RAM gating: skip if model exceeds budget
-        should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(text_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 
-        print(f"\nTesting {model_key}: {model_id}")
+        print(f"\nTesting {text_model_key}: {model_id}")
 
         with LocalServer(model_id, port=8765) as server_url:
             # Non-streaming chat completion
@@ -150,7 +155,7 @@ class TestChatCompletionsBatch:
                     "max_tokens": MAX_TOKENS,
                     "stream": False
                 },
-                timeout=30.0
+                timeout=SERVER_REQUEST_TIMEOUT
             )
 
             assert response.status_code == 200, f"Expected 200, got {response.status_code}"
@@ -180,7 +185,7 @@ class TestChatCompletionsBatch:
                 f"Content: {content!r}"
             )
 
-            print(f"✓ {model_key}: Passed (output: {len(content)} chars)")
+            print(f"✓ {text_model_key}: Passed (output: {len(content)} chars)")
 
             # Benchmark reporting (ADR-013 Phase 0)
             # Extract usage statistics if available
@@ -209,10 +214,10 @@ class TestChatCompletionsStreaming:
     """
 
     @pytest.mark.live_e2e
-    def test_chat_completions_streaming(self, portfolio_models, model_key, report_benchmark):
+    def test_chat_completions_streaming(self, text_portfolio, text_model_key, report_benchmark):
         """Validate SSE streaming chat completions.
 
-        Parametrized test (one instance per model in portfolio).
+        Parametrized test (one instance per TEXT model in portfolio).
 
         Tests:
         - SSE format compliance (data: lines, [DONE] sentinel)
@@ -220,15 +225,15 @@ class TestChatCompletionsStreaming:
         - Stop token filtering (Issue #32)
         - Stream completion
         """
-        model_info = portfolio_models[model_key]
+        model_info = text_portfolio[text_model_key]
         model_id = model_info["id"]
 
         # RAM gating
-        should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(text_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 
-        print(f"\nTesting {model_key}: {model_id}")
+        print(f"\nTesting {text_model_key}: {model_id}")
 
         with LocalServer(model_id, port=8765) as server_url:
             # Streaming chat completion
@@ -243,7 +248,7 @@ class TestChatCompletionsStreaming:
                     "max_tokens": MAX_TOKENS,
                     "stream": True
                 },
-                timeout=30.0
+                timeout=SERVER_REQUEST_TIMEOUT
             ) as response:
                 assert response.status_code == 200
 
@@ -265,7 +270,7 @@ class TestChatCompletionsStreaming:
                     "max_tokens": MAX_TOKENS,
                     "stream": True
                 },
-                timeout=30.0
+                timeout=SERVER_REQUEST_TIMEOUT
             ) as response:
                 content = collect_sse_content(response)
 
@@ -280,7 +285,7 @@ class TestChatCompletionsStreaming:
                 f"Content: {content!r}"
             )
 
-            print(f"✓ {model_key}: Passed (streamed: {len(content)} chars)")
+            print(f"✓ {text_model_key}: Passed (streamed: {len(content)} chars)")
 
             # Benchmark reporting (ADR-013 Phase 0)
             report_benchmark(stop_tokens={
@@ -295,23 +300,23 @@ class TestCompletionsBatch:
     """Non-streaming text completion tests."""
 
     @pytest.mark.live_e2e
-    def test_completions_batch_basic(self, portfolio_models):
+    def test_completions_batch_basic(self, text_portfolio):
         """Validate non-streaming text completions.
 
-        Tests basic /v1/completions endpoint with first available model.
+        Tests basic /v1/completions endpoint with first available TEXT model.
         """
         # Use first model that fits in RAM
         test_model = None
         test_model_key = None
-        for model_key, model_info in portfolio_models.items():
-            should_skip, _ = should_skip_model(model_key, portfolio_models)
+        for model_key, model_info in text_portfolio.items():
+            should_skip, _ = should_skip_model(model_key, text_portfolio)
             if not should_skip:
                 test_model = model_info["id"]
                 test_model_key = model_key
                 break
 
         if test_model is None:
-            pytest.skip("No models available within RAM budget")
+            pytest.skip("No text models available within RAM budget")
 
         print(f"\nTesting {test_model_key}: {test_model}")
 
@@ -324,7 +329,7 @@ class TestCompletionsBatch:
                     "max_tokens": MAX_TOKENS,
                     "stream": False
                 },
-                timeout=30.0
+                timeout=SERVER_REQUEST_TIMEOUT
             )
 
             assert response.status_code == 200
@@ -354,23 +359,23 @@ class TestCompletionsStreaming:
     """SSE streaming text completion tests."""
 
     @pytest.mark.live_e2e
-    def test_completions_streaming_basic(self, portfolio_models):
+    def test_completions_streaming_basic(self, text_portfolio):
         """Validate SSE streaming text completions.
 
-        Tests /v1/completions with stream=True.
+        Tests /v1/completions with stream=True (TEXT models only).
         """
         # Use first model that fits in RAM
         test_model = None
         test_model_key = None
-        for model_key, model_info in portfolio_models.items():
-            should_skip, _ = should_skip_model(model_key, portfolio_models)
+        for model_key, model_info in text_portfolio.items():
+            should_skip, _ = should_skip_model(model_key, text_portfolio)
             if not should_skip:
                 test_model = model_info["id"]
                 test_model_key = model_key
                 break
 
         if test_model is None:
-            pytest.skip("No models available within RAM budget")
+            pytest.skip("No text models available within RAM budget")
 
         print(f"\nTesting {test_model_key}: {test_model}")
 
@@ -384,7 +389,7 @@ class TestCompletionsStreaming:
                     "max_tokens": MAX_TOKENS,
                     "stream": True
                 },
-                timeout=30.0
+                timeout=SERVER_REQUEST_TIMEOUT
             ) as response:
                 assert response.status_code == 200
 

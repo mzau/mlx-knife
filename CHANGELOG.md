@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.0.4-beta.1] - WIP
+
+**Focus:** Unix Pipe Integration + Vision Support + Memory-Aware Loading + Python 3.14
+
+### Added
+
+- **Unix Pipe Integration (ADR-014 Phase 1):**
+  - `mlx-run` wrapper command for streamlined model execution
+  - Stdin support: `mlxk run <model> -` reads from stdin, concatenates trailing CLI text with `\n\n` separator
+  - Auto-batch mode: Non-TTY stdout disables streaming for clean pipe output
+  - SIGPIPE handler and BrokenPipeError handling for Unix convention compliance
+  - Gate: `MLXK2_ENABLE_PIPES=1` (beta, stable API)
+  - Example: `examples/mlx-tee.py` for parallel model execution
+
+- **Vision Support (Issue #45, ADR-012 Phase 1-3):**
+  - CLI (Phase 1+2): Vision model detection, `--image` flag with multiple images, VisionRunner (mlx-vlm 0.3.9+), health checks
+  - Server (Phase 3): VisionHTTPAdapter for OpenAI-compatible Base64 image requests
+  - Limits: 5 images max, 20 MB per image, 50 MB total (prevents Metal OOM crashes)
+  - Requires: Python 3.10+ (mlx-vlm dependency)
+
+- **Memory-Aware Model Loading (ADR-016 Phase 1+2):**
+  - JSON API 0.1.6: `system.memory_total_bytes` in `mlxk --version --json`
+  - Pre-load memory checks: Vision models >70% RAM → abort with error (CLI) or HTTP 507 (server)
+  - Text models >70% RAM → warning only (backwards compatible, swap-tolerant)
+
+- **Python 3.14 Support:**
+  - mlx-lm 0.28.4+ with official Python 3.14 support
+  - Tested: Python 3.9.6 - 3.14 (all versions verified)
+
+- **Server `/v1/models` Enhancements:**
+  - Preloaded model listed first (when `--model` specified), then alphabetically
+  - Resolved name stored for sorting (e.g., "qwen" → "mlx-community/Qwen2.5-0.5B-Instruct-4bit")
+  - Filters to healthy MLX models only (runtime compatibility check deferred to P2 refactoring due to code duplication)
+
+### Fixed
+
+- **`mlxk serve --log-json` fully fixed (Issue #44):** Clean JSON logs without duplicates or mixed formats
+  - **Fixed mixed plain-text/JSON logs:** Added `__main__` entrypoint; supervised mode now calls `python -m mlxk2.core.server_base` with JSON config
+  - **Fixed duplicate uvicorn logs:** Added `propagate: False` to `uvicorn.error` logger config
+  - **Result:** 100% parseable JSON output for log aggregation and monitoring systems
+  - **Config:** Passed via environment variables (`MLXK2_HOST`, `MLXK2_PORT`, `MLXK2_LOG_LEVEL`, `MLXK2_LOG_JSON`)
+
+### Documentation
+
+- ADR-012: Vision Support Phase 1-3 (CLI complete, Server Phase 3 in progress)
+- ADR-014: Unix Pipe Integration Phase 1 complete
+- ADR-016: Memory-Aware Model Loading complete
+- ARCHITECTURE.md: Core principles documented (no silent fallbacks, fail fast/clearly, memory gates)
+
 ## [2.0.3] - 2025-11-17
 
 **Stable Release**: Benchmark infrastructure + Unix stderr fix + reasoning control + dependency hardening.
@@ -22,7 +71,7 @@
   - **Limitations**: Only works with models that auto-generate reasoning tags (GPT-OSS, QwQ-32B via chat templates)
   - **Not supported**: DeepSeek-R1, Qwen3, and most other reasoning models (require system prompts from Issue #33)
   - **Issue #40 remains open**: Requires structured API (Option 2) and depends on #33 (System Prompts) for broad model support
-  - **Technical fix**: `review_report.md` - Flag now correctly propagates through `interactive_chat()` in both streaming and batch modes
+  - **Technical fix**: - Flag now correctly propagates through `interactive_chat()` in both streaming and batch modes
   - **Files**: `mlxk2/cli.py`, `mlxk2/operations/run.py`, `mlxk2/core/runner/__init__.py`, `mlxk2/core/runner/reasoning_format.py`
 
 ### BREAKING CHANGES

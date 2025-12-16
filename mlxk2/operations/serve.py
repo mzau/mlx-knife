@@ -13,36 +13,34 @@ from ..core.server_base import run_server
 
 
 def _run_supervised_uvicorn(host: str, port: int, log_level: str, reload: bool = False) -> int:
-    """Run uvicorn as a supervised subprocess and handle Ctrl-C in parent.
+    """Run server as a supervised subprocess and handle Ctrl-C in parent.
+
+    Uses the server_base __main__ entrypoint instead of uvicorn CLI directly.
+    This ensures proper JSON log configuration via MLXK2_LOG_JSON env var.
 
     Returns the subprocess' exit code.
     """
+    # Pass configuration via environment variables to subprocess
+    # This allows the __main__ entrypoint to configure run_server() properly
+    env = os.environ.copy()
+    env["MLXK2_HOST"] = host
+    env["MLXK2_PORT"] = str(port)
+    env["MLXK2_LOG_LEVEL"] = log_level
+    if reload:
+        env["MLXK2_RELOAD"] = "1"
+
+    # Note: MLXK2_LOG_JSON and MLXK2_PRELOAD_MODEL are already set by start_server()
+
     cmd = [
         sys.executable,
         "-m",
-        "uvicorn",
-        "mlxk2.core.server_base:app",
-        "--host",
-        host,
-        "--port",
-        str(port),
-        "--log-level",
-        log_level,
-        "--workers",
-        "1",
-        "--timeout-keep-alive",
-        "5",
-        "--timeout-graceful-shutdown",
-        "5",
-        "--lifespan",
-        "on",
+        "mlxk2.core.server_base",
     ]
-    if reload:
-        cmd.append("--reload")
 
     # Start in a new session so we can signal the whole process group
     proc = subprocess.Popen(
         cmd,
+        env=env,
         start_new_session=True,
     )
 
@@ -99,7 +97,9 @@ def start_server(
     """Start OpenAI-compatible API server for MLX models.
 
     Args:
-        model: Specific model to load on startup (optional)
+        model: Specific model to pre-load on startup (optional)
+               If specified, validates model with probe/policy before starting.
+               Server will fail-fast if model is incompatible (vision, memory, etc.)
         port: Port to bind the server to
         host: Host address to bind to
         max_tokens: Default maximum tokens for generation
@@ -114,9 +114,14 @@ def start_server(
             print(f"Pre-loading model: {model}")
         print(f"Server will bind to: http://{host}:{port}")
 
+    # Pre-load validation happens in server_base.py lifespan hook
+    # via environment variable MLXK2_PRELOAD_MODEL
+
     if supervise:
-        # Pass log_level via environment to subprocess (ADR-004)
+        # Pass log_level and model via environment to subprocess (ADR-004)
         os.environ["MLXK2_LOG_LEVEL"] = log_level
+        if model:
+            os.environ["MLXK2_PRELOAD_MODEL"] = model
         # Delegate to subprocess-managed uvicorn
         _ = _run_supervised_uvicorn(host=host, port=port, log_level=log_level, reload=reload)
         return
@@ -128,4 +133,5 @@ def start_server(
         max_tokens=max_tokens,
         reload=reload,
         log_level=log_level,
+        preload_model=model,
     )

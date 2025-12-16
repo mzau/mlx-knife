@@ -43,6 +43,53 @@ def is_model_healthy(model_spec):
     return _check_snapshot_health(model_path)
 
 
+def _check_auxiliary_assets(model_path, config_data):
+    """Check vision and tokenizer auxiliary assets.
+
+    ADR-012 Phase 2: Auxiliary asset validation
+    - Vision models require preprocessor_config.json (for image processing)
+    - Chat models benefit from tokenizer assets (tokenizer.json, tokenizer_config.json)
+
+    Returns:
+        (bool, str): (is_ok, reason_message)
+    """
+    from .common import detect_vision_capability
+    is_vision = detect_vision_capability(model_path, config_data)
+
+    if is_vision:
+        # Vision models require preprocessor_config.json for mlx-vlm
+        preprocessor_path = model_path / "preprocessor_config.json"
+        if not preprocessor_path.exists():
+            return False, "Vision model missing preprocessor_config.json"
+
+        try:
+            with open(preprocessor_path) as f:
+                preprocessor_data = json.load(f)
+            if not isinstance(preprocessor_data, dict):
+                return False, "preprocessor_config.json invalid"
+        except (OSError, json.JSONDecodeError):
+            return False, "preprocessor_config.json invalid JSON"
+
+    # Chat models benefit from tokenizer assets (not strict requirement for base models)
+    # Check tokenizer_config.json for chat template support
+    tokenizer_config_path = model_path / "tokenizer_config.json"
+    if tokenizer_config_path.exists():
+        try:
+            with open(tokenizer_config_path) as f:
+                tokenizer_data = json.load(f)
+            if not isinstance(tokenizer_data, dict):
+                return False, "tokenizer_config.json exists but invalid"
+        except (OSError, json.JSONDecodeError):
+            return False, "tokenizer_config.json contains invalid JSON"
+
+        # If tokenizer_config exists, tokenizer.json should also exist
+        tokenizer_path = model_path / "tokenizer.json"
+        if not tokenizer_path.exists():
+            return False, "tokenizer_config.json present but tokenizer.json missing"
+
+    return True, "Auxiliary assets OK"
+
+
 def _check_snapshot_health(model_path):
     """Check health of a specific snapshot directory.
 
@@ -52,15 +99,19 @@ def _check_snapshot_health(model_path):
       A subset must NOT be marked healthy.
     - Without an index, require at least one weight file present and non-empty,
       and ensure none are LFS pointers.
+
+    ADR-012 Phase 2: Auxiliary asset validation
+    - Vision models require preprocessor_config.json (for image processing)
+    - Chat models benefit from tokenizer assets (tokenizer.json, tokenizer_config.json)
     """
     if not model_path.exists():
         return False, "Model path does not exist"
-    
+
     # Check config.json
     config_path = model_path / "config.json"
     if not config_path.exists():
         return False, "config.json missing"
-    
+
     try:
         with open(config_path) as f:
             config_data = json.load(f)
@@ -110,6 +161,10 @@ def _check_snapshot_health(model_path):
                         pass
             if lfs_bad:
                 return False, f"LFS pointers instead of files: {', '.join(lfs_bad)}"
+            # ADR-012 Phase 2: Vision/tokenizer checks for indexed models
+            aux_ok, aux_msg = _check_auxiliary_assets(model_path, config_data)
+            if not aux_ok:
+                return False, aux_msg
             return True, "Multi-file model complete"
         except (OSError, json.JSONDecodeError):
             return False, "Invalid index file"
@@ -192,6 +247,11 @@ def _check_snapshot_health(model_path):
     lfs_ok, lfs_msg = check_lfs_corruption(model_path)
     if not lfs_ok:
         return False, lfs_msg
+
+    # ADR-012 Phase 2: Vision/tokenizer checks for non-indexed models
+    aux_ok, aux_msg = _check_auxiliary_assets(model_path, config_data)
+    if not aux_ok:
+        return False, aux_msg
 
     return True, "Model is healthy"
 

@@ -18,7 +18,7 @@ RAM Safety:
 - Tests automatically skip models that exceed available RAM
 - Progressive budget scaling: 40% (16GB), 50% (32GB), 60% (64GB), 70% (96GB+)
 - Larger systems have lower relative overhead, enabling better RAM utilization
-- See TESTING.md: "RAM-Aware Model Selection Strategy"
+- See TESTING-DETAILS.md: "RAM-Aware Model Selection Strategy"
 """
 
 from __future__ import annotations
@@ -176,12 +176,17 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     - Runtime: runtime_compatible only (mlx-lm can load)
     - Type: chat models only (for stop token testing)
 
+    Note: Vision models are included if runtime_compatible=True (Python 3.10+).
+    Server E2E tests handle vision models gracefully (HTTP 501 → pytest.skip).
+
     Returns:
         List of dicts with keys: model_id, ram_needed_gb, snapshot_path, weight_count
         Note: snapshot_path and weight_count set to None (not needed for tests)
     """
     import subprocess
     import json
+    from mlxk2.core.model_resolution import resolve_model_for_operation
+    from mlxk2.core.cache import get_current_model_cache, hf_to_cache_dir
 
     # Check HF_HOME is set (required for mlxk list)
     env = os.environ.copy()
@@ -211,17 +216,39 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
         discovered = []
         for model in models:
             # Filter: MLX + healthy + runtime_compatible + chat
+            model_type = model.get("model_type")
+            is_chat_family = (
+                isinstance(model_type, str) and
+                ("chat" in model_type.lower())  # includes chat and chat+vision
+            )
             if (model.get("framework") == "MLX" and
                 model.get("health") == "healthy" and
                 model.get("runtime_compatible") is True and
-                model.get("model_type") == "chat"):
+                is_chat_family):
 
                 # RAM estimation: size_bytes * 1.2 overhead
                 size_bytes = model.get("size_bytes", 0)
                 ram_gb = (size_bytes / (1024**3)) * 1.2 if size_bytes else 0
 
+                # Resolve to canonical cache name to avoid 404 during preload
+                model_name = model["name"]
+                try:
+                    resolved_name, _, _ = resolve_model_for_operation(model_name)
+                    if resolved_name:
+                        model_name = resolved_name
+                except Exception:
+                    pass
+
+                # Ensure cache directory exists (defensive against stale listings)
+                try:
+                    cache_dir = get_current_model_cache() / hf_to_cache_dir(model_name)
+                    if not cache_dir.exists():
+                        continue
+                except Exception:
+                    continue
+
                 discovered.append({
-                    "model_id": model["name"],  # Per schema: name is the model ID
+                    "model_id": model_name,  # Canonical model ID
                     "ram_needed_gb": ram_gb,
                     "snapshot_path": None,      # Not provided by list, not needed
                     "weight_count": None        # Not provided by list, not needed
@@ -235,7 +262,7 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
 
 
 # Test models from ADR-009 with RAM requirements
-# RAM estimates from TESTING.md: "RAM-Aware Model Selection Strategy"
+# RAM estimates from TESTING-DETAILS.md: "RAM-Aware Model Selection Strategy"
 TEST_MODELS = {
     "mxfp4": {
         "id": "mlx-community/gpt-oss-20b-MXFP4-Q8",
@@ -310,7 +337,7 @@ def should_skip_model(model_key: str, models_dict: Dict[str, Any] = None) -> tup
         return (
             True,
             f"Model requires {ram_needed}GB but only {ram_budget:.1f}GB available "
-            f"({budget_pct}% of {system_ram:.0f}GB system RAM). See TESTING.md RAM-Aware Model Selection."
+            f"({budget_pct}% of {system_ram:.0f}GB system RAM). See TESTING-DETAILS.md RAM-Aware Model Selection."
         )
     return (False, "")
 
