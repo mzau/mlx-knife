@@ -91,9 +91,12 @@ Repository structure:
 
 **What goes where:**
 - **PyPI Package**: Only `mlxk2/` + `pyproject.toml` (optional dependencies excluded from release wheel)
-- **GitHub Repository**: Everything else (documentation, tests, web interface)
+- **GitHub Repository**: Everything else (documentation, tests)
+- **Web Interface**: Separate project at [github.com/mzau/broke-nchat](https://github.com/mzau/broke-nchat) (shared across BROKE ecosystem)
 
 This helps ensure contributors commit files to the right place and understand the package vs. repository distinction.
+
+**Note:** The web UI (nChat) is intentionally separate to enable reuse across the BROKE ecosystem (MLX Knife + BROKE Cluster). Do not add web UI code to this repository.
 
 ## Testing Requirements
 

@@ -1,0 +1,231 @@
+"""Tests for ADR-016 memory-aware model loading."""
+
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from mlxk2.operations.run import (
+    _get_system_memory_bytes,
+    _format_bytes_gb,
+    check_memory_before_load,
+    check_memory_for_server,
+    MEMORY_THRESHOLD_PERCENT,
+)
+
+
+class TestGetSystemMemoryBytes:
+    """Tests for _get_system_memory_bytes helper."""
+
+    def test_returns_integer_on_success(self):
+        """Should return total memory as integer."""
+        result = _get_system_memory_bytes()
+        # On macOS, this should succeed
+        if result is not None:
+            assert isinstance(result, int)
+            assert result > 0
+
+    def test_returns_none_on_error(self):
+        """Should return None if sysctl fails."""
+        with patch("mlxk2.operations.run.subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError()
+            result = _get_system_memory_bytes()
+            assert result is None
+
+    def test_returns_none_on_timeout(self):
+        """Should return None if sysctl times out."""
+        import subprocess
+
+        with patch("mlxk2.operations.run.subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired("sysctl", 5)
+            result = _get_system_memory_bytes()
+            assert result is None
+
+    def test_returns_none_on_invalid_output(self):
+        """Should return None if sysctl returns non-integer."""
+        with patch("mlxk2.operations.run.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="not_a_number\n")
+            result = _get_system_memory_bytes()
+            assert result is None
+
+
+class TestFormatBytesGb:
+    """Tests for _format_bytes_gb helper."""
+
+    def test_format_64gb(self):
+        """Should format 64GB correctly."""
+        assert _format_bytes_gb(64 * 1024**3) == "64.0 GB"
+
+    def test_format_49_9gb(self):
+        """Should format 49.9GB correctly."""
+        assert _format_bytes_gb(int(49.9 * 1024**3)) == "49.9 GB"
+
+    def test_format_small(self):
+        """Should format small sizes correctly."""
+        assert _format_bytes_gb(1 * 1024**3) == "1.0 GB"
+
+
+class TestCheckMemoryBeforeLoad:
+    """Tests for check_memory_before_load (CLI path)."""
+
+    def test_vision_model_under_threshold_returns_none(self, tmp_path):
+        """Vision model under 70% threshold should return None (safe to proceed)."""
+        # Create a small mock model
+        (tmp_path / "weights.safetensors").write_bytes(b"x" * 1000)
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            # 64GB system, 1KB model = ~0% usage
+            mock_mem.return_value = 64 * 1024**3
+            result = check_memory_before_load(tmp_path, is_vision_model=True)
+            assert result is None
+
+    def test_vision_model_over_threshold_returns_error(self, tmp_path):
+        """Vision model over 70% threshold should return error message."""
+        # Create a large mock model (50GB on 64GB system = 78%)
+        model_size = 50 * 1024**3
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3  # 64GB system
+                mock_size.return_value = model_size  # 50GB model
+
+                result = check_memory_before_load(tmp_path, is_vision_model=True)
+
+                assert result is not None
+                assert "exceeds 70%" in result
+                assert "Vision models crash" in result
+                assert "Metal OOM" in result
+
+    def test_text_model_over_threshold_returns_none(self, tmp_path):
+        """Text model over 70% threshold should return None (no abort for text)."""
+        model_size = 60 * 1024**3  # 60GB on 64GB system = 94%
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3
+                mock_size.return_value = model_size
+
+                # Text model should NOT be aborted (swaps gracefully)
+                result = check_memory_before_load(tmp_path, is_vision_model=False)
+                assert result is None
+
+    def test_returns_none_when_memory_unavailable(self, tmp_path):
+        """Should return None when system memory cannot be determined."""
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            mock_mem.return_value = None
+            result = check_memory_before_load(tmp_path, is_vision_model=True)
+            assert result is None
+
+    def test_returns_none_when_model_size_zero(self, tmp_path):
+        """Should return None when model size cannot be determined."""
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3
+                mock_size.return_value = 0  # Cannot determine size
+
+                result = check_memory_before_load(tmp_path, is_vision_model=True)
+                assert result is None
+
+
+class TestCheckMemoryForServer:
+    """Tests for check_memory_for_server (Server path)."""
+
+    def test_vision_model_over_threshold_returns_error(self, tmp_path):
+        """Vision model over 70% should return error for HTTP 507."""
+        model_size = 50 * 1024**3  # 50GB on 64GB system = 78%
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3
+                mock_size.return_value = model_size
+
+                result = check_memory_for_server(
+                    tmp_path,
+                    is_vision_model=True,
+                    model_name="test-vision-model",
+                )
+
+                assert result is not None
+                assert "exceeds 70%" in result
+                assert "Metal OOM" in result
+
+    def test_text_model_over_threshold_logs_warning(self, tmp_path):
+        """Text model over 70% should log warning but return None."""
+        model_size = 60 * 1024**3  # 60GB on 64GB system = 94%
+        mock_logger = MagicMock()
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3
+                mock_size.return_value = model_size
+
+                result = check_memory_for_server(
+                    tmp_path,
+                    is_vision_model=False,
+                    model_name="test-text-model",
+                    logger=mock_logger,
+                )
+
+                # Should NOT return error (text models don't abort)
+                assert result is None
+
+                # Should log warning
+                mock_logger.warning.assert_called_once()
+                call_args = mock_logger.warning.call_args
+                assert "exceeds 70%" in call_args[0][0]
+                assert "extreme slowness" in call_args[0][0]
+                assert call_args[1]["model"] == "test-text-model"
+
+    def test_text_model_under_threshold_no_warning(self, tmp_path):
+        """Text model under 70% should not log warning."""
+        model_size = 10 * 1024**3  # 10GB on 64GB system = 16%
+        mock_logger = MagicMock()
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3
+                mock_size.return_value = model_size
+
+                result = check_memory_for_server(
+                    tmp_path,
+                    is_vision_model=False,
+                    model_name="test-text-model",
+                    logger=mock_logger,
+                )
+
+                assert result is None
+                mock_logger.warning.assert_not_called()
+
+    def test_works_without_logger(self, tmp_path):
+        """Should work without logger for text models."""
+        model_size = 60 * 1024**3
+
+        with patch("mlxk2.operations.run._get_system_memory_bytes") as mock_mem:
+            with patch("mlxk2.operations.run._total_size_bytes") as mock_size:
+                mock_mem.return_value = 64 * 1024**3
+                mock_size.return_value = model_size
+
+                # No logger provided - should not crash
+                result = check_memory_for_server(
+                    tmp_path,
+                    is_vision_model=False,
+                    model_name="test-text-model",
+                    logger=None,
+                )
+                assert result is None
+
+
+class TestMemoryThreshold:
+    """Tests for MEMORY_THRESHOLD_PERCENT constant."""
+
+    def test_threshold_is_70_percent(self):
+        """Threshold should be 70% as per ADR-016."""
+        assert MEMORY_THRESHOLD_PERCENT == 0.70
+
+    def test_threshold_calculation(self):
+        """Verify threshold calculation for 64GB system."""
+        system_memory = 64 * 1024**3
+        threshold = int(system_memory * MEMORY_THRESHOLD_PERCENT)
+        expected = int(44.8 * 1024**3)  # 70% of 64GB
+
+        # Allow small rounding difference
+        assert abs(threshold - expected) < 1024**2  # Within 1MB

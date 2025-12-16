@@ -1,6 +1,6 @@
 import shutil
 import os
-from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf, verify_cache_context
+from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
 
 
@@ -183,7 +183,9 @@ def rm_operation(model_spec, force=False):
         if force or not result["data"]["requires_confirmation"]:
             # Optional safety: when running tests, enforce test cache context
             if os.environ.get("MLXK2_STRICT_TEST_DELETE") == "1":
-                verify_cache_context("test")
+                cache_path = str(get_current_model_cache())
+                if "mlxk2_test_" not in cache_path:
+                    raise RuntimeError(f"STRICT_TEST_DELETE: Refusing to delete from non-test cache: {cache_path}")
             # MLX-Knife 2.0 Fix: Always delete entire model directory
             # This prevents the Issue #23 double-execution problem
             shutil.rmtree(resolved_model_dir)

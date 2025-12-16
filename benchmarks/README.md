@@ -20,9 +20,19 @@ This directory tracks empirical performance and compatibility data from mlx-knif
 
 ### Current Schema
 
-**Version:** 0.1.0 (Phase 0 - Minimal)
+**Version:** 0.2.0 (Phase 0 - Scheduling-Enhanced)
 
-See `schemas/report-v0.1.schema.json` for details.
+- **v0.1.0** (2.0.3+): Minimal schema - basic performance metrics
+- **v0.2.0** (2.0.4+): Hardware profiling + detailed metrics for cluster scheduling
+  - `system.hardware_profile`: Mac model, cores, Metal version
+  - `performance.*_time_s`: model_load, time_to_first_token, cleanup
+  - `system_health`: swap, zombies, quality_flags
+  - Backward compatible: v0.1.0 reports still valid
+
+**Schema Files:**
+- `schemas/report-current.schema.json` → always points to latest version
+- `schemas/report-v0.2.schema.json` → current schema (2.0.4+)
+- `schemas/report-v0.1.schema.json` → legacy schema (2.0.3)
 
 **Required fields:**
 - `schema_version`, `timestamp`, `mlx_knife_version`, `test`, `outcome`

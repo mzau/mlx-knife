@@ -1,0 +1,262 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MLX Knife Test Report v0.2 (Scheduling-Enhanced)",
+  "description": "Enhanced schema for cluster scheduling. Adds hardware profiling and detailed performance metrics. Backward compatible with v0.1.0.",
+  "type": "object",
+  "required": ["schema_version", "timestamp", "mlx_knife_version", "test", "outcome"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["0.2.0", "0.1.0"],
+      "description": "Schema version. 0.2.0 adds scheduling-enhanced fields. 0.1.0 reports remain valid."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of test execution (UTC recommended)"
+    },
+    "mlx_knife_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "mlx-knife version that generated this report (SemVer, e.g., '2.0.4')"
+    },
+    "test": {
+      "type": "string",
+      "description": "Test identifier (pytest nodeid format: path::test_name[params])"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["passed", "failed", "skipped"],
+      "description": "Test execution result"
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Test duration in seconds"
+    },
+    "model": {
+      "type": "object",
+      "description": "Model under test (if applicable)",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "HuggingFace model ID (org/name format)"
+        },
+        "size_gb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Model size in gigabytes (disk)"
+        },
+        "family": {
+          "type": "string",
+          "description": "Model family (e.g., 'phi-3', 'llama', 'qwen')"
+        },
+        "variant": {
+          "type": "string",
+          "description": "Model variant (e.g., '4k-instruct', 'chat', 'base')"
+        },
+        "framework": {
+          "type": "string",
+          "description": "Model framework (e.g., 'MLX', 'GGUF', 'PyTorch'). New in v0.2."
+        },
+        "quantization": {
+          "type": "string",
+          "description": "Quantization format (e.g., '4bit', '8bit', 'fp16'). New in v0.2."
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "description": "Performance metrics for scheduling decisions",
+      "properties": {
+        "tokens_per_sec": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Generation speed (tokens/second). Legacy v0.1 field."
+        },
+        "ram_peak_mb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Peak RAM usage in megabytes. Legacy v0.1 field (deprecated, use peak_ram_gb)."
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total inference duration in seconds. Legacy v0.1 field."
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of prompt tokens. Legacy v0.1 field."
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of generated tokens. Legacy v0.1 field."
+        },
+        "model_load_time_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Model loading time in seconds. Critical for scheduling startup costs. New in v0.2."
+        },
+        "time_to_first_token_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Time to first token in seconds (user-perceived latency). New in v0.2."
+        },
+        "cleanup_time_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cleanup/shutdown time in seconds. Critical for resource release scheduling. New in v0.2."
+        },
+        "peak_ram_gb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Peak RAM usage in gigabytes during inference. Critical for memory-based scheduling. New in v0.2."
+        },
+        "stable_ram_gb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Steady-state RAM usage in gigabytes (after warmup). New in v0.2."
+        }
+      }
+    },
+    "stop_tokens": {
+      "type": "object",
+      "description": "Stop token behavior (ADR-009 validation data)",
+      "properties": {
+        "configured": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Stop tokens configured for the model"
+        },
+        "detected": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Stop tokens actually found in response"
+        },
+        "workaround": {
+          "type": "string",
+          "description": "Workaround identifier (e.g., 'phi-3-dual-eos', 'none')"
+        },
+        "leaked": {
+          "type": "boolean",
+          "description": "Whether stop tokens leaked into output (bug indicator)"
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "description": "System information for hardware profiling and scheduling",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "OS platform (e.g., 'darwin', 'linux')"
+        },
+        "platform_version": {
+          "type": "string",
+          "description": "OS version (e.g., 'macOS 14.6', 'Ubuntu 22.04')"
+        },
+        "python_version": {
+          "type": "string",
+          "description": "Python version (e.g., '3.11.5')"
+        },
+        "mlx_version": {
+          "type": "string",
+          "description": "MLX framework version"
+        },
+        "hardware": {
+          "type": "string",
+          "description": "Human-readable hardware identifier (e.g., 'M2 Max', 'M1'). Legacy v0.1 field."
+        },
+        "ram_total_gb": {
+          "type": "number",
+          "description": "Total system RAM in GB"
+        },
+        "hardware_profile": {
+          "type": "object",
+          "description": "Detailed hardware profile for precise scheduling. New in v0.2.",
+          "properties": {
+            "model_identifier": {
+              "type": "string",
+              "description": "System model identifier (e.g., 'Mac14,6' for M2 Max MacBook Pro 16-inch)"
+            },
+            "chip": {
+              "type": "string",
+              "description": "Chip name (e.g., 'Apple M2 Max', 'Apple M3 Pro')"
+            },
+            "chip_cores_performance": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of performance CPU cores"
+            },
+            "chip_cores_efficiency": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of efficiency CPU cores"
+            },
+            "gpu_cores": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of GPU cores (Metal)"
+            },
+            "metal_version": {
+              "type": "string",
+              "description": "Metal API version (e.g., '3.1')"
+            }
+          }
+        }
+      }
+    },
+    "system_health": {
+      "type": "object",
+      "description": "System health metrics for benchmark quality assessment. New in v0.2.",
+      "properties": {
+        "swap_gb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Swap usage in gigabytes at benchmark time"
+        },
+        "ram_free_gb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Free RAM in gigabytes at benchmark start"
+        },
+        "zombies_detected": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of zombie MLX processes detected before benchmark"
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["clean", "degraded_swap", "degraded_zombies", "degraded_memory"]
+          },
+          "description": "Quality assessment flags. 'clean' = ideal conditions, others indicate degraded benchmarks."
+        }
+      }
+    },
+    "timeline": {
+      "type": "object",
+      "description": "Optional detailed execution timeline for bottleneck analysis. New in v0.2.",
+      "properties": {
+        "server_start_ms": {"type": "number", "minimum": 0},
+        "model_load_start_ms": {"type": "number", "minimum": 0},
+        "model_load_complete_ms": {"type": "number", "minimum": 0},
+        "server_ready_ms": {"type": "number", "minimum": 0},
+        "request_sent_ms": {"type": "number", "minimum": 0},
+        "first_token_ms": {"type": "number", "minimum": 0},
+        "stream_complete_ms": {"type": "number", "minimum": 0},
+        "shutdown_request_ms": {"type": "number", "minimum": 0},
+        "cleanup_complete_ms": {"type": "number", "minimum": 0}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Extensible metadata for experimentation. No schema constraints.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Stable Version: 2.0.3**
+**Current Version: 2.0.4-beta.1** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.3-green.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.1-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -20,20 +20,56 @@
 - **Model Information**: Detailed model metadata including quantization info
 - **Download Models**: Pull models from HuggingFace with progress tracking
 - **Run Models**: Native MLX execution with streaming and chat modes
+- **Vision Models**: Image analysis (Python 3.10+, alpha)
+- **Unix Pipes**: Chain models via stdin/stdout - no temp files (beta)
 - **Health Checks**: Verify model integrity and MLX runtime compatibility
 - **Cache Management**: Clean up and organize your model storage
 - **Privacy & Network**: No background network or telemetry; only explicit Hugging Face interactions when you run pull or the experimental push.
+
+### Unix Pipe Integration (Beta, 2.0.4)
+Chain models with standard Unix pipes - no temp files needed:
+```bash
+export MLXK2_ENABLE_PIPES=1
+
+# Model chaining
+cat article.txt | mlx-run translator_model - | mlx-run summarizer_model - "3 bullets"
+
+# Works with Unix tools
+mlx-run chat_model "explain quicksort" | tee explanation.txt | head -20
+```
+Robust handling of SIGPIPE and early pipe termination (`| head`, `| grep -m1`).
 
 ### Requirements
 - macOS with Apple Silicon
 - Python 3.9+ (native macOS version or newer)
 - 8GB+ RAM recommended + RAM to run LLM
 
+## ⚖️ Model Usage and Licenses
+
+`mlx-knife` is a **tooling layer** for running ML models (e.g. from Hugging Face) locally.
+The project does **not** distribute any model weights and does **not** decide which models you use or how you use them.
+
+Please note:
+
+- Each model (weights, tokenizer, configuration, etc.) is governed by its **own license**.
+- When `mlx-knife` downloads a model from a third-party service (e.g. Hugging Face), it does so **on your behalf**.
+- **You** are responsible for:
+  - reading and understanding the license of each model you use,
+  - complying with any restrictions (e.g. *Non-Commercial*, *Research Only*, RAIL, etc.),
+  - ensuring that your use of a given model (private, research, commercial, on-prem services, etc.) is legally permitted.
+
+The `mlx-knife` source code itself is provided under the open-source license specified in this repository.
+This license applies **only** to the `mlx-knife` code and **does not extend** to any external models.
+
+> This is not legal advice. Always refer to the original model license text and, if necessary, seek professional legal counsel.
+
 ### Python Compatibility
 MLX Knife has been comprehensively tested and verified on:
 
-✅ **Python 3.9.6** (native macOS) - Primary target
-✅ **Python 3.10-3.13** - Fully compatible
+✅ **Python 3.9.6 - 3.14** - Text LLMs fully supported (mlx-lm 0.28.4+)
+✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+)
+
+**Note:** Vision features require Python 3.10+. Native macOS Python 3.9.6 users need to upgrade (e.g., via Homebrew).
 
 
 
@@ -46,7 +82,7 @@ MLX Knife has been comprehensively tested and verified on:
 pip install mlx-knife
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.3
+mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.1 (dev)
 ```
 
 ### Development Installation
@@ -60,7 +96,7 @@ cd mlx-knife
 pip install -e ".[dev,test]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.3
+mlxk --version  # → mlxk 2.0.4-beta.1
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -99,6 +135,26 @@ mlxk run "Phi-3-mini" -c
 mlxk serve --port 8080
 ```
 
+## Web Interface
+
+For a web-based chat UI, use **[nChat](https://github.com/mzau/broke-nchat)** - a lightweight web interface for the BROKE ecosystem:
+
+```bash
+# Clone once (local setup):
+git clone https://github.com/mzau/broke-nchat.git
+cd broke-nchat
+
+# Start mlx-knife server:
+mlxk serve
+
+# Open web UI:
+open index.html
+```
+
+**On-Prem:** Pure HTML/CSS/JS - runs entirely locally, zero dependencies.
+
+**Note:** nChat is a separate project designed for the entire BROKE ecosystem (MLX Knife + BROKE Cluster). See [nChat README](https://github.com/mzau/broke-nchat/blob/main/README.md) for CORS configuration.
+
 
 ## Commands
 
@@ -113,6 +169,7 @@ mlxk serve --port 8080
 | `rm` | Model deletion with lock cleanup and fuzzy matching |
 | 🔒 `push` | **Alpha feature** - Upload to HuggingFace Hub; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
 | 🔒 `clone` | **Alpha feature** - Model workspace cloning; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
 
 
@@ -143,6 +200,28 @@ mlxk show "Phi-3-mini" --json | jq '.data.model'
 ```
 
 ### Examples
+
+#### Pipe mode (Alpha: set `MLXK2_ENABLE_PIPES=1`)
+
+```bash
+# Read prompt from stdin and append trailing text (auto batch in pipes)
+echo "from stdin" | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "append extra context"
+
+# JSON interactive guard (no prompt) emits JSON error on stdout, exit!=0
+MLXK2_ENABLE_PIPES=1 mlxk run "<model>" --json
+
+# Pipe list JSON into run for summarization
+MLXK2_ENABLE_PIPES=1 mlxk list --json \
+  | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "Summarize the model list as a concise table."
+
+# Shortcut wrapper (same semantics)
+MLXK2_ENABLE_PIPES=1 mlx-run "<model>" - "translate into german" < README.md
+```
+
+Notes:
+- Stdin requires `MLXK2_ENABLE_PIPES=1` (alpha gate). Without it, `-` is rejected.
+- When stdout is a pipe (non-TTY), streaming is disabled automatically to keep clean output.
+- Use full model IDs in place of `<model>`; HF_HOME should point to your cache for live runs.
 
 #### List Models
 ```bash
@@ -425,10 +504,122 @@ Using token hf_AbCdEfGhIjKlMnOpQrStUvWxYz123456 from /Users/john/models
 Using token [REDACTED_TOKEN] from ~/models
 ```
 
-### Environment Variables
 
-- `MLXK2_LOG_JSON=1`: Enable JSON log format (alternative to `--log-json` flag)
-- `MLXK2_LOG_LEVEL`: Override log level (used internally for subprocess mode)
+## Configuration Reference
+
+MLX Knife supports comprehensive runtime configuration via environment variables. All settings can be controlled without code changes.
+
+### Feature Gates
+
+Enable experimental and alpha features:
+
+| Variable | Description | Default | Since |
+|----------|-------------|---------|-------|
+| `MLXK2_ENABLE_ALPHA_FEATURES` | Enable alpha commands (`clone`, `push`) | `0` (disabled) | 2.0.0 |
+| `MLXK2_ENABLE_PIPES` | Enable Unix pipe integration (`mlxk run <model> -`) | `0` (disabled) | 2.0.4 |
+| `MLXK2_EXIF_METADATA` | Extract EXIF metadata from images (Vision models) | `1` (enabled) | 2.0.4 |
+
+**Examples:**
+```bash
+# Enable pipe mode for stdin processing
+export MLXK2_ENABLE_PIPES=1
+echo "Hello" | mlxk run model - "translate to Spanish"
+
+# Disable EXIF extraction for privacy (enabled by default)
+export MLXK2_EXIF_METADATA=0
+mlxk run vision-model --image photo.jpg "describe this"
+
+# Enable alpha features for development
+export MLXK2_ENABLE_ALPHA_FEATURES=1
+mlxk clone model-name ./workspace
+mlxk push ./workspace org/model --private --create
+```
+
+### Server Configuration
+
+Control server behavior without command-line flags:
+
+| Variable | Description | Default | Since |
+|----------|-------------|---------|-------|
+| `MLXK2_HOST` | Server bind address | `127.0.0.1` | 2.0.0 |
+| `MLXK2_PORT` | Server port | `8000` | 2.0.0 |
+| `MLXK2_PRELOAD_MODEL` | Model to load at startup (set by `--model` flag) | (none) | 2.0.0-beta |
+| `MLXK2_MAX_TOKENS` | Override default max_tokens for all requests | (auto) | 2.0.4 |
+| `MLXK2_RELOAD` | Enable Uvicorn auto-reload (development only) | `0` (disabled) | 2.0.0 |
+
+**Examples:**
+```bash
+# Custom host/port binding
+MLXK2_HOST=0.0.0.0 MLXK2_PORT=9000 mlxk serve
+
+# Preload model for faster first request
+MLXK2_PRELOAD_MODEL="mlx-community/Qwen2.5-3B-Instruct-4bit" mlxk serve
+
+# Override max_tokens for all requests
+MLXK2_MAX_TOKENS=4096 mlxk serve
+
+# Development mode with auto-reload
+MLXK2_RELOAD=1 mlxk serve
+```
+
+### Logging Configuration
+
+Control log output format and verbosity:
+
+| Variable | Description | Default | Since |
+|----------|-------------|---------|-------|
+| `MLXK2_LOG_JSON` | Enable JSON log format | `0` (text) | 2.0.0 |
+| `MLXK2_LOG_LEVEL` | Log level (`debug`, `info`, `warning`, `error`) | `info` | 2.0.0 |
+
+**Examples:**
+```bash
+# JSON logs for log aggregation tools
+MLXK2_LOG_JSON=1 mlxk serve
+
+# Quiet mode (warnings and errors only)
+MLXK2_LOG_LEVEL=warning mlxk serve
+
+# Verbose debug output
+MLXK2_LOG_LEVEL=debug mlxk serve
+```
+
+**Note:** CLI flags (`--log-json`, `--log-level`) take precedence over environment variables.
+
+### HuggingFace Integration
+
+Control HuggingFace Hub authentication and cache:
+
+| Variable | Description | Default | Since |
+|----------|-------------|---------|-------|
+| `HF_HOME` | HuggingFace cache directory | `~/.cache/huggingface` | N/A |
+| `HF_TOKEN` | HuggingFace API token (for private models, `push`) | (none) | N/A |
+| `HUGGINGFACE_HUB_TOKEN` | Alternative token variable (fallback) | (none) | N/A |
+
+**Examples:**
+```bash
+# Custom cache location
+HF_HOME=/data/models mlxk list
+
+# Authentication for private models
+HF_TOKEN=hf_... mlxk pull org/private-model
+
+# Upload to HuggingFace Hub (requires MLXK2_ENABLE_ALPHA_FEATURES=1)
+HF_TOKEN=hf_... mlxk push ./workspace org/model --private
+```
+
+### Configuration Priority
+
+When multiple sources define the same setting, precedence order is:
+
+1. **CLI flags** (highest priority) - e.g., `--log-json`, `--port`
+2. **Environment variables** - e.g., `MLXK2_LOG_JSON=1`
+3. **Defaults** (lowest priority) - documented above
+
+**Example:**
+```bash
+# CLI flag wins over environment variable
+MLXK2_PORT=9000 mlxk serve --port 8080  # Uses port 8080, not 9000
+```
 
 
 ## HuggingFace Cache Safety
@@ -455,7 +646,7 @@ mlxk health --json | jq '.data.summary'
 ```
 
 
-## Hidden Alpha Features: `clone` and `push`
+## Hidden Alpha Features: `clone`, `push`, and pipe mode
 
 ### `clone` - Model Workspace Creation
 
@@ -505,6 +696,42 @@ mlxk push --private ./workspace org/model --create --commit "init"
 
 These features are not final and may change or be removed in future releases.
 
+### `pipe mode` - stdin for `run` (beta, `mlx-run` shorthand)
+
+Pipe mode is beta (feature complete) and requires `MLXK2_ENABLE_PIPES=1`. It lets `mlxk run` (and `mlx-run`) read stdin when you pass `-` as the prompt.
+
+- Gate: `MLXK2_ENABLE_PIPES=1` (will become default in a future stable release).
+- Auto-batch: When stdout is a pipe (non-TTY), streaming is disabled automatically for clean output.
+- Robust: Handles SIGPIPE and BrokenPipeError gracefully (`| head`, `| grep -m1` work correctly).
+- Scope: Applies to `mlxk run` and `mlx-run`; other commands unchanged.
+- Usage examples (replace `<model>` with a cached MLX chat model):
+
+```bash
+# stdin + trailing text (batch when piped)
+MLXK2_ENABLE_PIPES=1 echo "from stdin" | mlxk run "<model>" - "append extra context"
+
+# JSON interactive guard (no prompt) → JSON error on stdout, exit 1
+MLXK2_ENABLE_PIPES=1 mlxk run "<model>" --json
+
+# list → run summarization
+MLXK2_ENABLE_PIPES=1 mlxk list --json \
+  | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "Summarize the model list as a concise table."
+
+# Wrapper shorthand
+MLXK2_ENABLE_PIPES=1 mlx-run "<model>" - "translate into german" < README.md
+```
+
+Pipe mode API is stable.
+
+### `vision` - mlx-vlm (Python 3.10+, non-streaming)
+
+- Install extras: `pip install -e .[vision]` (pulls `mlx-vlm` from GitHub, Python 3.10+).
+- Backend: Uses `mlx-vlm` (vision); streaming is disabled for vision runs.
+- Usage:
+  - Text-only on a vision model: `mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "what is 2+2"`
+  - Image + text: `mlxk run "<vision-model>" --image cat.jpg "describe the cat"`
+  - Image-only (auto prompt): `mlxk run "<vision-model>" --image cat.jpg`
+
 
 ## Testing
 
@@ -544,7 +771,7 @@ This branch follows the established MLX-Knife development patterns:
 
 ```bash
 # Run quality checks
-python test-multi-python.sh  # Tests across Python 3.9-3.13
+python test-multi-python.sh  # Tests across Python 3.9-3.14
 ./run_linting.sh             # Code quality validation
 
 # Key files:
@@ -580,6 +807,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.3 | November 2025</i><br>
-  <a href="https://github.com/mzau/broke-cluster">🔮 Next: BROKE Cluster for multi-node deployments</a>
+  <i>Version 2.0.4-beta.1 | December 2025</i><br>
+  <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
+  <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

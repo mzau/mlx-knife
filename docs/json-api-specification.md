@@ -1,8 +1,8 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.5
+**Specification Version:** 0.1.6
 **Status:** Alpha - Subject to change
-**Target:** MLX-Knife 2.0.0-beta.4
+**Target:** MLX-Knife 2.0.4-beta.1
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
@@ -106,8 +106,11 @@ JSON output example:
   "status": "success",
   "command": "version",
   "data": {
-    "cli_version": "2.0.0-alpha",
-    "json_api_spec_version": "0.1.2"
+    "cli_version": "2.0.4-beta.1",
+    "json_api_spec_version": "0.1.6",
+    "system": {
+      "memory_total_bytes": 137438953472
+    }
   },
   "error": null
 }
@@ -115,6 +118,7 @@ JSON output example:
 
 Notes:
 - Regular command responses (e.g., `list`, `show`) do not include a separate protocol tag; the spec version is reported by the `version` command in `data.json_api_spec_version`.
+- `system` object is `null` on non-macOS platforms where `sysctl hw.memsize` is unavailable (0.1.6+).
 
 ## Commands Overview
 
@@ -141,7 +145,7 @@ All commands that return model information use the same minimal model object.
 - `last_modified`: ISO-8601 UTC timestamp (with `Z`) of the selected path.
 - `framework`: "MLX" | "GGUF" | "PyTorch" | "Unknown".
 - `model_type`: "chat" | "embedding" | "base" | "unknown".
-- `capabilities`: e.g., ["text-generation", "chat"] or ["embeddings"].
+- `capabilities`: e.g., ["text-generation", "chat"], ["embeddings"], or ["text-generation", "chat", "vision"].
 - `health`: "healthy" | "unhealthy" (always present).
 - `runtime_compatible`: `true` | `false` (0.1.5+, always present).
 - `reason`: `string | null` (0.1.5+, describes first problem found, null when both checks pass).
@@ -152,6 +156,7 @@ Notes:
 - No human-readable "modified" field; `last_modified` is authoritative.
 - No absolute filesystem paths are exposed.
 - `runtime_compatible` and `reason` fields added in spec version 0.1.5 (Issue #36).
+- `vision` capability added in 0.1.5 as a backward-compatible enum extension (ADR-012 Phase 1a).
 
 ### Supported Commands
 
@@ -184,6 +189,34 @@ Notes:
 - `"chat"` - Supports chat template/instruction format
 - `"embeddings"` - Can generate embeddings
 - `"completion"` - Text completion without chat format
+- `"vision"` - Accepts image inputs (detected via `model_type` in vision families or presence of `preprocessor_config.json`)
+
+**Vision Example (Phase 1a, ADR-012):**
+```json
+{
+  "status": "success",
+  "command": "list",
+  "data": {
+    "models": [
+      {
+        "name": "mlx-community/llava-1.5-7b-hf-4bit-mlx",
+        "hash": "a5339a41b2e3abcdefgh1234567890ab12345678",
+        "size_bytes": 4613734656,
+        "last_modified": "2024-12-03T10:00:00Z",
+        "framework": "MLX",
+        "model_type": "chat",
+        "capabilities": ["text-generation", "chat", "vision"],
+        "health": "healthy",
+        "runtime_compatible": true,
+        "reason": null,
+        "cached": true
+      }
+    ],
+    "count": 1
+  },
+  "error": null
+}
+```
 
 ### `mlxk-json list [pattern] --json`
 
@@ -517,6 +550,28 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
   }
 }
 ```
+
+## Changes in 0.1.6 (Alpha)
+
+**ADR-016 Preparation: System Memory Information**
+
+- Added `system` object to `version` command response
+- `system.memory_total_bytes`: Total physical RAM in bytes (from `sysctl hw.memsize`)
+- `system` is `null` on non-macOS platforms where sysctl is unavailable
+- Enables ADR-016 Memory-Aware Model Loading (pre-load memory checks)
+
+**ADR-012: Vision Support - Model Discovery**
+
+- Vision models detected via `preprocessor_config.json` presence
+- `vision` capability added to model discovery (backward-compatible enum extension)
+- Visible in `mlxk list --json`, `mlxk show --json`, `mlxk health --json`
+- Example: `"capabilities": ["text-generation", "chat", "vision"]`
+
+**Note on `mlxk run --image` (CLI):**
+- `mlxk run --image` command exists for vision models (ADR-012 Phase 1b)
+- Current output: Text mode only (Markdown table with filename mapping)
+- JSON output: Deferred to ADR-017 Phase 2 (requires formal schema extension)
+- Server OpenAI Vision API documented in `docs/SERVER-HANDBOOK.md`
 
 ## Changes in 0.1.5 (Alpha)
 

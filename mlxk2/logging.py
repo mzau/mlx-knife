@@ -127,11 +127,10 @@ class MLXKLogger:
 
             return json.dumps(log_entry)
         else:
-            # Plain text format
-            prefix = f"[{level}]" if level != "INFO" else ""
-            if prefix:
-                return f"{prefix} {message}"
-            return message
+            # Plain text format (consistent with Uvicorn style)
+            # INFO messages get prefix for consistency with Uvicorn logs
+            prefix = f"[{level}]"
+            return f"{prefix} {message}"
 
     def info(self, message: str, request_id: Optional[str] = None, **extra: Any):
         """Log INFO level message."""
@@ -227,10 +226,10 @@ def get_logger() -> MLXKLogger:
 
 
 def _configure_root_logger():
-    """Configure root logger to use JSON format when MLXK2_LOG_JSON=1.
+    """Configure root logger for both JSON and plain-text modes.
 
     This captures logs from external libraries (mlx-lm, transformers, etc.)
-    and ensures consistent JSON output.
+    and ensures consistent output with MLXKLogger formatting.
     """
     global _root_logger_configured
     if _root_logger_configured:
@@ -238,18 +237,22 @@ def _configure_root_logger():
 
     json_mode = os.environ.get("MLXK2_LOG_JSON", "0") == "1"
 
+    # Configure root logger for both JSON and plain-text modes
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.WARNING)  # Capture WARNING and above from external libs
+
+    # Clear existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+
+    # Add handler with appropriate formatter
+    handler = logging.StreamHandler(sys.stderr)
     if json_mode:
-        # Configure root logger for JSON output
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)  # Capture INFO and above from external libs
-
-        # Clear existing handlers to avoid duplicates
-        root_logger.handlers.clear()
-
-        # Add JSON handler
-        handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(JSONFormatter())
-        root_logger.addHandler(handler)
+    else:
+        # Plain text: use [LEVEL] prefix for consistency with MLXKLogger
+        formatter = logging.Formatter('[%(levelname)s] %(name)s: %(message)s')
+        handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
 
     _root_logger_configured = True
 

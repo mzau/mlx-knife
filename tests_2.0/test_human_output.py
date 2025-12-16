@@ -174,3 +174,33 @@ def test_list_human_all_shows_all_frameworks():
     assert "MLXChat" in out_all
     assert "OtherGGUF" in out_all
     assert "OtherPT" in out_all
+
+
+def test_list_human_type_shows_vision_flag():
+    from mlxk2.output.human import render_list
+
+    data = {
+        "status": "success",
+        "command": "list",
+        "data": {
+            "models": [
+                {
+                    "name": "org/VisionChat",
+                    "hash": None,
+                    "size_bytes": 1,
+                    "last_modified": "2025-08-30T12:00:00Z",
+                    "framework": "MLX",
+                    "model_type": "chat",
+                    "capabilities": ["text-generation", "chat", "vision"],
+                    "health": "healthy",
+                    "runtime_compatible": True,
+                    "cached": True,
+                }
+            ],
+            "count": 1,
+        },
+        "error": None,
+    }
+
+    out = render_list(data, show_health=False, show_all=True, verbose=False)
+    assert "chat+vision" in out

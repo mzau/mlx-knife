@@ -13,7 +13,7 @@ authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: MacOS",
     "Environment :: Console",
     "License :: OSI Approved :: Apache Software License",
@@ -29,7 +30,7 @@ classifiers = [
 dependencies = [
     "huggingface-hub>=0.34.0,<1.0",
     "requests>=2.32.0",
-    "mlx-lm>=0.28.3",
+    "mlx-lm>=0.28.4",
     "mlx>=0.29.0",
     "fastapi>=0.116.0",
     "uvicorn>=0.35.0",
@@ -41,6 +42,7 @@ dependencies = [
 mlxk = "mlxk2.cli:main"
 mlxk-json = "mlxk2.cli:main"
 mlxk2 = "mlxk2.cli:main"
+mlx-run = "mlxk2.tools.run:main"
 
 [project.urls]
 Homepage = "https://github.com/mzau/mlx-knife"
@@ -62,6 +64,9 @@ test = [
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.5.0",
+]
+vision = [
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@v0.3.9",  # Vision Language Models support (ADR-012, Dec 3 2024 - not yet on PyPI)
 ]
 
 [tool.setuptools]

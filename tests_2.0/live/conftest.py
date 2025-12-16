@@ -19,6 +19,8 @@ from typing import Dict, Any
 # Import utilities from test_utils
 from .test_utils import (
     discover_mlx_models_in_user_cache,
+    discover_text_models,
+    discover_vision_models,
     TEST_MODELS,
 )
 
@@ -54,12 +56,19 @@ def _skip_unless_live_e2e_marker(request):
 
 
 def pytest_generate_tests(metafunc):
-    """Generate parametrized tests for model_key parameter.
+    """Generate parametrized tests for model_key, text_model_key, or vision_model_key.
+
+    DEPRECATED (model_key): Use text_model_key or vision_model_key instead for
+    deterministic test isolation. The legacy model_key parametrization mixes text
+    and vision models which causes test interference and non-deterministic indices.
 
     If a test function has 'model_key' in its signature, this hook
     automatically parametrizes it over all models in the portfolio.
     This replaces the old loop-based approach (which caused RAM leaks)
     with pytest-native parametrization for proper test isolation.
+
+    RECOMMENDED (Portfolio Separation): If a test has 'text_model_key' or 'vision_model_key',
+    parametrizes over text-only or vision-only models respectively.
 
     Each parametrized test gets its own server instance lifecycle,
     preventing accumulated RAM leaks from improper cleanup.
@@ -68,13 +77,51 @@ def pytest_generate_tests(metafunc):
     live_e2e marker BEFORE doing portfolio discovery to avoid slow
     collection when marker is not requested (maintains marker-required 🔒).
     """
+    # Check if live_e2e marker is requested (COLLECTION-TIME check)
+    selected_markers = metafunc.config.getoption("-m") or ""
+    is_live_e2e = "live_e2e" in selected_markers
+
+    # Handle text_model_key (NEW - Portfolio Separation)
+    if "text_model_key" in metafunc.fixturenames:
+        if not is_live_e2e:
+            metafunc.parametrize("text_model_key", ["_skipped"])
+            return
+
+        # Discover text-only models
+        text_models = discover_text_models()
+        if text_models:
+            model_keys = [f"text_{i:02d}" for i in range(len(text_models))]
+        else:
+            # Fallback to hardcoded test models (assume all text)
+            model_keys = list(TEST_MODELS.keys())
+
+        metafunc.parametrize("text_model_key", model_keys)
+        return
+
+    # Handle vision_model_key (NEW - Portfolio Separation)
+    if "vision_model_key" in metafunc.fixturenames:
+        if not is_live_e2e:
+            metafunc.parametrize("vision_model_key", ["_skipped"])
+            return
+
+        # Discover vision-only models
+        vision_models = discover_vision_models()
+        if vision_models:
+            model_keys = [f"vision_{i:02d}" for i in range(len(vision_models))]
+        else:
+            # No fallback for vision (needs real models)
+            model_keys = []
+
+        # If no vision models, parametrize with skip marker
+        if not model_keys:
+            model_keys = ["_no_vision_models"]
+
+        metafunc.parametrize("vision_model_key", model_keys)
+        return
+
+    # Handle model_key (DEPRECATED - Mixed Text+Vision, use text_model_key/vision_model_key instead)
     if "model_key" in metafunc.fixturenames:
-        # Check if live_e2e marker is requested (COLLECTION-TIME check)
-        selected_markers = metafunc.config.getoption("-m") or ""
-        if "live_e2e" not in selected_markers:
-            # Parametrize with dummy value to allow collection
-            # Tests will be skipped by _skip_unless_live_e2e_marker fixture
-            # This prevents "fixture 'model_key' not found" errors
+        if not is_live_e2e:
             metafunc.parametrize("model_key", ["_skipped"])
             return
 
@@ -95,6 +142,10 @@ def pytest_generate_tests(metafunc):
 @pytest.fixture(scope="module")
 def portfolio_models():
     """Dynamic model portfolio: discovered models OR hardcoded fallback.
+
+    DEPRECATED: Use text_portfolio or vision_portfolio instead for deterministic
+    test isolation. This fixture mixes text and vision models which can cause
+    test interference and non-deterministic discovered_XX indices.
 
     Reuses Portfolio Discovery from ADR-009 (test_stop_tokens_live.py).
     Enables portfolio testing when HF_HOME is set, falls back to
@@ -126,7 +177,7 @@ def portfolio_models():
                 "description": f"Discovered: {model['model_id']} ({model['weight_count']} weights)"
             }
 
-        print(f"\n🔍 Portfolio Discovery: Found {len(result)} MLX models in cache")
+        print(f"\n🔍 Portfolio Discovery: Found {len(result)} MLX models in cache (Text+Vision mixed)")
         return result
     else:
         # Fallback to hardcoded test models
@@ -134,9 +185,93 @@ def portfolio_models():
         return TEST_MODELS
 
 
+@pytest.fixture(scope="module")
+def text_portfolio():
+    """Text-only model portfolio (NEW - Portfolio Separation).
+
+    Discovers text models using discover_text_models() which filters out
+    vision models. This ensures deterministic test_XX indices that won't
+    change when vision models are added/removed from cache.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: Text model portfolio keyed by text_model_key
+            {
+                "text_00": {
+                    "id": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+                    "ram_needed_gb": 0.3,
+                    "expected_issue": None,
+                    "description": "Text: Qwen2.5-0.5B-Instruct-4bit"
+                },
+                ...
+            }
+    """
+    text_models = discover_text_models()
+
+    if text_models:
+        result = {}
+        for i, model in enumerate(text_models):
+            key = f"text_{i:02d}"
+            result[key] = {
+                "id": model["model_id"],
+                "ram_needed_gb": model["ram_needed_gb"],
+                "expected_issue": None,
+                "description": f"Text: {model['model_id'].split('/')[-1]}"
+            }
+
+        print(f"\n📝 Text Portfolio: Found {len(result)} text-only models")
+        return result
+    else:
+        # Fallback to hardcoded test models (assume all text)
+        print(f"\n📋 Text Portfolio: Using hardcoded TEST_MODELS (3 models)")
+        return TEST_MODELS
+
+
+@pytest.fixture(scope="module")
+def vision_portfolio():
+    """Vision-only model portfolio (NEW - Portfolio Separation).
+
+    Discovers vision models using discover_vision_models() which filters to
+    only models with vision capabilities. Uses Vision-specific RAM calculation
+    (0.70 threshold instead of 1.2x multiplier).
+
+    Returns:
+        Dict[str, Dict[str, Any]]: Vision model portfolio keyed by vision_model_key
+            {
+                "vision_00": {
+                    "id": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
+                    "ram_needed_gb": 5.6,
+                    "expected_issue": None,
+                    "description": "Vision: Llama-3.2-11B-Vision-Instruct-4bit"
+                },
+                ...
+            }
+    """
+    vision_models = discover_vision_models()
+
+    if vision_models:
+        result = {}
+        for i, model in enumerate(vision_models):
+            key = f"vision_{i:02d}"
+            result[key] = {
+                "id": model["model_id"],
+                "ram_needed_gb": model["ram_needed_gb"],
+                "expected_issue": None,
+                "description": f"Vision: {model['model_id'].split('/')[-1]}"
+            }
+
+        print(f"\n👁️  Vision Portfolio: Found {len(result)} vision-capable models")
+        return result
+    else:
+        # No fallback for vision - requires real models
+        print(f"\n⚠️  Vision Portfolio: No vision models found in cache")
+        return {}
+
+
 @pytest.fixture
 def model_info(portfolio_models, model_key):
     """Get model info for the current parametrized model_key.
+
+    DEPRECATED: Use text_model_info or vision_model_info for new tests.
 
     This fixture provides convenient access to model metadata in
     parametrized tests. It automatically looks up the model_key
@@ -156,6 +291,54 @@ def model_info(portfolio_models, model_key):
             - description: Human-readable description
     """
     return portfolio_models[model_key]
+
+
+@pytest.fixture
+def text_model_info(text_portfolio, text_model_key):
+    """Get model info for the current parametrized text_model_key (NEW).
+
+    This fixture provides convenient access to text model metadata in
+    parametrized tests. It automatically looks up the text_model_key
+    in the text_portfolio and returns the model info dict.
+
+    Usage:
+        def test_something(text_model_info):
+            model_id = text_model_info["id"]
+            ram_needed = text_model_info["ram_needed_gb"]
+            ...
+
+    Returns:
+        Dict[str, Any]: Text model metadata with keys:
+            - id: Model ID (e.g., "mlx-community/Qwen2.5-0.5B-Instruct-4bit")
+            - ram_needed_gb: Estimated RAM requirement (1.2x text formula)
+            - expected_issue: Known issue or None
+            - description: Human-readable description
+    """
+    return text_portfolio[text_model_key]
+
+
+@pytest.fixture
+def vision_model_info(vision_portfolio, vision_model_key):
+    """Get model info for the current parametrized vision_model_key (NEW).
+
+    This fixture provides convenient access to vision model metadata in
+    parametrized tests. It automatically looks up the vision_model_key
+    in the vision_portfolio and returns the model info dict.
+
+    Usage:
+        def test_something(vision_model_info):
+            model_id = vision_model_info["id"]
+            ram_needed = vision_model_info["ram_needed_gb"]
+            ...
+
+    Returns:
+        Dict[str, Any]: Vision model metadata with keys:
+            - id: Model ID (e.g., "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit")
+            - ram_needed_gb: Estimated RAM requirement (0.70 threshold vision formula)
+            - expected_issue: Known issue or None
+            - description: Human-readable description
+    """
+    return vision_portfolio[vision_model_key]
 
 
 def _parse_model_family(model_id: str) -> tuple[str, str]:
@@ -225,14 +408,17 @@ def _parse_model_family(model_id: str) -> tuple[str, str]:
 
 
 @pytest.fixture
-def report_benchmark(request, model_info):
+def report_benchmark(request):
     """Helper for writing benchmark data to test reports (ADR-013 Phase 0).
 
     Simplifies adding model metadata and performance metrics to E2E test reports.
     Reports are written as JSONL via pytest_runtest_makereport hook.
 
+    Dynamically uses text_model_info, vision_model_info, or model_info (deprecated)
+    based on what's available in the test's fixture request.
+
     Usage:
-        def test_something(report_benchmark, model_info):
+        def test_something(report_benchmark, text_model_info):
             # ... test logic ...
 
             # Report model info only
@@ -260,17 +446,39 @@ def report_benchmark(request, model_info):
         **extra: Additional metadata (goes to metadata section)
     """
     def _report(performance: Dict[str, Any] = None, stop_tokens: Dict[str, Any] = None, **extra):
+        # Dynamically get model_info from available fixtures (Portfolio Separation)
+        model_info = None
+        for fixture_name in ["text_model_info", "vision_model_info", "model_info"]:
+            try:
+                model_info = request.getfixturevalue(fixture_name)
+                if model_info is not None:
+                    break
+            except:
+                continue
+
+        if model_info is None:
+            # No model info available (non-parametrized test)
+            return
+
         # Extract model family/variant from model_id
         model_id = model_info["id"]
         family, variant = _parse_model_family(model_id)
 
         # Build model section (convert RAM estimate to disk size)
-        # ram_needed_gb includes 1.2x overhead, so disk size = ram_needed_gb / 1.2
-        disk_size_gb = model_info["ram_needed_gb"] / 1.2
+        # ram_needed_gb includes 1.2x overhead for text, direct size for vision
+        # For vision models (with 0.70 threshold), ram_needed_gb IS the disk size
+        # For text models, disk size = ram_needed_gb / 1.2
+        ram_gb = model_info["ram_needed_gb"]
+        if ram_gb == float('inf'):
+            disk_size_gb = float('inf')  # Vision model too large
+        else:
+            # Heuristic: if ram < 1.5x disk size, assume it's vision (no overhead)
+            # Otherwise assume text (1.2x overhead)
+            disk_size_gb = ram_gb / 1.2
 
         request.node.user_properties.append(("model", {
             "id": model_id,
-            "size_gb": round(disk_size_gb, 2),
+            "size_gb": round(disk_size_gb, 2) if disk_size_gb != float('inf') else disk_size_gb,
             "family": family,
             "variant": variant,
         }))

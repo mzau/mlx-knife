@@ -6,6 +6,7 @@ and then apply controlled mutations to simulate edge cases.
 """
 
 import os
+import sys
 import pytest
 
 # Allow selecting these tests via marker: -m issue27
@@ -139,3 +140,93 @@ class TestIssue27Exploration:
             m.get("name") == model and m.get("status") == "healthy"
             for m in result["data"]["healthy"]
         ), f"Expected healthy for user model, got: {result}"
+
+    @requires_user_cache
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="Vision models require Python 3.10+")
+    def test_vision_model_missing_preprocessor_is_unhealthy(self, copy_user_model_to_isolated, monkeypatch):
+        """ADR-012 Phase 2: Vision model without preprocessor_config.json should be unhealthy.
+
+        Note: Requires complete model copy (all weight shards) for valid health check.
+        CoW (Copy-on-Write) on macOS/APFS makes this instant and disk-free.
+        """
+        # Copy all shards for complete health check (CoW makes this instant)
+        monkeypatch.setenv("MLXK2_SUBSET_COUNT", "999")
+
+        model = os.environ.get(
+            "MLXK2_VISION_MODEL", "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit"
+        )
+        # Copy real vision model and remove preprocessor_config.json
+        copy_user_model_to_isolated(model, mutations=['remove_preprocessor'])
+
+        from mlxk2.operations.health import health_check_operation
+        result = health_check_operation(model)
+        assert result["status"] == "success"
+        unhealthy = result["data"]["unhealthy"]
+        assert any(model in m.get("name", "") for m in unhealthy), \
+            f"Expected {model} to be unhealthy without preprocessor_config.json"
+        # Check that the reason mentions preprocessor
+        matched = [m for m in unhealthy if model in m.get("name", "")]
+        if matched:
+            assert "preprocessor" in matched[0].get("reason", "").lower()
+
+    @requires_user_cache
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="Vision models require Python 3.10+")
+    def test_vision_model_invalid_preprocessor_is_unhealthy(self, copy_user_model_to_isolated, monkeypatch):
+        """ADR-012 Phase 2: Vision model with invalid preprocessor_config.json should be unhealthy."""
+        # Copy all shards for complete health check (CoW makes this instant)
+        monkeypatch.setenv("MLXK2_SUBSET_COUNT", "999")
+
+        model = os.environ.get(
+            "MLXK2_VISION_MODEL", "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit"
+        )
+        copy_user_model_to_isolated(model, mutations=['inject_invalid_preprocessor'])
+
+        from mlxk2.operations.health import health_check_operation
+        result = health_check_operation(model)
+        assert result["status"] == "success"
+        unhealthy = result["data"]["unhealthy"]
+        assert any(model in m.get("name", "") for m in unhealthy), \
+            f"Expected {model} to be unhealthy with invalid preprocessor_config.json"
+
+    @requires_user_cache
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="Vision models require Python 3.10+")
+    def test_vision_model_missing_tokenizer_json_is_unhealthy(self, copy_user_model_to_isolated, monkeypatch):
+        """ADR-012 Phase 2: Vision model with tokenizer_config but no tokenizer.json is unhealthy."""
+        # Copy all shards for complete health check (CoW makes this instant)
+        monkeypatch.setenv("MLXK2_SUBSET_COUNT", "999")
+
+        model = os.environ.get(
+            "MLXK2_VISION_MODEL", "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit"
+        )
+        copy_user_model_to_isolated(model, mutations=['remove_tokenizer_json'])
+
+        from mlxk2.operations.health import health_check_operation
+        result = health_check_operation(model)
+        assert result["status"] == "success"
+        unhealthy = result["data"]["unhealthy"]
+        assert any(model in m.get("name", "") for m in unhealthy), \
+            f"Expected {model} to be unhealthy without tokenizer.json"
+        # Check that the reason mentions tokenizer
+        matched = [m for m in unhealthy if model in m.get("name", "")]
+        if matched:
+            assert "tokenizer" in matched[0].get("reason", "").lower()
+
+    @requires_user_cache
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="Vision models require Python 3.10+")
+    def test_vision_model_complete_is_healthy(self, copy_user_model_to_isolated, monkeypatch):
+        """ADR-012 Phase 2: Complete vision model should be healthy."""
+        # Copy all shards for complete health check (CoW makes this instant)
+        monkeypatch.setenv("MLXK2_SUBSET_COUNT", "999")
+
+        model = os.environ.get(
+            "MLXK2_VISION_MODEL", "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit"
+        )
+        # Copy without mutations - should be healthy
+        copy_user_model_to_isolated(model)
+
+        from mlxk2.operations.health import health_check_operation
+        result = health_check_operation(model)
+        assert result["status"] == "success"
+        healthy = result["data"]["healthy"]
+        assert any(model in m.get("name", "") for m in healthy), \
+            f"Expected {model} to be healthy when complete, got: {result}"

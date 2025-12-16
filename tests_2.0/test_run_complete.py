@@ -132,9 +132,9 @@ class TestRunBasic:
                 json_output=True
             )
 
-        error_output = fake_err.getvalue()
-        assert "not compatible with JSON output" in error_output
-        assert result is None
+        assert result == "Error: Interactive mode not compatible with JSON output"
+        assert fake_out.getvalue() == ""
+        assert fake_err.getvalue() == ""
 
 
 class TestRunParameters:

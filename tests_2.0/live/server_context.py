@@ -9,6 +9,8 @@ Provides a clean subprocess-based server lifecycle for testing:
 from __future__ import annotations
 
 import gc
+import os
+import signal
 import sys
 import time
 import subprocess
@@ -72,6 +74,9 @@ def LocalServer(
         raise RuntimeError("httpx required for E2E tests (pip install httpx)")
 
     # Start server subprocess
+    # Pass environment variables (including HF_HOME) to subprocess
+    env = os.environ.copy()
+
     proc = subprocess.Popen(
         [
             sys.executable, "-m", "mlxk2.cli",
@@ -83,7 +88,9 @@ def LocalServer(
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
+        env=env,
+        start_new_session=True  # Create process group for robust cleanup
     )
 
     server_url = f"http://127.0.0.1:{port}"
@@ -117,27 +124,89 @@ def LocalServer(
     try:
         yield server_url
     finally:
-        # Graceful shutdown with active polling for MLX memory cleanup
-        proc.terminate()
+        # Robust cleanup with process group verification
+        # This prevents zombie accumulation from failed cleanups
+        cleanup_success = False
 
-        # Active polling: Check if process actually terminated (smart wait)
-        # instead of blindly waiting 45s every time
-        max_wait = 45  # Conservative timeout for very large models (>40GB)
-        start = time.time()
+        try:
+            # Step 1: Graceful shutdown (SIGTERM to process group)
+            try:
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                # Process/group already gone or not accessible - try direct terminate
+                proc.terminate()
 
-        while time.time() - start < max_wait:
-            if proc.poll() is not None:
-                # Process terminated successfully
-                break
-            time.sleep(0.5)  # Poll every 500ms
-        else:
-            # Timeout: Process frozen after 45s, force kill
-            # Note: This should be rare - most models cleanup in 10-20s
-            proc.kill()
-            proc.wait()
+            # Step 2: Wait for graceful cleanup (most models finish in 5-10s)
+            try:
+                proc.wait(timeout=10)
+                cleanup_success = True
+            except subprocess.TimeoutExpired:
+                # Graceful shutdown failed - escalate to SIGKILL
+                print(f"\n⚠️  WARNING: Server cleanup timeout after 10s (PID {proc.pid}, model: {model})")
+                print(f"    Escalating to SIGKILL...")
 
-        # Explicit garbage collection + buffer time for Metal memory release
-        # This helps prevent RAM overlap when transitioning between large models
-        # (e.g., Mixtral 29GB → OpenCode 21GB back-to-back tests)
+        except Exception as e:
+            print(f"\n⚠️  WARNING: Error during graceful cleanup: {e}")
+
+        # Step 3: Forceful shutdown if graceful failed
+        if not cleanup_success:
+            try:
+                # Kill process group with SIGKILL
+                try:
+                    pgid = os.getpgid(proc.pid)
+                    os.killpg(pgid, signal.SIGKILL)
+                    print(f"    Process group {pgid} killed with SIGKILL")
+                except (ProcessLookupError, PermissionError):
+                    # Group gone or not accessible - try direct kill
+                    proc.kill()
+                    print(f"    Process {proc.pid} killed with SIGKILL")
+
+                # Wait for death
+                proc.wait(timeout=5)
+                cleanup_success = True
+            except subprocess.TimeoutExpired:
+                # CRITICAL: Process refuses to die even with SIGKILL
+                print(f"⚠️  CRITICAL: Process {proc.pid} refuses to die even with SIGKILL!")
+            except (ProcessLookupError, PermissionError):
+                # Process already gone - cleanup succeeded
+                cleanup_success = True
+            except Exception as e:
+                print(f"⚠️  WARNING: Forceful cleanup failed: {e}")
+
+        # Step 4: Drain pipes (prevents zombies from pipe backpressure)
+        try:
+            proc.communicate(timeout=5)
+        except Exception:
+            pass  # Best-effort
+
+        # Step 5: Final verification - ensure no zombies leaked
+        try:
+            if proc.poll() is None:
+                # Still alive - one last kill attempt
+                print(f"⚠️  WARNING: Process {proc.pid} still alive after cleanup - final SIGKILL")
+                proc.kill()
+                proc.wait(timeout=2)
+        except Exception:
+            pass  # Best-effort
+
+        # Step 6: Verify process group is dead (prevent zombie accumulation)
+        try:
+            # Check if any processes in the group are still alive
+            result = subprocess.run(
+                ["pgrep", "-g", str(os.getpgid(proc.pid))],
+                capture_output=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
+                # Group still has members - kill them all
+                subprocess.run(["pkill", "-9", "-g", str(os.getpgid(proc.pid))], timeout=2)
+                print(f"⚠️  WARNING: Killed remaining processes in group {os.getpgid(proc.pid)}")
+        except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+            pass  # Group gone or not accessible - that's fine
+        except Exception:
+            pass  # Best-effort
+
+        # Step 7: Explicit garbage collection + Metal memory release buffer
         gc.collect()
-        time.sleep(2)  # Buffer for GPU memory deallocation (reduced from 5s)
+        time.sleep(2)

@@ -3,3 +3,14 @@ Copyright 2025 The BROKE team
 
 This product includes software developed by The BROKE team.
 Licensed under the Apache License, Version 2.0.
+
+THIRD-PARTY DEPENDENCIES
+========================
+
+This product includes software developed by:
+
+- MLX-LM (https://github.com/ml-explore/mlx-lm)
+  Licensed under the MIT License
+
+- MLX-VLM (https://github.com/Blaizzy/mlx-vlm)
+  Licensed under the MIT License

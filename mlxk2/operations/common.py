@@ -10,10 +10,15 @@ parsed from the first '---' block in README.md when present.
 
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
-import json as _json
+import importlib.util
+import sys
+
+# Import from unified capabilities module (ARCHITECTURE.md)
+from ..core.capabilities import VISION_MODEL_TYPES
 
 
 @dataclass
@@ -175,8 +180,13 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
     name = hf_name.lower()
     if "embed" in name:
         return "embedding"
-    if (config or {}).get("model_type") == "chat":
-        return "chat"
+    model_type = (config or {}).get("model_type")
+    if isinstance(model_type, str):
+        mt_lower = model_type.lower()
+        if mt_lower == "chat":
+            return "chat"
+        if mt_lower in VISION_MODEL_TYPES:
+            return "chat"
     ct = tok_hints.get("chat_template")
     if isinstance(ct, str) and ct.strip():
         return "chat"
@@ -185,7 +195,45 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
     return "base"
 
 
-def detect_capabilities(model_type: str, hf_name: str, tok_hints: Dict[str, Any], config: Optional[Dict[str, Any]]) -> list[str]:
+def detect_vision_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bool:
+    """Detect whether the model snapshot supports vision inputs."""
+    try:
+        if isinstance(config, dict):
+            mt = config.get("model_type")
+            if isinstance(mt, str) and mt.lower() in VISION_MODEL_TYPES:
+                return True
+
+            if config.get("image_processor"):
+                return True
+
+            preprocessor_cfg = config.get("preprocessor_config")
+            if isinstance(preprocessor_cfg, dict):
+                return True
+
+        if _has_any(
+            probe,
+            (
+                "preprocessor_config.json",
+                "processor_config.json",
+                "image_processor_config.json",
+                "**/preprocessor_config.json",
+                "**/processor_config.json",
+                "**/image_processor_config.json",
+            ),
+        ):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def detect_capabilities(
+    model_type: str,
+    hf_name: str,
+    tok_hints: Dict[str, Any],
+    config: Optional[Dict[str, Any]],
+    probe: Path,
+) -> list[str]:
     if model_type == "embedding":
         return ["embeddings"]
     caps = ["text-generation"]
@@ -193,7 +241,19 @@ def detect_capabilities(model_type: str, hf_name: str, tok_hints: Dict[str, Any]
     ct = tok_hints.get("chat_template")
     if model_type == "chat" or "instruct" in name or "chat" in name or (isinstance(ct, str) and ct.strip()):
         caps.append("chat")
+    if detect_vision_capability(probe, config):
+        caps.append("vision")
     return caps
+
+
+def vision_runtime_compatibility() -> tuple[bool, Optional[str]]:
+    """Vision uses mlx-vlm backend; mark compatible only if available."""
+    if sys.version_info < (3, 10):
+        return False, "Vision requires Python 3.10+ (mlx-vlm dependency)"
+    spec = importlib.util.find_spec("mlx_vlm")
+    if spec is None:
+        return False, "mlx-vlm not installed (install extras: vision)"
+    return True, None
 
 
 def _iso8601_utc_from_mtime(p: Path) -> str:
@@ -249,15 +309,20 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
 
     framework = detect_framework(hf_name, model_root, selected_path=selected_path, fm=fm)
     model_type = detect_model_type(hf_name, config, tok)
-    capabilities = detect_capabilities(model_type, hf_name, tok, config)
+    capabilities = detect_capabilities(model_type, hf_name, tok, config, probe)
+    has_vision = "vision" in capabilities
 
     # Health: rely on existing operation (name-based)
     healthy, health_reason = is_model_healthy(hf_name)
 
     # Runtime compatibility: ALWAYS computed (gate logic applies)
     # Gate: Only check runtime if file integrity is healthy
+    runtime_reason: Optional[str] = None
     if healthy:
-        runtime_compatible, runtime_reason = check_runtime_compatibility(probe, framework)
+        if has_vision:
+            runtime_compatible, runtime_reason = vision_runtime_compatibility()
+        else:
+            runtime_compatible, runtime_reason = check_runtime_compatibility(probe, framework)
     else:
         # File integrity failed → skip runtime check
         runtime_compatible = False
