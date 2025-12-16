@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.1** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.2** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.1-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.2-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -78,12 +78,19 @@ MLX Knife has been comprehensively tested and verified on:
 ### Via PyPI (Recommended)
 
 ```bash
-# Install stable release from PyPI
+# Basic installation (Text models only, Python 3.9+)
 pip install mlx-knife
 
+# With Vision support (Python 3.10+ required)
+pip install mlx-knife[vision]
+
 # Verify installation
-mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.1 (dev)
+mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.2 (dev)
 ```
+
+**Python Requirements:**
+- **Text models:** Python 3.9-3.14
+- **Vision models:** Python 3.10-3.14 (requires `mlx-vlm>=0.3.9`)
 
 ### Development Installation
 
@@ -95,8 +102,11 @@ cd mlx-knife
 # Install with all development dependencies (required for testing and code quality)
 pip install -e ".[dev,test]"
 
+# With Vision support (optional)
+pip install -e ".[dev,test,vision]"
+
 # Verify installation
-mlxk --version  # → mlxk 2.0.4-beta.1
+mlxk --version  # → mlxk 2.0.4-beta.2
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -725,7 +735,7 @@ Pipe mode API is stable.
 
 ### `vision` - mlx-vlm (Python 3.10+, non-streaming)
 
-- Install extras: `pip install -e .[vision]` (pulls `mlx-vlm` from GitHub, Python 3.10+).
+- Install extras: `pip install -e .[vision]` (requires `mlx-vlm>=0.3.9` from PyPI, Python 3.10+).
 - Backend: Uses `mlx-vlm` (vision); streaming is disabled for vision runs.
 - Usage:
   - Text-only on a vision model: `mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "what is 2+2"`
@@ -807,7 +817,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.1 | December 2025</i><br>
+  <i>Version 2.0.4-beta.2 | December 2025</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>
