@@ -77,14 +77,16 @@ def main():
         print("Usage: python benchmarks/validate_reports.py <jsonl_file> [<jsonl_file> ...]")
         sys.exit(1)
 
-    # Load schema
-    schema_path = Path("benchmarks/schemas/report-v0.1.schema.json")
+    # Load schema (always use current version)
+    schema_path = Path("benchmarks/schemas/report-current.schema.json")
     if not schema_path.exists():
         print(f"Error: Schema not found at {schema_path}")
         sys.exit(1)
 
     schema = load_schema(schema_path)
-    print(f"📋 Loaded schema: {schema_path}")
+    # Resolve symlink for display
+    resolved = schema_path.resolve()
+    print(f"📋 Loaded schema: {schema_path} → {resolved.name}")
     print()
 
     # Validate each file

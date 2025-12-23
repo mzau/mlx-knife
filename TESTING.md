@@ -19,6 +19,17 @@ For current test counts, version-specific details, and complete file listings, s
 - Delete operations fail if not in test cache (`MLXK2_STRICT_TEST_DELETE=1`)
 - Live tests never modify user cache without explicit environment variables
 
+**Unit Test Limitations:**
+
+MLX Knife has two test categories:
+1. **Unit tests** (~500 tests, fast, mocked) - verify code structure
+2. **Live E2E tests** (real models, slow) - verify actual functionality
+
+**Why both are needed:**
+When dependencies like `transformers` or `mlx-lm` update their APIs, unit tests (which mock these libraries) continue to pass, but real model loading breaks. Only live E2E tests catch these issues.
+
+**Example:** transformers 5.0 changed tokenizer initialization - unit tests passed (mocked API), but vision models failed to load in production. Live E2E tests caught the issue immediately.
+
 ## Quick Start
 
 ```bash

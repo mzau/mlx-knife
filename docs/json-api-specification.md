@@ -1,8 +1,8 @@
 # MLX-Knife 2.0 JSON API Specification
 
 **Specification Version:** 0.1.6
-**Status:** Alpha - Subject to change
-**Target:** MLX-Knife 2.0.4-beta.1
+**Status:** Stable (backward-compatible)
+**Released:** MLX-Knife 2.0.4-beta.1
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
@@ -551,29 +551,31 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
 }
 ```
 
-## Changes in 0.1.6 (Alpha)
+## Changes in 0.1.6 (Stable, 2.0.4-beta.1)
 
-**ADR-016 Preparation: System Memory Information**
+**System Memory Information**
 
 - Added `system` object to `version` command response
 - `system.memory_total_bytes`: Total physical RAM in bytes (from `sysctl hw.memsize`)
 - `system` is `null` on non-macOS platforms where sysctl is unavailable
-- Enables ADR-016 Memory-Aware Model Loading (pre-load memory checks)
+- Enables memory-aware model loading (ADR-016)
 
-**ADR-012: Vision Support - Model Discovery**
+**Model Discovery: Vision capability flag**
 
 - Vision models detected via `preprocessor_config.json` presence
-- `vision` capability added to model discovery (backward-compatible enum extension)
+- `vision` added to `capabilities` enum (backward-compatible extension)
 - Visible in `mlxk list --json`, `mlxk show --json`, `mlxk health --json`
 - Example: `"capabilities": ["text-generation", "chat", "vision"]`
 
-**Note on `mlxk run --image` (CLI):**
-- `mlxk run --image` command exists for vision models (ADR-012 Phase 1b)
-- Current output: Text mode only (Markdown table with filename mapping)
-- JSON output: Deferred to ADR-017 Phase 2 (requires formal schema extension)
-- Server OpenAI Vision API documented in `docs/SERVER-HANDBOOK.md`
+**Note:** Vision runtime support (`mlxk run --image`, Server API) is documented in README.md "Multi-Modal Support" and `docs/SERVER-HANDBOOK.md`.
 
-## Changes in 0.1.5 (Alpha)
+## Changes in 0.1.5 (Stable, 2.0.0)
+
+**Foundation: Model Object Schema**
+
+- Standardized `modelObject` across all commands
+- Machine-readable fields: `size_bytes`, `last_modified` (ISO-8601 UTC with `Z`)
+- No human-readable `size` or `modified` fields (JSON consumers parse structured data)
 
 **Issue #36: Separate Integrity and Runtime Compatibility Checks**
 
@@ -586,12 +588,6 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
   - Respects `MODEL_REMAPPING` for aliased architectures
 - Gate logic: Runtime check requires passing integrity check first
 - `reason` field describes first problem found (integrity > runtime priority)
-
-## Changes in 0.1.2 (Alpha)
-
-- Introduced a common minimal Model Object for consistency across commands.
-- Replaced human-readable `size` with machine-friendly `size_bytes`.
-- Removed human-readable `modified`; `last_modified` (ISO-8601 UTC) is authoritative.
 
 ## Operations
 

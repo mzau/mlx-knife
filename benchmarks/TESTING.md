@@ -1,155 +1,263 @@
-# Testing with Benchmark Reports (ADR-013 Phase 0)
+# Benchmark Handbook
 
-This document explains how to generate benchmark reports during E2E tests.
+Step-by-step guide for running benchmarks and generating reports.
+
+## Quick Start
+
+```bash
+# 1. Run E2E tests with report output
+pytest -m live_e2e tests_2.0/live/ \
+  --report-output benchmarks/reports/$(date +%Y-%m-%d)-v2.0.4b3.jsonl
+
+# 2. Generate analysis report
+python benchmarks/generate_benchmark_report.py
+
+# 3. View results
+cat benchmarks/reports/BENCHMARK-v1.0-2.0.4b3-*.md
+```
+
+---
+
+## Running Benchmarks
+
+### Basic Test Run
+
+```bash
+# Run all E2E tests, output to JSONL
+pytest -m live_e2e tests_2.0/live/ \
+  --report-output benchmarks/reports/$(date +%Y-%m-%d)-v2.0.4b3.jsonl
+```
+
+### With Custom HuggingFace Cache
+
+```bash
+HF_HOME=/path/to/huggingface/cache \
+  pytest -m live_e2e tests_2.0/live/ -v \
+  --report-output benchmarks/reports/2025-12-20-v2.0.4b3.jsonl
+```
+
+### With Memory Monitoring
+
+```bash
+# Run memmon in parallel to capture memory profile
+python benchmarks/tools/memmon.py \
+  --output benchmarks/reports/2025-12-20-memory.jsonl \
+  -- pytest -m live_e2e tests_2.0/live/ \
+     --report-output benchmarks/reports/2025-12-20-v2.0.4b3.jsonl
+```
+
+---
 
 ## Generating Reports
 
-### Basic Usage
+### Auto-Detect Latest JSONL
 
 ```bash
-# Run E2E tests with reporting
-pytest -m live_e2e tests_2.0/live/ \
-  --report-output benchmarks/reports/$(date +%Y-%m-%d)-v2.0.3.jsonl
+python benchmarks/generate_benchmark_report.py
+# → Finds most recent .jsonl in benchmarks/reports/
+# → Outputs: BENCHMARK-v1.0-<version>-<date>.md
 ```
 
-### With Full Environment
+### Explicit Input File
 
 ```bash
-# Use specific HF cache + generate reports
-HF_HOME=/Volumes/mz-SSD/huggingface/cache \
-  pytest -m live_e2e tests_2.0/live/ -v \
-  --report-output benchmarks/reports/2025-11-16-v2.0.3.jsonl
+python benchmarks/generate_benchmark_report.py \
+  benchmarks/reports/2025-12-20-v2.0.4b3.jsonl
 ```
 
-## Adding Report Data to Tests
+### With Comparison (Regression Detection)
 
-Tests can add structured data to reports using `request.node.user_properties`:
+```bash
+python benchmarks/generate_benchmark_report.py \
+  benchmarks/reports/2025-12-20-new.jsonl \
+  --compare benchmarks/reports/2025-12-19-old.jsonl
+```
+
+Output includes:
+- Duration change (e.g., 20.5 min → 19.7 min, -3.8%)
+- Per-model changes with Old/Δ/Change columns
+- Per-test median time changes
+- Status indicators: ⚠️ (>5% slower), ✅ (>1% faster)
+
+### Custom Output Location
+
+```bash
+python benchmarks/generate_benchmark_report.py \
+  --output /tmp/my-report.md \
+  benchmarks/reports/2025-12-20-v2.0.4b3.jsonl
+```
+
+---
+
+## Memory Monitoring
+
+### Standalone Monitor (Fixed Duration)
+
+```bash
+python benchmarks/tools/memmon.py \
+  --duration 60 \
+  --interval 200 \
+  --output memory.jsonl
+```
+
+### Wrap Any Command
+
+```bash
+python benchmarks/tools/memmon.py \
+  --output memory.jsonl \
+  -- ./my-benchmark-script.sh
+```
+
+### Output Format
+
+```jsonl
+{"ts": 1734567890.1, "ram_free_gb": 45.2, "swap_used_mb": 0, "elapsed_s": 0.2}
+{"ts": 1734567890.3, "ram_free_gb": 42.1, "swap_used_mb": 0, "elapsed_s": 0.4}
+...
+{"summary": {"ram_free_min_gb": 21.3, "ram_free_max_gb": 45.2, "swap_max_mb": 0}}
+```
+
+### Correlating with Test Results
+
+Memory samples can be correlated with test results via timestamps:
 
 ```python
-def test_example(model_info, request):
-    # ... test logic ...
+# Test entry has: timestamp (end time), duration
+# Calculate: started_at = timestamp - duration
 
-    # Add model info
-    request.node.user_properties.append(("model", {
-        "id": model_info["id"],
-        "size_gb": model_info["ram_needed_gb"],
-        "family": extract_family(model_info["id"]),
-        "variant": extract_variant(model_info["id"])
-    }))
+test_start = parse_iso(entry["timestamp"]) - entry["duration"]
+test_end = parse_iso(entry["timestamp"])
 
-    # Add performance metrics
-    request.node.user_properties.append(("performance", {
-        "tokens_per_sec": measure_tokens_per_sec(response),
-        "ram_peak_mb": get_peak_ram_usage(),
-        "duration_s": response.elapsed
-    }))
-
-    # Add stop token data (ADR-009)
-    request.node.user_properties.append(("stop_tokens", {
-        "configured": model_stop_tokens,
-        "detected": find_stop_tokens_in_response(response),
-        "workaround": get_workaround_name(model_info["id"]),
-        "leaked": check_for_leaked_tokens(response)
-    }))
-
-    # Add system info (optional)
-    request.node.user_properties.append(("system", {
-        "platform": platform.system().lower(),
-        "platform_version": get_os_version(),
-        "python_version": platform.python_version(),
-        "mlx_version": get_mlx_version(),
-        "hardware": get_hardware_model(),
-        "ram_total_gb": get_total_ram_gb()
-    }))
-
-    # Anything else goes to metadata
-    request.node.user_properties.append(("custom_metric", "value"))
+# Find matching memory samples
+matching = [s for s in samples if test_start <= s["ts"] <= test_end]
 ```
 
-## Structured Sections
+---
 
-Reports have predefined structured sections that map to schema fields:
+## Validating Reports
 
-| user_properties key | Maps to report field | Description |
-|---------------------|----------------------|-------------|
-| `model` | `model` object | Model metadata (id, size, family, variant) |
-| `performance` | `performance` object | Performance metrics (tokens/sec, RAM, duration) |
-| `stop_tokens` | `stop_tokens` object | Stop token behavior (ADR-009 validation) |
-| `system` | `system` object | Platform information (OS, Python, MLX, hardware) |
-| _anything else_ | `metadata` object | Extensible catch-all for experiments |
-
-## Schema Validation
+### Validate Against Current Schema
 
 ```bash
-# Validate reports against schema (requires jsonschema)
-pip install jsonschema
-
-# Validate all reports
-for report in benchmarks/reports/*.jsonl; do
-  echo "Validating $report..."
-  cat "$report" | while read line; do
-    echo "$line" | python3 -c "
-import sys, json
-from jsonschema import validate
-
-with open('benchmarks/schemas/report-v0.1.schema.json') as f:
-    schema = json.load(f)
-
-report = json.load(sys.stdin)
-validate(instance=report, schema=schema)
-print('✓ Valid')
-"
-  done
-done
+python benchmarks/validate_reports.py benchmarks/reports/*.jsonl
 ```
 
-## Example Report
+### Validate Specific File
 
+```bash
+python benchmarks/validate_reports.py benchmarks/reports/2025-12-20-v2.0.4b3.jsonl
+```
+
+---
+
+## Schema Reference
+
+### Current Schema: v0.2.0
+
+Required fields:
 ```json
 {
-  "schema_version": "0.1.0",
-  "timestamp": "2025-11-16T10:30:00Z",
-  "mlx_knife_version": "2.0.3",
-  "test": "tests_2.0/live/test_stop_tokens_live.py::test_stop_tokens[phi-3-mini]",
+  "schema_version": "0.2.0",
+  "timestamp": "2025-12-20T02:26:10.722510+00:00",
+  "mlx_knife_version": "2.0.4-beta.3",
+  "test": "tests_2.0/live/test_cli_e2e.py::test_run_command[discovered_00]",
   "outcome": "passed",
-  "duration": 12.3,
+  "duration": 12.3
+}
+```
+
+Optional sections:
+```json
+{
   "model": {
-    "id": "mlx-community/phi-3-mini-4k-instruct",
-    "size_gb": 2.8,
-    "family": "phi-3",
-    "variant": "mini-4k-instruct"
+    "id": "mlx-community/Qwen3-32B-4bit",
+    "size_gb": 17.2,
+    "family": "qwen3"
   },
-  "performance": {
-    "tokens_per_sec": 45.2,
-    "ram_peak_mb": 3200,
-    "prompt_tokens": 15,
-    "completion_tokens": 42
+  "system": {
+    "hardware_profile": {
+      "model": "Mac14,13",
+      "cores_physical": 12
+    }
   },
-  "stop_tokens": {
-    "configured": ["<|end|>", "<|endoftext|>"],
-    "detected": ["<|end|>"],
-    "workaround": "phi-3-dual-eos",
-    "leaked": false
+  "system_health": {
+    "swap_used_mb": 0,
+    "ram_free_gb": 45.2,
+    "zombie_processes": 0,
+    "quality_flags": ["clean"]
   }
 }
 ```
 
-## Analyzing Reports
+### Quality Flags
 
-See `reports/README.md` for analysis examples (jq queries, statistics, trends).
+| Flag | Meaning | Threshold |
+|------|---------|-----------|
+| `clean` | Test ran without issues | swap=0, zombies=0 |
+| `degraded_swap` | Memory pressure detected | swap > 100 MB |
+| `degraded_zombies` | Zombie processes present | zombies > 0 |
+
+---
 
 ## Best Practices
 
 1. **File Naming:** Use `YYYY-MM-DD-vX.Y.Z.jsonl` format
 2. **Append Only:** Never edit existing reports (historical data)
 3. **Commit Reports:** Reports are git-tracked for trend analysis
-4. **Schema Version:** Always include `schema_version` for evolution tracking
-5. **Optional Data:** Only add what you can measure reliably
-6. **No PII:** Never include personal information in reports
+4. **Clean State:** Reboot before important benchmark runs
+5. **Close Apps:** Minimize background processes during tests
+6. **Multiple Runs:** Run 2-3 times, compare for consistency
 
-## Future Enhancements (Phase 1+)
+---
 
-- Automatic validation during `pytest --report-output`
-- Performance regression detection
-- Report comparison tools (`mlxk report diff`)
-- Schema migration utilities
+## Troubleshooting
+
+### "No JSONL files found"
+
+```bash
+# Check if reports exist
+ls -la benchmarks/reports/*.jsonl
+
+# Run tests with output
+pytest -m live_e2e tests_2.0/live/ --report-output benchmarks/reports/test.jsonl
+```
+
+### Schema Validation Fails
+
+```bash
+# Check schema version in file
+head -1 benchmarks/reports/file.jsonl | jq .schema_version
+
+# Validate manually
+python -c "
+import json
+from jsonschema import validate
+with open('benchmarks/schemas/report-current.schema.json') as f:
+    schema = json.load(f)
+with open('benchmarks/reports/file.jsonl') as f:
+    for line in f:
+        validate(json.loads(line), schema)
+print('OK')
+"
+```
+
+### Comparison Shows "N/A"
+
+Model not found in comparison file. Check:
+- Same models tested in both runs?
+- Model ID spelling matches exactly?
+
+---
+
+## Future: Phase 1 (mlxk-benchmark)
+
+Phase 1 will introduce a standalone benchmark package:
+
+```bash
+pip install mlxk-benchmark
+mlx-benchmark --model llama-3.2-3b --contribute
+```
+
+No pytest, no fixtures, no conftest.py - just simple CLI for community contributions.
+
+See `schemas/LEARNINGS-FOR-v1.0.md` for design notes.

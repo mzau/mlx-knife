@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.2** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.3** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.2-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.3-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -20,7 +20,7 @@
 - **Model Information**: Detailed model metadata including quantization info
 - **Download Models**: Pull models from HuggingFace with progress tracking
 - **Run Models**: Native MLX execution with streaming and chat modes
-- **Vision Models**: Image analysis (Python 3.10+, alpha)
+- **Vision Models**: Image analysis (Python 3.10+, beta)
 - **Unix Pipes**: Chain models via stdin/stdout - no temp files (beta)
 - **Health Checks**: Verify model integrity and MLX runtime compatibility
 - **Cache Management**: Clean up and organize your model storage
@@ -67,7 +67,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 MLX Knife has been comprehensively tested and verified on:
 
 ✅ **Python 3.9.6 - 3.14** - Text LLMs fully supported (mlx-lm 0.28.4+)
-✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+)
+✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.3 recommends commit c4ea290e47e2155b67d94c708c662f8ab64e1b37)
 
 **Note:** Vision features require Python 3.10+. Native macOS Python 3.9.6 users need to upgrade (e.g., via Homebrew).
 
@@ -85,12 +85,17 @@ pip install mlx-knife
 pip install mlx-knife[vision]
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.2 (dev)
+mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.3 (dev)
 ```
 
 **Python Requirements:**
 - **Text models:** Python 3.9-3.14
-- **Vision models:** Python 3.10-3.14 (requires `mlx-vlm>=0.3.9`)
+- **Vision models:** Python 3.10-3.14 (requires `mlx-vlm>=0.3.9`; beta.3 recommends commit c4ea290e47e2155b67d94c708c662f8ab64e1b37)
+
+**Beta.3 note:** Until mlx-vlm 0.3.10 is released, install the upstream commit before mlx-knife if you need the fix:
+```bash
+pip install "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290e47e2155b67d94c708c662f8ab64e1b37"
+```
 
 ### Development Installation
 
@@ -106,7 +111,7 @@ pip install -e ".[dev,test]"
 pip install -e ".[dev,test,vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4-beta.2
+mlxk --version  # → mlxk 2.0.4-beta.3
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -182,6 +187,100 @@ open index.html
 | 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
 
+## Multi-Modal Support
+
+MLX Knife supports multiple input modalities beyond text. All multi-modal features share a **common output pattern**: model responses are followed by collapsible metadata tables for transparency and traceability.
+
+### Vision (Beta)
+
+Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+.
+
+#### Requirements
+
+- **Python 3.10+** (mlx-vlm dependency)
+- **Installation:** `pip install mlx-knife[vision]`
+- **Backend:** mlx-vlm 0.3.9+ from PyPI
+- **Beta.3 note:** For upstream bugfixes, install commit `c4ea290e47e2155b67d94c708c662f8ab64e1b37` before mlx-knife:
+  ```bash
+  pip install "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290e47e2155b67d94c708c662f8ab64e1b37"
+  pip install mlx-knife[vision]
+  ```
+
+#### Usage
+
+```bash
+# Image analysis with custom prompt
+mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" \
+  --image photo.jpg "Describe what you see in detail"
+
+# Multiple images (space-separated or glob)
+mlxk run vision-model --image img1.jpg img2.jpg img3.jpg "Compare these images"
+mlxk run vision-model --image photos/*.jpg "Which images show outdoor scenes?"
+
+# Auto-prompt (default: "Describe the image.")
+mlxk run vision-model --image cat.jpg
+
+# Text-only on vision model (no --image flag)
+mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "What is 2+2?"
+```
+
+#### Metadata Output Format
+
+When processing images, MLX Knife automatically appends metadata in a **collapsible table** (collapsed by default):
+
+```
+A beach with palm trees and clear blue water.
+
+<details>
+<summary>📸 Image Metadata (2 images)</summary>
+
+| Image | Filename | Original | Location | Date | Camera |
+|-------|----------|----------|----------|------|--------|
+| 1 | image_abc123.jpeg | beach.jpg | 📍 32.79°N, 16.92°W | 📅 2023-12-06 12:19 | 📷 Apple iPhone SE |
+| 2 | image_def456.jpeg | mountain.jpg | 📍 32.87°N, 17.17°W | 📅 2023-12-10 15:42 | 📷 Apple iPhone SE |
+
+</details>
+```
+
+**Metadata includes:**
+- **Image ID** → **Filename mapping** (identify which description belongs to which file)
+- **GPS coordinates** (latitude/longitude, if available in EXIF)
+- **Capture date/time** (ISO 8601 format)
+- **Camera model** (device info)
+
+**Privacy control:**
+
+EXIF extraction is **enabled by default**. To disable (e.g., for privacy-sensitive images):
+
+```bash
+export MLXK2_EXIF_METADATA=0
+mlxk run vision-model --image photo.jpg "describe"
+```
+
+**Output is the same for CLI and server** - metadata tables work in terminals, web UIs (nChat), and can be parsed programmatically.
+
+#### Limitations
+
+- **Non-streaming:** Vision runs always use batch mode (no streaming output)
+- **Image limits:** 5 images max per request, 20 MB per image, 50 MB total
+
+#### Server API
+
+Vision models work with OpenAI-compatible `/v1/chat/completions` endpoint using base64-encoded images:
+
+```bash
+curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "llama-vision",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "What is in this image?"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]
+  }]
+}'
+```
+
 
 ## JSON API
 
@@ -210,28 +309,6 @@ mlxk show "Phi-3-mini" --json | jq '.data.model'
 ```
 
 ### Examples
-
-#### Pipe mode (Alpha: set `MLXK2_ENABLE_PIPES=1`)
-
-```bash
-# Read prompt from stdin and append trailing text (auto batch in pipes)
-echo "from stdin" | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "append extra context"
-
-# JSON interactive guard (no prompt) emits JSON error on stdout, exit!=0
-MLXK2_ENABLE_PIPES=1 mlxk run "<model>" --json
-
-# Pipe list JSON into run for summarization
-MLXK2_ENABLE_PIPES=1 mlxk list --json \
-  | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "Summarize the model list as a concise table."
-
-# Shortcut wrapper (same semantics)
-MLXK2_ENABLE_PIPES=1 mlx-run "<model>" - "translate into german" < README.md
-```
-
-Notes:
-- Stdin requires `MLXK2_ENABLE_PIPES=1` (alpha gate). Without it, `-` is rejected.
-- When stdout is a pipe (non-TTY), streaming is disabled automatically to keep clean output.
-- Use full model IDs in place of `<model>`; HF_HOME should point to your cache for live runs.
 
 #### List Models
 ```bash
@@ -656,7 +733,7 @@ mlxk health --json | jq '.data.summary'
 ```
 
 
-## Hidden Alpha Features: `clone`, `push`, and pipe mode
+## Feature Gates: `clone`, `push` (Alpha), `pipe mode` (Beta)
 
 ### `clone` - Model Workspace Creation
 
@@ -710,37 +787,30 @@ These features are not final and may change or be removed in future releases.
 
 Pipe mode is beta (feature complete) and requires `MLXK2_ENABLE_PIPES=1`. It lets `mlxk run` (and `mlx-run`) read stdin when you pass `-` as the prompt.
 
-- Gate: `MLXK2_ENABLE_PIPES=1` (will become default in a future stable release).
-- Auto-batch: When stdout is a pipe (non-TTY), streaming is disabled automatically for clean output.
-- Robust: Handles SIGPIPE and BrokenPipeError gracefully (`| head`, `| grep -m1` work correctly).
-- Scope: Applies to `mlxk run` and `mlx-run`; other commands unchanged.
+- **Status:** Beta (feature complete), API stable (syntax will not change)
+- **Gate:** `MLXK2_ENABLE_PIPES=1` (will become default in a future stable release)
+- **Auto-batch:** When stdout is a pipe (non-TTY), streaming is disabled automatically for clean output
+- **Robust:** Handles SIGPIPE and BrokenPipeError gracefully (`| head`, `| grep -m1` work correctly)
+- **Scope:** Applies to `mlxk run` and `mlx-run`; other commands unchanged
 - Usage examples (replace `<model>` with a cached MLX chat model):
 
 ```bash
 # stdin + trailing text (batch when piped)
 MLXK2_ENABLE_PIPES=1 echo "from stdin" | mlxk run "<model>" - "append extra context"
 
-# JSON interactive guard (no prompt) → JSON error on stdout, exit 1
-MLXK2_ENABLE_PIPES=1 mlxk run "<model>" --json
-
 # list → run summarization
 MLXK2_ENABLE_PIPES=1 mlxk list --json \
-  | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "Summarize the model list as a concise table."
+  | MLXK2_ENABLE_PIPES=1 mlxk run "<model>" - "Summarize the model list as a concise table." >my-hf-table.md
 
 # Wrapper shorthand
 MLXK2_ENABLE_PIPES=1 mlx-run "<model>" - "translate into german" < README.md
+
+# Vision → Text chain: Photo tour review
+MLXK2_ENABLE_PIPES=1 mlxk run pixtral --image photos/*.jpg "Describe each picture" \
+  | MLXK2_ENABLE_PIPES=1 mlxk run qwen3 - \
+    "Write a tour review. Create a table with picture names, metadata, and descriptions." \
+  > tour-review.md
 ```
-
-Pipe mode API is stable.
-
-### `vision` - mlx-vlm (Python 3.10+, non-streaming)
-
-- Install extras: `pip install -e .[vision]` (requires `mlx-vlm>=0.3.9` from PyPI, Python 3.10+).
-- Backend: Uses `mlx-vlm` (vision); streaming is disabled for vision runs.
-- Usage:
-  - Text-only on a vision model: `mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "what is 2+2"`
-  - Image + text: `mlxk run "<vision-model>" --image cat.jpg "describe the cat"`
-  - Image-only (auto prompt): `mlxk run "<vision-model>" --image cat.jpg`
 
 
 ## Testing
@@ -817,7 +887,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.2 | December 2025</i><br>
+  <i>Version 2.0.4-beta.3 | December 2025</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

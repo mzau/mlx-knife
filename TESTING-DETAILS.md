@@ -847,7 +847,7 @@ MLXK2_LIVE_PUSH=1 \
 
 ---
 
-### Complete Test File Structure (2.0.4-beta.1)
+### Complete Test File Structure (2.0.4-beta.3)
 
 ```
 tests_2.0/
@@ -885,7 +885,8 @@ tests_2.0/
 │   ├── test_server_e2e.py                      # Server E2E tests with TEXT models (ADR-011 + Portfolio Separation, parametrized: text_XX)
 │   ├── test_streaming_parity.py                # Streaming vs batch parity tests (Issue #20, ADR-011, parametrized)
 │   ├── test_vision_e2e_live.py                 # Vision CLI E2E tests with real models (ADR-012, 5 deterministic vision queries)
-│   └── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
+│   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
+│   └── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
 ├── test_adr004_error_logging.py       # ADR-004 error logging and redaction (tokens, paths)
 ├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016, Session 18-19, 45 tests)
 ├── test_cli_log_json_flag.py          # CLI --log-json flag behavior and JSON log format

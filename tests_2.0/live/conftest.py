@@ -21,6 +21,7 @@ from .test_utils import (
     discover_mlx_models_in_user_cache,
     discover_text_models,
     discover_vision_models,
+    parse_vm_stat_page_size,
     TEST_MODELS,
 )
 
@@ -499,8 +500,175 @@ def report_benchmark(request):
 
 
 # ============================================================================
-# Benchmark Reporting (ADR-013 Phase 0)
+# Benchmark Reporting (ADR-013 Phase 0 + 0.5)
 # ============================================================================
+
+def _get_macos_system_health() -> Dict[str, Any]:
+    """Collect macOS system health metrics (ADR-013 Phase 0.5 - v0.2.0).
+
+    Uses macOS-native tools (sysctl, vm_stat, ps) - ZERO new dependencies.
+    Enables automatic regression quality assessment via quality_flags.
+
+    Returns:
+        dict: System health metrics with keys:
+            - swap_used_mb: Current swap usage in MB
+            - ram_free_gb: Available RAM in GB
+            - zombie_processes: Count of zombie processes
+            - quality_flags: List of quality indicators
+                ["clean"] = healthy system
+                ["degraded_swap"] = swap usage detected (memory pressure)
+                ["degraded_zombies"] = zombie processes detected
+
+    Quality Thresholds (empirically derived from Session 43 analysis):
+        - Swap: >100 MB indicates memory pressure (beta2→beta3: 1.8 GB swap = +3.4% slowdown)
+        - Zombies: >0 indicates stuck processes (REGRESSION-2025-12-08: 14 zombies = +90% slowdown)
+    """
+    import subprocess
+
+    health = {
+        "swap_used_mb": 0,
+        "ram_free_gb": 0.0,
+        "zombie_processes": 0,
+        "quality_flags": []
+    }
+
+    try:
+        # Get swap usage via sysctl (macOS native)
+        # sysctl vm.swapusage returns: "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)"
+        result = subprocess.run(
+            ["sysctl", "vm.swapusage"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            # Parse: "total = X.XXM  used = Y.YYM  free = Z.ZZM"
+            for part in result.stdout.split():
+                if part.endswith("M") and "used" in result.stdout:
+                    # Extract used value (appears after "used = ")
+                    parts = result.stdout.split("used = ")
+                    if len(parts) > 1:
+                        used_str = parts[1].split()[0]
+                        # Parse size (can be M or G suffix)
+                        if used_str.endswith("G"):
+                            health["swap_used_mb"] = int(float(used_str[:-1]) * 1024)
+                        elif used_str.endswith("M"):
+                            health["swap_used_mb"] = int(float(used_str[:-1]))
+                        break
+    except Exception:
+        pass  # Swap metric is optional (not critical if it fails)
+
+    try:
+        # Get free RAM via vm_stat (macOS native)
+        # vm_stat reports page size in the header (Apple Silicon uses 16KB pages).
+        result = subprocess.run(
+            ["vm_stat"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            page_size = parse_vm_stat_page_size(result.stdout)
+            # Parse "Pages free: 12345."
+            for line in result.stdout.splitlines():
+                if "Pages free:" in line:
+                    pages_free = int(line.split(":")[1].strip().rstrip("."))
+                    health["ram_free_gb"] = round(pages_free * page_size / (1024**3), 2)
+                    break
+    except Exception:
+        pass  # RAM metric is optional
+
+    try:
+        # Get zombie process count via ps aux (macOS native)
+        # Zombies show as "<defunct>" in ps output
+        result = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            # Count lines containing "<defunct>"
+            health["zombie_processes"] = result.stdout.count("<defunct>")
+    except Exception:
+        pass  # Zombie count is optional
+
+    # Determine quality flags (empirical thresholds from regression analysis)
+    flags = []
+    if health["swap_used_mb"] > 100:
+        flags.append("degraded_swap")
+    if health["zombie_processes"] > 0:
+        flags.append("degraded_zombies")
+
+    # If no degradation detected, mark as clean
+    if not flags:
+        flags.append("clean")
+
+    health["quality_flags"] = flags
+    return health
+
+
+def _get_macos_hardware_profile() -> Dict[str, Any]:
+    """Collect macOS hardware profile (ADR-013 Phase 0.5 - v0.2.0).
+
+    Uses macOS-native sysctl - ZERO new dependencies.
+    Enables hardware-specific performance analysis (M1 vs M2 vs M3 vs M4).
+
+    Returns:
+        dict: Hardware profile with keys:
+            - model: Mac model identifier (e.g., "Mac14,9" = M3 Max)
+            - cores_physical: Physical CPU cores (P-cores only)
+            - cores_logical: Logical CPU cores (P+E cores with hyperthreading)
+    """
+    import subprocess
+
+    profile = {
+        "model": "unknown",
+        "cores_physical": 0,
+        "cores_logical": 0,
+    }
+
+    try:
+        # Get Mac model identifier
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.model"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            profile["model"] = result.stdout.strip()
+    except Exception:
+        pass
+
+    try:
+        # Get physical cores (P-cores)
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.physicalcpu"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            profile["cores_physical"] = int(result.stdout.strip())
+    except Exception:
+        pass
+
+    try:
+        # Get logical cores (P+E cores with hyperthreading)
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.logicalcpu"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            profile["cores_logical"] = int(result.stdout.strip())
+    except Exception:
+        pass
+
+    return profile
+
 
 def pytest_addoption(parser):
     """Add --report-output option for benchmark reporting."""
@@ -509,7 +677,7 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         metavar="PATH",
-        help="Generate benchmark reports to JSONL file (ADR-013 Phase 0)"
+        help="Generate benchmark reports to JSONL file (ADR-013 Phase 0.5)"
     )
 
 
@@ -534,11 +702,16 @@ def pytest_runtest_makereport(item, call):
     Reports are written as JSONL (one JSON object per line) to allow
     streaming and easy appending across test runs.
 
-    Schema version: 0.1.0 (Phase 0 - Experimental)
-    See: benchmarks/schemas/report-v0.1.schema.json
+    Schema version: 0.2.0 (Phase 0.5 - System Health + Hardware Profile)
+    See: ADR-013 Phase 0.5 implementation
+
+    Changelog from 0.1.0 → 0.2.0:
+        - Added: system.hardware_profile (Mac model, cores)
+        - Added: system_health (swap, RAM, zombies, quality_flags)
+        - Backward compatible: All 0.1.0 fields preserved
     """
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     outcome = yield
     report = outcome.get_result()
@@ -553,8 +726,8 @@ def pytest_runtest_makereport(item, call):
 
         # Build report data (required fields)
         data = {
-            "schema_version": "0.1.0",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "schema_version": "0.2.0",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "mlx_knife_version": __version__,
             "test": item.nodeid,
             "outcome": report.outcome,
@@ -581,6 +754,20 @@ def pytest_runtest_makereport(item, call):
                 # Everything else goes to metadata
                 data.setdefault("metadata", {})[key] = value
 
+        # ADR-013 Phase 0.5: Collect system health metrics (v0.2.0)
+        # Enables automatic regression quality assessment
+        system_health = _get_macos_system_health()
+        data["system_health"] = system_health
+
+        # ADR-013 Phase 0.5: Collect hardware profile (v0.2.0)
+        # Enables hardware-specific performance analysis (M1 vs M2 vs M3 vs M4)
+        hardware_profile = _get_macos_hardware_profile()
+
+        # Add hardware_profile to system section (create if not exists)
+        if "system" not in data:
+            data["system"] = {}
+        data["system"]["hardware_profile"] = hardware_profile
+
         # Write JSONL (one line per report)
         try:
             item.config.report_file.write(json.dumps(data) + "\n")
@@ -588,4 +775,3 @@ def pytest_runtest_makereport(item, call):
         except Exception as e:
             # Don't fail tests if reporting fails
             print(f"\n⚠️  Benchmark report write failed: {e}")
-

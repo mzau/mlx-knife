@@ -1,6 +1,97 @@
 # Changelog
 
-## [2.0.4-beta.1] - WIP
+## [2.0.4-beta.3] - 2025-12-23
+
+### Added
+
+- **Benchmark Infrastructure v1.0 (ADR-013 Phase 0):**
+  - Template-based report generator: `benchmarks/generate_benchmark_report.py`
+  - Per-model statistics, per-test statistics, system health summary
+  - Schema validation: `benchmarks/validate_reports.py`
+  - Documentation: `benchmarks/README.md`, `benchmarks/TESTING.md`
+  - Quality tracking: Schema v0.2.0 with system_health (swap, RAM, zombies, quality_flags)
+  - Page-size fix: Corrected Apple Silicon 16KB page size (RAM values were 4x too low)
+  - Files: `tests_2.0/live/conftest.py`, `test_utils.py`, `test_vm_stat_parsing.py`
+
+- **Memory Timeline Visualization:**
+  - Interactive HTML visualizer: `benchmarks/tools/memplot.py` (500+ lines)
+  - Memory monitor enhanced: `benchmarks/tools/memmon.py` (memory pressure capture)
+  - Visual legend: Activity Monitor colors, memory pressure, test regions, model markers
+  - Documentation: Complete interpretation guide in `benchmarks/README.md`
+  - Schema learnings: Server test attribution problem + log-parsing solution documented
+  - File: `benchmarks/schemas/LEARNINGS-FOR-v1.0.md`
+
+### Fixed
+
+- **Server model switch log timing:** "Switched to model" now emitted only after successful load (past tense reflects completed action)
+  - File: `mlxk2/core/server_base.py:230`
+
+- **Unified model filter (Server + CLI):** Both `/v1/models` and `mlxk list` now use `build_model_object()` as single source of truth
+  - Filter: `healthy AND runtime_compatible` (no more code duplication)
+  - Framework gate: Non-MLX models (PyTorch, GGUF) now correctly marked `runtime_compatible=false`
+  - WebUI clients get consistent, runnable model lists
+  - Files: `mlxk2/core/server_base.py`, `mlxk2/output/human.py`, `mlxk2/operations/common.py`
+
+- **transformers 5.0 compatibility for vision models:** Removed `fix_mistral_regex` parameter from mlx-vlm load call
+  - transformers 5.0.0rc1 changed tokenizer initialization - `fix_mistral_regex` no longer accepted as kwarg
+  - Error was: `TypeError: _patch_mistral_regex() got multiple values for keyword argument 'fix_mistral_regex'`
+  - Removed deprecated parameter from vision model loading - all vision models now work with transformers 5.0
+  - File: `mlxk2/core/vision_runner.py:101`
+
+- **huggingface-hub 1.x compatibility:** Updated preflight test mocks for hub 1.x exception API changes
+  - Hub 1.x changed exception signatures: `GatedRepoError/RepositoryNotFoundError` now require `response` parameter
+  - Added `_create_mock_response()` helper to create proper httpx.Response objects for test mocks
+  - **Test-only changes** - preflight production code works unchanged with hub 0.x and 1.x
+  - **Result:** mlx-knife now fully compatible with mlx 0.30.x, mlx-lm 0.30.0, transformers 5.0, hub 1.x
+  - All 494 unit tests pass, vision models functional with newest dependencies
+  - Files: `tests_2.0/test_issue_30_preflight.py`, `mlxk2/core/vision_runner.py`
+
+- **EXIF GPS 0° coordinate handling:** Fixed truthiness checks in `VisionRunner._extract_exif` that incorrectly dropped valid GPS coordinates
+  - Equator (0° latitude) and Prime Meridian (0° longitude) now correctly preserved
+  - Changed latitude/longitude negation checks from `if lat` to `if lat is not None`
+  - Changed EXIF retention check from `not any([...])` to `all(x is None for x in [...])`
+  - Ensures 0.0 is treated as valid coordinate, not as missing data
+  - File: `mlxk2/core/vision_runner.py:259-262, 283`
+
+- **Framework/Type detection for non-mlx-community models (Issue #48):**
+  - `detect_framework()`: Now reads front-matter internally and checks config.json `quantization` key (MLX-specific)
+  - `detect_model_type()`: Added `probe` parameter and checks for `chat_template.json` file (reliable chat indicator)
+  - Removed redundant PR #42 code from server_base.py (cleaner architecture)
+  - Fixes: Models like locally converted quantized models now correctly show "MLX" + "chat" instead of "PyTorch" + "base"
+  - Files: `mlxk2/operations/common.py:118-157, 180-208`, `mlxk2/core/server_base.py:114-120`
+
+- **Video model detection and exclusion:**
+  - Video models (require PyTorch/Torchvision) now excluded from vision capability detection
+  - mlx-vlm only supports image vision models, not video models
+  - Video indicators: `video_preprocessor_config.json`, `temporal_patch_size`, `AutoVideoProcessor`
+  - Video models fall back to mlx-lm for text-only (consistent with vision architecture)
+  - Example: `mlx-community/MiMo-VL-7B-RL-bf16` now classified as "chat" (not "chat+vision")
+  - Files: `mlxk2/operations/common.py:211-266`, `mlxk2/core/capabilities.py:169-238`
+
+### Documentation
+
+- **mlx-vlm beta.3 install guidance:** Recommend upstream commit `c4ea290e47e2155b67d94c708c662f8ab64e1b37` until mlx-vlm 0.3.10 is released
+  - Files: `README.md`, `docs/SERVER-HANDBOOK.md`
+
+## [2.0.4-beta.2] - 2025-12-16
+
+**PyPI-only release** - Fixes Git dependency issue for PyPI compatibility. Not tagged on GitHub.
+
+### Fixed
+
+- **PyPI compatibility:** Changed `mlx-vlm` dependency from Git URL to PyPI version `mlx-vlm>=0.3.9`
+  - PyPI does not allow Git dependencies
+  - mlx-vlm 0.3.9 is available on PyPI
+  - File: `pyproject.toml:69`
+
+### Documentation
+
+- **Installation instructions:** Added Vision-specific installation to README.md
+  - Clear separation: Text models (Python 3.9+) vs Vision models (Python 3.10+)
+  - Installation command: `pip install mlx-knife[vision]`
+  - Updated all version references from 2.0.4-beta.1 → 2.0.4-beta.2
+
+## [2.0.4-beta.1] - 2025-12-16
 
 **Focus:** Unix Pipe Integration + Vision Support + Memory-Aware Loading + Python 3.14
 

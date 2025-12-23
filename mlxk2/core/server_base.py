@@ -118,8 +118,6 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
             raise HTTPException(status_code=503, detail="Server is shutting down")
         # Simple approach like run command - let MLXRunner handle everything
         if _current_model_path != model_spec:
-            logger.info(f"Switching to model: {model_spec}", model=model_spec)
-
             # Clean up previous model
             if _model_cache:
                 try:
@@ -229,8 +227,7 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
                 _model_cache[model_spec] = runner
                 _current_model_path = model_spec
 
-                backend_name = "vision" if policy.backend == Backend.MLX_VLM else "text"
-                logger.info(f"Model loaded successfully ({backend_name}): {model_spec}", model=model_spec)
+                logger.info(f"Switched to model: {model_spec}", model=model_spec)
 
             except HTTPException:
                 # Re-raise HTTP exceptions (501, 507, etc.) from vision/memory checks
@@ -767,11 +764,10 @@ async def list_models():
     """List available MLX models in the cache.
 
     Returns models sorted with preloaded model first (if set), then alphabetically.
-    Filters to healthy MLX models (runtime compatibility deferred to P2 refactoring).
+    Filters to healthy + runtime_compatible models.
     """
     from .cache import cache_dir_to_hf
-    from ..operations.common import detect_framework, read_front_matter
-    from ..operations.health import is_model_healthy
+    from ..operations.common import build_model_object
 
     model_list = []
     model_cache = get_current_model_cache()
@@ -783,8 +779,7 @@ async def list_models():
         model_name = cache_dir_to_hf(model_dir.name)
 
         try:
-            # Check if it's a healthy MLX model
-            # Get the latest snapshot for detection
+            # Get snapshot path
             snapshots_dir = model_dir / "snapshots"
             selected_path = None
             if snapshots_dir.exists():
@@ -792,27 +787,21 @@ async def list_models():
                 if snapshots:
                     selected_path = snapshots[0]
 
-            # Read front-matter for framework detection (align with CLI behavior)
-            probe = selected_path if selected_path is not None else model_dir
-            fm = read_front_matter(probe)
+            # Use shared build_model_object (single source of truth)
+            model_obj = build_model_object(model_name, model_dir, selected_path)
 
-            framework = detect_framework(model_name, model_dir, selected_path, fm)
-            healthy, _ = is_model_healthy(model_name)
-
-            # Filter: Only MLX + healthy models
-            # TODO P2: Add runtime_compatible check (needs refactoring to avoid duplication)
-            if framework != "MLX" or not healthy:
+            # Filter: healthy AND runtime_compatible
+            if model_obj.get("health") != "healthy":
+                continue
+            if not model_obj.get("runtime_compatible"):
                 continue
 
             # Get model context length (best effort)
             context_length = None
             try:
-                snapshots_dir = model_dir / "snapshots"
-                if snapshots_dir.exists():
-                    snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                    if snapshots:
-                        from .runner import get_model_context_length
-                        context_length = get_model_context_length(str(snapshots[0]))
+                if selected_path:
+                    from .runner import get_model_context_length
+                    context_length = get_model_context_length(str(selected_path))
             except Exception:
                 pass
 

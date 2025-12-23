@@ -26,7 +26,7 @@ mlxk serve --host 0.0.0.0 --port 8000
 - Python 3.9+ (Text models)
 - Python 3.10+ (Vision models)
 - mlx-lm 0.28.4+
-- mlx-vlm 0.3.9+ (optional, for vision)
+- mlx-vlm 0.3.9+ (optional, for vision; beta.3 recommends commit c4ea290e47e2155b67d94c708c662f8ab64e1b37)
 
 ---
 
@@ -380,6 +380,9 @@ python -m mlxk2.core.server_base
 pyenv install 3.10
 pyenv local 3.10
 pip install mlx-lm mlx-vlm
+
+# Beta.3 (pre-0.3.10 fix)
+pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290e47e2155b67d94c708c662f8ab64e1b37"
 ```
 
 ### Memory Constraint Errors (HTTP 507)

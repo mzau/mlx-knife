@@ -42,6 +42,8 @@ from .test_utils import (
 # Server request timeout (increased from 30s to 45s in Session 22)
 # Accounts for: baseline (15s) + probe/policy overhead (2.7s) + generation + safety margin
 SERVER_REQUEST_TIMEOUT = 45.0
+# /v1/models can be slower due to cache scans + runtime checks
+MODEL_LIST_TIMEOUT = 20.0
 
 # Opt-in markers
 pytestmark = [
@@ -100,7 +102,7 @@ class TestServerHealthEndpoints:
             pytest.skip("No text models available within RAM budget")
 
         with LocalServer(test_model) as server_url:
-            response = httpx.get(f"{server_url}/v1/models")
+            response = httpx.get(f"{server_url}/v1/models", timeout=MODEL_LIST_TIMEOUT)
 
             assert response.status_code == 200
             data = response.json()
