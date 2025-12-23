@@ -1,68 +1,288 @@
 # MLX Knife Benchmarks
 
-**Status:** Phase 0 - Organic Data Collection
+**Status:** Phase 0 - Organic Data Collection (WIP)
 
-## Architecture
+## What's Here?
 
-This directory tracks empirical performance and compatibility data from mlx-knife's test suite.
+This directory contains benchmark infrastructure for mlx-knife:
+- Empirical performance and compatibility data from E2E tests
+- Tools for analysis and visualization
+- Schema definitions for structured reports
 
-### Phase 0 Goals (2.0.3+)
+## Directory Structure
+
+```
+benchmarks/
+├── reports/                    # JSONL test reports + Markdown analyses
+│   ├── 2025-12-20-v2.0.4b3.jsonl   # Raw data (one file per test run)
+│   └── BENCHMARK-v1.0-*.md         # Generated analysis reports
+├── schemas/                    # JSON Schema definitions
+│   ├── report-v0.1.0.schema.json   # lecacy schema
+│   ├── report-v0.2.0.schema.json   # Current schema
+│   └── report-current.schema.json  # Symlink → current schema
+├── tools/                      # Standalone tools
+│   ├── memmon.py                   # Memory monitor (background sampling)
+│   └── memplot.py                  # Memory timeline visualizer
+├── generate_benchmark_report.py    # Report generator (Template v1.0)
+├── validate_reports.py             # Schema validation
+├── README.md                       # ← You are here
+└── TESTING.md                      # Benchmark handbook (How-To)
+```
+
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `generate_benchmark_report.py` | JSONL → Markdown report (Template v1.0) |
+| `validate_reports.py` | Schema validation of JSONL files |
+| `tools/memmon.py` | Memory monitoring during test runs |
+| `tools/memplot.py` | Interactive memory timeline visualization (HTML) |
+
+## Schema
+
+**Current:** v0.2.0 (Phase 0 - Test Infrastructure)
+
+| Version | Release | Content |
+|---------|---------|---------|
+| v0.1.0 | 2.0.3 | Minimal: test, outcome, duration, model |
+| v0.2.0 | 2.0.4 | + hardware_profile, system_health, quality_flags |
+| v1.0.0 | Future | Model benchmarks (mlxk-benchmark package) |
+
+**Schema Strategy:** No v0.3.x planned. v0.2.0 → v1.0.0 directly.
+- v0.x = Test infrastructure ("Was the test run clean?")
+- v1.x = Model benchmarks ("How good is the model?")
+
+See `schemas/LEARNINGS-FOR-v1.0.md` for details.
+
+## Current Baseline
+
+**Report:** `reports/BENCHMARK-v1.0-2.0.4b3-2025-12-20.md`
+
+- Version: 2.0.4-beta.3
+- Hardware: Mac14,13 (M2 Max, 64 GB)
+- Tests: 141/162 passed, 19.5 min
+- Quality: 100% clean (0 MB swap, 0 zombies)
+
+## Phase 0 Goals
 
 1. **Collect data organically** from E2E tests
 2. **No perfect schema** - schema evolves with data
 3. **Git-tracked reports** - historical trends
-4. **Foundation for future** - community contributions, public database
+4. **Foundation for Phase 1** - mlxk-benchmark package
 
-### Directory Structure
+## Memory Timeline Visualization
 
-- `reports/` - JSONL test reports (one file per release)
-- `schemas/` - JSON Schema definitions (versioned)
+**Tool:** `tools/memplot.py` | **Created:** Session 45 (2025-12-21)
 
-### Current Schema
-
-**Version:** 0.2.0 (Phase 0 - Scheduling-Enhanced)
-
-- **v0.1.0** (2.0.3+): Minimal schema - basic performance metrics
-- **v0.2.0** (2.0.4+): Hardware profiling + detailed metrics for cluster scheduling
-  - `system.hardware_profile`: Mac model, cores, Metal version
-  - `performance.*_time_s`: model_load, time_to_first_token, cleanup
-  - `system_health`: swap, zombies, quality_flags
-  - Backward compatible: v0.1.0 reports still valid
-
-**Schema Files:**
-- `schemas/report-current.schema.json` → always points to latest version
-- `schemas/report-v0.2.schema.json` → current schema (2.0.4+)
-- `schemas/report-v0.1.schema.json` → legacy schema (2.0.3)
-
-**Required fields:**
-- `schema_version`, `timestamp`, `mlx_knife_version`, `test`, `outcome`
-
-**Optional sections:**
-- `model` - Model metadata
-- `performance` - tokens/sec, RAM usage
-- `stop_tokens` - ADR-009 validation data
-- `system` - Platform info
-- `metadata` - Extensible (anything)
-
-### Generating Reports
+### Quick Start
 
 ```bash
-# During E2E tests
-pytest -m live_e2e tests_2.0/live/ \
-  --report-output benchmarks/reports/$(date +%Y-%m-%d)-v$(mlxk --version | cut -d' ' -f2).jsonl
+# Collect data (memmon runs in background)
+python benchmarks/tools/memmon.py --output memory.jsonl -- \
+  pytest -m live_e2e tests_2.0/live/ --report-output benchmark.jsonl
+
+# Generate interactive HTML
+python benchmarks/tools/memplot.py memory.jsonl benchmark.jsonl -o timeline.html
 ```
 
-### Schema Evolution
+### Visual Legend
 
-As we collect more data, the schema will evolve:
-- New fields added (backward compatible)
-- Optional → Required (when stable)
-- Breaking changes documented in `schemas/MIGRATIONS.md`
+#### Main Graph: RAM Free (GB)
 
-### Future Phases
+**Blue line with colored markers:**
+- 🟢 **Green markers:** Healthy (≥32 GB free, ≥50% of 64 GB)
+- 🟠 **Orange markers:** Warning (16-32 GB free, 25-50%)
+- 🔴 **Red markers:** Critical (<16 GB free, <25%)
 
-- **Phase 1 (2.1+):** Schema formalization, validation tooling
-- **Phase 2 (2.2+):** `mlxk report` CLI for manual submissions
-- **Phase 3 (2.3+):** Public database, community contributions
+**Dashed threshold lines:**
+- **Green line (32 GB):** 50% threshold - system healthy
+- **Orange line (16 GB):** 25% threshold - warning level
 
-See `docs/ADR/ADR-013-Community-Model-Quality-Database.md` for full roadmap.
+#### Background Rectangles: Test Regions
+
+**Gray (rgba(200, 200, 200, 0.3)):**
+- Model tests that load an LLM model
+- Example: `test_run_command[text_00]`, `test_chat_completion[vision_01]`
+- **Meaning:** Model is loaded in RAM during this time
+
+**Light Blue (rgba(173, 216, 230, 0.2)):**
+- Infrastructure tests without model
+- Example: `test_portfolio_discovery`, `test_health_check`
+- **Meaning:** No model loaded, only test infrastructure active
+
+⚠️ **Known limitation (v0.2.0):** Server tests appear as "light blue" even when loading models (LocalServer fixture doesn't record model metadata). Recognizable by: high RAM usage + long duration in blue region. Example: `test_text_request_still_works_on_vision_model` (57 GB used, 16s duration).
+
+#### Memory Pressure Overlay
+
+**Yellow (rgba(255, 204, 0, 0.15)):**
+- macOS Memory Pressure: WARN
+- Source: `sysctl kern.memorystatus_vm_pressure_level = 2`
+
+**Red (rgba(255, 59, 48, 0.15)):**
+- macOS Memory Pressure: CRITICAL
+- Source: `sysctl kern.memorystatus_vm_pressure_level = 4`
+- **Meaning:** System begins swapping, performance degradation
+
+**White/Transparent:**
+- macOS Memory Pressure: NORMAL (level = 1)
+
+#### Labels
+
+**Top (90° rotated, black):**
+- Model names at each model switch
+- Example: `DeepHermes-3-Mistral`, `pixtral-12b-8bit`
+- Position: Left-aligned with test start
+
+**Bottom (90° rotated, gray):**
+- Test names for each test (model + infrastructure)
+- Example: `test_run_command`, `test_chat_completion`
+- Position: Left-aligned with test start
+
+**Vertical helper lines:**
+- Thin gray lines at each test start
+- Help correlate labels with timeline
+
+#### Secondary Y-Axis: Swap Used (MB)
+
+**Red line (right axis):**
+- Only visible when swap > 0 MB
+- **Meaning:** System paging RAM to SSD → performance loss
+- **Normal:** 0 MB
+- **Problematic:** >100 MB
+
+### Interpretation Patterns
+
+**Typical model load:**
+```
+Pattern: RAM Free drops suddenly (e.g., 52 GB → 28 GB)
+Duration: 2-5 seconds
+Color: Gray rectangle begins
+Label: Model name appears at top
+→ Model loaded into RAM (24 GB)
+```
+
+**Typical model unload:**
+```
+Pattern: RAM Free rises suddenly (e.g., 28 GB → 52 GB)
+Duration: <1 second
+Color: Gray rectangle ends (or switches to next)
+Label: New model name (or none)
+→ Model removed from RAM
+```
+
+**Memory pressure without swap:**
+```
+Pattern: Yellow/Red background WITHOUT swap line
+RAM Free: Still >10 GB
+→ macOS preparing to swap, not yet active
+→ Often during large model loads (temporary)
+```
+
+**Memory pressure with swap:**
+```
+Pattern: Red background + Red swap line rises
+RAM Free: <10 GB
+Swap: >100 MB
+→ System actually at limit
+→ Performance significantly worse
+→ Typical: Multiple large models in short time
+```
+
+**Infrastructure test with high RAM usage:**
+```
+Pattern: Light blue rectangle + RAM drops significantly (>20 GB)
+Duration: >10 seconds
+Example: 57 GB used in test_text_request_still_works_on_vision_model
+→ ⚠️ Schema bug: Server test loads model but "model": null
+→ Should be gray, not light blue
+→ Fix: v1.0 schema with log parsing
+```
+
+### Data Sources
+
+**RAM Free:**
+- Source: `vm_stat` (macOS native)
+- Calculation: `(free + inactive + purgeable + speculative) * page_size / 1e9`
+- Sample rate: 500ms (2 samples/second)
+
+**Memory Pressure:**
+- Source: `sysctl kern.memorystatus_vm_pressure_level`
+- Values: 1=NORMAL, 2=WARN, 4=CRITICAL
+- Sample rate: 500ms (synchronized with RAM)
+
+**Swap Used:**
+- Source: `sysctl vm.swapusage`
+- Unit: MB
+- Sample rate: 500ms
+
+**Test Metadata:**
+- Source: Benchmark JSONL (pytest-json-report format)
+- Fields: `timestamp`, `duration`, `test`, `model` (optional), `outcome`
+- Correlation: ISO timestamp → Unix timestamp → elapsed seconds
+
+### Known Limitations (v0.2.0)
+
+1. **Model load/unload events missing**
+   - Gray regions show "test with model", not "model is loaded"
+   - Pytest runs through ALL models 4x → each model loaded/unloaded 4x
+   - Regions overlap visually though sequential
+   - **Fix planned:** v1.0 schema with explicit events
+
+2. **Server tests without model attribution**
+   - Server tests (LocalServer fixture) load models internally
+   - Appear as "infrastructure" (light blue) instead of "model" (gray)
+   - Recognizable: High RAM + long duration in blue region
+   - **Fix planned:** Log parsing in v0.3.0/v1.0
+
+3. **Dense test sequences**
+   - Tests shorter than 500ms sample rate → no coloring
+   - Typical: Fast infrastructure tests (<100ms)
+   - **Workaround:** Test labels show all tests
+
+4. **Label overlap**
+   - Many tests in short time (>10 tests/min)
+   - Labels may overlap (90° rotated)
+   - **Mitigation:** Zoom for detailed view
+   - **Future:** Adaptive label density or collapsing
+
+### Interactive Features
+
+- **Zoom & Pan:** Mouse wheel (vertical), Shift+wheel (horizontal), click+drag
+- **Range Slider:** Quick navigation in long (>20 min) timelines
+- **Hover:** X-axis unified mode shows all values at same time
+
+### Future Extensions (Ideas)
+
+**For plot:**
+- [ ] Embedded legend in plot (not external file)
+- [ ] Toggle show/hide infrastructure tests
+- [ ] Hover shows full test names (not truncated)
+- [ ] Color-blind mode (alternative palette)
+
+**For schema v1.0:**
+- [ ] Model load/unload events → precise "in RAM" regions
+- [ ] Log parsing for server tests → correct attribution
+- [ ] GPU activity (Metal performance)
+- [ ] Net T/S (tokens/second, pure inference)
+
+**For analysis:**
+- [ ] Automatic anomaly detection (memory leaks, zombies)
+- [ ] Per-model memory profiling (min/max/avg RAM)
+- [ ] Scheduling optimization (avoid model-switch overlap)
+
+---
+
+## Roadmap
+
+| Phase | Release | Description |
+|-------|---------|-------------|
+| **Phase 0** | 2.0.3-2.0.4 | Organic Data Collection ✅ |
+| Phase 1 | 2.1+ | `mlxk-benchmark` package (separate tool) |
+| Phase 2 | 2.2+ | Report aggregation, hardware correlation |
+| Phase 3 | 2.3+ | Public database, community contributions |
+
+## Further Documentation
+
+- **[TESTING.md](TESTING.md)** - Benchmark handbook (How-To)
+- **[schemas/LEARNINGS-FOR-v1.0.md](schemas/LEARNINGS-FOR-v1.0.md)** - Learnings for Phase 1
+- **[docs/ADR/ADR-013-Community-Model-Quality-Database.md](../docs/ADR/ADR-013-Community-Model-Quality-Database.md)** - Architecture vision

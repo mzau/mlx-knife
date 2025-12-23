@@ -134,25 +134,20 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
             headers.append("Health")
 
     # Human filter:
-    # - --all: show everything
-    # - default: show only MLX chat models (safer for run/server selection)
-    # - --verbose (without --all): show all MLX models (chat + base)
+    # - --all: show everything (no filter)
+    # - default/verbose: only healthy + runtime_compatible (runnable models)
+    # Same filter as Server /v1/models - single source of truth via build_model_object
     filtered: List[Dict[str, Any]] = []
     for m in models:
-        fw = str(m.get("framework", "")).upper()
-        typ = str(m.get("model_type", "")).lower()
         if show_all:
             filtered.append(m)
         else:
-            if fw != "MLX":
+            # Filter: healthy AND runtime_compatible
+            if m.get("health") != "healthy":
                 continue
-            if verbose:
-                # In verbose mode, show all MLX models
-                filtered.append(m)
-            else:
-                # Default compact mode: only MLX chat
-                if typ == "chat":
-                    filtered.append(m)
+            if not m.get("runtime_compatible"):
+                continue
+            filtered.append(m)
 
     rows: List[List[str]] = []
     for m in filtered:

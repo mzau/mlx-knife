@@ -18,6 +18,7 @@ def sample_list_data():
                     "model_type": "chat",
                     "capabilities": ["text-generation", "chat"],
                     "health": "healthy",
+                    "runtime_compatible": True,
                     "cached": True,
                 },
                 {
@@ -29,6 +30,7 @@ def sample_list_data():
                     "model_type": "base",
                     "capabilities": ["text-generation"],
                     "health": "unhealthy",
+                    "runtime_compatible": False,
                     "cached": True,
                 },
             ],
@@ -98,6 +100,7 @@ def test_list_human_filters_mlx_base_default():
                     "model_type": "chat",
                     "capabilities": ["text-generation", "chat"],
                     "health": "healthy",
+                    "runtime_compatible": True,
                     "cached": True,
                 },
                 {
@@ -109,26 +112,42 @@ def test_list_human_filters_mlx_base_default():
                     "model_type": "base",
                     "capabilities": ["text-generation"],
                     "health": "healthy",
+                    "runtime_compatible": True,
+                    "cached": True,
+                },
+                {
+                    "name": "org/Unhealthy",
+                    "hash": None,
+                    "size_bytes": 500,
+                    "last_modified": "2025-08-30T12:00:00Z",
+                    "framework": "MLX",
+                    "model_type": "chat",
+                    "capabilities": ["text-generation"],
+                    "health": "unhealthy",
+                    "runtime_compatible": False,
                     "cached": True,
                 },
             ],
-            "count": 2,
+            "count": 3,
         },
         "error": None,
     }
 
-    # Default (compact) should hide MLX base
+    # Default: shows healthy + runtime_compatible models (both MLXChat and MLXBase)
     out_default = render_list(data, show_health=False, show_all=False, verbose=False)
     assert "MLXChat" in out_default
-    assert "MLXBase" not in out_default
+    assert "MLXBase" in out_default
+    assert "Unhealthy" not in out_default
 
-    # Verbose (without --all) shows all MLX (chat + base)
+    # Verbose: same filter, more columns
     out_verbose = render_list(data, show_health=False, show_all=False, verbose=True)
     assert "MLXChat" in out_verbose
     assert "MLXBase" in out_verbose
+    assert "Unhealthy" not in out_verbose
 
 
-def test_list_human_verbose_shows_all_mlx_only():
+def test_list_human_filters_by_healthy_and_runtime_compatible():
+    """Test that default/verbose filters by healthy + runtime_compatible."""
     from mlxk2.output.human import render_list
 
     data = {
@@ -136,9 +155,9 @@ def test_list_human_verbose_shows_all_mlx_only():
         "command": "list",
         "data": {
             "models": [
-                {"name": "org/MLXChat", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "chat", "capabilities": ["text-generation", "chat"], "health": "healthy", "cached": True},
-                {"name": "org/MLXBase", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "base", "capabilities": ["text-generation"], "health": "healthy", "cached": True},
-                {"name": "org/OtherPT", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "PyTorch", "model_type": "base", "capabilities": ["text-generation"], "health": "healthy", "cached": True},
+                {"name": "org/Runnable", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "chat", "capabilities": ["text-generation", "chat"], "health": "healthy", "runtime_compatible": True, "cached": True},
+                {"name": "org/Unhealthy", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "MLX", "model_type": "base", "capabilities": ["text-generation"], "health": "unhealthy", "runtime_compatible": True, "cached": True},
+                {"name": "org/NotCompatible", "hash": None, "size_bytes": 1, "last_modified": "2025-08-30T12:00:00Z", "framework": "PyTorch", "model_type": "base", "capabilities": ["text-generation"], "health": "healthy", "runtime_compatible": False, "cached": True},
             ],
             "count": 3,
         },
@@ -146,11 +165,12 @@ def test_list_human_verbose_shows_all_mlx_only():
     }
 
     out_verbose = render_list(data, show_health=False, show_all=False, verbose=True)
-    # Shows both MLX models (chat+base)
-    assert "MLXChat" in out_verbose
-    assert "MLXBase" in out_verbose
-    # Hides non-MLX
-    assert "OtherPT" not in out_verbose
+    # Shows only healthy + runtime_compatible
+    assert "Runnable" in out_verbose
+    # Hides unhealthy
+    assert "Unhealthy" not in out_verbose
+    # Hides not runtime_compatible
+    assert "NotCompatible" not in out_verbose
 
 
 def test_list_human_all_shows_all_frameworks():

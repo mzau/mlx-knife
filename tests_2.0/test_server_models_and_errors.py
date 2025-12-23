@@ -63,45 +63,57 @@ def test_unknown_model_maps_to_404():
         assert resp.status_code == 404
 
 
-def test_models_endpoint_filters_non_mlx_and_unhealthy():
-    """Ensure /v1/models excludes non-MLX and unhealthy entries."""
+def test_models_endpoint_filters_unhealthy_and_not_runtime_compatible():
+    """Ensure /v1/models excludes unhealthy and non-runtime-compatible entries.
+
+    Filter logic: healthy == True AND runtime_compatible == True
+    Uses shared build_model_object from common.py (single source of truth).
+    """
     client = TestClient(app)
 
     with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
          patch('mlxk2.core.cache.cache_dir_to_hf') as mock_cache_to_hf, \
-         patch('mlxk2.operations.common.detect_framework') as mock_framework, \
-         patch('mlxk2.operations.health.is_model_healthy') as mock_healthy:
+         patch('mlxk2.operations.common.build_model_object') as mock_build:
 
-        # Two cached dirs
-        d1 = MagicMock(); d1.name = "models--org--mlx"
-        d2 = MagicMock(); d2.name = "models--org--pt"
-        mock_cache.return_value.iterdir.return_value = [d1, d2]
+        # Three cached dirs with proper snapshot structure
+        d1 = MagicMock(); d1.name = "models--org--healthy-compatible"
+        d2 = MagicMock(); d2.name = "models--org--unhealthy"
+        d3 = MagicMock(); d3.name = "models--org--not-compatible"
+
+        # Setup snapshot paths for each model dir
+        for d in [d1, d2, d3]:
+            snapshot_dir = MagicMock()
+            snapshot_path = MagicMock()
+            snapshot_dir.exists.return_value = True
+            snapshot_dir.iterdir.return_value = [snapshot_path]
+            snapshot_path.is_dir.return_value = True
+            d.__truediv__ = lambda self, x, snap=snapshot_dir, spath=snapshot_path: snap if x == "snapshots" else spath
+
+        mock_cache.return_value.iterdir.return_value = [d1, d2, d3]
 
         # Map names
         def map_name(n):
-            if n == "models--org--mlx":
-                return "org/mlx"
-            return "org/pt"
-
+            return n.replace("models--", "").replace("--", "/")
         mock_cache_to_hf.side_effect = map_name
 
-        # Framework detection: d1 is MLX, d2 is not
-        def detect_fw(model_name, *_args, **_kwargs):
-            return "MLX" if model_name.endswith("/mlx") else "PyTorch"
-
-        mock_framework.side_effect = detect_fw
-
-        # Health: return False for the MLX one to ensure it is filtered, too
-        def health(model_name):
-            return (False, None) if model_name.endswith("/mlx") else (True, None)
-
-        mock_healthy.side_effect = health
+        # build_model_object returns different health/runtime_compatible
+        def build(model_name, model_dir, selected_path):
+            if "unhealthy" in model_name:
+                return {"health": "unhealthy", "runtime_compatible": True}
+            elif "not-compatible" in model_name:
+                return {"health": "healthy", "runtime_compatible": False}
+            else:
+                return {"health": "healthy", "runtime_compatible": True}
+        mock_build.side_effect = build
 
         resp = client.get("/v1/models")
         assert resp.status_code == 200
         data = resp.json()
-        # Both should be filtered: one not MLX, one unhealthy
-        assert data.get("data") == []
+        # Only d1 (healthy + runtime_compatible) should pass
+        model_ids = [m["id"] for m in data.get("data", [])]
+        assert "org/healthy-compatible" in model_ids
+        assert "org/unhealthy" not in model_ids
+        assert "org/not-compatible" not in model_ids
 
 
 def test_chat_unknown_model_maps_to_404():

@@ -129,18 +129,15 @@ For detailed testing options, troubleshooting, and advanced workflows, see **[TE
 
 ### Before Submitting PRs
 
-Please ensure all tests pass locally:
-```bash
-# Complete test workflow
-ruff check mlxk2/ --fix         # Fix code style
-mypy mlxk2/                     # Check types
-pytest -v                       # Run all 2.0 tests
-```
+**All tests must pass:**
+- ✅ Code quality: `ruff check mlxk2/ --fix && mypy mlxk2/`
+- ✅ Unit tests: `pytest tests_2.0/ -v` (always required)
+- ✅ Live E2E tests: Required for model/inference changes
 
-Since we don't have CI/CD (MLX requires Apple Silicon), we rely on contributors to verify their changes locally. Please mention in your PR:
-- Which Python version you tested with
-- Which Mac model you tested on (M1/M2/M3)
-- Test results summary
+**PR requirements:**
+- State your Python version + Mac chip in PR description
+- For model/inference changes: Document which live tests you ran
+- **Important:** Unit tests alone are NOT sufficient - see **[TESTING.md](TESTING.md)** for why and how
 
 ## Python Version Requirements
 

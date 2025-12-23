@@ -97,9 +97,8 @@ class VisionRunner:
             raise RuntimeError("mlx-vlm is missing load()/generate() API")
 
         # mlx-vlm expects HF repo_id, not local path
-        # fix_mistral_regex=True: Suppress tokenizer regex warning for Mistral-based models
         # local_files_only=True: Use mlx-knife's cache only, never download (pull's responsibility)
-        loaded = self._load(self.model_name, fix_mistral_regex=True, local_files_only=True)
+        loaded = self._load(self.model_name, local_files_only=True)
         if isinstance(loaded, tuple):
             # Common pattern: (model, processor)
             self.model = loaded[0] if len(loaded) > 0 else None
@@ -256,9 +255,9 @@ class VisionRunner:
                 lat = convert_to_degrees(gps_dict.get("GPSLatitude"))
                 lon = convert_to_degrees(gps_dict.get("GPSLongitude"))
 
-                if lat and gps_dict.get("GPSLatitudeRef") == "S":
+                if lat is not None and gps_dict.get("GPSLatitudeRef") == "S":
                     lat = -lat
-                if lon and gps_dict.get("GPSLongitudeRef") == "W":
+                if lon is not None and gps_dict.get("GPSLongitudeRef") == "W":
                     lon = -lon
 
                 exif.gps_lat = lat
@@ -280,7 +279,7 @@ class VisionRunner:
                 exif.camera = str(camera).strip()
 
             # Return None if no useful EXIF found
-            if not any([exif.gps_lat, exif.gps_lon, exif.datetime, exif.camera]):
+            if all(x is None for x in [exif.gps_lat, exif.gps_lon, exif.datetime, exif.camera]):
                 return None
 
             return exif

@@ -27,6 +27,7 @@ openwebui311/bin/
 *_report.json
 test-img-collection/
 small-img-collection
+benchmarks/reports/*.html
 
 # Benchmark reports (ADR-013 Phase 0)
 # These reports ARE tracked in git for historical data

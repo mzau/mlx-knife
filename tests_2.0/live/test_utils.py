@@ -8,6 +8,7 @@ Provides:
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Dict, Any, Tuple
@@ -106,6 +107,14 @@ def get_system_memory_bytes() -> int:
         pass
 
     return 0
+
+
+def parse_vm_stat_page_size(output: str) -> int:
+    """Extract vm_stat page size in bytes, falling back to 4096."""
+    match = re.search(r"page size of (\d+) bytes", output)
+    if match:
+        return int(match.group(1))
+    return 4096
 
 
 def discover_text_models() -> list[Dict[str, Any]]:

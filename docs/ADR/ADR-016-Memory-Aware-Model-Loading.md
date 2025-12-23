@@ -89,27 +89,11 @@ This is a **hardware fact** (from `sysctl -n hw.memsize`), not a heuristic.
 - Vision >70%: HTTP 507 Insufficient Storage + JSON error response
 - Text >70%: `logger.warning("Model size XX.X GB exceeds 70% of YY.Y GB system memory. Expect extreme slowness due to swapping.")` → visible via `--log-level warning` (default) and `--log-json` if enabled
 
-## TODO
+## Status
 
-### Phase 1 (2.0.4-beta.1) ✅ COMPLETE
-- [x] Add `system.memory_total_bytes` to JSON-API
-- [x] Schema bump to 0.1.6
-- [x] Document in json-api-specification.md
+**Phase 1+2:** ✅ Complete (2.0.4-beta.1) - See CHANGELOG.md
 
-### Phase 2 (2.0.4-beta.1) ✅ COMPLETE
-- [x] Implement pre-load memory check in `run.py`
-  - `_get_system_memory_bytes()` via `sysctl -n hw.memsize`
-  - `check_memory_before_load()` for CLI path
-  - `check_memory_for_server()` for server path
-- [x] Vision: ERROR + abort if size > 70% total (empirically confirmed: crash at 73%)
-  - CLI: stderr error + exit 1
-  - Server: HTTP 507 + JSON error (via `ErrorType.INSUFFICIENT_MEMORY`)
-- [x] Text: Internal log only if size > 70% total (empirically confirmed: no crash at 95-97%)
-  - CLI: No user-facing action (backwards compatible)
-  - Server: `logger.warning()` only (uses existing `--log-level`/`--log-json` infrastructure)
-- [x] Unit tests: 18 tests in `tests_2.0/test_memory_checks.py`
-
-### Phase 3 (Future)
+**Phase 3 (Future):** Issue #46
 - [ ] Configurable threshold (env var or CLI flag)
 - [ ] Vision overhead estimation based on model architecture
 - [ ] KV-Cache size estimation based on context length

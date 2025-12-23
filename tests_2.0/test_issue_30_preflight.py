@@ -4,6 +4,21 @@ import pytest
 from mlxk2.operations.pull import preflight_repo_access, pull_operation
 
 
+def _create_mock_response(status_code=403):
+    """Create a mock httpx.Response for huggingface-hub 1.x exceptions.
+
+    Hub 1.x requires response parameter to be a real httpx.Response object.
+    """
+    try:
+        import httpx
+        # Create minimal mock response
+        request = httpx.Request("GET", "https://huggingface.co/api/models/test")
+        return httpx.Response(status_code=status_code, request=request)
+    except ImportError:
+        # Fallback for older hub versions that don't need it
+        return None
+
+
 def test_preflight_private_model_without_token(monkeypatch):
     """Test preflight check with a known private model without token.
     
@@ -29,7 +44,8 @@ def test_preflight_private_model_without_token(monkeypatch):
         from huggingface_hub import errors as _hub_errors
         GatedRepoError = _hub_errors.GatedRepoError
         def _fake_model_info(self, repo_id, token=None):
-            raise GatedRepoError("Gated/private repository")
+            response = _create_mock_response(status_code=403)
+            raise GatedRepoError("Gated/private repository", response=response)
         monkeypatch.setattr(HfApi, "model_info", _fake_model_info, raising=True)
 
         success, error = preflight_repo_access("org/private-model")
@@ -53,7 +69,8 @@ def test_preflight_nonexistent_model(monkeypatch):
     from huggingface_hub import errors as _hub_errors
     RepositoryNotFoundError = _hub_errors.RepositoryNotFoundError
     def _fake_model_info(self, repo_id, token=None):
-        raise RepositoryNotFoundError("Not found")
+        response = _create_mock_response(status_code=404)
+        raise RepositoryNotFoundError("Not found", response=response)
     monkeypatch.setattr(HfApi, "model_info", _fake_model_info, raising=True)
 
     success, error = preflight_repo_access("definitely-not-existing-model-12345-xyz")
@@ -78,7 +95,8 @@ def test_preflight_integration_in_pull(isolated_cache, monkeypatch):
     from huggingface_hub import errors as _hub_errors
     RepositoryNotFoundError = _hub_errors.RepositoryNotFoundError
     def _fake_model_info(self, repo_id, token=None):
-        raise RepositoryNotFoundError("Not found")
+        response = _create_mock_response(status_code=404)
+        raise RepositoryNotFoundError("Not found", response=response)
     monkeypatch.setattr(HfApi, "model_info", _fake_model_info, raising=True)
 
     # Test with a non-existent model - should fail at preflight stage
@@ -145,7 +163,8 @@ def test_preflight_prevents_cache_pollution(isolated_cache, monkeypatch):
     from huggingface_hub import errors as _hub_errors
     GatedRepoError = _hub_errors.GatedRepoError
     def _fake_model_info(self, repo_id, token=None):
-        raise GatedRepoError("Gated/private repository")
+        response = _create_mock_response(status_code=403)
+        raise GatedRepoError("Gated/private repository", response=response)
     monkeypatch.setattr(HfApi, "model_info", _fake_model_info, raising=True)
 
     # Attempt to pull a gated/private model

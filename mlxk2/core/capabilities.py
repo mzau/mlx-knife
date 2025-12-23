@@ -167,7 +167,11 @@ def _has_any(path: Path, patterns: Tuple[str, ...]) -> bool:
 
 
 def _detect_vision_from_config(config: Optional[Dict[str, Any]]) -> bool:
-    """Detect vision capability from config.json content."""
+    """Detect vision capability from config.json content.
+
+    Video models (AutoVideoProcessor) are excluded as they require PyTorch/Torchvision.
+    mlx-vlm only supports image vision models (AutoImageProcessor).
+    """
     if not isinstance(config, dict):
         return False
 
@@ -181,15 +185,29 @@ def _detect_vision_from_config(config: Optional[Dict[str, Any]]) -> bool:
         return True
 
     # Check for embedded preprocessor_config
-    if isinstance(config.get("preprocessor_config"), dict):
+    preprocessor_cfg = config.get("preprocessor_config")
+    if isinstance(preprocessor_cfg, dict):
+        # Exclude video processors (requires PyTorch/Torchvision)
+        if preprocessor_cfg.get("processor_class") == "AutoVideoProcessor":
+            return False
+        if "temporal_patch_size" in preprocessor_cfg:
+            return False
         return True
 
     return False
 
 
 def _detect_vision_from_files(model_path: Path) -> bool:
-    """Detect vision capability from file presence."""
-    return _has_any(
+    """Detect vision capability from file presence.
+
+    Video models (AutoVideoProcessor) are excluded as they require PyTorch/Torchvision.
+    mlx-vlm only supports image vision models (AutoImageProcessor).
+    """
+    # Check if it's a video model (requires PyTorch/Torchvision)
+    if (model_path / "video_preprocessor_config.json").exists():
+        return False
+
+    if _has_any(
         model_path,
         (
             "preprocessor_config.json",
@@ -199,7 +217,25 @@ def _detect_vision_from_files(model_path: Path) -> bool:
             "**/processor_config.json",
             "**/image_processor_config.json",
         ),
-    )
+    ):
+        # Found vision-related files, but check if it's a video processor
+        preprocessor_path = model_path / "preprocessor_config.json"
+        if preprocessor_path.exists():
+            try:
+                import json
+                with open(preprocessor_path) as f:
+                    preprocessor_data = json.load(f)
+                if isinstance(preprocessor_data, dict):
+                    # Video model indicators
+                    if preprocessor_data.get("processor_class") == "AutoVideoProcessor":
+                        return False
+                    if "temporal_patch_size" in preprocessor_data:
+                        return False
+            except Exception:
+                pass
+        return True
+
+    return False
 
 
 def _check_mlx_vlm_available() -> bool:
