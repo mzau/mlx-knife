@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.4-beta.4] - 2025-12-25
+
+### Fixed
+
+- **Pixtral text-only regression (upstream mlx-vlm):**
+  - Updated mlx-vlm dependency to commit `c536165df2b3b4aece3a795b2e414349f935e750` (Blaizzy/mlx-vlm)
+  - **Issue:** mlx-vlm commit d7d73de (Batch Generation #538) broke text-only requests on Vision models without `pad_token`
+  - **Fix:** Upstream PR merged - sets `pad_token = eos_token` when missing during text-only padding
+  - **Impact:** Pixtral and other Vision models now work correctly for both text-only and image requests
+  - **Installation:** `pip install mlx-knife[vision]` now auto-installs patched mlx-vlm from git
+  - **Future:** Will switch to PyPI mlx-vlm v0.3.10 when released
+  - **Details:** See `docs/ISSUES/pixtral-pad-token-regression.md`
+  - **Upstream contribution:** Issue #643, PR merged into Blaizzy/mlx-vlm main
+  - Files: `pyproject.toml:69`, `README.md`
+
+### Documentation
+
+- **mlx-vlm installation guidance:** Updated to use commit c536165df2b3b4aece3a795b2e414349f935e750 with Pixtral fix
+  - Files: `README.md`, `pyproject.toml`
+
 ## [2.0.4-beta.3] - 2025-12-23
 
 ### Added
