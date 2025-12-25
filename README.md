@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.3** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.4** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.3-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.4-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -67,7 +67,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 MLX Knife has been comprehensively tested and verified on:
 
 ✅ **Python 3.9.6 - 3.14** - Text LLMs fully supported (mlx-lm 0.28.4+)
-✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.3 recommends commit c4ea290e47e2155b67d94c708c662f8ab64e1b37)
+✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.4 uses commit c536165df2b3b4aece3a795b2e414349f935e750 with Pixtral fix)
 
 **Note:** Vision features require Python 3.10+. Native macOS Python 3.9.6 users need to upgrade (e.g., via Homebrew).
 
@@ -85,16 +85,16 @@ pip install mlx-knife
 pip install mlx-knife[vision]
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.3 (dev)
+mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.4 (dev)
 ```
 
 **Python Requirements:**
 - **Text models:** Python 3.9-3.14
-- **Vision models:** Python 3.10-3.14 (requires `mlx-vlm>=0.3.9`; beta.3 recommends commit c4ea290e47e2155b67d94c708c662f8ab64e1b37)
+- **Vision models:** Python 3.10-3.14 (requires mlx-vlm with Pixtral pad_token fix)
 
-**Beta.3 note:** Until mlx-vlm 0.3.10 is released, install the upstream commit before mlx-knife if you need the fix:
+**Beta.4 note:** Uses mlx-vlm commit c536165df2b3b4aece3a795b2e414349f935e750 (includes Pixtral text-only fix). The `[vision]` extra automatically installs the correct version:
 ```bash
-pip install "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290e47e2155b67d94c708c662f8ab64e1b37"
+pip install mlx-knife[vision]  # Installs mlx-vlm from git with fix
 ```
 
 ### Development Installation
@@ -111,7 +111,7 @@ pip install -e ".[dev,test]"
 pip install -e ".[dev,test,vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4-beta.3
+mlxk --version  # → mlxk 2.0.4-beta.4
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -199,12 +199,8 @@ Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+.
 
 - **Python 3.10+** (mlx-vlm dependency)
 - **Installation:** `pip install mlx-knife[vision]`
-- **Backend:** mlx-vlm 0.3.9+ from PyPI
-- **Beta.3 note:** For upstream bugfixes, install commit `c4ea290e47e2155b67d94c708c662f8ab64e1b37` before mlx-knife:
-  ```bash
-  pip install "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290e47e2155b67d94c708c662f8ab64e1b37"
-  pip install mlx-knife[vision]
-  ```
+- **Backend:** mlx-vlm commit c536165df2b3b4aece3a795b2e414349f935e750 (auto-installed)
+- **Beta.4 note:** The `[vision]` extra automatically installs mlx-vlm from git with the Pixtral pad_token fix. Will switch to PyPI v0.3.10 when released.
 
 #### Usage
 
@@ -887,7 +883,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.3 | December 2025</i><br>
+  <i>Version 2.0.4-beta.4 | December 2025</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>
