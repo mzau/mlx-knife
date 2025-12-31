@@ -11,6 +11,38 @@ from mlxk2.core.runner import MLXRunner
 from mlxk2.operations.run import interactive_chat
 
 
+class MockDetokenizer:
+    """Mock detokenizer that mimics BPEStreamingDetokenizer behavior.
+
+    Used by unit tests to mock tokenizer.detokenizer after Session 60 changes.
+    Session 60 switched from tokenizer.decode() to tokenizer.detokenizer for
+    proper BPE space marker (Ġ U+0120) conversion.
+    """
+    def __init__(self, decode_func):
+        """Initialize with a decode function that maps token lists to strings."""
+        self.decode_func = decode_func
+        self.tokens = []
+        self._text = ""
+
+    def reset(self):
+        """Reset accumulated tokens."""
+        self.tokens = []
+        self._text = ""
+
+    def add_token(self, token_id):
+        """Add a token to the accumulated list."""
+        self.tokens.append(token_id)
+
+    def finalize(self):
+        """Finalize and decode accumulated tokens."""
+        self._text = self.decode_func(self.tokens)
+
+    @property
+    def text(self):
+        """Return the decoded text."""
+        return self._text
+
+
 class TestInterruptionRecovery:
     """Test recovery after interruption in interactive mode."""
     
@@ -39,7 +71,15 @@ class TestInterruptionRecovery:
                 (Mock(item=lambda: 2), Mock())
             ])
             mock_tokenizer.decode.side_effect = ["Hello", " world"]
-            
+            # Use MockDetokenizer for proper BPE space marker handling
+            def mock_decode(tokens):
+                if len(tokens) == 1:
+                    return "Hello" if tokens[0] == 1 else " world"
+                elif len(tokens) == 2:
+                    return "Hello world"
+                return ""
+            mock_tokenizer.detokenizer = MockDetokenizer(mock_decode)
+
             with MLXRunner("test-model") as runner:
                 # Simulate interruption
                 runner._interrupted = True
@@ -59,7 +99,7 @@ class TestInterruptionRecovery:
         """Test that interruption flag is reset for new batch generation"""
         mock_resolve.return_value = ("test-model", None, None)
         mock_cache.return_value = Mock()
-        
+
         mock_model = Mock()
         mock_tokenizer = Mock()
         mock_tokenizer.eos_token = "</s>"
@@ -68,23 +108,26 @@ class TestInterruptionRecovery:
         mock_tokenizer.additional_special_tokens = []
         mock_tokenizer.added_tokens_decoder = {}
         mock_tokenizer.encode.return_value = [1, 2, 3]
+        # Mock decode for compatibility
         mock_tokenizer.decode.return_value = "Hello world"
+        # Mock detokenizer (Session 60 BPE fix)
+        mock_tokenizer.detokenizer = MockDetokenizer(lambda tokens: "Hello world")
         mock_load.return_value = (mock_model, mock_tokenizer)
-        
+
         with patch('mlxk2.core.runner.generate_step') as mock_gen:
             mock_gen.return_value = iter([
                 (Mock(item=lambda: 1), Mock()),
                 (Mock(item=lambda: 2), Mock())
             ])
-            
+
             with MLXRunner("test-model") as runner:
                 # Simulate interruption
                 runner._interrupted = True
                 assert runner._interrupted is True
-                
+
                 # Start new generation - should reset flag
                 result = runner.generate_batch("test prompt")
-                
+
                 # Flag should be reset at start of generation
                 assert runner._interrupted is False
                 assert result == "Hello world"

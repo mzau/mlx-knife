@@ -12,7 +12,14 @@ For current test counts, version-specific details, and complete file listings, s
 - **Isolated by default** - User cache stays pristine with sentinel protection
 - **Opt-in live tests** - Network/model tests require explicit markers/environment
 - **Mock-heavy** - MLX stubs enable fast testing without model downloads
-- **Fast feedback** - 300+ tests run in seconds on any Apple Silicon Mac
+- **Fast feedback** - 500+ tests run in seconds on any Apple Silicon Mac
+
+**Cache Architecture:**
+- **User Cache (Singleton):** ONE permanent cache per system - READ-ONLY in tests
+- **Isolated Cache (Factory):** NEW temporary cache PER test - full read/write
+- **Sentinel Safety:** Automatic protection prevents accidental User Cache deletion
+
+See [TESTING-DETAILS.md → Fundamental Definitions](TESTING-DETAILS.md#fundamental-definitions-single-source-of-truth) for complete cache architecture and safety mechanisms.
 
 **Safety First:**
 - Tests use temporary caches with `TEST_SENTINEL` protection
@@ -44,6 +51,24 @@ ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 ```
 
 **That's it!** Default tests use isolated caches and MLX stubs - no model downloads required.
+
+## Running All Real Tests
+
+**Single command (recommended):**
+```bash
+./scripts/test-wet-umbrella.sh
+```
+
+This runs all real tests in the correct order. For details on test categories, see [TESTING-DETAILS.md](TESTING-DETAILS.md).
+
+**Manual execution (advanced):**
+```bash
+# Portfolio-compatible tests
+pytest -m wet -v
+
+# Isolated Cache WRITE tests
+MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_resumable -v
+```
 
 ## Test Categories
 
@@ -140,11 +165,25 @@ tests_2.0/
 
 **Legend:**
 - `spec/` - API contract validation (stays in sync with `docs/schema`)
-- `live/` - Opt-in tests requiring environment (markers: `live_*`)
+- `live/` - **User Cache READ only** - Portfolio Discovery tests (parametrized across many models)
 - `stubs/` - Lightweight MLX replacements for unit tests
 - `conftest.py` - Isolated HF cache (temp), safety sentinel, fixtures
+  - Parent `conftest.py` applies globally
+  - Subdirectory `conftest.py` (live/, spec/) MUST limit scope to own directory only
+  - See [TESTING-DETAILS.md → conftest.py Scope Rules](TESTING-DETAILS.md#conftestpy-scope-rules)
 
-See [TESTING-DETAILS.md](TESTING-DETAILS.md) for complete file listing with descriptions.
+**CRITICAL RULE:** ❌ **NEVER write to User Cache** ❌
+
+**Test organization by cache strategy:**
+- **User Cache READ** → `tests_2.0/live/` (Portfolio Discovery with many models)
+- **Isolated Cache WRITE** → `tests_2.0/` (fresh downloads, mock creation)
+- **Isolated Cache READ** → `tests_2.0/` (safety copies from User Cache)
+- **Schema validation** → `tests_2.0/spec/` (mocks, fast)
+- **Workspace operations** → `tmp_path` fixture (Clone/Push tests, separate from cache)
+
+**Note:** Workspace is semantically distinct from Cache - see [TESTING-DETAILS.md → Workspace](TESTING-DETAILS.md#workspace-separate-concept---not-a-cache) for details.
+
+See [TESTING-DETAILS.md → Truth Table](TESTING-DETAILS.md#truth-table-cache-type--operation) for complete categorization and decision tree.
 
 ## MLX Stubs (Fast Testing Without Model Downloads)
 
@@ -344,9 +383,9 @@ When submitting PRs with test changes, please include:
 
 2. **Test results** (example):
    ```
-   Platform: macOS 14.6, M2 Max
-   Python: 3.9.6
-   Results: 476 passed, 65 skipped
+   Platform: macOS 26.2 (Tahoe), M2 Max
+   Python: 3.10.x
+   Results: 528 passed, 60 skipped
    ```
 
 3. **Any issues encountered** and resolutions
@@ -373,7 +412,7 @@ ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 
 **MLX Knife Testing:**
 - ✅ **Isolated by default** - User cache stays pristine
-- ✅ **Fast feedback** - 400+ tests run in seconds without model downloads
+- ✅ **Fast feedback** - 500+ tests run in seconds without model downloads
 - ✅ **Low requirements** - 16GB RAM, ~20MB disk, no HF cache needed
 - ✅ **Opt-in live tests** - Real models/network when needed
 - ✅ **Multi-Python support** - Verified on Python 3.9-3.14

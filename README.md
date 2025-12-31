@@ -4,13 +4,15 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.4** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.5** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.4-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.5-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
+
+**Release Notes:** See [CHANGELOG.md](CHANGELOG.md) for detailed changes, fixes, and migration guides.
 
 
 ## Features
@@ -75,7 +77,7 @@ MLX Knife has been comprehensively tested and verified on:
 
 ## Installation
 
-### Via PyPI (Recommended)
+### Via PyPI (Stable)
 
 ```bash
 # Basic installation (Text models only, Python 3.9+)
@@ -85,17 +87,31 @@ pip install mlx-knife
 pip install mlx-knife[vision]
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.3 (stable) or 2.0.4-beta.4 (dev)
+mlxk --version  # → mlxk 2.0.3 (latest stable on PyPI)
 ```
 
 **Python Requirements:**
 - **Text models:** Python 3.9-3.14
-- **Vision models:** Python 3.10-3.14 (requires mlx-vlm with Pixtral pad_token fix)
+- **Vision models:** Python 3.10-3.14
 
-**Beta.4 note:** Uses mlx-vlm commit c536165df2b3b4aece3a795b2e414349f935e750 (includes Pixtral text-only fix). The `[vision]` extra automatically installs the correct version:
+**Note:** Version 2.0.4 is under development. Beta releases are available on GitHub only (see below).
+
+### Via GitHub (Latest Beta)
+
 ```bash
-pip install mlx-knife[vision]  # Installs mlx-vlm from git with fix
+# Install 2.0.4-beta.5 (Community repair tools + BPE fix)
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.5"
+
+# With Vision support (Python 3.10+ required)
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.5#egg=mlx-knife[vision]"
+
+# Verify installation
+mlxk --version  # → mlxk 2.0.4b5
 ```
+
+**Beta.5 note:** Uses mlx-vlm commit c536165df2b3b4aece3a795b2e414349f935e750 (includes Pixtral text-only fix). The `[vision]` extra automatically installs the correct version.
+
+**For production use:** Wait for 2.0.4 stable on PyPI (requires mlx-vlm 0.3.10 release).
 
 ### Development Installation
 
@@ -111,7 +127,7 @@ pip install -e ".[dev,test]"
 pip install -e ".[dev,test,vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4-beta.4
+mlxk --version  # → mlxk 2.0.4b5
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -142,6 +158,9 @@ mlxk show "mlx-community/Phi-3-mini-4k-instruct-4bit"
 
 # Pull a model
 mlxk pull "mlx-community/Llama-3.2-3B-Instruct-4bit"
+
+# Resume interrupted download (skip prompt)
+mlxk pull "model-name" --force-resume
 
 # Run interactive chat
 mlxk run "Phi-3-mini" -c
@@ -184,6 +203,7 @@ open index.html
 | `rm` | Model deletion with lock cleanup and fuzzy matching |
 | 🔒 `push` | **Alpha feature** - Upload to HuggingFace Hub; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
 | 🔒 `clone` | **Alpha feature** - Model workspace cloning; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| 🔒 `convert` | **Beta feature** - Workspace transformations (repair-index, quantize); `--repair-index` fixes mlx-vlm #624 models |
 | 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
 
@@ -457,6 +477,30 @@ mlxk list
 mlxk list --health
 mlxk health
 mlxk show "mlx-community/Phi-3-mini-4k-instruct-4bit"
+mlxk pull "mlx-community/Llama-3.2-3B-Instruct-4bit"
+```
+
+### Pull Command
+
+Download models from HuggingFace:
+
+```bash
+mlxk pull "mlx-community/Phi-3-mini-4k-instruct-4bit"
+```
+
+**Interrupted downloads (2.0.4-beta.5+):** If a download fails (network issue, Ctrl-C), `mlxk pull` will detect this and prompt to resume:
+
+```bash
+$ mlxk pull "model-name"
+Model 'model-name' has partial download:
+  No model weights found. Use --force-resume to attempt resume or 'mlxk rm' to delete.
+Resume download? [Y/n]: y
+```
+
+**Automation/scripting:** Use `--force-resume` to skip the prompt:
+
+```bash
+mlxk pull "model-name" --force-resume
 ```
 
 ### List Filters
@@ -731,6 +775,45 @@ mlxk health --json | jq '.data.summary'
 
 ## Feature Gates: `clone`, `push` (Alpha), `pipe mode` (Beta)
 
+### Workspace Structure
+
+A **workspace** is a self-contained directory containing model files in a flat structure (not the HuggingFace cache format). Workspaces are portable, editable, and can be health-checked standalone.
+
+**Structure:**
+```
+workspace/
+├── config.json              # Model configuration
+├── tokenizer.json           # Tokenizer definition
+├── tokenizer_config.json    # Tokenizer settings
+├── model.safetensors        # Weights (single file)
+├── (or model-*.safetensors) # Weights (multi-shard)
+└── README.md                # Optional documentation
+```
+
+**Key characteristics:**
+
+| Aspect | **Workspace** | **HuggingFace Cache** |
+|--------|--------------|----------------------|
+| Structure | Flat, self-contained | Nested (hub/models--org--repo/snapshots/...) |
+| Models | **Exactly one** model per workspace | Many models (models--org--repo1, models--org--repo2, ...) |
+| Purpose | Portable working directory | Download cache (managed) |
+| Health Check | Standalone (no cache needed) | Requires cache structure |
+| Portability | **Goal:** USB stick, SMB share, any volume | Fixed location (HF_HOME) |
+| Ownership | User owns files | Managed by HuggingFace Hub |
+| Operations | `clone` (creates), `push` (uploads from) | `pull` (downloads to) |
+
+**Portability (Phase 1 limitation):**
+- **Current:** Same APFS volume as cache (CoW optimization)
+- **Community Goal:** Any location (USB stick, SMB share, different volumes)
+- **Future:** Cross-volume support planned
+
+**Typical workflow:**
+1. `mlxk pull org/model` → Downloads to cache
+2. `mlxk clone org/model workspace/` → Creates editable workspace copy
+3. Edit files in `workspace/` (modify config, quantize, etc.)
+4. `mlxk push workspace/ org/new-model` → Upload modified version
+5. (Optional) Copy workspace to USB stick for sharing
+
 ### `clone` - Model Workspace Creation
 
 `mlxk clone` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It creates a local workspace from a cached model for modification and development.
@@ -778,6 +861,43 @@ mlxk push --private ./workspace org/model --create --commit "init"
 ```
 
 These features are not final and may change or be removed in future releases.
+
+### `convert` - Workspace Transformations (Beta)
+
+`mlxk convert` transforms workspaces (repair, quantize, etc.). The `--repair-index` mode is beta (feature complete) and fixes safetensors index/shard mismatches.
+
+**Use case:** Repair models affected by mlx-vlm #624 conversion bug (7+ mlx-community Vision models).
+
+**Workflow:**
+```bash
+# Enable alpha features (required for clone)
+export MLXK2_ENABLE_ALPHA_FEATURES=1
+
+# Clone affected model to workspace
+mlxk clone mlx-community/Qwen2.5-VL-7B-Instruct-4bit ./ws-qwen
+
+# Repair safetensors index (no weights changed)
+mlxk convert ./ws-qwen ./ws-qwen-fixed --repair-index
+
+# Verify health
+mlxk health ./ws-qwen-fixed  # Should report healthy
+```
+
+**Affected models (mlx-vlm #624):**
+- Qwen2.5-VL-7B-Instruct-4bit
+- gemma-3-27b-it-4bit
+- Mistral-Small-3.1-24B-Instruct-2503-4bit
+- DeepSeek-OCR-4bit
+- Devstral-Small-2-24B-Instruct-2512-6bit
+- (7+ models total)
+
+**Key features:**
+- **Cache sanctity:** Hard blocks writes to HF cache (workspaces only)
+- **Workspace-to-workspace:** Source can be managed or unmanaged, output always managed
+- **Health check integration:** Automatic validation (skip with `--skip-health`)
+- **APFS CoW:** Instant, space-efficient cloning via `cp -c`
+
+**Future modes:** `--quantize <bits>` (text models), `--dequantize` (planned).
 
 ### `pipe mode` - stdin for `run` (beta, `mlx-run` shorthand)
 
@@ -883,7 +1003,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.4 | December 2025</i><br>
+  <i>Version 2.0.4-beta.5 | December 2025</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

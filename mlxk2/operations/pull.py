@@ -1,4 +1,4 @@
-from ..core.cache import MODEL_CACHE, hf_to_cache_dir
+from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from .health import is_model_healthy
 import os
@@ -127,8 +127,13 @@ def pull_model_with_huggingface_hub(model_name, cache_dir=None):
         return False, f"Download failed: {str(e)}"
 
 
-def pull_operation(model_spec):
-    """Pull (download) operation for JSON API."""
+def pull_operation(model_spec, force_resume=False):
+    """Pull (download) operation for JSON API.
+
+    Args:
+        model_spec: Model name/spec to pull
+        force_resume: If True, skip unhealthy check and attempt resume
+    """
     result = {
         "status": "success",
         "command": "pull",
@@ -190,22 +195,19 @@ def pull_operation(model_spec):
             result["data"]["commit_hash"] = commit_hash
         
         # Check if already exists and is healthy
-        cache_dir = MODEL_CACHE / hf_to_cache_dir(resolved_name)
-        if cache_dir.exists():
-            healthy, _ = is_model_healthy(resolved_name)
+        cache_dir = get_current_model_cache() / hf_to_cache_dir(resolved_name)
+        if cache_dir.exists() and not force_resume:
+            healthy, health_reason = is_model_healthy(resolved_name)
             if healthy:
                 result["data"]["download_status"] = "already_exists"
                 result["data"]["message"] = f"Model {resolved_name} already exists in cache"
                 return result
             else:
-                # Model exists but unhealthy - suggest rm workflow
-                result["status"] = "error"
-                result["error"] = {
-                    "type": "model_corrupted",
-                    "message": f"Model exists but is corrupted. Use 'rm {model_spec}' first, then pull again."
-                }
-                result["data"]["download_status"] = "corrupted"
-                return result
+                # Model exists but unhealthy - prompt user to resume
+                # Let huggingface_hub decide if resume is possible
+                result["data"]["download_status"] = "requires_confirmation"
+                result["data"]["message"] = f"{health_reason}. Use --force-resume to attempt resume or 'mlxk rm' to delete."
+                return result  # CLI will handle prompt
         
         # Preflight check for repository access (Issue #30)
         result["data"]["download_status"] = "checking_access"
@@ -250,7 +252,15 @@ def pull_operation(model_spec):
 
 
 def pull_to_cache(model_spec, cache_dir):
-    """Pull model to specific cache directory - used by clone operation."""
+    """Pull model to specific cache directory - used by clone operation.
+
+    Note: Resumable download prompts are not implemented for pull_to_cache() because:
+    - Clone creates fresh temp caches with unique names (PID + random)
+    - Partial downloads don't persist across clone operations
+    - Making is_model_healthy() work with custom cache dirs requires refactoring
+    - The scenario is rare (as noted in PLAN-resumable-pull-clone.md)
+    TODO: Add health check if clone starts reusing temp caches in the future
+    """
     result = {
         "status": "success",
         "command": "pull",

@@ -1,6 +1,6 @@
 """Real-model stop token detection tests for Issue #32 (ADR-009).
 
-This test suite validates stop token handling with real models that exhibit
+This test suite validates stop token handling with real TEXT models that exhibit
 known issues:
 - MXFP4: Visible `<|end|>` tokens in output
 - Qwen 2.5: Self-conversation (chat template role markers)
@@ -10,6 +10,11 @@ Test Strategy (ADR-009):
 1. Phase 1: Baseline measurement (document broken behavior)
 2. Phase 2: Fix validation (verify 2-LOC fix works)
 3. Phase 3: Empirical mapping (document tokenizer configs)
+
+Portfolio Discovery:
+- Auto-discovers MLX TEXT chat models only (excludes Vision "chat+vision")
+- Uses MLXRunner (mlx-lm) which cannot load Vision models (mllama etc.)
+- See Portfolio Separation: live/test_utils.py for separated text/vision portfolios
 
 Opt-in via: pytest -m live_stop_tokens
 Requires: HF_HOME set to SSD cache (CoW same-volume requirement, ADR-007)
@@ -32,6 +37,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import importlib
 import importlib.util
+
+# Portfolio Separation reference: live/test_utils.py provides discover_text_models()
+# but we can't use it here due to circular import (test_utils imports from this file)
+# Instead, we fix discover_mlx_models_in_user_cache() to exclude Vision models directly
 
 # Opt-in marker for live tests
 pytestmark = [pytest.mark.live_stop_tokens, pytest.mark.slow]
@@ -173,11 +182,11 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     Filters for:
     - Framework: MLX only (not GGUF/PyTorch)
     - Health: healthy only
-    - Runtime: runtime_compatible only (mlx-lm can load)
-    - Type: chat models only (for stop token testing)
+    - Runtime: runtime_compatible only (mlx-lm/mlx-vlm can load)
+    - Type: chat models (TEXT + VISION, includes all model_type="chat")
 
-    Note: Vision models are included if runtime_compatible=True (Python 3.10+).
-    Server E2E tests handle vision models gracefully (HTTP 501 → pytest.skip).
+    Note: Returns BOTH text and vision models. Caller must filter by capabilities
+    if needed (e.g., portfolio_models fixture filters to TEXT-only).
 
     Returns:
         List of dicts with keys: model_id, ram_needed_gb, snapshot_path, weight_count
@@ -215,16 +224,16 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
         # Filter per schema modelObject fields
         discovered = []
         for model in models:
-            # Filter: MLX + healthy + runtime_compatible + chat
+            # Filter: MLX + healthy + runtime_compatible + chat (TEXT + VISION)
             model_type = model.get("model_type")
-            is_chat_family = (
+            is_chat = (
                 isinstance(model_type, str) and
-                ("chat" in model_type.lower())  # includes chat and chat+vision
+                model_type == "chat"  # Includes both text and vision chat models
             )
             if (model.get("framework") == "MLX" and
                 model.get("health") == "healthy" and
                 model.get("runtime_compatible") is True and
-                is_chat_family):
+                is_chat):
 
                 # RAM estimation: size_bytes * 1.2 overhead
                 size_bytes = model.get("size_bytes", 0)
@@ -287,26 +296,59 @@ TEST_MODELS = {
 
 @pytest.fixture(scope="module")
 def portfolio_models():
-    """Dynamic model portfolio: discovered models OR hardcoded fallback.
+    """Dynamic TEXT model portfolio: discovered models OR hardcoded fallback.
+
+    Discovers MLX TEXT chat models only (excludes Vision "chat+vision").
+    Uses MLXRunner (mlx-lm) which cannot load Vision models.
 
     Enables portfolio testing when HF_HOME is set, falls back to
     3 hardcoded test models otherwise (backward compatibility).
     """
-    discovered = discover_mlx_models_in_user_cache()
+    all_models = discover_mlx_models_in_user_cache()  # Returns TEXT + VISION
 
-    if discovered:
-        # Convert discovered models to TEST_MODELS format
+    if all_models:
+        # Filter to TEXT-only models (exclude Vision)
+        # Vision models have "vision" in capabilities array (from mlxk list --json)
+        import subprocess
+        import json
+        import os
+
+        env = os.environ.copy()
+        if env.get("HF_HOME"):
+            try:
+                result_data = subprocess.run(
+                    [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env
+                )
+                if result_data.returncode == 0:
+                    data = json.loads(result_data.stdout)
+                    models_list = data.get("data", {}).get("models", [])
+                    # Build set of vision model IDs
+                    vision_ids = {m["name"] for m in models_list if "vision" in m.get("capabilities", [])}
+                    # Filter out vision models
+                    text_models = [m for m in all_models if m["model_id"] not in vision_ids]
+                else:
+                    text_models = all_models  # Fallback: include all
+            except Exception:
+                text_models = all_models  # Fallback: include all
+        else:
+            text_models = all_models  # No HF_HOME, use all
+
+        # Convert discovered TEXT models to TEST_MODELS format
         result = {}
-        for i, model in enumerate(discovered):
+        for i, model in enumerate(text_models):
             key = f"discovered_{i:02d}"
             result[key] = {
                 "id": model["model_id"],
                 "ram_needed_gb": model["ram_needed_gb"],
                 "expected_issue": None,  # Unknown for discovered models
-                "description": f"Discovered: {model['model_id']} ({model['weight_count']} weights)"
+                "description": f"Discovered: {model['model_id']} ({model.get('weight_count', 'unknown')} weights)"
             }
 
-        print(f"\n🔍 Portfolio Discovery: Found {len(result)} MLX models in cache")
+        print(f"\n🔍 Portfolio Discovery: Found {len(result)} MLX TEXT models in cache")
         return result
     else:
         # Fallback to hardcoded test models
@@ -346,6 +388,59 @@ TEST_PROMPT = "Write one sentence about cats."
 MAX_TOKENS = 50
 
 
+def pytest_generate_tests(metafunc):
+    """Dynamically parametrize empirical mapping test with discovered model keys.
+
+    This hook runs during test collection (before test execution).
+    Enables process-per-model isolation: each model runs in separate pytest process.
+
+    Architecture Decision (Session 56):
+    - Prevents memory leak accumulation (71GB swap with 20 models in one process)
+    - OS-level cleanup between models (process exit guarantees full cleanup)
+    - Reflects real-world usage (users never load 20+ models sequentially)
+    """
+    if metafunc.function.__name__ == "test_empirical_mapping_single_model":
+        # Lightweight discovery for parametrization (same logic as portfolio_models fixture)
+        from live.test_utils import discover_mlx_models_in_user_cache
+
+        all_models = discover_mlx_models_in_user_cache()
+
+        if all_models:
+            # Filter to TEXT-only models (exclude Vision) - same as portfolio_models fixture
+            import json
+            env = os.environ.copy()
+            if env.get("HF_HOME"):
+                try:
+                    result_data = subprocess.run(
+                        [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=env
+                    )
+                    if result_data.returncode == 0:
+                        data = json.loads(result_data.stdout)
+                        models_list = data.get("data", {}).get("models", [])
+                        vision_ids = {m["name"] for m in models_list if "vision" in m.get("capabilities", [])}
+                        text_models = [m for m in all_models if m["model_id"] not in vision_ids]
+                    else:
+                        text_models = all_models
+                except Exception:
+                    text_models = all_models
+            else:
+                text_models = all_models
+
+            # Generate model keys (discovered_00, discovered_01, ...)
+            model_keys = [f"discovered_{i:02d}" for i in range(len(text_models))]
+        else:
+            # Fallback to hardcoded test models
+            model_keys = list(TEST_MODELS.keys())
+
+        # Parametrize with model keys (each key becomes a separate test)
+        # ids= makes test names readable: test_empirical_mapping_single_model[discovered_00]
+        metafunc.parametrize("model_key_param", model_keys, ids=lambda x: x)
+
+
 class TestStopTokensValidation:
     """Validation: Verify stop token handling works correctly (Issue #32, ADR-009)."""
 
@@ -362,10 +457,10 @@ class TestStopTokensValidation:
         - Root cause: Runner only checked singular eos_token_id
         - Fix: Use eos_token_ids Set to handle multiple EOS tokens
         """
-        # Only run when explicitly selected with -m live_stop_tokens
+        # Only run when explicitly selected with -m live_stop_tokens or -m wet
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected:
-            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
+        if "live_stop_tokens" not in selected and "wet" not in selected:
+            pytest.skip("Run with -m live_stop_tokens or -m wet to enable live model tests")
 
         # RAM Safety Check
         should_skip, reason = should_skip_model("mxfp4")
@@ -410,10 +505,10 @@ class TestStopTokensValidation:
         - Model stops cleanly after its response
         - No chat template markers in output
         """
-        # Only run when explicitly selected with -m live_stop_tokens
+        # Only run when explicitly selected with -m live_stop_tokens or -m wet
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected:
-            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
+        if "live_stop_tokens" not in selected and "wet" not in selected:
+            pytest.skip("Run with -m live_stop_tokens or -m wet to enable live model tests")
 
         # RAM Safety Check
         should_skip, reason = should_skip_model("qwen25")
@@ -467,10 +562,10 @@ class TestStopTokensValidation:
         - No self-conversation
         - Serves as regression baseline
         """
-        # Only run when explicitly selected with -m live_stop_tokens
+        # Only run when explicitly selected with -m live_stop_tokens or -m wet
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected:
-            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
+        if "live_stop_tokens" not in selected and "wet" not in selected:
+            pytest.skip("Run with -m live_stop_tokens or -m wet to enable live model tests")
 
         # RAM Safety Check
         should_skip, reason = should_skip_model("llama32")
@@ -478,8 +573,17 @@ class TestStopTokensValidation:
             pytest.skip(reason)
 
         from mlxk2.core.runner import MLXRunner
+        from mlxk2.core.cache import get_current_model_cache, hf_to_cache_dir
+        from pathlib import Path
 
         model_id = TEST_MODELS["llama32"]["id"]
+
+        # Check if model exists in cache
+        cache = get_current_model_cache()
+        model_dir = cache / hf_to_cache_dir(model_id)
+        snapshots_dir = model_dir / "snapshots"
+        if not snapshots_dir.exists() or not any(snapshots_dir.iterdir()):
+            pytest.skip(f"Model not in cache: {model_id}")
 
         # Run inference
         with MLXRunner(model_id) as runner:
@@ -513,11 +617,17 @@ class TestStopTokensEmpiricalMapping:
     """Phase 3: Empirical mapping - document tokenizer configs and observed tokens."""
 
     @pytest.mark.live_stop_tokens
-    def test_empirical_mapping_all_models(self, portfolio_models, request):
-        """Document tokenizer configs and empirically observed stop tokens.
+    def test_empirical_mapping_single_model(self, model_key_param, portfolio_models, request):
+        """Document tokenizer configs and empirically observed stop tokens (ONE model per test).
+
+        ARCHITECTURE DECISION (Session 56):
+        - Each model runs in SEPARATE pytest process (process isolation)
+        - OS guarantees complete memory cleanup between models
+        - Prevents memory leak accumulation (71GB swap with 20 models in one process)
+        - Reflects real-world usage (users never load 20 models sequentially)
 
         Uses portfolio_models fixture for dynamic model discovery.
-        Generates report: stop_token_config_report.json
+        Each test writes JSONL fragment, final report generated by finalize test.
 
         Report Format (ADR-009):
         {
@@ -528,41 +638,36 @@ class TestStopTokensEmpiricalMapping:
           "workaround_needed": True/False
         }
         """
-        # Only run when explicitly selected with -m live_stop_tokens
+        # Only run when explicitly selected with -m live_stop_tokens or -m wet
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected:
-            pytest.skip("Run with -m live_stop_tokens to enable portfolio discovery")
+        if "live_stop_tokens" not in selected and "wet" not in selected:
+            pytest.skip("Run with -m live_stop_tokens or -m wet to enable portfolio discovery")
 
         from mlxk2.core.runner import MLXRunner
 
-        report = {}
+        # Get model_key from pytest parametrize
+        model_key = model_key_param
+        model_info = portfolio_models[model_key]
+        model_id = model_info["id"]
+
         system_ram = get_system_ram_gb()
         ram_budget = get_safe_ram_budget_gb()
-
-        # Calculate actual budget ratio used
         budget_ratio = ram_budget / system_ram if system_ram > 0 else 0.40
 
-        # Add system info to report
-        report["_system_info"] = {
-            "system_ram_gb": round(system_ram, 1),
-            "ram_budget_gb": round(ram_budget, 1),
-            "budget_ratio": round(budget_ratio, 2)
-        }
-
-        for model_key, model_info in portfolio_models.items():
-            model_id = model_info["id"]
-
-            # Skip models that exceed RAM budget
-            should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
-            if should_skip:
-                print(f"\nSkipping {model_key}: {skip_reason}")
-                report[model_key] = {
-                    "model_id": model_id,
-                    "skipped": True,
-                    "skip_reason": skip_reason
-                }
-                continue
-
+        # Skip models that exceed RAM budget
+        should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
+        if should_skip:
+            print(f"\nSkipping {model_key}: {skip_reason}")
+            result = {
+                "model_key": model_key,
+                "model_id": model_id,
+                "skipped": True,
+                "skip_reason": skip_reason,
+                "system_ram_gb": round(system_ram, 1),
+                "ram_budget_gb": round(ram_budget, 1),
+                "budget_ratio": round(budget_ratio, 2)
+            }
+        else:
             with MLXRunner(model_id) as runner:
                 # Get tokenizer config
                 tokenizer = runner.tokenizer
@@ -588,18 +693,77 @@ class TestStopTokensEmpiricalMapping:
                 potential_stop_tokens = ["<|end|>", "<|eot_id|>", "<|im_end|>", "<|endoftext|>"]
                 found_stop_tokens = [t for t in potential_stop_tokens if t in output]
 
-                report[model_key] = {
+                result = {
+                    "model_key": model_key,
                     "model_id": model_id,
                     "configured_eos_token": eos_token,
                     "configured_eos_token_id": eos_token_id,
                     "configured_eos_token_ids": eos_token_ids,
                     "generated_output": output[:100],  # First 100 chars for reference
                     "visible_stop_tokens": found_stop_tokens,
-                    "workaround_needed": bool(found_stop_tokens)
+                    "workaround_needed": bool(found_stop_tokens),
+                    "system_ram_gb": round(system_ram, 1),
+                    "ram_budget_gb": round(ram_budget, 1),
+                    "budget_ratio": round(budget_ratio, 2)
                 }
 
-        # Write report
+        # Write JSONL fragment (append mode - each test writes one line)
+        fragments_path = Path("stop_token_config_fragments.jsonl")
+        with open(fragments_path, "a") as f:
+            f.write(json.dumps(result) + "\n")
+
+        print(f"\n{'='*60}")
+        print(f"EMPIRICAL MAPPING: {model_key}")
+        print(f"{'='*60}")
+        print(json.dumps(result, indent=2))
+
+    @pytest.mark.live_stop_tokens
+    def test_empirical_mapping_generate_report(self, request):
+        """Finalize: Aggregate JSONL fragments into final JSON report.
+
+        Runs AFTER all single-model tests complete.
+        Reads stop_token_config_fragments.jsonl and generates stop_token_config_report.json.
+        """
+        # Only run when explicitly selected
+        selected = request.config.getoption("-m") or ""
+        if "live_stop_tokens" not in selected and "wet" not in selected:
+            pytest.skip("Run with -m live_stop_tokens or -m wet to enable portfolio discovery")
+
+        fragments_path = Path("stop_token_config_fragments.jsonl")
         report_path = Path("stop_token_config_report.json")
+
+        if not fragments_path.exists():
+            pytest.skip("No fragments found - single-model tests may not have run")
+
+        # Read all JSONL fragments
+        fragments = []
+        with open(fragments_path, "r") as f:
+            for line in f:
+                if line.strip():
+                    fragments.append(json.loads(line))
+
+        # Build final report
+        report = {}
+
+        # Extract system info from first fragment
+        if fragments:
+            first = fragments[0]
+            report["_system_info"] = {
+                "system_ram_gb": first.get("system_ram_gb", 0),
+                "ram_budget_gb": first.get("ram_budget_gb", 0),
+                "budget_ratio": first.get("budget_ratio", 0)
+            }
+
+        # Add all model results
+        for fragment in fragments:
+            model_key = fragment.pop("model_key")
+            # Remove system_info fields from individual entries
+            fragment.pop("system_ram_gb", None)
+            fragment.pop("ram_budget_gb", None)
+            fragment.pop("budget_ratio", None)
+            report[model_key] = fragment
+
+        # Write final JSON report
         report_path.write_text(json.dumps(report, indent=2))
 
         print(f"\n{'='*60}")
@@ -614,3 +778,7 @@ class TestStopTokensEmpiricalMapping:
             if isinstance(v, dict) and v.get("workaround_needed")
         ]
         print(f"\nModels needing fix: {models_needing_fix}")
+
+        # Cleanup fragments
+        fragments_path.unlink()
+        print(f"Cleaned up: {fragments_path}")

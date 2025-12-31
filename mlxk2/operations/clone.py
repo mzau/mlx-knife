@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .pull import pull_to_cache
+from .workspace import write_workspace_sentinel
 from ..core.cache import hf_to_cache_dir, get_current_cache_root
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,12 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
                 result["data"]["clone_status"] = "pull_failed"
                 return result
 
+            # Phase 3b: Mark download as complete (ADR-018 Phase 0b prep)
+            # This marker distinguishes "download incomplete" from "model unhealthy"
+            # Critical for resumable clone: know when to skip re-download
+            download_marker = temp_cache / ".mlxk2_download_complete"
+            download_marker.write_text(f"completed_{int(time.time())}\n")
+
             # Extract resolved model name from pull result
             resolved_model = pull_result["data"]["model"]
             result["data"]["model"] = resolved_model
@@ -138,19 +145,16 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
                 return result
 
             # Phase 5: Optional health check on temp cache
+            # Health check is informational only - all HF models must be clonable
+            # This allows users to repair broken models (e.g., mlx-vlm #624 affected models)
             if health_check:
                 result["data"]["clone_status"] = "health_checking"
-                # Use health_from_cache for proper isolation
                 from .health import health_from_cache
                 healthy, health_message = health_from_cache(model_spec, temp_cache)
-                if not healthy:
-                    result["status"] = "error"
-                    result["error"] = {
-                        "type": "ModelUnhealthyError",
-                        "message": f"Model failed health check: {health_message}"
-                    }
-                    result["data"]["clone_status"] = "health_check_failed"
-                    return result
+                # Store health status but continue regardless
+                result["data"]["health"] = "healthy" if healthy else "unhealthy"
+                result["data"]["health_reason"] = health_message
+                logger.info(f"Health check: {'healthy' if healthy else 'unhealthy'} - {health_message}")
 
             # Phase 6: APFS clone temp cache → workspace (instant, CoW)
             result["data"]["clone_status"] = "cloning"
@@ -166,12 +170,41 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
                 result["data"]["clone_status"] = "filesystem_error"
                 return result
 
+            # Phase 6b: Write workspace sentinel (ADR-018 Phase 0a)
+            # Sentinel written AFTER clone success, BEFORE declaring operation complete
+            from datetime import datetime
+
+            # Extract commit hash if available from pull result
+            commit_hash = pull_result["data"].get("commit_hash")
+
+            metadata = {
+                "mlxk_version": "2.0.4",  # TODO: Read from __version__
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "source_repo": resolved_model,
+                "source_revision": commit_hash,
+                "managed": True,
+                "operation": "clone"
+            }
+
+            try:
+                write_workspace_sentinel(target_path, metadata)
+                logger.debug(f"Wrote workspace sentinel to {target_path}")
+            except Exception as e:
+                # Sentinel write failure is non-fatal - workspace is still usable
+                # Log warning but don't fail the entire clone operation
+                logger.warning(f"Failed to write workspace sentinel: {e}")
+                # Workspace is unmanaged but functional
+
             # Success - temp cache auto-cleanup via finally block
             result["data"]["clone_status"] = "success"
             result["data"]["message"] = f"Cloned to {target_dir}"
 
         finally:
             # Phase 7: Cleanup temp cache (always) - with safety check
+            # TODO (ADR-018 Phase 0b): Make cleanup conditional based on:
+            # - .mlxk2_download_complete marker exists AND
+            # - health status (healthy → cleanup, unhealthy → keep for debugging/repair)
+            # - user choice (prompt if unhealthy: "Keep temp cache for inspection?")
             if temp_cache and temp_cache.exists():
                 _cleanup_temp_cache_safe(temp_cache)
 
@@ -245,11 +278,20 @@ def _is_apfs_filesystem(path: Path) -> bool:
 
 
 def _create_temp_cache_same_volume(target_workspace: Path) -> Path:
-    """Create temp cache on same APFS volume as target for CoW optimization."""
+    """Create temp cache on same APFS volume as target for CoW optimization.
+
+    TODO (ADR-018 Phase 0b - Resumable Clone):
+    Change naming to deterministic for resume support:
+        OLD: f".mlxk2_temp_{os.getpid()}_{random.randint(...)}"  # ephemeral
+        NEW: f".mlxk2_temp_{hash(model_spec + target_workspace)}"  # deterministic
+
+    This allows detection of existing partial downloads for resume prompts.
+    """
     # Get target volume mount point via st_dev
     target_volume = _get_volume_mount_point(target_workspace)
 
     # Create temp cache on same volume
+    # NOTE: PID-based (ephemeral) - will become deterministic in Phase 0b
     temp_cache = target_volume / f".mlxk2_temp_{os.getpid()}_{random.randint(1000,9999)}"
     temp_cache.mkdir(parents=True)
 

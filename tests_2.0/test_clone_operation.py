@@ -590,7 +590,10 @@ class TestCloneOperationIntegration:
             assert not real_temp_cache.exists()
 
     def test_clone_operation_health_check_failure(self, tmp_path):
-        """Test clone operation handles health check failure."""
+        """Test clone operation continues despite health check failure (Session 59).
+
+        Unhealthy models must be clonable for community repair workflow.
+        """
         target_dir = str(tmp_path / "workspace")
         model_spec = "corrupted/model"
 
@@ -617,11 +620,21 @@ class TestCloneOperationIntegration:
 
             mock_health.return_value = (False, "Model is corrupted")
 
-            result = clone_operation(model_spec, target_dir)
+            # Need to mock clone and sentinel too (Session 59: unhealthy doesn't block)
+            with patch('mlxk2.operations.clone._apfs_clone_directory') as mock_clone, \
+                 patch('mlxk2.operations.clone.write_workspace_sentinel'):
 
-            assert result["status"] == "error"
-            assert result["data"]["clone_status"] == "health_check_failed"
-            assert "Model failed health check" in result["error"]["message"]
+                mock_clone.return_value = True
+
+                result = clone_operation(model_spec, target_dir)
+
+                # Session 59 fix: Should succeed despite unhealthy
+                assert result["status"] == "success"
+                assert result["data"]["clone_status"] == "success"
+
+                # Health status recorded as warning
+                assert result["data"]["health"] == "unhealthy"
+                assert result["data"]["health_reason"] == "Model is corrupted"
 
             # Verify real cleanup happened
             assert not real_temp_cache.exists()
@@ -1026,3 +1039,159 @@ class TestCloneEdgeCases:
             assert result["data"]["clone_status"] == "error"
             assert result["error"]["type"] == "CloneOperationError"
             assert "Unexpected error" in result["error"]["message"]
+
+
+class TestUnhealthyModelClone:
+    """Test that unhealthy models can still be cloned (Session 59 fix).
+
+    Critical for community repair workflow:
+    - mlx-vlm #624 affected models have broken index.json
+    - Users need to clone them to repair with `convert --repair-index`
+    - Health check should be informational only, not blocking
+    """
+
+    @patch('mlxk2.operations.clone._validate_apfs_filesystem')
+    @patch('mlxk2.operations.clone._validate_same_volume')
+    @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
+    @patch('mlxk2.operations.clone.pull_to_cache')
+    @patch('mlxk2.operations.clone._resolve_latest_snapshot')
+    @patch('mlxk2.operations.health.health_from_cache')
+    @patch('mlxk2.operations.clone._apfs_clone_directory')
+    @patch('mlxk2.operations.clone._cleanup_temp_cache_safe')
+    @patch('mlxk2.operations.clone.write_workspace_sentinel')
+    def test_unhealthy_model_clone_succeeds(
+        self, mock_sentinel, mock_cleanup, mock_clone, mock_health,
+        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_vol, mock_validate_apfs,
+        tmp_path
+    ):
+        """Test that unhealthy models are still cloned successfully."""
+        model_spec = "mlx-community/broken-model"
+        target_dir = str(tmp_path / "workspace")
+
+        # Setup mocks
+        temp_cache = tmp_path / "temp"
+        temp_cache.mkdir()
+        mock_temp_cache.return_value = temp_cache
+
+        mock_pull.return_value = {
+            "status": "success",
+            "data": {"model": model_spec, "commit_hash": "abc123"}
+        }
+
+        snapshot = temp_cache / "snapshot"
+        snapshot.mkdir()
+        mock_snapshot.return_value = snapshot
+
+        # Health check returns UNHEALTHY
+        mock_health.return_value = (False, "Missing weight shards: model-00001-of-00010.safetensors")
+
+        mock_clone.return_value = True
+
+        # Execute clone
+        result = clone_operation(model_spec, target_dir, health_check=True)
+
+        # Should succeed despite unhealthy status
+        assert result["status"] == "success"
+        assert result["data"]["clone_status"] == "success"
+
+        # Health status should be recorded
+        assert result["data"]["health"] == "unhealthy"
+        assert "Missing weight shards" in result["data"]["health_reason"]
+
+        # Clone should have been called (workspace created)
+        mock_clone.assert_called_once()
+
+        # Sentinel should have been written
+        mock_sentinel.assert_called_once()
+
+    @patch('mlxk2.operations.clone._validate_apfs_filesystem')
+    @patch('mlxk2.operations.clone._validate_same_volume')
+    @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
+    @patch('mlxk2.operations.clone.pull_to_cache')
+    @patch('mlxk2.operations.clone._resolve_latest_snapshot')
+    @patch('mlxk2.operations.health.health_from_cache')
+    @patch('mlxk2.operations.clone._apfs_clone_directory')
+    @patch('mlxk2.operations.clone._cleanup_temp_cache_safe')
+    @patch('mlxk2.operations.clone.write_workspace_sentinel')
+    def test_healthy_model_clone_records_status(
+        self, mock_sentinel, mock_cleanup, mock_clone, mock_health,
+        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_vol, mock_validate_apfs,
+        tmp_path
+    ):
+        """Test that healthy models record health status correctly."""
+        model_spec = "mlx-community/good-model"
+        target_dir = str(tmp_path / "workspace")
+
+        # Setup mocks
+        temp_cache = tmp_path / "temp"
+        temp_cache.mkdir()
+        mock_temp_cache.return_value = temp_cache
+
+        mock_pull.return_value = {
+            "status": "success",
+            "data": {"model": model_spec, "commit_hash": "abc123"}
+        }
+
+        snapshot = temp_cache / "snapshot"
+        snapshot.mkdir()
+        mock_snapshot.return_value = snapshot
+
+        # Health check returns HEALTHY
+        mock_health.return_value = (True, "Multi-file model complete")
+
+        mock_clone.return_value = True
+
+        # Execute clone
+        result = clone_operation(model_spec, target_dir, health_check=True)
+
+        # Should succeed
+        assert result["status"] == "success"
+        assert result["data"]["clone_status"] == "success"
+
+        # Health status should be recorded as healthy
+        assert result["data"]["health"] == "healthy"
+        assert result["data"]["health_reason"] == "Multi-file model complete"
+
+    @patch('mlxk2.operations.clone._validate_apfs_filesystem')
+    @patch('mlxk2.operations.clone._validate_same_volume')
+    @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
+    @patch('mlxk2.operations.clone.pull_to_cache')
+    @patch('mlxk2.operations.clone._resolve_latest_snapshot')
+    @patch('mlxk2.operations.clone._apfs_clone_directory')
+    @patch('mlxk2.operations.clone._cleanup_temp_cache_safe')
+    @patch('mlxk2.operations.clone.write_workspace_sentinel')
+    def test_no_health_check_skips_health_status(
+        self, mock_sentinel, mock_cleanup, mock_clone,
+        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_vol, mock_validate_apfs,
+        tmp_path
+    ):
+        """Test that --no-health-check skips health status entirely."""
+        model_spec = "mlx-community/model"
+        target_dir = str(tmp_path / "workspace")
+
+        # Setup mocks
+        temp_cache = tmp_path / "temp"
+        temp_cache.mkdir()
+        mock_temp_cache.return_value = temp_cache
+
+        mock_pull.return_value = {
+            "status": "success",
+            "data": {"model": model_spec, "commit_hash": "abc123"}
+        }
+
+        snapshot = temp_cache / "snapshot"
+        snapshot.mkdir()
+        mock_snapshot.return_value = snapshot
+
+        mock_clone.return_value = True
+
+        # Execute clone with health_check=False
+        result = clone_operation(model_spec, target_dir, health_check=False)
+
+        # Should succeed
+        assert result["status"] == "success"
+        assert result["data"]["clone_status"] == "success"
+
+        # Health status should NOT be in result
+        assert "health" not in result["data"]
+        assert "health_reason" not in result["data"]

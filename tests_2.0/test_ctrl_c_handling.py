@@ -13,6 +13,38 @@ from mlxk2.core.runner import MLXRunner
 from mlxk2.operations.run import run_model, interactive_chat
 
 
+class MockDetokenizer:
+    """Mock detokenizer that mimics BPEStreamingDetokenizer behavior.
+
+    Used by unit tests to mock tokenizer.detokenizer after Session 60 changes.
+    Session 60 switched from tokenizer.decode() to tokenizer.detokenizer for
+    proper BPE space marker (Ġ U+0120) conversion.
+    """
+    def __init__(self, decode_func):
+        """Initialize with a decode function that maps token lists to strings."""
+        self.decode_func = decode_func
+        self.tokens = []
+        self._text = ""
+
+    def reset(self):
+        """Reset accumulated tokens."""
+        self.tokens = []
+        self._text = ""
+
+    def add_token(self, token_id):
+        """Add a token to the accumulated list."""
+        self.tokens.append(token_id)
+
+    def finalize(self):
+        """Finalize and decode accumulated tokens."""
+        self._text = self.decode_func(self.tokens)
+
+    @property
+    def text(self):
+        """Return the decoded text."""
+        return self._text
+
+
 @pytest.fixture
 def mock_runner_with_interruption():
     """Mock runner that can simulate interruption scenarios."""
@@ -91,8 +123,18 @@ class TestMLXRunnerInterruption:
         mock_tokenizer.added_tokens_decoder = {}
         mock_tokenizer.encode.return_value = [1, 2, 3]
         mock_tokenizer.decode.side_effect = ["Hello", " world", "!"]
+        # Use MockDetokenizer for proper BPE space marker handling
+        def mock_decode(tokens):
+            if len(tokens) == 1:
+                return {1: "Hello", 2: " world", 3: "!"}.get(tokens[0], "")
+            elif len(tokens) == 2:
+                return "Hello world"
+            elif len(tokens) == 3:
+                return "Hello world!"
+            return ""
+        mock_tokenizer.detokenizer = MockDetokenizer(mock_decode)
         mock_load.return_value = (mock_model, mock_tokenizer)
-        
+
         # Mock generation that yields multiple tokens
         mock_gen.return_value = iter([
             (Mock(item=lambda: 1), Mock()),
@@ -133,8 +175,12 @@ class TestMLXRunnerInterruption:
         mock_tokenizer.added_tokens_decoder = {}
         mock_tokenizer.encode.return_value = [1, 2, 3]
         mock_tokenizer.decode.return_value = "Partial response"
+        # Use MockDetokenizer for proper BPE space marker handling
+        def mock_decode(tokens):
+            return "Partial response" if tokens else ""
+        mock_tokenizer.detokenizer = MockDetokenizer(mock_decode)
         mock_load.return_value = (mock_model, mock_tokenizer)
-        
+
         def interrupted_generation():
             """Generator that gets interrupted"""
             yield (Mock(item=lambda: 1), Mock())

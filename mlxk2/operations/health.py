@@ -274,25 +274,88 @@ def check_lfs_corruption(model_path):
     return True, "No LFS corruption detected"
 
 
-def health_from_cache(model_spec, cache_dir):
-    """Health check for a specific model in a specific cache directory.
+def health_check_workspace(workspace_path: Path) -> Tuple[bool, str, bool]:
+    """Health check for workspace directory (managed or unmanaged).
 
-    This is used by clone operations to check model health in temporary caches
+    Workspaces can be:
+    - Managed: Created by mlxk (clone/convert), has .mlxk_workspace.json
+    - Unmanaged: 3rd-party directories, no sentinel
+
+    Both types are checked for model file validity. The is_managed flag
+    helps operations decide if they can trust provenance metadata.
+
+    Args:
+        workspace_path: Path to workspace directory
+
+    Returns:
+        Tuple of (is_healthy, reason_message, is_managed):
+        - is_healthy (bool): True if model files are valid
+        - reason_message (str): Health status or error details
+        - is_managed (bool): True if workspace has valid sentinel
+
+    Example:
+        >>> healthy, reason, managed = health_check_workspace(Path("./ws"))
+        >>> if not healthy:
+        ...     print(f"Unhealthy: {reason}")
+        >>> if managed:
+        ...     metadata = read_workspace_metadata(Path("./ws"))
+        ...     print(f"Source: {metadata['source_repo']}")
+    """
+    from pathlib import Path
+    from .workspace import is_managed_workspace
+
+    workspace_path = Path(workspace_path).resolve()
+    managed = is_managed_workspace(workspace_path)
+
+    # Check if workspace contains model files
+    config = workspace_path / "config.json"
+    if not config.exists():
+        return False, "No config.json found in workspace", managed
+
+    # Run standard snapshot health check
+    # Workspace root is treated as snapshot directory
+    healthy, reason = _check_snapshot_health(workspace_path)
+
+    return healthy, reason, managed
+
+
+def health_from_cache(model_spec, cache_dir):
+    """Health check for model in cache OR workspace path.
+
+    This function now supports both:
+    1. Cache directories: HuggingFace cache structure with snapshots
+    2. Workspace directories: Direct model file directories (managed or unmanaged)
+
+    Detection logic:
+    - If cache_dir contains .mlxk_workspace.json → treat as workspace
+    - Otherwise → treat as HF cache structure
+
+    Used by clone operations to check model health in temporary caches
     without contaminating the user's main cache. Uses the full _check_snapshot_health()
     logic to ensure identical health validation standards.
 
     Args:
         model_spec: Model name/spec to check (e.g., "microsoft/DialoGPT-small")
-        cache_dir: Path to the cache directory containing the model
+        cache_dir: Path to cache directory OR workspace directory
 
     Returns:
         (bool, str): (is_healthy, reason_message)
+
+    Note: For workspace paths, model_spec is ignored (workspace already
+    contains the model files directly). Kept for API compatibility.
     """
     from pathlib import Path
     from ..core.cache import hf_to_cache_dir
 
     cache_path = Path(cache_dir)
 
+    # Check if this is a workspace (not cache structure)
+    if (cache_path / ".mlxk_workspace.json").exists():
+        # Direct workspace check (model_spec ignored, workspace has files directly)
+        healthy, reason, managed = health_check_workspace(cache_path)
+        return healthy, reason
+
+    # Original cache structure logic
     # Convert model spec to cache directory format
     model_cache_dir = cache_path / hf_to_cache_dir(model_spec)
     if not model_cache_dir.exists():
@@ -412,7 +475,13 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
 
 
 def health_check_operation(model_pattern=None):
-    """Health check operation for JSON API with model resolution support."""
+    """Health check operation for JSON API with model resolution support.
+
+    Supports:
+    - Cache model names: "microsoft/phi-2", "phi-2", "1.3b"
+    - Workspace paths: "./workspace", "/path/to/model"
+    - No pattern: Check all cached models
+    """
     result = {
         "status": "success",
         "command": "health",
@@ -427,13 +496,38 @@ def health_check_operation(model_pattern=None):
             }
         }
     }
-    
+
     try:
+        # Check if model_pattern is a workspace path
+        if model_pattern:
+            workspace_path = Path(model_pattern)
+            if workspace_path.exists() and (workspace_path / "config.json").exists():
+                # This is a workspace directory - use workspace health check
+                healthy, reason, managed = health_check_workspace(workspace_path)
+
+                model_info = {
+                    "name": str(workspace_path),
+                    "status": "healthy" if healthy else "unhealthy",
+                    "reason": reason,
+                    "managed": managed
+                }
+
+                result["data"]["summary"]["total"] = 1
+                if healthy:
+                    result["data"]["healthy"].append(model_info)
+                    result["data"]["summary"]["healthy_count"] = 1
+                else:
+                    result["data"]["unhealthy"].append(model_info)
+                    result["data"]["summary"]["unhealthy_count"] = 1
+
+                return result
+
+        # Not a workspace - proceed with cache-based health check
         model_cache = get_current_model_cache()
         if not model_cache.exists():
             result["data"]["summary"]["total"] = 0
             return result
-        
+
         # Use model resolution if specific pattern provided
         if model_pattern:
             resolved_name, commit_hash, ambiguous_matches = resolve_model_for_operation(model_pattern)

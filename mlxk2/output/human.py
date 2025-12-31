@@ -232,7 +232,13 @@ def render_health(data: Dict[str, Any]) -> str:
     healthy_count = summary.get("healthy_count", 0)
     unhealthy_count = summary.get("unhealthy_count", 0)
 
-    lines = [f"Summary: total {total}, healthy {healthy_count}, unhealthy {unhealthy_count}"]
+    lines = []
+
+    # Show summary only when checking multiple items (or zero)
+    # For single item (total==1), the result line is self-explanatory
+    if total != 1:
+        lines.append(f"Summary: total {total}, healthy {healthy_count}, unhealthy {unhealthy_count}")
+
     for entry in d.get("healthy", []):
         lines.append(f"healthy   {entry.get('name','-')} — {entry.get('reason','')}".rstrip())
     for entry in d.get("unhealthy", []):
@@ -292,6 +298,13 @@ def render_show(data: Dict[str, Any]) -> str:
 
 def render_pull(data: Dict[str, Any]) -> str:
     d = data.get("data", {})
+
+    # Handle requires_confirmation status
+    if d.get("download_status") == "requires_confirmation":
+        model = d.get("model", "-")
+        message = d.get("message", "Partial download detected")
+        return f"pull: {model} — {message}"
+
     status = data.get("status", "error")
     model = d.get("model", "-")
     msg = d.get("message", "")
@@ -328,16 +341,20 @@ def render_clone(data: Dict[str, Any], quiet: bool = False) -> str:
 
         # Show additional info for successful clone
         cache_cleanup = d.get("cache_cleanup", False)
-        health_check = d.get("health_check", True)
+        health_status = d.get("health")  # "healthy" or "unhealthy" or None
+        health_reason = d.get("health_reason", "")
 
         status_parts = []
-        if health_check:
-            status_parts.append("✓ health")
+        if health_status == "healthy":
+            status_parts.append("✓ healthy")
+        elif health_status == "unhealthy":
+            # Show warning for unhealthy models
+            status_parts.append(f"⚠ unhealthy: {health_reason}")
         if cache_cleanup:
             status_parts.append("✓ cleanup")
 
         status_info = f" ({', '.join(status_parts)})" if status_parts else ""
-        return f"clone: {model} → {target_dir}{status_info} — {msg}".rstrip()
+        return f"clone: {model} → {target_dir}{status_info}".rstrip()
 
     # Error case
     err = data.get("error", {})
@@ -349,6 +366,40 @@ def render_clone(data: Dict[str, Any], quiet: bool = False) -> str:
         return f"clone: {model} → {target_dir} — {phase}: {error_msg}".rstrip()
 
     return f"clone: {model} → {target_dir} — {error_msg}".rstrip()
+
+
+def render_convert(data: Dict[str, Any]) -> str:
+    """Render convert operation result for human consumption."""
+    d = data.get("data", {})
+    status = data.get("status", "error")
+
+    source = d.get("source", "-")
+    target = d.get("target", "-")
+    mode = d.get("mode", "unknown")
+    message = d.get("message", "")
+
+    health_status = d.get("health_status", "unknown")
+    health_reason = d.get("health_reason", "")
+
+    if status == "success":
+        output = f"convert: {source} → {target}\n"
+        output += f"  Mode: {mode}\n"
+
+        if message:
+            output += f"  {message}\n"
+
+        if health_status == "healthy":
+            output += "  ✓ Health check: passed"
+        elif health_status == "unhealthy":
+            output += f"  ✗ Health check: {health_reason}"
+
+        return output.rstrip()
+
+    # Error case
+    err = data.get("error", {})
+    error_msg = err.get("message", message)
+
+    return f"convert: {source} → {target} — {error_msg}".rstrip()
 
 
 def render_push(data: Dict[str, Any], verbose: bool = False) -> str:
