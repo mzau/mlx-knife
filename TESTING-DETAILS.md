@@ -4,16 +4,16 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.4-beta.1 (Release Candidate)** — Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**.
-✅ **Test Suite:** **476-485 unit tests passing** (Py3.9: 476 passed/65 skipped, Py3.10+: 485 passed/56 skipped, baseline without HF_HOME); Live E2E: 139 passed/21 skipped
-✅ **Test environment:** macOS 14.x, M2 Max, Python 3.9-3.14
+✅ **2.0.4-beta.5 (WIP for stable)** — Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a); Convert Operation (ADR-018 Phase 1).
+✅ **Test Suite:** **528 unit tests passing** (Py3.10: 528 passed/60 skipped, baseline without HF_HOME); Live E2E: 144+ passed/21 skipped
+✅ **Test environment:** macOS 26.2 (Tahoe), M2 Max, Python 3.9-3.14
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
 ✅ **License:** Apache 2.0 (was MIT in 1.x)
 ✅ **Isolated test system** - user cache stays pristine with temp cache isolation
 ✅ **3-category test strategy** - optimized for performance and safety
 ✅ **Portfolio Separation** - Text and Vision models tested independently with separate RAM formulas
 
-### Skipped Tests Breakdown (56 total Python 3.10+, 65 total Python 3.9, standard run without HF_HOME)
+### Skipped Tests Breakdown (60 total Python 3.10+, 69 total Python 3.9, standard run without HF_HOME)
 - **34 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011 + Portfolio Separation)
   - **23 Text model tests** - Parametrized across text_portfolio (chat completions batch/streaming)
   - **3 Vision model tests** - Parametrized across vision_portfolio (multimodal, SSE, text-on-vision)
@@ -25,6 +25,7 @@ This document contains version-specific details, complete file listings, and imp
 - **2 Runtime Compatibility tests** - Reason chain validation (requires specific model types)
 - **1 Live List test** - Tests against user cache (requires HF_HOME with models)
 - **1 Live Push test** - Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
+- **1 Resumable Pull test** - Real network download with controlled interruption (requires `MLXK2_TEST_RESUMABLE_DOWNLOAD=1`)
 - **2 Show Portfolio tests** - Display text/vision portfolios separately (requires HF_HOME)
 - **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
@@ -78,6 +79,7 @@ For complete test file structure, see [Appendix](#complete-test-file-structure-2
 | Live E2E (ADR-011) | `HF_HOME=/path/to/cache pytest -m live_e2e -v` | `live_e2e` (required) + Env: `HF_HOME` (optional, enables Portfolio Discovery); Requires: `httpx` installed | **✅ Working:** Server/HTTP/CLI validation with real models. Portfolio Discovery auto-discovers all MLX chat models via `mlxk list --json` (filter: MLX+healthy+runtime+chat), parametrized tests (one server per model), RAM-aware skip. | No (uses local cache) |
 | Vision CLI E2E (ADR-012) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache, e.g., pixtral-12b-8bit or Llama-3.2-Vision); Requires: `mlx-vlm` installed (Python 3.10+) | **✅ Working:** Deterministic vision queries validate actual image understanding (not hallucination). Tests: chess position reading (e6=black king), OCR text extraction (contract name), color recognition (blue mug), chart label reading (Y-axis), large image support (2.7MB). | No (uses local cache) |
 | Vision Server E2E (ADR-012 Phase 3) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_server_e2e.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache); Requires: `mlx-vlm` installed (Python 3.10+), `httpx` | **✅ Working:** Vision API over HTTP. Tests: Base64 image chat completion, streaming graceful degradation (SSE emulation), text request on vision model server. | No (uses local cache) |
+| Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_resumable tests_2.0/test_resumable_pull.py -v` | `live_resumable` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
 | Show E2E portfolios | `HF_HOME=/path/to/cache python tests_2.0/show_portfolios.py` OR `pytest -m show_model_portfolio -s` | Env: `HF_HOME` | Displays TEXT and VISION portfolios separately. Shows model keys (text_XX, vision_XX), RAM requirements, and test/skip status. Diagnostic tool for understanding portfolio separation. Use script for detailed output, or pytest marker for quick check. | No (uses local cache) |
 | Manual debug mode | `mlxk run <model> "test prompt" --verbose` | Manual CLI usage with `--verbose` flag | Shows token generation details including multiple EOS token warnings. Use this for manual debugging of model quality issues. Output includes `[DEBUG] Token generation analysis` and `⚠️ WARNING: Multiple EOS tokens detected` for broken models. | No (uses local cache) |
 | Issue #27 real-model | `pytest -m issue27 tests_2.0/test_issue_27.py -v` | Marker: `issue27`; Env (required): `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache, read-only). Env (optional): `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL`, `MLXK2_SUBSET_COUNT=0`. | Copies real models from user cache into isolated test cache; validates strict health policy on index-based models (no network) | No (uses local cache) |
@@ -115,12 +117,372 @@ HF_HOME=/path/to/user/cache pytest -m live_run -v
 # Live E2E only (ADR-011)
 HF_HOME=/path/to/user/cache pytest -m live_e2e -v  # See model list: pytest tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch --collect-only -q
 
+# Resumable Pull only (separate run - uses isolated cache)
+MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_resumable tests_2.0/test_resumable_pull.py -v
+
+# Empirical Mapping only (model benchmarking - excluded from wet due to RAM)
+pytest -m live_stop_tokens tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping -v
+
 # Issue #27 only
 MLXK2_USER_HF_HOME=/path/to/user/cache pytest -m issue27 tests_2.0/test_issue_27.py -v
 
 # All live tests (umbrella)
 MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m wet -v
 ```
+
+---
+
+## Test Directory Organization
+
+### Fundamental Definitions (Single Source of Truth)
+
+**User Cache (Singleton - ONE instance per system)**
+```
+What:      The HuggingFace cache directory owned by the user
+Location:  Defined by HF_HOME environment variable
+           Default: ~/.cache/huggingface
+           Example: /Volumes/ExternalSSD/huggingface/cache
+Lifecycle: Permanent - survives test runs, system reboots
+Ownership: Belongs to USER, NOT to tests
+Instances: Exactly ONE per system/user
+```
+
+**Isolated Cache (Class with instances - MANY per test run)**
+```
+What:      Temporary cache directories created by isolated_cache fixture
+Location:  System temp OR APFS volume root (for CoW optimization)
+           Example: /Volumes/ExternalSSD/.mlxk2_test_isolation/mlxk2_test_xyz123/test_cache/hub
+Lifecycle: Temporary - created before test, deleted after test (seconds)
+Ownership: Belongs to SPECIFIC TEST, isolated from others
+Instances: NEW instance PER test function (pytest scope="function")
+           5 tests = 5 separate isolated cache instances
+```
+
+**Instance Model:**
+- **User Cache:** Singleton pattern - shared resource, READ-only in tests
+- **Isolated Cache:** Factory pattern - `isolated_cache()` fixture creates new instance each time
+
+**Lifecycle Diagram:**
+```
+Test 1: def test_foo(isolated_cache):
+    [SETUP]   Create /tmp/mlxk2_test_abc123/  ← Instance 1
+    [TEST]    Use isolated cache
+    [TEARDOWN] Delete /tmp/mlxk2_test_abc123/  ✓ Instance 1 destroyed
+
+Test 2: def test_bar(isolated_cache):
+    [SETUP]   Create /tmp/mlxk2_test_xyz789/  ← Instance 2 (NEW, separate)
+    [TEST]    Use isolated cache
+    [TEARDOWN] Delete /tmp/mlxk2_test_xyz789/  ✓ Instance 2 destroyed
+```
+
+**Sentinel Safety Mechanism:**
+
+Every isolated cache contains a sentinel model: `models--TEST-CACHE-SENTINEL--mlxk2-safety-check`
+
+```python
+# Fixture setup (Line 464-468 conftest.py)
+sentinel_dir = hub_path / TEST_SENTINEL
+sentinel_snapshot = sentinel_dir / "snapshots" / "test123..."
+sentinel_snapshot.mkdir(parents=True)
+(sentinel_snapshot / "config.json").write_text('{"model_type": "test_sentinel", "test_cache": true}')
+
+# Fixture teardown (Line 498-500)
+_safe_rmtree(temp_dir_path, signature_id)  # ← Checks signature before delete
+```
+
+**How Sentinel protects User Cache:**
+1. Test code tries to delete a directory
+2. `_safe_rmtree()` checks: Does this directory contain TEST_SENTINEL?
+3. **NO** → ❌ REFUSE deletion (could be User Cache!)
+4. **YES** → ✅ OK to delete (is Test Cache)
+
+**What it prevents:**
+- Accidental deletion if `HF_HOME` wrongly points to User Cache
+- Bugs in test code using wrong paths
+- Race conditions between tests
+- Catastrophic data loss (User Cache = gigabytes of downloaded models)
+
+**Environment Variables during test:**
+```python
+# Before test:
+HF_HOME = /Volumes/ExternalSSD/huggingface/cache  # User Cache
+
+# During test (isolated_cache fixture):
+HF_HOME = /tmp/mlxk2_test_abc123/test_cache  # Isolated Cache (instance 1)
+MLXK2_STRICT_TEST_DELETE = 1                 # Enable safety checks
+
+# After test:
+HF_HOME = /Volumes/ExternalSSD/huggingface/cache  # Restored
+MLXK2_STRICT_TEST_DELETE = <original>         # Restored
+```
+
+**Workspace (Separate Concept - NOT a Cache)**
+
+Workspace is semantically distinct from Cache - it's a **self-contained, portable** directory for Clone/Push operations.
+
+```
+What:      Self-contained directory with model files (standalone health-check capable)
+Purpose:   Clone target (output) OR Push source (input)
+Location:  User-specified path (production) OR tmp_path (tests)
+           Goal: Any location (USB stick, SMB share, different volumes)
+           Phase 1: Same APFS volume as cache (CoW optimization)
+Structure: Flat directory with config.json + weights (*.safetensors, *.gguf, etc.)
+           NOT HuggingFace cache structure (no hub/snapshots/blobs)
+Lifecycle: Permanent (user owns it) OR temporary (tests use tmp_path)
+Portable:  Yes (conceptually) - can be copied, moved, shared via USB/SMB
+```
+
+**Workspace vs Cache:**
+- **Cache**: HuggingFace internal structure (hub/models--org--repo/snapshots/...), **many models**
+- **Workspace**: User-facing structure (config.json, model.safetensors, tokenizer.json, ...), **exactly one model**
+
+**Self-contained health check:**
+- Workspace contains all files needed for validation
+- Can be checked without HuggingFace cache
+- `mlxk push --check-only workspace/` validates standalone
+
+**Workspace in production:**
+- **Clone**: `mlxk clone org/model /path/to/workspace` → Creates workspace at user-specified path
+- **Push**: `mlxk push /path/to/workspace org/model` → Uploads from user-specified path
+- **Validation**: Clone requires empty directory, Push requires valid model structure
+- **Portability**: Phase 1 requires same APFS volume (limitation), future: any location
+
+**Workspace in tests:**
+- Uses pytest's `tmp_path` fixture (NOT `isolated_cache`)
+- Pattern: `target_dir = str(tmp_path / "workspace")`
+- Example: `test_clone_operation.py` line 489, `test_push_workspace_check.py` line 18
+
+**Workspace safety (Clone operation):**
+- Temp cache during clone: `.mlxk2_temp_cache_sentinel` (cleanup protection)
+- Sentinel is in temp cache, NOT in final workspace
+- Temp cache deleted after successful clone → workspace remains
+
+**Workspace dimension in truth table:**
+
+| Operation | Workspace Location | Cache Type | Allowed? |
+|-----------|-------------------|------------|----------|
+| **Clone (production)** | User-specified path | Isolated temp cache | ✅ |
+| **Clone (tests)** | `tmp_path / "workspace"` | Isolated temp cache | ✅ |
+| **Push (production)** | User-specified path | N/A (upload only) | ✅ |
+| **Push (tests)** | `tmp_path / "ws"` | N/A (offline `--check-only`) | ✅ |
+| **Clone/Push (NEVER)** | Inside User Cache | User Cache | ❌ FORBIDDEN |
+| **Clone/Push (wrong)** | Inside Isolated Cache | Isolated Cache | ❌ Semantically wrong |
+
+**Why Workspace ≠ Cache:**
+- Different structure (flat vs HF nested)
+- Different ownership (user vs HF tooling)
+- Different purpose (working directory vs download cache)
+- Different lifecycle (permanent vs managed)
+
+---
+
+**CRITICAL RULE:** ❌ **NEVER write to User Cache** ❌ All writes must go to isolated cache or external destinations (HuggingFace, workspace).
+
+### Truth Table: Cache Type × Operation
+
+| Cache Type | Read | Write | Allowed? | Example Tests | Directory |
+|------------|------|-------|----------|---------------|-----------|
+| **User Cache** | ✅ | ❌ | **READ ONLY** | Portfolio Discovery, E2E with real models | `tests_2.0/live/` |
+| **Isolated Cache** | ✅ | ✅ | **Both allowed** | Mock models, fresh downloads, safety copies | `tests_2.0/`, `tests_2.0/spec/` |
+
+### Extended Truth Table: Portfolio Discovery Compatibility
+
+Portfolio Discovery fixtures (`vision_portfolio`, `text_portfolio`) use module scope and run subprocesses, creating import-state side-effects. Most tests are compatible, but some require clean import state.
+
+| Test Category          | Cache Type | Fixtures Used           | Portfolio Compatible? | Marker          | Run Group |
+|------------------------|------------|-------------------------|-----------------------|-----------------|-----------|
+| Portfolio Discovery    | User READ  | vision/text_portfolio   | ✅ (source)           | live_e2e        | wet       |
+| Stop Token Validation  | User READ  | vision/text_portfolio   | ✅ (uses it)          | live_stop_tokens| wet       |
+| User Cache Read        | User READ  | isolated_cache (copy)   | ✅ (no conflict)      | live_run/list   | wet       |
+| Workspace Operations   | N/A        | tmp_path                | ✅ (cache-agnostic)   | live_push/clone | wet       |
+| Issue Reproduction     | User→Iso   | isolated_cache + copy   | ✅ (no conflict)      | issue27         | wet       |
+| Isolated Cache Write   | Isolated   | isolated_cache (fresh)  | ❌ (import conflict)  | live_resumable  | separate  |
+
+**Run Groups:**
+- `wet`: Can run together in one pytest invocation
+- `separate`: Must run in separate pytest process
+
+**User Experience:**
+```bash
+./scripts/test-wet-umbrella.sh  # Runs both groups automatically
+```
+
+### Decision Tree: Categorizing New Tests
+
+When writing a new test, follow this decision tree:
+
+**Question 1:** Does your test use Portfolio Discovery fixtures (vision/text_portfolio)?
+├─ YES → Marker: `live_e2e` or `live_stop_tokens` → Run group: **wet** ✅
+└─ NO  → Continue to Question 2
+
+**Question 2:** Does your test need fresh downloads (Isolated Cache WRITE)?
+├─ YES → Marker: `live_resumable` → Run group: **separate** ⚠️
+└─ NO  → Continue to Question 3
+
+**Question 3:** What does your test use?
+├─ User Cache (READ only)     → Markers: `live_run`, `live_list`, `issue27` → Run group: **wet** ✅
+├─ Workspace (tmp_path)        → Markers: `live_push`, `live_clone` → Run group: **wet** ✅
+└─ Isolated Cache (copy/mock)  → Standard markers → Unit test (not live)
+
+### Compatibility Rule (Technical Background)
+
+**Why separate runs?**
+
+Portfolio Discovery fixtures manipulate import state via subprocesses:
+- Subprocess runs: `mlxk list --json [--vision]`
+- Side-effect: Imports `mlx_lm`, `mlx_vlm`, `transformers`, `huggingface_hub` into pytest process
+- Module scope: Remains active across all tests in run
+
+**Compatible tests:** Can tolerate polluted import state
+- Tests using Portfolio fixtures (they expect it)
+- Tests with User Cache READ (no import-sensitive operations)
+- Tests with Workspace (cache-agnostic)
+
+**Incompatible tests:** Require clean import state
+- `live_resumable`: HuggingFace Hub needs clean imports for symlink creation
+- Fresh downloads fail with polluted `sys.modules`
+
+**Solution:** Separate pytest runs ensure clean import state for incompatible tests.
+
+For pytest implementation details, see Appendix below.
+
+### conftest.py Scope Rules
+
+**Pytest conftest.py files form a hierarchy** - parent conftest applies to all children, but child conftest should ONLY apply to their directory.
+
+**Rule:** Subdirectory `conftest.py` files MUST limit their scope to their own directory to avoid interfering with sibling/parent tests.
+
+**Implementation pattern:**
+```python
+# tests_2.0/live/conftest.py
+
+@pytest.fixture(scope="function", autouse=True)
+def _skip_unless_live_e2e_marker(request):
+    """Autouse fixture that ONLY applies to tests in live/ directory."""
+    # CRITICAL: Early return for tests outside this directory
+    test_path = str(request.node.path)
+    if "/live/" not in test_path and "\\live\\" not in test_path:
+        return  # Skip fixture for tests outside live/ directory
+
+    # Rest of fixture logic...
+
+def pytest_generate_tests(metafunc):
+    """Hook that ONLY applies to tests in live/ directory."""
+    # CRITICAL: Early return for tests outside this directory
+    test_path = str(metafunc.definition.path)
+    if "/live/" not in test_path and "\\live\\" not in test_path:
+        return  # Skip hook for tests outside live/ directory
+
+    # Rest of hook logic (Portfolio Discovery, parametrization, etc.)
+```
+
+**Rationale:**
+- `tests_2.0/live/` contains User Cache tests (Portfolio Discovery)
+- `tests_2.0/` contains Isolated Cache tests (fresh downloads, mocks)
+- Portfolio Discovery hooks (`pytest_generate_tests`, `autouse` fixtures) should NOT apply to Isolated Cache tests
+- Without scope limitation: `live/conftest.py` hooks interfere with `isolated_cache` fixture in parent tests
+
+**Test hierarchy:**
+```
+tests_2.0/
+├── conftest.py              # Global: applies to ALL tests (isolated_cache, assert_is_test_cache, etc.)
+├── test_resumable_pull.py   # Uses isolated_cache → must NOT be affected by live/conftest.py
+├── live/
+│   ├── conftest.py          # Local: MUST limit scope to /live/ only (Portfolio Discovery)
+│   └── test_server_e2e.py   # Uses Portfolio Discovery → affected by live/conftest.py
+└── spec/
+    ├── conftest.py          # (if exists) Local: MUST limit scope to /spec/ only
+    └── test_*.py
+```
+
+**Verification:**
+- Test in `tests_2.0/test_resumable_pull.py` with marker `live_resumable` should collect as 1 test (NOT parametrized)
+- Test in `tests_2.0/live/test_server_e2e.py` with `text_model_key` should parametrize across portfolio
+
+### Test Categories by Cache Strategy
+
+**Category 1: User Cache READ (Portfolio Discovery)**
+- **Location:** `tests_2.0/live/`
+- **Cache:** Direct User Cache via `HF_HOME` environment
+- **Operation:** READ only (via `mlxk list --json`, server load, etc.)
+- **Examples:**
+  - `test_server_e2e.py` - Parametrized tests across text_portfolio (23 models)
+  - `test_vision_e2e_live.py` - Vision CLI with real models from cache
+  - `test_stop_tokens_live.py` - Stop token validation with discovered models
+- **Why in live/:** Portfolio Discovery hooks (`pytest_generate_tests`) auto-discover models from User Cache
+- **Count:** 10+ tests
+
+**Category 2: Isolated Cache WRITE (Fresh State)**
+- **Location:** `tests_2.0/`
+- **Cache:** Isolated temp cache (empty at start)
+- **Operation:** WRITE (download, create mock models)
+- **Examples:**
+  - `test_resumable_pull.py` - Downloads fresh from HuggingFace into isolated cache
+  - `test_robustness.py` - Creates mock model files for testing
+  - `test_integration.py` - Synthetic model creation for integration tests
+- **Why in parent:** Needs clean pytest environment without Portfolio Discovery hooks
+- **Count:** 15+ tests
+
+**Category 3: Isolated Cache READ (Safety Copies)**
+- **Location:** `tests_2.0/`
+- **Cache:** Isolated temp cache (copied from User Cache)
+- **Operation:** WRITE (copy) then READ (test on copy)
+- **Examples:**
+  - `test_issue_27.py` - Copies real models from User Cache, mutates copies, tests health
+  - `test_issue_37_private_org_regression.py` - Copies model, renames to simulate private repo
+- **Why copy:** Protects User Cache from mutations (delete shards, truncate, inject LFS pointers)
+- **Count:** 2 tests
+
+**Category 4: Spec/Schema Validation**
+- **Location:** `tests_2.0/spec/`
+- **Cache:** Isolated cache with minimal mocks
+- **Operation:** WRITE (mock creation) + READ
+- **Examples:**
+  - `test_cli_commands_json_flag.py` - JSON output format validation
+  - `test_code_outputs_validate_against_schema.py` - Schema compliance
+- **Why isolated:** Fast, deterministic, no real models needed
+- **Count:** 7 tests
+
+**Special Cases (External Writes):**
+- `test_push_live.py` - Writes to **HuggingFace** (not local cache) ✅ Allowed
+- `test_clone_live.py` - Writes to **workspace directory** (not cache) ✅ Allowed
+
+### Why Resumable Pull MUST stay in `tests_2.0/`
+
+**The conflict:**
+- Resumable Pull needs **empty isolated cache** (Category 2)
+- `tests_2.0/live/` expects **populated User Cache** (Category 1)
+- Portfolio Discovery hooks (`pytest_generate_tests`) run during collection, expecting models in HF_HOME
+- When test uses `isolated_cache` in `live/`, hooks interfere with cache isolation
+
+**Observed:**
+- ✅ `tests_2.0/test_resumable_pull.py` → 2.15GB downloaded, PASS
+- ❌ `tests_2.0/live/test_resumable_pull.py` → 0 bytes downloaded, FAIL
+
+### Decision Tree: Where does my test belong?
+
+**Ask yourself:**
+
+1. **Does my test READ from User Cache?**
+   - YES, and needs Portfolio Discovery (test many models) → `tests_2.0/live/`
+   - YES, but only one specific model → Copy to isolated cache, use `tests_2.0/`
+   - NO → Continue to question 2
+
+2. **Does my test WRITE?**
+   - Write to **User Cache** → ❌ **FORBIDDEN** - redesign your test
+   - Write to **isolated cache** (fresh download, mock creation) → `tests_2.0/`
+   - Write to **external** (HuggingFace, workspace) → `tests_2.0/` or `tests_2.0/live/` depending on read source
+
+3. **Does my test use mock/stub models?**
+   - YES, schema validation only → `tests_2.0/spec/`
+   - YES, but needs integrated testing → `tests_2.0/`
+   - NO → See questions 1-2
+
+**Summary:**
+- User Cache READ + Many models → `tests_2.0/live/` (Portfolio Discovery)
+- User Cache READ + Safety copies → `tests_2.0/` (copy_user_model_to_isolated)
+- Isolated Cache WRITE → `tests_2.0/` (fresh state, no hooks)
+- Schema/Mock only → `tests_2.0/spec/` (fast validation)
 
 ---
 
@@ -170,15 +532,15 @@ HF_HOME=/path/to/cache pytest -m live_e2e -n auto  # ← NEVER DO THIS!
 
 | Python Version | Status | Tests Passing | Skipped | Notes |
 |----------------|--------|---------------|---------|-------|
-| 3.9.6 (macOS)  | ✅ Verified | 476/541 | 65 | Vision tests auto-skip (mlx-vlm requires 3.10+) |
-| 3.10.x         | ✅ Verified | 485/541 | 56 | Full suite including vision tests |
-| 3.11.x         | ✅ Verified | 485/541 | 56 | Full suite including vision tests |
-| 3.12.x         | ✅ Verified | 485/541 | 56 | Full suite including vision tests |
-| 3.13.x         | ✅ Verified | 485/541 | 56 | Full suite including vision tests |
-| 3.14.x         | ✅ Verified | 485/541 | 56 | Full suite including vision tests |
+| 3.9.6 (macOS)  | ✅ Verified | 519/588 | 69 | Vision tests auto-skip (mlx-vlm requires 3.10+) |
+| 3.10.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
+| 3.11.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
+| 3.12.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
+| 3.13.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
+| 3.14.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
 
-**Note:** 56 skipped tests (65 on Python 3.9) are opt-in (live tests, alpha features). Skipped count may vary by environment:
-- Without `HF_HOME`: Standard 56 skipped (65 on Py3.9, live E2E tests use fallback parametrization)
+**Note:** 60 skipped tests (69 on Python 3.9) are opt-in (live tests, alpha features). Skipped count may vary by environment:
+- Without `HF_HOME`: Standard 60 skipped (69 on Py3.9, live E2E tests use fallback parametrization)
 - With `HF_HOME`: Live E2E tests run with discovered models across text_portfolio (23) and vision_portfolio (3)
 
 All versions tested with `isolated_cache` system and MLX stubs for fast execution without model downloads.
@@ -798,11 +1160,90 @@ pytest -m live_e2e --collect-only  # Should work without errors
 
 ## Appendix
 
-### Test Environment Variables Reference
+### A1. Portfolio Discovery Fixture Compatibility
+
+**Implementation:** `tests_2.0/conftest.py`
+
+The `pytest_collection_modifyitems` hook auto-assigns the `wet` marker based on test markers and location:
+
+```python
+# Declarative compatibility set
+LIVE_MARKERS_FOR_WET = {
+    # Portfolio Discovery users
+    "live_e2e",           # Uses Portfolio fixtures
+    "live_stop_tokens",   # Uses Portfolio fixtures
+
+    # User Cache READ
+    "live_run",           # User Cache READ only
+    "live_list",          # User Cache READ only
+    "issue27",            # User Cache READ + copy
+
+    # Workspace operations
+    "live_push",          # Workspace only (tmp_path)
+    "live_clone",         # Workspace only (tmp_path)
+}
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-assign wet marker based on compatibility."""
+    for item in items:
+        test_markers = {m.name for m in item.iter_markers()}
+        test_path = str(item.path)
+        is_in_live_dir = "/live/" in test_path or "\\live\\" in test_path
+
+        # Wet marker for compatible tests
+        if (test_markers & LIVE_MARKERS_FOR_WET) or is_in_live_dir:
+            # EXCLUDE live_resumable (incompatible)
+            if "live_resumable" not in test_markers:
+                item.add_marker(pytest.mark.wet)
+```
+
+### A2. Why sys.modules Pollution Matters
+
+**pytest runs in single Python process:**
+- All tests share: `sys.modules`, `sys.path`
+- Module-scoped fixtures remain active across tests
+- Import pollution persists until pytest exit
+
+**Portfolio Discovery side-effects:**
+```python
+# live/conftest.py:vision_portfolio (module scope)
+def vision_portfolio():
+    discover_vision_models()  # Runs: mlxk list --json --vision
+    # Subprocess imports pollute pytest process sys.modules
+```
+
+**Why live_resumable breaks:**
+```python
+# test_resumable_pull.py:190
+pull_operation(model, force_resume=True)  # In pytest process
+# Imports huggingface_hub → finds polluted version in sys.modules
+# Symlink creation fails
+```
+
+**Evidence:**
+- Solo run: ✅ No Portfolio Discovery → clean imports → works
+- Multi-test run: ❌ Portfolio Discovery → polluted imports → fails
+
+### A3. Why Not Function Scope for Portfolio?
+
+**Current (module scope):**
+- Portfolio Discovery runs 1x per module
+- 26 tests → 2x subprocess (text + vision) → fast
+
+**Alternative (function scope):**
+- Portfolio Discovery per test
+- 26 tests → 52x subprocess → 10-20x slower
+- Subprocess overhead: Model enumeration + RAM calculation
+
+**Decision:** Module scope is performance optimization, not bug.
+
+---
+
+### A4. Test Environment Variables Reference
 
 This section documents environment variables used exclusively for testing and development. For user-facing configuration, see the "Configuration Reference" section in [README.md](README.md).
 
-#### Test Control Variables
+#### A4.1 Test Control Variables
 
 These variables control test behavior and should only be set when running the test suite:
 
@@ -812,7 +1253,7 @@ These variables control test behavior and should only be set when running the te
 | `MLXK2_STRICT_TEST_DELETE` | Enforce strict deletion checks in `rm` tests | Set to `1` in test suite to validate error handling |
 | `HF_HUB_DISABLE_PROGRESS_BARS` | Disable HuggingFace download progress bars | Set automatically by MLX Knife; don't set manually |
 
-#### Live Test Environment Variables
+#### A4.2 Live Test Environment Variables
 
 These variables enable optional live tests that interact with real models or external services:
 
@@ -829,6 +1270,7 @@ These variables enable optional live tests that interact with real models or ext
 | `MLXK2_ISSUE27_INDEX_MODEL` | Index-based model for Issue #27 | `pytest -m issue27` |
 | `MLXK2_SUBSET_COUNT` | Limit Issue #27 test count | `pytest -m issue27` |
 | `MLXK2_BOOTSTRAP_INDEX` | Auto-download model for Issue #27 | `pytest -m issue27` |
+| `MLXK2_TEST_RESUMABLE_DOWNLOAD` | Enable resumable pull tests (requires network) | `pytest -m live_resumable tests_2.0/test_resumable_pull.py` |
 
 **Example:**
 ```bash
@@ -847,12 +1289,15 @@ MLXK2_LIVE_PUSH=1 \
 
 ---
 
-### Complete Test File Structure (2.0.4-beta.3)
+### A5. Complete Test File Structure (2.0.4-beta.5)
 
 ```
+scripts/
+└── test-wet-umbrella.sh           # Single entry point for all real tests (wet + resumable), memory-optimized (--tb=no --capture=sys)
+
 tests_2.0/
 ├── __init__.py
-├── conftest.py                        # Isolated test cache (HF_HOME override), safety sentinel, core fixtures
+├── conftest.py                        # Isolated test cache (HF_HOME override), safety sentinel, core fixtures, wet marker hook, memory cleanup (live_e2e+wet), pytest_addoption (--report-output)
 ├── conftest_runner.py                 # Runner-specific fixtures/mocks
 ├── show_portfolios.py                 # Diagnostic tool: Display text/vision portfolios with RAM estimates
 ├── stubs/                             # Minimal mlx/mlx_lm stubs for unit/spec tests
@@ -883,6 +1328,7 @@ tests_2.0/
 │   ├── test_portfolio_fixtures.py              # Portfolio separation validation tests (7 tests: fixture behavior, disjoint check)
 │   ├── test_push_live.py                       # Live push flow (requires MLXK2_LIVE_PUSH, HF_TOKEN)
 │   ├── test_server_e2e.py                      # Server E2E tests with TEXT models (ADR-011 + Portfolio Separation, parametrized: text_XX)
+│   ├── test_show_portfolio.py                  # Portfolio display (marker: show_model_portfolio, requires HF_HOME)
 │   ├── test_streaming_parity.py                # Streaming vs batch parity tests (Issue #20, ADR-011, parametrized)
 │   ├── test_vision_e2e_live.py                 # Vision CLI E2E tests with real models (ADR-012, 5 deterministic vision queries)
 │   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
@@ -917,6 +1363,7 @@ tests_2.0/
 ├── test_push_minimal.py               # Minimal push scenarios (offline)
 ├── test_push_workspace_check.py       # Push check-only: workspace validation without network
 ├── test_ram_calculation.py            # RAM calculation unit tests (11 tests: text 1.2x, vision 0.70 threshold, system memory)
+├── test_resumable_pull.py             # Resumable download tests (real network download with controlled interruption)
 ├── test_robustness.py                 # Robustness for rm/pull/disk/timeout/concurrency
 ├── test_run_complete.py               # End-to-end run command (stream/batch/params)
 ├── test_run_vision.py                 # Vision runner unit tests (ADR-012 Phase 1b, VisionRunner routing, default prompt)
@@ -931,7 +1378,9 @@ tests_2.0/
 ├── test_stop_tokens_live.py           # Stop token validation with real models (marker: live_stop_tokens, ADR-009)
 ├── test_token_limits.py               # Dynamic token calculation; server vs run policies
 ├── test_vision_adapter.py             # Vision HTTP adapter unit tests (46 tests: Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
-└── test_vision_exif.py                # EXIF extraction tests (ADR-017 Phase 1, 8 tests: GPS, DateTime, Camera, collapsible table, privacy controls)
+├── test_vision_exif.py                # EXIF extraction tests (ADR-017 Phase 1, 8 tests: GPS, DateTime, Camera, collapsible table, privacy controls)
+├── test_workspace_sentinel.py         # Workspace infrastructure tests (ADR-018 Phase 0a, 20 tests: sentinel primitives, atomic write, managed/unmanaged detection, health checks, CLI integration)
+└── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1, 11 tests: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
 ```
 
 ---
@@ -963,62 +1412,4 @@ mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cat
 
 ---
 
-### Version History
-
-### 2.0.4-beta.1 (Release Candidate, 2025-12-16)
-- ✅ **Vision Server integration (ADR-012 Phase 3, Session 24):**
-  - Backend-aware `get_or_load_model()`: Loads MLXRunner OR VisionRunner based on policy
-  - `ChatMessage.content` extended: `Union[str, List[Dict]]` for OpenAI Vision format
-  - `_handle_vision_chat_completion()`: Vision request handler with cache reuse
-  - `_handle_text_chat_completion()`: Supports both runner types
-  - Streaming rejection (HTTP 400) for vision models
-  - 17 new unit tests in `test_server_vision.py`
-  - 3 new E2E tests in `test_vision_server_e2e.py`
-- ✅ **Test count:** 430 passed, 41 skipped (17 new tests from Session 24)
-- ✅ **Live E2E:** 105 passed, 5 failed, 20 skipped
-  - **Known failures:** discovered_04/25 (Vision models) HTTP 404 in generic E2E tests (not vision-specific tests)
-  - **Fixed:** test_chess_position_e6 (increased max_tokens, relaxed assertion for "black" OR "king")
-
-### 2.0.3 (2025-11-17)
-- ✅ **Test updates for stderr separation:** 4 test files modified to verify errors go to stderr (human mode)
-  - `test_interactive_mode.py`: 2 tests patching stderr for ERROR messages
-  - `test_run_complete.py`: 2 tests validating stderr error handling
-  - `test_cli_run_exit_codes.py`: 3 tests checking stdout/stderr separation in JSON mode
-  - `test_cli_push_args.py`: 2 tests verifying push stdout/stderr returns
-- ✅ **Benchmark reporting infrastructure:** 4 live test files updated with benchmark fixtures
-  - `live/conftest.py`: +225 lines - `report_benchmark()` fixture, `_parse_model_family()` helper
-  - `live/test_cli_e2e.py`: Benchmark metadata reporting (family, variant, stop_tokens)
-  - `live/test_server_e2e.py`: Benchmark metadata + performance (usage) data
-  - `live/test_streaming_parity.py`: Portfolio Discovery refactoring (uses `mlxk list --json`)
-- ✅ **Interactive mode reasoning control:** 2 new tests added (review_report.md)
-  - `test_interactive_mode.py`: 1 test for `hide_reasoning` parameter passing
-  - `test_run_complete.py`: 1 test for `TestRunReasoningControl` class
-- ✅ **Test count:** 308 passed, 35 skipped (+2 tests from review_report.md fixes)
-
-### 2.0.2 (2025-11-14)
-- ✅ Test infrastructure hardening (TOKENIZERS_PARALLELISM, active polling, gc.collect())
-- ✅ Portfolio Discovery validation complete (73/81 E2E tests, 17 models discovered)
-- ✅ Sequential execution warning added (TESTING-DETAILS.md CRITICAL section)
-- ✅ RAM logging infrastructure added (server_context.py, for future benchmark tooling)
-
-### 2.0.2-dev (2025-11-13)
-- ✅ Stop token ordering bugs fixed (batch + streaming modes)
-- ✅ E2E test suite completed (ADR-011)
-- ✅ 72/80 E2E tests passing baseline (15 models tested)
-- ✅ TESTING.md restructuring (timeless policy + version-specific details split)
-
-### 2.0.1 (2025-11-28)
-- ✅ Portfolio Discovery (Issue #32, ADR-009)
-- ✅ CLI exit code propagation (Issue #38)
-- ✅ 306/306 tests passing
-
-### 2.0.0 (2025-11-06)
-- ✅ Complete rewrite with Apache 2.0 license
-- ✅ JSON-first architecture
-- ✅ Isolated test system with sentinel protection
-- ✅ MLX stubs for fast testing without model downloads
-- ✅ 3-category test strategy
-
----
-
-*MLX-Knife 2.0.4-beta.1 Testing Details*
+*MLX-Knife 2.0 Testing Details*

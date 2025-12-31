@@ -1,5 +1,68 @@
 # Changelog
 
+## [2.0.4-beta.5] - 2025-12-31
+
+### Added
+
+- **Workspace Infrastructure (ADR-018 Phase 0a):**
+  - Managed workspace detection via `.mlxk_workspace.json` sentinel
+  - Workspace health checks support managed and unmanaged workspaces
+  - All cloned workspaces now include provenance metadata
+  - Backward compatible with unmanaged workspaces (pre-2.0.4)
+  - See ADR-018.md Phase 0a for details
+
+- **Convert Operation (ADR-018 Phase 1):**
+  - `mlxk convert <src> <dst> --repair-index` rebuilds safetensors index from shards
+  - Fixes mlx-vlm #624 affected models (7+ models: Qwen2.5-VL, gemma-3, Mistral-Small, etc.)
+  - Cache sanctity: Hard blocks writes to HF cache
+  - APFS CoW optimization for instant, space-efficient cloning
+  - See ADR-018.md Phase 1 for details
+
+- **Resumable Pull Support:**
+  - Auto-detect partial downloads with user confirmation prompts
+  - `--force-resume` flag for non-interactive automation
+  - Health-aware logic for damaged downloads
+
+- **Wet Umbrella Test Integration:**
+  - Single entry point: `scripts/test-wet-umbrella.sh` runs all real model tests
+  - Auto-marker assignment via pytest hook
+  - Memory-optimized options prevent pytest RAM spikes
+  - See TESTING-DETAILS.md for architecture
+
+- **Vision Model Benchmark Reporting:**
+  - Auto-reporting fixture adds Vision metadata to benchmark JSONL
+  - Schema v0.2.0 compliance for memplot integration
+
+### Changed
+
+- **Clone operation:** Now produces managed workspaces (sentinel written after APFS clone, enables provenance detection)
+
+### Fixed
+
+- **Vision Portfolio Discovery:** Fixed KeyError when discovering Vision models. Issue: Vision models share `model_type="chat"` with TEXT. Solution: Filter by capabilities instead. Result: 3 Vision models now detected.
+
+- **Mistral Tokenizer Bug (Issue #49):** Fixed BPE space markers `Ġ` (U+0120) appearing in output instead of spaces. Affected: 3+ Mistral-family models (DeepHermes, Mistral-Small-3.2, DeepSeek-R1). Root cause: Broken `tokenizer.json` PreTokenizer regex patterns. Solution: (1) Post-load tokenizer regex patching for encoding fix, (2) `_decode_tokens()` helper using `tokenizer.detokenizer` for proper BPE space marker conversion in both streaming and batch modes. Impact: Correct encoding/decoding, 15% context window waste eliminated. All generation modes fixed (streaming, batch, server). Related: HuggingFace discussion https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84
+
+- **Memory Cleanup Hook:** Fixed 60GB swap during wet tests. Hook now triggers for both `live_e2e` and `wet` markers.
+
+- **Missing Model Skip:** Regression test now skips cleanly when hardcoded model not in cache.
+
+- **pytest CLI option location:** Moved `--report-output` hook from subdirectory to root conftest.py (pytest requirement).
+
+- **Cache resolution in pull:** Dynamic `get_current_model_cache()` instead of module-level import (fixes test isolation).
+
+- **Test Regression:** Fixed 4 unit tests after BPE detokenizer changes. Created `MockDetokenizer` class matching BPEStreamingDetokenizer API.
+
+### Testing
+
+- **Benchmark Quality Metrics (OS-agnostic):** Switched from swap-based to RAM-based quality flags. DeepHermes-3-24B steady-state baseline analysis revealed OS-specific memory behavior: Tahoe maintains ~24 GB free RAM with aggressive swap (1-55 GB), Sequoia maintains ~40 GB free with minimal swap (0 MB). Despite 16 GB RAM difference, both OSs achieve similar performance. Identified `ram_free < 5 GB` as universal degradation threshold (extreme memory pressure). Result: 97.8% clean on Tahoe, 96.9% clean on Sequoia. Report generator now recalculates quality flags from raw metrics, ignoring stored flags. Created memory profiling tooling (memmon.py, memplot.py). MLX 0.30.x cleanup verified functional.
+
+### Community
+
+- **Repair workflow:** 7+ mlx-community VLM models fixable with `mlxk clone <model> ./ws && mlxk convert ./ws ./ws-fixed --repair-index`. Discord announcement pending mlx-vlm 0.3.10 release.
+
+---
+
 ## [2.0.4-beta.4] - 2025-12-25
 
 ### Fixed

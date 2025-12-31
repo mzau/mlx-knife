@@ -10,10 +10,11 @@ if str(_stubs_path) not in sys.path:
     sys.path.insert(0, str(_stubs_path))
 
 import os
+import re
 import tempfile
 import pytest
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Dict, Any
 from contextlib import contextmanager
 import shutil
 import random
@@ -42,10 +43,11 @@ def cleanup_zombie_servers(request):
 
     Use case: Prevents RAM exhaustion and port conflicts from accumulated zombies.
     """
-    # SAFETY: Only cleanup when live_e2e marker is explicitly requested
+    # SAFETY: Only cleanup when live_e2e or wet marker is explicitly requested
     # This prevents killing production/dev servers during unit test runs
+    # wet marker includes live_e2e tests (Wet Umbrella pattern)
     selected_markers = request.config.getoption("-m") or ""
-    should_cleanup = "live_e2e" in selected_markers
+    should_cleanup = "live_e2e" in selected_markers or "wet" in selected_markers
 
     if should_cleanup:
         # Pre-test cleanup: Kill zombies from previous runs
@@ -1158,3 +1160,350 @@ def copy_user_model_to_isolated(isolated_cache):
         return dst
 
     return copier
+
+
+# =============================================================================
+# Wet Umbrella: Auto-assign marker to Portfolio-compatible tests
+# =============================================================================
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-assign wet marker to Portfolio Discovery compatible tests.
+
+    Wet Umbrella groups tests that can run together in one pytest invocation:
+    - User Cache READ tests (live_e2e, live_stop_tokens, live_run, live_list)
+    - Workspace operations (live_push, live_clone)
+    - Issue reproduction (issue27)
+
+    Excluded from wet:
+    - live_resumable (Isolated Cache WRITE - requires clean import state)
+    - Model validation tests (memory-intensive, belongs in separate benchmark suite)
+
+    See: TESTING-DETAILS.md → Extended Truth Table
+    """
+    # Compatible live markers (User Cache READ + Workspace)
+    LIVE_MARKERS_FOR_WET = {
+        "live_e2e",           # Portfolio Discovery (User Cache READ)
+        "live_stop_tokens",   # Portfolio Discovery (User Cache READ)
+        "live_run",           # User Cache READ
+        "live_list",          # User Cache READ
+        "live_push",          # Workspace (not Cache)
+        "live_clone",         # Workspace (not Cache)
+        "issue27",            # User Cache READ
+    }
+
+    # Tests excluded from wet (model validation, not code tests)
+    EXCLUDED_FROM_WET = {
+        "test_empirical_mapping_single_model",  # Model benchmark (ADR-013)
+        "test_empirical_mapping_generate_report",  # Report generation
+    }
+
+    for item in items:
+        test_markers = {m.name for m in item.iter_markers()}
+        test_path = str(item.path)
+        test_name = item.name
+        is_in_live_dir = "/live/" in test_path or "\\live\\" in test_path
+
+        # Skip model validation tests
+        if any(excluded in test_name for excluded in EXCLUDED_FROM_WET):
+            continue
+
+        # Wet marker for compatible tests
+        if (test_markers & LIVE_MARKERS_FOR_WET) or is_in_live_dir:
+            # EXCLUDE live_resumable (Isolated Cache WRITE - incompatible!)
+            if "live_resumable" not in test_markers:
+                item.add_marker(pytest.mark.wet)
+
+
+# ============================================================================
+# Benchmark Reporting (ADR-013 Phase 0.5)
+# ============================================================================
+
+def pytest_addoption(parser):
+    """Add --report-output option for benchmark reporting."""
+    parser.addoption(
+        "--report-output",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="Generate benchmark reports to JSONL file (ADR-013 Phase 0.5)"
+    )
+
+
+def pytest_configure(config):
+    """Initialize report file if --report-output is specified."""
+    from pathlib import Path
+    config.report_file = None
+    if report_path := config.getoption("--report-output"):
+        config.report_file = Path(report_path).open("a", encoding="utf-8")
+        print(f"\n📊 Benchmark reporting enabled: {report_path}")
+
+
+def pytest_unconfigure(config):
+    """Close report file at end of session."""
+    if config.report_file:
+        config.report_file.close()
+
+
+# ============================================================================
+# Benchmark Reporting Helpers (ADR-013 Phase 0.5)
+# ============================================================================
+
+def parse_vm_stat_page_size(output: str) -> int:
+    """Extract vm_stat page size in bytes, falling back to 4096."""
+    match = re.search(r"page size of (\d+) bytes", output)
+    if match:
+        return int(match.group(1))
+    return 4096
+
+
+def _get_macos_system_health() -> Dict[str, Any]:
+    """Collect macOS system health metrics (ADR-013 Phase 0.5 - v0.2.0).
+
+    Uses macOS-native tools (sysctl, vm_stat, ps) - ZERO new dependencies.
+    Enables automatic regression quality assessment via quality_flags.
+
+    Returns:
+        dict: System health metrics with keys:
+            - swap_used_mb: Current swap usage in MB
+            - ram_free_gb: Available RAM in GB
+            - zombie_processes: Count of zombie processes
+            - quality_flags: List of quality indicators
+                ["clean"] = healthy system
+                ["degraded_swap"] = swap usage detected (memory pressure)
+                ["degraded_zombies"] = zombie processes detected
+
+    Quality Thresholds (empirically derived from Session 43 analysis):
+        - Swap: >100 MB indicates memory pressure (beta2→beta3: 1.8 GB swap = +3.4% slowdown)
+        - Zombies: >0 indicates stuck processes (REGRESSION-2025-12-08: 14 zombies = +90% slowdown)
+    """
+    # Force C locale for consistent number formatting (avoid locale-specific decimal separators)
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+
+    health = {
+        "swap_used_mb": 0,
+        "ram_free_gb": 0.0,
+        "zombie_processes": 0,
+        "quality_flags": []
+    }
+
+    try:
+        # Get swap usage via sysctl (macOS native)
+        # sysctl vm.swapusage returns: "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)"
+        result = subprocess.run(
+            ["sysctl", "vm.swapusage"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            env=env
+        )
+        if result.returncode == 0:
+            # Parse: "total = X.XXM  used = Y.YYM  free = Z.ZZM"
+            # LC_ALL=C ensures consistent dot decimal separator
+            for part in result.stdout.split():
+                if part.endswith("M") and "used" in result.stdout:
+                    # Extract used value (appears after "used = ")
+                    parts = result.stdout.split("used = ")
+                    if len(parts) > 1:
+                        used_str = parts[1].split()[0]
+                        # Parse size (can be M or G suffix)
+                        if used_str.endswith("G"):
+                            health["swap_used_mb"] = int(float(used_str[:-1]) * 1024)
+                        elif used_str.endswith("M"):
+                            health["swap_used_mb"] = int(float(used_str[:-1]))
+                        break
+    except Exception:
+        pass  # Swap metric is optional (not critical if it fails)
+
+    try:
+        # Get free RAM via vm_stat (macOS native)
+        # vm_stat reports page size in the header (Apple Silicon uses 16KB pages).
+        result = subprocess.run(
+            ["vm_stat"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            env=env
+        )
+        if result.returncode == 0:
+            page_size = parse_vm_stat_page_size(result.stdout)
+            # Parse "Pages free: 12345."
+            for line in result.stdout.splitlines():
+                if "Pages free:" in line:
+                    pages_free = int(line.split(":")[1].strip().rstrip("."))
+                    health["ram_free_gb"] = round(pages_free * page_size / (1024**3), 2)
+                    break
+    except Exception:
+        pass  # RAM metric is optional
+
+    try:
+        # Get zombie process count via ps aux (macOS native)
+        # Zombies show as "<defunct>" in ps output
+        result = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            env=env
+        )
+        if result.returncode == 0:
+            # Count lines containing "<defunct>"
+            health["zombie_processes"] = result.stdout.count("<defunct>")
+    except Exception:
+        pass  # Zombie count is optional
+
+    # Determine quality flags (empirical thresholds from regression analysis)
+    flags = []
+    if health["swap_used_mb"] > 100:
+        flags.append("degraded_swap")
+    if health["zombie_processes"] > 0:
+        flags.append("degraded_zombies")
+
+    # If no degradation detected, mark as clean
+    if not flags:
+        flags.append("clean")
+
+    health["quality_flags"] = flags
+    return health
+
+
+def _get_macos_hardware_profile() -> Dict[str, Any]:
+    """Collect macOS hardware profile (ADR-013 Phase 0.5 - v0.2.0).
+
+    Uses macOS-native sysctl - ZERO new dependencies.
+    Enables hardware-specific performance analysis (M1 vs M2 vs M3 vs M4).
+
+    Returns:
+        dict: Hardware profile with keys:
+            - model: Mac model identifier (e.g., "Mac14,9" = M3 Max)
+            - cores_physical: Physical CPU cores (P-cores only)
+            - cores_logical: Logical CPU cores (P+E cores with hyperthreading)
+    """
+    profile = {
+        "model": "unknown",
+        "cores_physical": 0,
+        "cores_logical": 0,
+    }
+
+    try:
+        # Get Mac model identifier
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.model"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            profile["model"] = result.stdout.strip()
+    except Exception:
+        pass
+
+    try:
+        # Get physical cores (P-cores)
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.physicalcpu"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            profile["cores_physical"] = int(result.stdout.strip())
+    except Exception:
+        pass
+
+    try:
+        # Get logical cores (P+E cores with hyperthreading)
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.logicalcpu"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            profile["cores_logical"] = int(result.stdout.strip())
+    except Exception:
+        pass
+
+    return profile
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Generate benchmark report for each test (if --report-output enabled).
+
+    Reports are written as JSONL (one JSON object per line) to allow
+    streaming and easy appending across test runs.
+
+    Schema version: 0.2.0 (Phase 0.5 - System Health + Hardware Profile)
+    See: ADR-013 Phase 0.5 implementation
+
+    Changelog from 0.1.0 → 0.2.0:
+        - Added: system.hardware_profile (Mac model, cores)
+        - Added: system_health (swap, RAM, zombies, quality_flags)
+        - Backward compatible: All 0.1.0 fields preserved
+    """
+    import json
+    from datetime import datetime, timezone
+
+    outcome = yield
+    report = outcome.get_result()
+
+    # Only report on test call phase (not setup/teardown)
+    if call.when == "call" and item.config.report_file:
+        try:
+            # Import version here to avoid circular imports
+            from mlxk2 import __version__
+        except ImportError:
+            __version__ = "unknown"
+
+        # Build report data (required fields)
+        data = {
+            "schema_version": "0.2.0",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "mlx_knife_version": __version__,
+            "test": item.nodeid,
+            "outcome": report.outcome,
+        }
+
+        # Add duration if available
+        if hasattr(report, "duration"):
+            data["duration"] = report.duration
+
+        # Add skip reason for skipped tests
+        if report.outcome == "skipped" and hasattr(report, "longrepr"):
+            # Extract skip reason from longrepr tuple
+            if isinstance(report.longrepr, tuple) and len(report.longrepr) >= 3:
+                skip_reason = report.longrepr[2]
+                data.setdefault("metadata", {})["skip_reason"] = skip_reason
+
+        # Extract structured data from user_properties
+        # Tests can add data via: request.node.user_properties.append(("key", value))
+        for key, value in item.user_properties:
+            if key in ("model", "performance", "stop_tokens", "system"):
+                # Structured sections (top-level keys)
+                data[key] = value
+            else:
+                # Everything else goes to metadata
+                data.setdefault("metadata", {})[key] = value
+
+        # ADR-013 Phase 0.5: Collect system health metrics (v0.2.0)
+        # Enables automatic regression quality assessment
+        system_health = _get_macos_system_health()
+        data["system_health"] = system_health
+
+        # ADR-013 Phase 0.5: Collect hardware profile (v0.2.0)
+        # Enables hardware-specific performance analysis (M1 vs M2 vs M3 vs M4)
+        hardware_profile = _get_macos_hardware_profile()
+
+        # Add hardware_profile to system section (create if not exists)
+        if "system" not in data:
+            data["system"] = {}
+        data["system"]["hardware_profile"] = hardware_profile
+
+        # Write JSONL (one line per report)
+        try:
+            item.config.report_file.write(json.dumps(data) + "\n")
+            item.config.report_file.flush()
+        except Exception as e:
+            # Don't fail tests if reporting fails
+            print(f"\n⚠️  Benchmark report write failed: {e}")

@@ -13,6 +13,7 @@ mlx_knife/*
 .DS_Store
 .claude/
 mymodel_test_workspace/
+live_clone_ws/
 build/
 dist/
 *.egg-info/

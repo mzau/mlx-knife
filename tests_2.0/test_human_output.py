@@ -1,6 +1,6 @@
 import re
 
-from mlxk2.output.human import render_list, render_health
+from mlxk2.output.human import render_list, render_health, render_clone
 
 
 def sample_list_data():
@@ -81,6 +81,44 @@ def test_health_human_summary_and_entries():
     assert "Summary: total 2, healthy 1, unhealthy 1" in out
     assert "model-a" in out
     assert "model-b" in out
+
+
+def test_health_human_single_item_no_summary():
+    """When total==1, summary line is redundant and should be omitted."""
+    data = {
+        "status": "success",
+        "command": "health",
+        "data": {
+            "healthy": [
+                {"name": "./workspace", "status": "healthy", "reason": "Multi-file model complete"}
+            ],
+            "unhealthy": [],
+            "summary": {"total": 1, "healthy_count": 1, "unhealthy_count": 0},
+        },
+        "error": None,
+    }
+    out = render_health(data)
+    # No summary line for single item
+    assert "Summary:" not in out
+    # Result line present
+    assert "healthy   ./workspace — Multi-file model complete" in out
+
+
+def test_health_human_zero_items_shows_summary():
+    """When total==0, summary is useful to indicate nothing was found."""
+    data = {
+        "status": "success",
+        "command": "health",
+        "data": {
+            "healthy": [],
+            "unhealthy": [],
+            "summary": {"total": 0, "healthy_count": 0, "unhealthy_count": 0},
+        },
+        "error": None,
+    }
+    out = render_health(data)
+    # Summary line present for zero results
+    assert "Summary: total 0, healthy 0, unhealthy 0" in out
 
 
 def test_list_human_filters_mlx_base_default():
@@ -224,3 +262,72 @@ def test_list_human_type_shows_vision_flag():
 
     out = render_list(data, show_health=False, show_all=True, verbose=False)
     assert "chat+vision" in out
+
+
+def test_clone_unhealthy_shows_warning():
+    """Test that unhealthy clone result shows warning in human output."""
+    data = {
+        "status": "success",
+        "command": "clone",
+        "data": {
+            "model": "mlx-community/broken-model",
+            "target_dir": "/path/to/workspace",
+            "clone_status": "success",
+            "health": "unhealthy",
+            "health_reason": "Missing weight shards: model-00001-of-00010.safetensors",
+            "message": "Cloned to /path/to/workspace"
+        },
+        "error": None
+    }
+
+    out = render_clone(data, quiet=False)
+    # Should show warning symbol and reason
+    assert "⚠" in out
+    assert "unhealthy" in out
+    assert "Missing weight shards" in out
+    assert "/path/to/workspace" in out
+
+
+def test_clone_healthy_shows_checkmark():
+    """Test that healthy clone result shows checkmark."""
+    data = {
+        "status": "success",
+        "command": "clone",
+        "data": {
+            "model": "mlx-community/good-model",
+            "target_dir": "/path/to/workspace",
+            "clone_status": "success",
+            "health": "healthy",
+            "health_reason": "Multi-file model complete",
+            "message": "Cloned to /path/to/workspace"
+        },
+        "error": None
+    }
+
+    out = render_clone(data, quiet=False)
+    # Should show checkmark
+    assert "✓ healthy" in out
+    assert "/path/to/workspace" in out
+
+
+def test_clone_no_health_check_omits_status():
+    """Test that clone without health check doesn't show health status."""
+    data = {
+        "status": "success",
+        "command": "clone",
+        "data": {
+            "model": "mlx-community/model",
+            "target_dir": "/path/to/workspace",
+            "clone_status": "success",
+            "message": "Cloned to /path/to/workspace"
+            # No health or health_reason fields
+        },
+        "error": None
+    }
+
+    out = render_clone(data, quiet=False)
+    # Should not show health status
+    assert "healthy" not in out
+    assert "unhealthy" not in out
+    assert "✓" not in out
+    assert "⚠" not in out

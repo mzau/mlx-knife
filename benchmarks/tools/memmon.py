@@ -14,11 +14,15 @@ Usage:
     # Just monitor (no subprocess)
     python benchmarks/tools/memmon.py --duration 60 --output memory.jsonl
 
+Platform: macOS + Apple Silicon (MLX requirement)
+Dependencies: ZERO - uses native macOS tools (sysctl, vm_stat)
+
 Future: Will be part of mlxk-benchmark kit.
 """
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -28,110 +32,84 @@ from pathlib import Path
 from typing import Optional
 
 
+def parse_vm_stat_page_size(output: str) -> int:
+    """Extract vm_stat page size in bytes, falling back to 16384 (Apple Silicon default).
+
+    Reuses proven logic from tests_2.0/conftest.py (ADR-013 Phase 0.5).
+    """
+    match = re.search(r"page size of (\d+) bytes", output)
+    if match:
+        return int(match.group(1))
+    return 16384  # Apple Silicon default
+
+
 def get_memory_sample() -> dict:
-    """Get current memory state using psutil."""
-    try:
-        import psutil
-        import subprocess
+    """Get current memory state using native macOS tools.
 
-        # Get memory pressure from sysctl (macOS only)
-        # Values: 1=NORMAL (green), 2=WARN (yellow), 4=CRITICAL (red)
-        memory_pressure = 1  # Default to NORMAL
-        try:
-            result = subprocess.run(
-                ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
-                capture_output=True, text=True, timeout=1
-            )
-            memory_pressure = int(result.stdout.strip())
-        except Exception:
-            pass
+    Platform: macOS only (MLX requirement)
+    Dependencies: ZERO - uses sysctl and vm_stat
 
-        vm = psutil.virtual_memory()
-        swap = psutil.swap_memory()
-        return {
-            "ram_free_gb": round(vm.available / 1e9, 2),
-            "ram_used_gb": round(vm.used / 1e9, 2),
-            "ram_percent": vm.percent,
-            "swap_used_mb": round(swap.used / 1e6, 1),
-            "swap_percent": swap.percent,
-            "memory_pressure": memory_pressure,
-        }
-    except ImportError:
-        # Fallback without psutil
-        return get_memory_sample_native()
-
-
-def get_memory_sample_native() -> dict:
-    """Get memory state using native macOS commands (no psutil)."""
-    import subprocess
+    Reuses proven parsing logic from tests_2.0/conftest.py (_get_macos_system_health).
+    Previously used psutil.swap_memory() which was BROKEN (showed 0 MB during 65GB real usage).
+    """
+    # Force C locale for consistent number formatting (avoid locale-specific decimal separators)
+    import os
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
 
     # Get memory pressure (1=NORMAL/green, 2=WARN/yellow, 4=CRITICAL/red)
     memory_pressure = 1  # Default to NORMAL
     try:
         result = subprocess.run(
             ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
-            capture_output=True, text=True, timeout=1
+            capture_output=True, text=True, timeout=1, env=env
         )
         memory_pressure = int(result.stdout.strip())
     except Exception:
         pass
 
-    # Get swap usage
+    # Get swap usage via sysctl (proven working - same logic as conftest.py)
     swap_mb = 0
     try:
         result = subprocess.run(
-            ["sysctl", "-n", "vm.swapusage"],
-            capture_output=True, text=True, timeout=1
+            ["sysctl", "vm.swapusage"],
+            capture_output=True, text=True, timeout=1, env=env
         )
-        # Parse: "total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)"
-        for part in result.stdout.split():
-            if part.endswith("M") and "used" in result.stdout.split()[result.stdout.split().index(part)-2]:
-                swap_mb = float(part[:-1])
-                break
-        # Simpler parsing
-        parts = result.stdout.replace("M", "").split()
-        for i, p in enumerate(parts):
-            if p == "used" and i + 2 < len(parts):
-                swap_mb = float(parts[i + 2])
-                break
+        if result.returncode == 0:
+            # Parse: "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)"
+            # LC_ALL=C ensures consistent dot decimal separator
+            parts = result.stdout.split("used = ")
+            if len(parts) > 1:
+                used_str = parts[1].split()[0]
+                # Parse size (can be M or G suffix)
+                if used_str.endswith("G"):
+                    swap_mb = int(float(used_str[:-1]) * 1024)
+                elif used_str.endswith("M"):
+                    swap_mb = int(float(used_str[:-1]))
     except Exception:
         pass
 
-    # Get RAM via vm_stat
+    # Get RAM via vm_stat (proven working - same logic as conftest.py)
     ram_free_gb = 0
     try:
         result = subprocess.run(
             ["vm_stat"],
-            capture_output=True, text=True, timeout=1
+            capture_output=True, text=True, timeout=1, env=env
         )
-        # Parse page size and available pages
-        page_size = 16384  # Default for Apple Silicon
-        pages_free = 0
-        pages_inactive = 0
-        pages_purgeable = 0
-        pages_speculative = 0
-
-        for line in result.stdout.splitlines():
-            if "page size of" in line:
-                page_size = int(line.split()[-2])
-            elif "Pages free:" in line:
-                pages_free = int(line.split()[-1].rstrip("."))
-            elif "Pages inactive:" in line:
-                pages_inactive = int(line.split()[-1].rstrip("."))
-            elif "Pages purgeable:" in line:
-                pages_purgeable = int(line.split()[-1].rstrip("."))
-            elif "Pages speculative:" in line:
-                pages_speculative = int(line.split()[-1].rstrip("."))
-
-        # Total available = free + inactive + purgeable + speculative
-        total_available_pages = pages_free + pages_inactive + pages_purgeable + pages_speculative
-        ram_free_gb = round((total_available_pages * page_size) / 1e9, 2)
+        if result.returncode == 0:
+            page_size = parse_vm_stat_page_size(result.stdout)
+            # Parse "Pages free: 12345."
+            for line in result.stdout.splitlines():
+                if "Pages free:" in line:
+                    pages_free = int(line.split(":")[1].strip().rstrip("."))
+                    ram_free_gb = round(pages_free * page_size / (1024**3), 2)
+                    break
     except Exception:
         pass
 
     return {
         "ram_free_gb": ram_free_gb,
-        "ram_used_gb": 0,  # Not available without psutil
+        "ram_used_gb": 0,  # Not available from vm_stat alone
         "ram_percent": 0,
         "swap_used_mb": swap_mb,
         "swap_percent": 0,

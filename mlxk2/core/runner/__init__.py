@@ -99,6 +99,25 @@ class MLXRunner:
         """Handle Ctrl-C interruption during generation."""
         self._interrupted = True
 
+    def _decode_tokens(self, token_ids):
+        """Decode token IDs using the streaming detokenizer.
+
+        This properly converts BPE space markers (Ġ U+0120) to spaces (U+0020)
+        while tokenizer.decode() for some tokenizers does NOT.
+
+        Args:
+            token_ids: List of token IDs to decode
+
+        Returns:
+            Decoded string
+        """
+        detok = self.tokenizer.detokenizer
+        detok.reset()
+        for token_id in token_ids:
+            detok.add_token(token_id)
+        detok.finalize()
+        return detok.text
+
     def request_interrupt(self) -> None:
         """Request an interruption from external controller (e.g., server signal).
 
@@ -199,6 +218,9 @@ class MLXRunner:
                 print(f"Model loaded in {load_time:.1f}s")
                 print(f"Memory: {model_memory:.1f}GB model, {current_memory:.1f}GB total")
 
+            # Apply Mistral regex fix if needed (workaround for mlx-community models with broken tokenizers)
+            self._apply_mistral_regex_fix(model_path)
+
             # Extract stop tokens and other properties
             self._extract_stop_tokens()
             self._context_length = get_model_context_length(str(model_path))
@@ -238,6 +260,98 @@ class MLXRunner:
             print(f"Stop tokens: {self._stop_tokens}")
         if self.verbose and self._is_reasoning_model:
             print("Reasoning model detected - special handling enabled")
+
+    def _apply_mistral_regex_fix(self, model_path):
+        """Apply Mistral tokenizer regex fix for models with broken tokenizers.
+
+        Problem: Some mlx-community models were converted with transformers 4.39-4.57.2,
+        which had an incorrect regex pattern for Mistral tokenizers. This causes:
+        1. Incorrect encoding (user prompts tokenized incorrectly, merged words)
+        2. Incorrect decoding (BPE space markers Ġ (U+0120) not converted to spaces)
+        3. Context window waste (broken tokenizer uses ~15% more tokens)
+
+        Affected models:
+        - mlx-community/DeepHermes-3-Mistral-24B-Preview-8bit (transformers 4.46.3)
+        - mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit (transformers 4.52.4)
+        - mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit (transformers 4.43.0)
+
+        Solution: Apply the same regex pattern fix that transformers 4.57.3+ uses.
+
+        See: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84
+        """
+        try:
+            import json
+            from packaging import version
+
+            # Read config to check if fix is needed
+            config_path = model_path / "config.json"
+            if not config_path.exists():
+                return  # No config, can't determine if fix needed
+
+            with open(config_path) as f:
+                config = json.load(f)
+
+            model_type = config.get("model_type")
+            transformers_version = config.get("transformers_version")
+
+            # Only apply fix to Mistral-family models converted with affected transformers versions
+            if model_type not in ["mistral", "mistral3", "llama"]:
+                return
+
+            if not transformers_version:
+                return  # Can't determine version, skip
+
+            # Parse version and check if in bug window
+            try:
+                tv = version.parse(transformers_version)
+                # Bug exists in 4.39.0 through 4.57.2
+                if tv < version.parse("4.39.0") or tv > version.parse("4.57.2"):
+                    return  # Not in bug window
+            except Exception:
+                return  # Can't parse version, skip
+
+            # Model needs fix - apply the patch
+            try:
+                import tokenizers
+
+                split_pretokenizer = tokenizers.pre_tokenizers.Split(
+                    pattern=tokenizers.Regex(
+                        r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+"
+                    ),
+                    behavior="isolated",
+                )
+
+                # Access the underlying HF tokenizer
+                backend_tokenizer = self.tokenizer._tokenizer.backend_tokenizer
+                current_pretokenizer = backend_tokenizer.pre_tokenizer
+
+                if isinstance(current_pretokenizer, tokenizers.pre_tokenizers.Sequence):
+                    # Replace the first element (the Split pattern)
+                    backend_tokenizer.pre_tokenizer[0] = split_pretokenizer
+                else:
+                    # Not a Sequence, create one with Split + current pretokenizer
+                    if isinstance(current_pretokenizer, tokenizers.pre_tokenizers.Metaspace):
+                        current_pretokenizer = tokenizers.pre_tokenizers.ByteLevel(
+                            add_prefix_space=False, use_regex=False
+                        )
+                    backend_tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Sequence(
+                        [split_pretokenizer, current_pretokenizer]
+                    )
+
+                # Mark as fixed
+                setattr(self.tokenizer._tokenizer, 'fix_mistral_regex', True)
+
+                if self.verbose:
+                    print(f"Applied Mistral tokenizer regex fix (transformers {transformers_version})")
+
+            except Exception as e:
+                # Patching failed, but don't break model loading
+                if self.verbose:
+                    print(f"Warning: Could not apply Mistral tokenizer fix: {e}")
+
+        except Exception:
+            # Silently skip if anything goes wrong (don't break model loading)
+            pass
 
     def cleanup(self):
         """Clean up model resources and clear GPU memory."""
@@ -409,7 +523,7 @@ class MLXRunner:
             # Use sliding window for proper decoding
             start_idx = max(0, len(generated_tokens) - context_window)
             window_tokens = generated_tokens[start_idx:]
-            window_text = self.tokenizer.decode(window_tokens)
+            window_text = self._decode_tokens(window_tokens)
 
             # Extract new text
             if start_idx == 0:
@@ -421,13 +535,13 @@ class MLXRunner:
                     new_text = window_text
                 previous_decoded = window_text
             else:
-                new_text = self.tokenizer.decode(window_tokens)
+                new_text = self._decode_tokens(window_tokens)
                 if len(window_tokens) > 1:
-                    prefix = self.tokenizer.decode(window_tokens[:-1])
+                    prefix = self._decode_tokens(window_tokens[:-1])
                     if new_text.startswith(prefix):
                         new_text = new_text[len(prefix):]
                     else:
-                        new_text = self.tokenizer.decode([token_id])
+                        new_text = self._decode_tokens([token_id])
 
             if new_text:
                 accumulated_response += new_text
@@ -603,8 +717,10 @@ class MLXRunner:
             if token_id in self.tokenizer.eos_token_ids:
                 break
 
-        # Decode full response
-        full_response = self.tokenizer.decode(all_tokens)
+        # Decode full response using the streaming detokenizer
+        # This properly converts BPE space markers (Ġ U+0120) to spaces (U+0020)
+        # while tokenizer.decode() for slow tokenizers (LlamaTokenizer) does NOT.
+        full_response = self._decode_tokens(all_tokens)
 
         # Debug: Show raw generated tokens for quality analysis (enabled via --verbose)
         if self.verbose:
@@ -615,7 +731,8 @@ class MLXRunner:
                 last_3_decoded = []
                 for tid in last_3_ids:
                     try:
-                        decoded = self.tokenizer.decode([tid])
+                        # Use detokenizer for debug output too
+                        decoded = self._decode_tokens([tid])
                         last_3_decoded.append(f"{tid}={decoded!r}")
                     except Exception:
                         last_3_decoded.append(f"{tid}=<error>")
@@ -630,7 +747,8 @@ class MLXRunner:
         if isinstance(full_response, str) and isinstance(formatted_prompt, str) and full_response.startswith(formatted_prompt):
             response = full_response[len(formatted_prompt):]
         else:
-            decoded = self.tokenizer.decode(generated_tokens)
+            # Decode generated tokens only (use detokenizer)
+            decoded = self._decode_tokens(generated_tokens)
             response = decoded if isinstance(decoded, str) else str(decoded)
 
         # Filter stop tokens (strings only)

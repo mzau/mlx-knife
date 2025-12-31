@@ -167,6 +167,7 @@ def main():
     pull_parser = subparsers.add_parser("pull", help="Download a model")
     pull_parser.add_argument("model", help="Model name to download")
     pull_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    pull_parser.add_argument("--force-resume", action="store_true", help="Force resume of partial downloads without prompting")
 
     # Clone command (alpha) - only show if alpha features enabled
     if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
@@ -177,7 +178,28 @@ def main():
         clone_parser.add_argument("--no-health-check", action="store_true", help="Skip health validation before copy")
         clone_parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
         clone_parser.add_argument("--json", action="store_true", help="Output in JSON format")
-    
+        clone_parser.add_argument("--force-resume", action="store_true", help="Force resume of partial downloads without prompting")
+
+    # Convert command (ADR-018 Phase 1)
+    convert_parser = subparsers.add_parser(
+        "convert",
+        help="Convert workspace to workspace with transformations",
+        description="Transform model workspaces (repair-index, quantize, etc.)"
+    )
+    convert_parser.add_argument("source", help="Source workspace path")
+    convert_parser.add_argument("target", help="Target workspace path")
+    convert_parser.add_argument(
+        "--repair-index",
+        action="store_true",
+        help="Rebuild model.safetensors.index.json from shards (fixes mlx-vlm #624)"
+    )
+    convert_parser.add_argument(
+        "--skip-health",
+        action="store_true",
+        help="Skip health check on output (debug only)"
+    )
+    convert_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+
     # Remove command
     rm_parser = subparsers.add_parser("rm", help="Delete a model")
     rm_parser.add_argument("model", help="Model name to delete")
@@ -297,6 +319,43 @@ def main():
             print_result(result, render_show, args.json)
         elif args.command == "pull":
             result = pull_operation(args.model)
+
+            # Handle resume confirmation
+            if result.get("data", {}).get("download_status") == "requires_confirmation":
+                # JSON mode: Return as-is, let caller decide
+                if args.json:
+                    print_result(result, render_pull, True)
+                    sys.exit(0)
+
+                # --force-resume flag: Resume immediately (works in both interactive and non-interactive)
+                if getattr(args, "force_resume", False):
+                    result = pull_operation(args.model, force_resume=True)
+                # Non-interactive without --force-resume: Fail with clear error
+                elif not sys.stdin.isatty():
+                    result["status"] = "error"
+                    result["error"] = {
+                        "type": "requires_confirmation",
+                        "message": result["data"]["message"]
+                    }
+                    print_result(result, None, False)
+                    sys.exit(1)
+                # Interactive: Prompt user
+                else:
+                    model_name = result["data"]["model"]
+                    message = result["data"]["message"]
+
+                    print(f"Model '{model_name}' has partial download:", file=sys.stderr)
+                    print(f"  {message}", file=sys.stderr)
+
+                    response = input("Resume download? [Y/n]: ").strip().lower()
+                    if response not in ("", "y", "yes"):
+                        print("Download cancelled. Partial download kept.", file=sys.stderr)
+                        print(f"Use 'mlxk rm {model_name}' to delete if needed.", file=sys.stderr)
+                        sys.exit(0)
+
+                    # User confirmed - retry pull with force_resume
+                    result = pull_operation(args.model, force_resume=True)
+
             print_result(result, render_pull, args.json)
         elif args.command == "clone":
             # Check if alpha features are enabled (should not reach here if not, but double-check)
@@ -319,6 +378,26 @@ def main():
             )
             print_result(result, render_clone, args.json,
                         quiet=getattr(args, "quiet", False))
+        elif args.command == "convert":
+            from .operations.convert import convert_operation
+
+            # Validate mode flags
+            if args.repair_index:
+                mode = "repair-index"
+            else:
+                print("Error: Must specify conversion mode (--repair-index)", file=sys.stderr)
+                sys.exit(1)
+
+            result = convert_operation(
+                args.source,
+                args.target,
+                mode=mode,
+                skip_health=args.skip_health
+            )
+
+            # Import render_convert from output.human
+            from .output.human import render_convert
+            print_result(result, render_convert, args.json)
         elif args.command == "rm":
             result = rm_operation(args.model, args.force)
             print_result(result, render_rm, args.json)

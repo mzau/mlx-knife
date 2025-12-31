@@ -13,6 +13,38 @@ import mlx.core as mx
 from mlxk2.core.runner import MLXRunner
 
 
+class MockDetokenizer:
+    """Mock detokenizer that mimics BPEStreamingDetokenizer behavior.
+
+    Used by unit tests to mock tokenizer.detokenizer after Session 60 changes.
+    Session 60 switched from tokenizer.decode() to tokenizer.detokenizer for
+    proper BPE space marker (Ġ U+0120) conversion.
+    """
+    def __init__(self, decode_func):
+        """Initialize with a decode function that maps token lists to strings."""
+        self.decode_func = decode_func
+        self.tokens = []
+        self._text = ""
+
+    def reset(self):
+        """Reset accumulated tokens."""
+        self.tokens = []
+        self._text = ""
+
+    def add_token(self, token_id):
+        """Add a token to the accumulated list."""
+        self.tokens.append(token_id)
+
+    def finalize(self):
+        """Finalize and decode accumulated tokens."""
+        self._text = self.decode_func(self.tokens)
+
+    @property
+    def text(self):
+        """Return the decoded text."""
+        return self._text
+
+
 @contextmanager
 def mock_runner_environment(temp_cache_dir, model_name="test-model"):
     """Mock the environment needed for MLXRunner tests."""
@@ -114,7 +146,9 @@ class TestMLXRunnerBasic:
                         return "unknown"
                 
                 mocks['mock_tokenizer'].decode.side_effect = mock_decode
-                
+                # Use MockDetokenizer for proper BPE space marker handling
+                mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
+
                 with MLXRunner(model_name) as runner:
                     tokens = list(runner.generate_streaming("test prompt", max_tokens=2))
                     
@@ -155,7 +189,7 @@ class TestMLXRunnerStopTokens:
     def test_chat_stop_tokens_filtered_when_enabled(self, temp_cache_dir):
         """Chat stop tokens are filtered only when explicitly enabled"""
         model_name = "test-model"
-        
+
         with mock_runner_environment(temp_cache_dir, model_name) as mocks:
             with patch('mlxk2.core.runner.generate_step') as mock_gen:
                 mock_gen.return_value = [
@@ -176,10 +210,12 @@ class TestMLXRunnerStopTokens:
                     # Fallback for other cases
                     return ""
                 mocks['mock_tokenizer'].decode.side_effect = mock_decode
+                # Mock detokenizer (Session 60 BPE fix)
+                mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
 
                 with MLXRunner(model_name) as runner:
                     result = runner.generate_batch("test prompt", use_chat_stop_tokens=True)
-                    
+
                 # Should stop at chat stop token
                 assert "\nHuman:" not in result
                 assert result == "Response"
@@ -205,6 +241,8 @@ class TestMLXRunnerStopTokens:
                         return "Response\nHuman: rest"
                     return ""
                 mocks['mock_tokenizer'].decode.side_effect = mock_decode
+                # Mock detokenizer (Session 60 BPE fix)
+                mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
 
                 with MLXRunner(model_name) as runner:
                     result = runner.generate_batch("test prompt")
@@ -215,7 +253,7 @@ class TestMLXRunnerStopTokens:
     def test_streaming_vs_batch_consistency(self, temp_cache_dir):
         """Test that streaming and batch modes produce identical output"""
         model_name = "test-model"
-        
+
         with mock_runner_environment(temp_cache_dir, model_name) as mocks:
             # Same mock sequence for both tests
             def mock_generation():
@@ -241,16 +279,18 @@ class TestMLXRunnerStopTokens:
                     return "Hello world!"
                 return ""
             mocks['mock_tokenizer'].decode.side_effect = mock_decode
+            # Mock detokenizer (Session 60 BPE fix)
+            mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
 
             with MLXRunner(model_name) as runner:
                 # Test streaming
                 with patch('mlxk2.core.runner.generate_step', return_value=mock_generation()):
                     streaming_result = "".join(runner.generate_streaming("test"))
-                
+
                 # Test batch
                 with patch('mlxk2.core.runner.generate_step', return_value=mock_generation()):
                     batch_result = runner.generate_batch("test")
-                
+
                 assert streaming_result == batch_result
 
 

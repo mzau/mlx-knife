@@ -106,13 +106,40 @@ def calculate_statistics(data: List[dict]) -> Dict:
 
     for e in data:
         if "system_health" in e:
-            swap_values.append(e["system_health"].get("swap_used_mb", 0))
-            ram_values.append(e["system_health"].get("ram_free_gb", 0))
-            zombie_values.append(e["system_health"].get("zombie_processes", 0))
-            quality_flags.append(e["system_health"].get("quality_flags", ["unknown"]))
+            swap_mb = e["system_health"].get("swap_used_mb", 0)
+            ram_gb = e["system_health"].get("ram_free_gb", 0)
+            zombies = e["system_health"].get("zombie_processes", 0)
+
+            swap_values.append(swap_mb)
+            ram_values.append(ram_gb)
+            zombie_values.append(zombies)
+
+            # Recalculate quality_flags from raw values (ignore stored flags)
+            # Rationale: Thresholds are experimental and OS-specific
+            #
+            # Session 61 Analysis (Sequoia vs Tahoe):
+            #   - Sequoia: RAM free varies 10-27 GB, swap=0
+            #   - Tahoe: RAM free drops to 0-0.1 GB during load, recovers to ~24 GB between tests
+            #
+            # Steady-State Baseline (DeepHermes post-load relaxation):
+            #   - Tahoe: ~24 GB free (1.2-1.4 min after first test)
+            #   - Sequoia: ~40 GB free (similar pattern)
+            #
+            # Degraded Threshold: ram_free < 5 GB (extreme memory pressure)
+            #   - Marks 0-0.1 GB minima as degraded ✅
+            #   - Normal tests (10-20 GB free) stay clean ✅
+            flags = []
+            if ram_gb < 5.0:  # < 5 GB free = extreme memory pressure
+                flags.append("degraded_ram")
+            if zombies > 0:
+                flags.append("degraded_zombies")
+            if not flags:
+                flags.append("clean")
+
+            quality_flags.append(flags)
 
     clean_count = sum(1 for flags in quality_flags if flags == ["clean"])
-    degraded_swap = sum(1 for flags in quality_flags if "degraded_swap" in flags)
+    degraded_ram = sum(1 for flags in quality_flags if "degraded_ram" in flags)
     degraded_zombies = sum(1 for flags in quality_flags if "degraded_zombies" in flags)
 
     # Per-model statistics
@@ -211,7 +238,7 @@ def calculate_statistics(data: List[dict]) -> Dict:
         },
         "quality": {
             "clean": clean_count,
-            "degraded_swap": degraded_swap,
+            "degraded_ram": degraded_ram,
             "degraded_zombies": degraded_zombies,
             "clean_percent": 100 * clean_count / len(data) if data else 0,
         },
@@ -288,9 +315,9 @@ def generate_markdown(stats: Dict, input_file: Path, compare_file: Optional[Path
     quality_icon = "✅" if stats['quality']['clean_percent'] == 100 else "⚠️"
     md += f"{quality_icon} **System Health:** "
     if stats['quality']['clean_percent'] == 100:
-        md += "All tests clean (0 MB swap, 0 zombies)\n"
+        md += "All tests clean (RAM >5 GB free, 0 zombies)\n"
     else:
-        md += f"{stats['quality']['degraded_swap']} degraded (swap), {stats['quality']['degraded_zombies']} degraded (zombies)\n"
+        md += f"{stats['quality']['degraded_ram']} degraded (RAM <5 GB free), {stats['quality']['degraded_zombies']} degraded (zombies)\n"
 
     md += "\n---\n\n"
 
@@ -315,9 +342,9 @@ Swap (MB):         min={stats['swap']['min']}, max={stats['swap']['max']}, avg={
 RAM free (GB):     min={stats['ram']['min']:.1f}, max={stats['ram']['max']:.1f}, avg={stats['ram']['avg']:.1f}
 Zombies:           min={stats['zombies']['min']}, max={stats['zombies']['max']}
 
-Quality Flags:
+Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
   Clean:           {stats['quality']['clean']}/{stats['total_tests']} ({stats['quality']['clean_percent']:.1f}%)
-  Degraded (swap): {stats['quality']['degraded_swap']}
+  Degraded (RAM):  {stats['quality']['degraded_ram']}
   Degraded (zombies): {stats['quality']['degraded_zombies']}
 ```
 
