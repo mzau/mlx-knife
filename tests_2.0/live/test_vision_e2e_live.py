@@ -21,6 +21,7 @@ from pathlib import Path
 
 # Vision support requires Python 3.10+ (mlx-vlm requirement)
 pytestmark = [
+    pytest.mark.live,
     pytest.mark.live_e2e,
     pytest.mark.skipif(
         sys.version_info < (3, 10),

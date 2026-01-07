@@ -1,11 +1,13 @@
 """Show model operation for MLX-Knife 2.0."""
 
 import json
+from pathlib import Path
 from typing import Dict, Any
 
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from .common import build_model_object
+from .workspace import is_workspace_path
 
 
 def get_file_type(file_name):
@@ -141,42 +143,48 @@ def show_model_operation(model_pattern: str, include_files: bool = False, includ
                 "message": f"No model found matching '{model_pattern}'"
             }
             return result
-            
-        # Get model directory
-        model_cache_dir = get_current_model_cache() / hf_to_cache_dir(resolved_name)
-        if not model_cache_dir.exists():
-            result["status"] = "error"
-            result["error"] = {
-                "type": "model_not_cached",
-                "message": f"Model '{resolved_name}' not found in cache"
-            }
-            return result
-            
-        # Find the correct snapshot
-        snapshots_dir = model_cache_dir / "snapshots"
-        model_path = None
-        
-        if commit_hash and snapshots_dir.exists():
-            # Specific hash requested
-            hash_path = snapshots_dir / commit_hash
-            if hash_path.exists():
-                model_path = hash_path
-            else:
+
+        # Check if resolved_name is a workspace path
+        if is_workspace_path(resolved_name):
+            # Workspace path - use directly
+            model_path = Path(resolved_name)
+            model_cache_dir = model_path.parent
+        else:
+            # Cache model - existing logic
+            model_cache_dir = get_current_model_cache() / hf_to_cache_dir(resolved_name)
+            if not model_cache_dir.exists():
                 result["status"] = "error"
                 result["error"] = {
-                    "type": "hash_not_found",
-                    "message": f"Hash '{commit_hash}' not found for model '{resolved_name}'"
+                    "type": "model_not_cached",
+                    "message": f"Model '{resolved_name}' not found in cache"
                 }
                 return result
-        elif snapshots_dir.exists():
-            # Use latest snapshot
-            snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-            if snapshots:
-                model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
-                commit_hash = model_path.name
-        
-        if not model_path:
-            model_path = model_cache_dir
+
+            # Find the correct snapshot
+            snapshots_dir = model_cache_dir / "snapshots"
+            model_path = None
+
+            if commit_hash and snapshots_dir.exists():
+                # Specific hash requested
+                hash_path = snapshots_dir / commit_hash
+                if hash_path.exists():
+                    model_path = hash_path
+                else:
+                    result["status"] = "error"
+                    result["error"] = {
+                        "type": "hash_not_found",
+                        "message": f"Hash '{commit_hash}' not found for model '{resolved_name}'"
+                    }
+                    return result
+            elif snapshots_dir.exists():
+                # Use latest snapshot
+                snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                if snapshots:
+                    model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+                    commit_hash = model_path.name
+
+            if not model_path:
+                model_path = model_cache_dir
             
         # Build unified model object
         model_obj = build_model_object(resolved_name, model_cache_dir, model_path)

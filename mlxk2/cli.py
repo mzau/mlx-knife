@@ -215,11 +215,23 @@ def main():
         help="Input prompt (optional - interactive if omitted). Use '-' for stdin (requires MLXK2_ENABLE_PIPES=1).",
     )
     run_parser.add_argument(
+        "--prompt",
+        dest="prompt_flag",
+        help="Input prompt (alternative to positional argument). Useful when prompt comes after --image flag.",
+    )
+    run_parser.add_argument(
         "--image",
         nargs='+',
         action="append",
         metavar="FILE",
         help="Attach image file(s) for vision models. Accepts multiple files per flag or use multiple flags.",
+    )
+    run_parser.add_argument(
+        "--chunk",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Process images in batches of N (default: 1 for maximum safety)",
     )
     run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate")
     run_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature (default: 0.7)")
@@ -240,6 +252,7 @@ def main():
     serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     serve_parser.add_argument("--log-level", default="info", help="Logging level (debug/info/warning/error, default: info)")
     serve_parser.add_argument("--log-json", action="store_true", help="Output logs in JSON format (for log aggregation)")
+    serve_parser.add_argument("--chunk", type=int, default=1, metavar="N", help="Default batch size for vision requests (default: 1 for maximum safety, max: 5)")
     serve_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
     serve_parser.add_argument("--json", action="store_true", help="Output startup info in JSON format")
 
@@ -374,7 +387,8 @@ def main():
             result = clone_operation(
                 model_spec=model_spec,
                 target_dir=args.target_dir,
-                health_check=not getattr(args, "no_health_check", False)
+                health_check=not getattr(args, "no_health_check", False),
+                force_resume=getattr(args, "force_resume", False)
             )
             print_result(result, render_clone, args.json,
                         quiet=getattr(args, "quiet", False))
@@ -402,25 +416,42 @@ def main():
             result = rm_operation(args.model, args.force)
             print_result(result, render_rm, args.json)
         elif args.command == "run":
-            prompt_parts = args.prompt if isinstance(args.prompt, list) else ([args.prompt] if args.prompt is not None else [])
+            # Support both positional prompt and --prompt flag (UX improvement)
+            # IMPORTANT: Check for stdin ("-") FIRST before applying prompt_flag precedence
             prompt_value = None
             pipes_enabled = bool(os.getenv("MLXK2_ENABLE_PIPES"))
 
-            if prompt_parts:
-                first_part = prompt_parts[0]
-                additional_text = " ".join(prompt_parts[1:]) if len(prompt_parts) > 1 else None
+            # Normalize positional args
+            positional_prompt = args.prompt if isinstance(args.prompt, list) else ([args.prompt] if args.prompt is not None else [])
 
-                if first_part == "-":
-                    if not pipes_enabled:
-                        result = handle_error("CommandError", "Pipe mode requires MLXK2_ENABLE_PIPES=1")
-                        print_result(result, None, True if args.json else False)
-                        sys.exit(1)
-                    stdin_content = sys.stdin.read()
-                    prompt_value = stdin_content
-                    if additional_text:
-                        prompt_value = f"{stdin_content}\n\n{additional_text}"
+            # Check if stdin ("-") is in positional args
+            has_stdin = "-" in positional_prompt if positional_prompt else False
+
+            if has_stdin:
+                # Stdin mode: Read from pipe
+                if not pipes_enabled:
+                    result = handle_error("CommandError", "Pipe mode requires MLXK2_ENABLE_PIPES=1")
+                    print_result(result, None, True if args.json else False)
+                    sys.exit(1)
+                stdin_content = sys.stdin.read()
+
+                # Combine stdin with --prompt flag if both present
+                if hasattr(args, 'prompt_flag') and args.prompt_flag:
+                    # "- --prompt text" → combine stdin + flag
+                    prompt_value = f"{stdin_content}\n\n{args.prompt_flag}"
                 else:
-                    prompt_value = " ".join(prompt_parts)
+                    # "- additional text" → combine stdin + positional
+                    additional_parts = [p for p in positional_prompt if p != "-"]
+                    if additional_parts:
+                        prompt_value = f"{stdin_content}\n\n{' '.join(additional_parts)}"
+                    else:
+                        prompt_value = stdin_content
+            elif hasattr(args, 'prompt_flag') and args.prompt_flag:
+                # --prompt flag (no stdin)
+                prompt_value = args.prompt_flag
+            elif positional_prompt:
+                # Positional prompt (no stdin, no flag)
+                prompt_value = " ".join(positional_prompt)
 
             image_inputs = []
             images = getattr(args, "image", None) or []
@@ -457,6 +488,7 @@ def main():
                 model_spec=args.model,
                 prompt=prompt_value,  # Can be None for interactive mode
                 images=image_inputs if images else None,
+                chunk=args.chunk,
                 stream=stream_mode,
                 max_tokens=getattr(args, "max_tokens", None),
                 temperature=args.temperature,
@@ -533,6 +565,7 @@ def main():
                 max_tokens=getattr(args, "max_tokens", None),
                 reload=getattr(args, "reload", False),
                 log_level=getattr(args, "log_level", "info"),
+                chunk=getattr(args, "chunk", 1),
                 verbose=getattr(args, "verbose", False),
                 supervise=True
             )

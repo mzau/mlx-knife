@@ -196,7 +196,7 @@ See [TESTING-DETAILS.md → Truth Table](TESTING-DETAILS.md#truth-table-cache-ty
 
 **Benefits:**
 - Fast test runs (seconds instead of minutes)
-- Low RAM usage (16GB sufficient)
+- Low RAM usage (default suite: 16GB sufficient)
 - No model downloads required
 - Deterministic behavior
 
@@ -231,14 +231,24 @@ pytest -k "test_name" -v       # Run specific test
 ### Required Setup
 1. **Apple Silicon Mac (M1/M2/M3)** - Required (MLX uses Metal)
 2. **Python 3.9 or newer**
-3. **16GB RAM minimum**
-4. **~10-20MB disk space** for test temp files
+3. **RAM Requirements:**
+   - **Default suite:** 16GB minimum (isolated tests, mock models)
+   - **Live E2E tests:** 32GB minimum (real models, Portfolio Discovery)
+   - **Full suite (wet-umbrella):** **64GB recommended**
+     - Wet umbrella Phase 4 (Vision→Geo pipe): ~29GB peak observed (M2 Max)
+     - Sequential loading: Vision unloads before text model loads (not parallel)
+     - Portfolio Discovery selects largest eligible models for quality
+     - **Tested:** M2 Max 64GB (comfortable headroom)
+     - **Untested:** M1 Max 32GB (theoretically viable but Metal limits unknown)
+     - **Note:** Metal memory limits may vary by chip generation
+4. **~10-20MB disk space** for test temp files (default suite)
 5. **Test dependencies:**
    ```bash
    pip install -e .[test]
    ```
 
-**That's it!** Default tests use mock models - no HF cache or downloads needed.
+**Default suite (16GB):** Mock models, fast, no downloads needed.
+**Full suite (64GB):** Real models, comprehensive validation, recommended for development.
 
 ### Optional Setup (Live Tests)
 
@@ -374,21 +384,13 @@ pytest path/to/test.py::test_name -v -s
 
 ## Contributing Tests
 
-When submitting PRs with test changes, please include:
+When submitting PRs with test changes, please document in the PR description:
 
-1. **Test environment:**
-   - macOS version
-   - Apple Silicon chip (M1/M2/M3/M4/M5)
-   - Python version
-
-2. **Test results** (example):
-   ```
-   Platform: macOS 26.2 (Tahoe), M2 Max
-   Python: 3.10.x
-   Results: 528 passed, 60 skipped
-   ```
-
+1. **Test environment** (macOS version, Apple Silicon chip, Python version)
+2. **Test results** (passed/skipped/failed counts)
 3. **Any issues encountered** and resolutions
+
+See [TESTING-DETAILS.md](TESTING-DETAILS.md#current-status) for the current official test environment and results as an example.
 
 ## Development Workflow
 

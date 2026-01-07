@@ -15,11 +15,11 @@ from typing import Any, Dict, List, Optional, Tuple
 # No imports needed - use standard Python exceptions
 
 # Limits for vision requests (safety and resource management)
-# Conservative limits to prevent Metal OOM crashes (ADR-012 Phase 3)
-# Phase 1c (future) will use batching for large collections
-MAX_IMAGES_PER_REQUEST = 5  # Tested stable with 5 images
-MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per image
-MAX_TOTAL_IMAGE_BYTES = 50 * 1024 * 1024  # 50 MB total (critical for Metal API)
+# Per-image size limit prevents Metal OOM crashes (ADR-012 Phase 3)
+# Total image count is unlimited - chunking (ADR-012 Phase 1c) handles batch safety
+# chunk_size controls memory usage: default=1 (safest), can be increased via request param
+MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per image (Metal API limit)
+MAX_SAFE_CHUNK_SIZE = 5  # Empirically tested stable (5 images @ ~50MB total)
 SUPPORTED_MIME_TYPES = frozenset({"jpeg", "jpg", "png", "gif", "webp"})
 
 
@@ -138,25 +138,12 @@ class VisionHTTPAdapter:
                             "image_url.url cannot be empty"
                         )
 
-                    # Decode base64 image
+                    # Decode base64 image (validates size per image)
                     filename, raw_bytes = VisionHTTPAdapter.decode_base64_image(url)
                     images.append((filename, raw_bytes))
 
-                    # Enforce image count limit
-                    if len(images) > MAX_IMAGES_PER_REQUEST:
-                        raise ValueError(
-                            f"Too many images in request (max: {MAX_IMAGES_PER_REQUEST})"
-                        )
-
-                    # Enforce total size limit (critical for Metal API)
-                    total_size = sum(len(img[1]) for img in images)
-                    if total_size > MAX_TOTAL_IMAGE_BYTES:
-                        size_mb = total_size / (1024 * 1024)
-                        limit_mb = MAX_TOTAL_IMAGE_BYTES / (1024 * 1024)
-                        raise ValueError(
-                            f"Total image size ({size_mb:.1f} MB) exceeds limit ({limit_mb:.0f} MB). "
-                            f"Try fewer or smaller images."
-                        )
+                    # Note: Total image count/size is unlimited - chunking handles batch safety
+                    # chunk_size (default=1) controls memory usage per batch
 
             # Stop after processing first (most recent) user message
             break

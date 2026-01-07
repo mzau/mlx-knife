@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
+from .workspace import is_workspace_path
 
 
 def is_model_healthy(model_spec):
@@ -57,18 +58,25 @@ def _check_auxiliary_assets(model_path, config_data):
     is_vision = detect_vision_capability(model_path, config_data)
 
     if is_vision:
-        # Vision models require preprocessor_config.json for mlx-vlm
+        # Vision models require preprocessor_config.json OR processor_config.json for mlx-vlm
+        # Different models use different naming conventions (DeepSeek-OCR uses processor_config.json)
         preprocessor_path = model_path / "preprocessor_config.json"
-        if not preprocessor_path.exists():
-            return False, "Vision model missing preprocessor_config.json"
+        processor_path = model_path / "processor_config.json"
+
+        if not preprocessor_path.exists() and not processor_path.exists():
+            return False, "Vision model missing preprocessor_config.json or processor_config.json"
+
+        # Use whichever file exists
+        config_path = preprocessor_path if preprocessor_path.exists() else processor_path
+        config_name = config_path.name
 
         try:
-            with open(preprocessor_path) as f:
+            with open(config_path) as f:
                 preprocessor_data = json.load(f)
             if not isinstance(preprocessor_data, dict):
-                return False, "preprocessor_config.json invalid"
+                return False, f"{config_name} invalid"
         except (OSError, json.JSONDecodeError):
-            return False, "preprocessor_config.json invalid JSON"
+            return False, f"{config_name} invalid JSON"
 
     # Chat models benefit from tokenizer assets (not strict requirement for base models)
     # Check tokenizer_config.json for chat template support
@@ -93,12 +101,41 @@ def _check_auxiliary_assets(model_path, config_data):
 def _check_snapshot_health(model_path):
     """Check health of a specific snapshot directory.
 
+    FILE INTEGRITY DEFINITION (used consistently across list/show/health commands):
+
+    A model is HEALTHY (integrity OK) if ALL of the following are true:
+
+    1. REQUIRED FILES PRESENT:
+       - config.json exists, is valid JSON, non-empty dict
+       - At least one weight file (.safetensors/.bin/.gguf) present
+
+    2. WEIGHT FILES COMPLETE (Index-based models):
+       - If model.safetensors.index.json exists:
+         * ALL referenced shards exist (no missing files)
+         * ALL shards are non-empty (size > 0)
+         * NO shards are LFS pointers (git-lfs markers)
+         * Index/shard mismatch (mlx-vlm #624) → unhealthy
+
+    3. WEIGHT FILES COMPLETE (Pattern-based, no index):
+       - If model-XXXXX-of-YYYYY.safetensors pattern detected:
+         * ALL shards 1 to YYYYY must exist (no gaps)
+         * ALL shards are non-empty
+         * Sharded models WITHOUT index → unhealthy
+
+    4. NO CORRUPTION MARKERS:
+       - No LFS pointers (git-lfs placeholders)
+       - No partial download markers (.partial, .tmp)
+
+    5. AUXILIARY ASSETS (model-type specific):
+       - Vision models: preprocessor_config.json OR processor_config.json required
+       - Chat models: if tokenizer_config.json exists, tokenizer.json required
+
+    IMPORTANT: This is INTEGRITY only - does NOT check runtime compatibility.
+    A PyTorch model can be "healthy" (files intact) but not runtime_compatible (mlx-lm can't run it).
+
     Rules (Issue #27 parity):
-    - If a multi-file safetensors index exists (model.safetensors.index.json),
-      ALL referenced shard files must exist and be non-empty, and none may be LFS pointers.
-      A subset must NOT be marked healthy.
-    - Without an index, require at least one weight file present and non-empty,
-      and ensure none are LFS pointers.
+    - Multi-file models: ALL shards required (no partial sets)
+    - mlx-vlm #624: Index/shard mismatch detected as integrity issue
 
     ADR-012 Phase 2: Auxiliary asset validation
     - Vision models require preprocessor_config.json (for image processing)
@@ -143,7 +180,15 @@ def _check_snapshot_health(model_path):
             referenced_files = sorted(set(weight_map.values()))
             missing = [rf for rf in referenced_files if not (model_path / rf).exists()]
             if missing:
-                return False, f"Missing weight shards: {', '.join(missing)}"
+                # Check if this is mlx-vlm #624 (index/shard mismatch) vs incomplete download
+                # mlx-vlm #624: Index references wrong files, but other shards exist
+                actual_shards = list(model_path.glob("*.safetensors"))
+                if actual_shards:
+                    # Shards exist but don't match index - mlx-vlm #624 (INTEGRITY ISSUE)
+                    return False, f"Index/shard mismatch (mlx-vlm #624). Index references {len(referenced_files)} shards but found {len(actual_shards)} different files. Fix: mlxk convert <model> <output> --repair-index"
+                else:
+                    # No shards at all - incomplete download
+                    return False, f"Missing weight shards: {', '.join(missing)}"
             empty = [rf for rf in referenced_files if (model_path / rf).stat().st_size == 0]
             if empty:
                 return False, f"Empty weight shards: {', '.join(empty)}"
@@ -481,6 +526,10 @@ def health_check_operation(model_pattern=None):
     - Cache model names: "microsoft/phi-2", "phi-2", "1.3b"
     - Workspace paths: "./workspace", "/path/to/model"
     - No pattern: Check all cached models
+
+    Returns minimal format per JSON API Schema 0.1.5:
+    - healthy/unhealthy arrays contain: {name, status, reason}
+    - Uses same integrity checks as list/show (_check_snapshot_health)
     """
     result = {
         "status": "success",
@@ -499,28 +548,27 @@ def health_check_operation(model_pattern=None):
 
     try:
         # Check if model_pattern is a workspace path
-        if model_pattern:
-            workspace_path = Path(model_pattern)
-            if workspace_path.exists() and (workspace_path / "config.json").exists():
-                # This is a workspace directory - use workspace health check
-                healthy, reason, managed = health_check_workspace(workspace_path)
+        if model_pattern and is_workspace_path(model_pattern):
+            # This is a workspace directory - use workspace health check
+            workspace_path = Path(model_pattern).resolve()
+            healthy, reason, managed = health_check_workspace(workspace_path)
 
-                model_info = {
-                    "name": str(workspace_path),
-                    "status": "healthy" if healthy else "unhealthy",
-                    "reason": reason,
-                    "managed": managed
-                }
+            model_info = {
+                "name": str(workspace_path),
+                "status": "healthy" if healthy else "unhealthy",
+                "reason": reason,
+                "managed": managed
+            }
 
-                result["data"]["summary"]["total"] = 1
-                if healthy:
-                    result["data"]["healthy"].append(model_info)
-                    result["data"]["summary"]["healthy_count"] = 1
-                else:
-                    result["data"]["unhealthy"].append(model_info)
-                    result["data"]["summary"]["unhealthy_count"] = 1
+            result["data"]["summary"]["total"] = 1
+            if healthy:
+                result["data"]["healthy"].append(model_info)
+                result["data"]["summary"]["healthy_count"] = 1
+            else:
+                result["data"]["unhealthy"].append(model_info)
+                result["data"]["summary"]["unhealthy_count"] = 1
 
-                return result
+            return result
 
         # Not a workspace - proceed with cache-based health check
         model_cache = get_current_model_cache()
@@ -531,7 +579,7 @@ def health_check_operation(model_pattern=None):
         # Use model resolution if specific pattern provided
         if model_pattern:
             resolved_name, commit_hash, ambiguous_matches = resolve_model_for_operation(model_pattern)
-            
+
             if ambiguous_matches:
                 # Multiple matches - let user choose
                 result["status"] = "error"
@@ -555,33 +603,37 @@ def health_check_operation(model_pattern=None):
         else:
             # No pattern - check all models
             models_to_check = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
-        
+
         result["data"]["summary"]["total"] = len(models_to_check)
-        
+
         for model_dir in sorted(models_to_check, key=lambda x: x.name):
             hf_name = cache_dir_to_hf(model_dir.name)
-            
-            # Use the new flexible health check
+
+            # Hide test sentinel directories from listings
+            if "TEST-CACHE-SENTINEL" in hf_name:
+                continue
+
+            # Use same integrity check as list/show (CONSISTENCY)
             healthy, reason = is_model_healthy(hf_name)
-            
+
             model_info = {
                 "name": hf_name,
-                "status": "healthy" if healthy else "unhealthy", 
+                "status": "healthy" if healthy else "unhealthy",
                 "reason": reason
             }
-            
+
             if healthy:
                 result["data"]["healthy"].append(model_info)
                 result["data"]["summary"]["healthy_count"] += 1
             else:
                 result["data"]["unhealthy"].append(model_info)
                 result["data"]["summary"]["unhealthy_count"] += 1
-    
+
     except Exception as e:
         result["status"] = "error"
         result["error"] = {
             "type": "health_check_failed",
             "message": str(e)
         }
-    
+
     return result

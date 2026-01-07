@@ -4,11 +4,13 @@ Provides REST endpoints for text generation with MLX backend.
 """
 
 import json
+import os
 import threading
 import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Request
@@ -69,6 +71,7 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = None
     repetition_penalty: Optional[float] = 1.1
+    chunk: Optional[int] = 1  # Vision batch processing (default: 1 for maximum safety)
 
 
 class CompletionResponse(BaseModel):
@@ -143,30 +146,62 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
                 model_path = None
                 resolved_name = None
                 try:
+                    from ..operations.workspace import is_workspace_path
+
                     resolved_name, _, _ = resolve_model_for_operation(model_spec)
-                    cache_root = get_current_model_cache()
-                    cache_dir = cache_root / hf_to_cache_dir(resolved_name or model_spec)
 
-                    # Debug logging for preload path
-                    logger.debug(
-                        f"Preload path: resolved_name={resolved_name}, cache_dir={cache_dir}",
-                        model=model_spec
-                    )
+                    # Check if resolved_name is a workspace path (ADR-018 Phase 0c)
+                    if resolved_name and is_workspace_path(resolved_name):
+                        # Workspace path - use directly
+                        model_path = Path(resolved_name)
 
-                    # ARCHITECTURE.md Principle #6: HTTP 404 = "Model not found in cache"
-                    if not cache_dir.exists():
-                        raise HTTPException(
-                            status_code=404,
-                            detail=f"Model not found in cache: {model_spec}"
+                        # Debug logging for workspace path
+                        logger.debug(
+                            f"Preload path (workspace): resolved_name={resolved_name}, model_path={model_path}",
+                            model=model_spec
                         )
 
-                    # Get actual snapshot path
-                    snapshots_dir = cache_dir / "snapshots"
-                    model_path = cache_dir
-                    if snapshots_dir.exists():
-                        snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                        if snapshots:
-                            model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+                        # Check workspace exists
+                        if not model_path.exists():
+                            raise HTTPException(
+                                status_code=404,
+                                detail=f"Workspace not found: {model_spec}"
+                            )
+                    elif resolved_name:
+                        # Cache model found - existing logic
+                        cache_root = get_current_model_cache()
+                        cache_dir = cache_root / hf_to_cache_dir(resolved_name)
+
+                        # Debug logging for preload path
+                        logger.debug(
+                            f"Preload path (cache): resolved_name={resolved_name}, cache_dir={cache_dir}",
+                            model=model_spec
+                        )
+
+                        # Get actual snapshot path
+                        snapshots_dir = cache_dir / "snapshots"
+                        model_path = cache_dir
+                        if snapshots_dir.exists():
+                            snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                            if snapshots:
+                                model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+                    else:
+                        # Resolution failed - check if local directory exists as fallback
+                        if is_workspace_path(model_spec):
+                            # Local workspace exists - use it
+                            model_path = Path(model_spec).resolve()
+                            resolved_name = str(model_path)
+
+                            logger.debug(
+                                f"Preload path (fallback workspace): model_spec={model_spec}, model_path={model_path}",
+                                model=model_spec
+                            )
+                        else:
+                            # Not found in cache and no local workspace
+                            raise HTTPException(
+                                status_code=404,
+                                detail=f"Model not found in cache: {model_spec}"
+                            )
 
                     logger.debug(
                         f"Preload path: model_path={model_path}",
@@ -214,8 +249,8 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
                     logger.info(f"Loading vision model: {model_spec}", model=model_spec, backend="mlx_vlm")
                     runner = VisionRunner(model_path, resolved_name or model_spec, verbose=verbose)
                 else:
-                    # Text model - use MLXRunner
-                    runner = MLXRunner(model_spec, verbose=verbose, install_signal_handlers=False)
+                    # Text model - use MLXRunner (use resolved_name for workspace support)
+                    runner = MLXRunner(resolved_name or model_spec, verbose=verbose, install_signal_handlers=False)
 
                 # If shutdown was requested, abort before expensive load
                 if _shutdown_event.is_set():
@@ -816,8 +851,30 @@ async def list_models():
             logger.warning(f"Skipping model {model_name} from /v1/models: {e}")
             continue
 
-    # Sort: preloaded model first, then alphabetically by id
+    # Add preloaded workspace if present and not already in list
     global _preload_model
+    if _preload_model:
+        # Check if it's a workspace path
+        from ..operations.workspace import is_workspace_path
+        if is_workspace_path(_preload_model):
+            # Check if already in list (avoid duplicates)
+            if not any(m.id == _preload_model for m in model_list):
+                # Get context length
+                context_length = None
+                try:
+                    from .runner import get_model_context_length
+                    context_length = get_model_context_length(_preload_model)
+                except Exception:
+                    pass
+
+                model_list.append(ModelInfo(
+                    id=_preload_model,  # Original path string
+                    object="model",
+                    owned_by="workspace",
+                    context_length=context_length
+                ))
+
+    # Sort: preloaded model first, then alphabetically by id
     if _preload_model:
         def sort_key(model: ModelInfo):
             # Preloaded model gets priority (0), others sorted alphabetically
@@ -1071,6 +1128,62 @@ async def _handle_text_chat_completion(request: ChatCompletionRequest, runner: A
     )
 
 
+def _process_vision_chunks_server(
+    model_path,
+    model_name: str,
+    prompt: str,
+    images: List[tuple],
+    chunk_size: int,
+    image_id_map: Dict[str, int],
+    max_tokens: Optional[int],
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+) -> str:
+    """Process vision images in batches with isolated model instances per chunk.
+
+    Each chunk creates a fresh VisionRunner to prevent state leakage between batches.
+    Similar to CLI _process_images_in_chunks but server-optimized
+    (no verbose output to stderr, uses existing image_id_map).
+
+    Args:
+        model_path: Path to model snapshot directory
+        model_name: Model name for VisionRunner
+        prompt: User prompt
+        images: Full list of (filename, bytes) tuples
+        chunk_size: Images per batch
+        image_id_map: Pre-computed global image IDs (from conversation history)
+        max_tokens, temperature, top_p, repetition_penalty: Generation params
+
+    Returns:
+        Combined text with merged filename mappings
+    """
+    from .vision_runner import VisionRunner
+
+    # Split into chunks
+    chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
+
+    # Process each chunk with fresh runner (prevents state leakage)
+    all_results = []
+    for chunk in chunks:
+        # Fresh runner per chunk to prevent KV-cache/state accumulation
+        with VisionRunner(model_path, model_name, verbose=False) as runner:
+            chunk_result = runner.generate(
+                prompt=prompt,
+                images=chunk,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                image_id_map=image_id_map,  # Global numbering from conversation
+                total_images=len(images),  # Enable chunk context line
+            )
+        all_results.append(chunk_result)
+
+    # Concatenate results
+    return "\n\n".join(all_results)
+
+
 async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner: Any = None) -> ChatCompletionResponse:
     """Handle vision chat completion with images (ADR-012 Phase 3).
 
@@ -1140,15 +1253,50 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
-    generated_text = runner.generate(
-        prompt=prompt,
-        images=images,
-        max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
-        temperature=0.0,  # Experiment: greedy sampling to reduce hallucinations
-        top_p=request.top_p or 0.9,
-        repetition_penalty=request.repetition_penalty or 1.0,
-        image_id_map=image_id_map,
-    )
+    # Get chunk size (with env var override)
+    chunk_size = request.chunk if request.chunk != 1 else int(os.environ.get("MLXK2_VISION_BATCH_SIZE", "1"))
+
+    # Validate chunk size for Metal API stability
+    from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
+    if chunk_size < 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"chunk size must be at least 1 (got: {chunk_size})."
+        )
+    if chunk_size > MAX_SAFE_CHUNK_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
+                f"This limit is based on empirically tested performance."
+            )
+        )
+
+    if len(images) <= chunk_size:
+        # Single batch (no chunking)
+        generated_text = runner.generate(
+            prompt=prompt,
+            images=images,
+            max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
+            temperature=0.0,  # Experiment: greedy sampling to reduce hallucinations
+            top_p=request.top_p or 0.9,
+            repetition_penalty=request.repetition_penalty or 1.0,
+            image_id_map=image_id_map,
+        )
+    else:
+        # Multi-batch chunking - creates fresh runner per chunk
+        generated_text = _process_vision_chunks_server(
+            model_path=runner.model_path,
+            model_name=runner.model_name,
+            prompt=prompt,
+            images=images,
+            chunk_size=chunk_size,
+            image_id_map=image_id_map,
+            max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
+            temperature=0.0,
+            top_p=request.top_p or 0.9,
+            repetition_penalty=request.repetition_penalty or 1.0,
+        )
 
     logger.info(
         f"Vision generation complete: {len(generated_text)} chars",

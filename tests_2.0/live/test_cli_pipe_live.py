@@ -16,7 +16,7 @@ import pytest
 
 from .test_utils import should_skip_model, MAX_TOKENS, TEST_TEMPERATURE
 
-pytestmark = [pytest.mark.live_e2e, pytest.mark.slow]
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
 
 
 def _pick_first_eligible_model(portfolio_models: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:

@@ -28,6 +28,7 @@ repo = os.environ.get("MLXK2_LIVE_REPO")
 workspace = os.environ.get("MLXK2_LIVE_WORKSPACE")
 
 pytestmark = [
+    pytest.mark.live,
     pytest.mark.wet,
     pytest.mark.live_push,
     pytest.mark.skipif(

@@ -27,6 +27,8 @@ from mlxk2.operations.clone import (
     _validate_apfs_filesystem,
     _is_apfs_filesystem,
     _create_temp_cache_same_volume,
+    _get_deterministic_temp_cache_name,
+    _check_temp_cache_resume,
     _get_volume_mount_point,
     _resolve_latest_snapshot,
     _apfs_clone_directory,
@@ -244,16 +246,18 @@ class TestTempCacheCreation:
     def test_create_temp_cache_same_volume(self, tmp_path):
         """Test temp cache creation on same volume."""
         target_workspace = tmp_path / "workspace"
+        model_spec = "test/model"
 
         with patch('mlxk2.operations.clone._get_volume_mount_point') as mock_volume:
             mock_volume.return_value = tmp_path
 
-            temp_cache = _create_temp_cache_same_volume(target_workspace)
+            temp_cache, should_download = _create_temp_cache_same_volume(target_workspace, model_spec, False)
 
             # Verify temp cache is on same volume
             assert temp_cache.parent == tmp_path
             assert temp_cache.exists()
             assert temp_cache.is_dir()
+            assert should_download is True  # New temp cache, should download
 
             # Verify sentinel file exists
             sentinel = temp_cache / ".mlxk2_temp_cache_sentinel"
@@ -263,37 +267,8 @@ class TestTempCacheCreation:
             # Cleanup
             shutil.rmtree(temp_cache)
 
-    def test_create_temp_cache_unique_names(self, tmp_path):
-        """Test temp cache gets unique names."""
-        target_workspace = tmp_path / "workspace"
-
-        with patch('mlxk2.operations.clone._get_volume_mount_point') as mock_volume:
-            mock_volume.return_value = tmp_path
-
-            cache1 = _create_temp_cache_same_volume(target_workspace)
-            cache2 = _create_temp_cache_same_volume(target_workspace)
-
-            assert cache1 != cache2
-            assert cache1.exists()
-            assert cache2.exists()
-
-            # Cleanup
-            shutil.rmtree(cache1)
-            shutil.rmtree(cache2)
-
-    def test_create_temp_cache_includes_pid(self, tmp_path):
-        """Test temp cache name includes process ID."""
-        target_workspace = tmp_path / "workspace"
-
-        with patch('mlxk2.operations.clone._get_volume_mount_point') as mock_volume:
-            mock_volume.return_value = tmp_path
-
-            temp_cache = _create_temp_cache_same_volume(target_workspace)
-
-            assert str(os.getpid()) in temp_cache.name
-
-            # Cleanup
-            shutil.rmtree(temp_cache)
+    # Note: test_create_temp_cache_unique_names and test_create_temp_cache_includes_pid
+    # removed in ADR-018 Phase 0b - replaced by deterministic naming (tested in TestResumableClone)
 
 
 class TestSentinelSafetyMechanism:
@@ -504,7 +479,7 @@ class TestCloneOperationIntegration:
              patch('mlxk2.operations.clone._apfs_clone_directory') as mock_clone:
 
             # Use real temp cache
-            mock_create_cache.return_value = real_temp_cache
+            mock_create_cache.return_value = (real_temp_cache, True)  # (temp_cache, should_download)
             mock_health.return_value = (True, "Model is healthy")
 
             mock_pull.return_value = {
@@ -573,7 +548,7 @@ class TestCloneOperationIntegration:
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull:
 
-            mock_create_cache.return_value = real_temp_cache
+            mock_create_cache.return_value = (real_temp_cache, True)  # (temp_cache, should_download)
 
             mock_pull.return_value = {
                 "status": "error",
@@ -610,7 +585,7 @@ class TestCloneOperationIntegration:
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
              patch('mlxk2.operations.health.health_from_cache') as mock_health:
 
-            mock_create_cache.return_value = real_temp_cache
+            mock_create_cache.return_value = (real_temp_cache, True)  # (temp_cache, should_download)
 
             mock_pull.return_value = {"status": "success", "data": {"model": model_spec}}
 
@@ -681,7 +656,7 @@ class TestCloneOperationIntegration:
              patch('mlxk2.operations.health.health_from_cache') as mock_health, \
              patch('mlxk2.operations.clone._apfs_clone_directory') as mock_clone:
 
-            mock_create_cache.return_value = real_temp_cache
+            mock_create_cache.return_value = (real_temp_cache, True)  # (temp_cache, should_download)
 
             mock_pull.return_value = {"status": "success", "data": {"model": model_spec}}
 
@@ -698,8 +673,10 @@ class TestCloneOperationIntegration:
             assert result["data"]["clone_status"] == "filesystem_error"
             assert "APFS clone operation failed" in result["error"]["message"]
 
-            # Verify real cleanup happened
-            assert not real_temp_cache.exists()
+            # ADR-018 Phase 0b: Temp cache is KEPT on failure with complete download (for debugging/retry)
+            assert real_temp_cache.exists()
+            # Download marker should exist (indicating complete download)
+            assert (real_temp_cache / ".mlxk2_download_complete").exists()
 
 
 @pytest.mark.spec
@@ -725,7 +702,7 @@ class TestCloneJSONAPICompliance:
              patch('mlxk2.operations.health.health_from_cache') as mock_health, \
              patch('mlxk2.operations.clone._apfs_clone_directory'):
 
-            mock_create_cache.return_value = real_temp_cache
+            mock_create_cache.return_value = (real_temp_cache, True)  # (temp_cache, should_download)
             mock_pull.return_value = {"status": "success", "data": {"model": model_spec}}
             mock_health.return_value = (True, "Model is healthy")
 
@@ -840,7 +817,7 @@ class TestCloneCoreFeatures:
             temp_cache1.mkdir()  # Create directory so .exists() returns True
             temp_cache2 = tmp_path / "temp_cache_2"
             temp_cache2.mkdir()  # Create directory so .exists() returns True
-            mock_create_cache.side_effect = [temp_cache1, temp_cache2]
+            mock_create_cache.side_effect = [(temp_cache1, True), (temp_cache2, True)]  # (temp_cache, should_download)
             mock_health.return_value = (True, "Model is healthy")
 
             # Setup side effects for both clones
@@ -899,7 +876,7 @@ class TestCloneCoreFeatures:
             # Different temp cache (not user cache)
             temp_cache = tmp_path / "temp_cache"
             temp_cache.mkdir()  # Create directory so .exists() returns True
-            mock_create_cache.return_value = temp_cache
+            mock_create_cache.return_value = (temp_cache, True)  # (temp_cache, should_download)
             mock_health.return_value = (True, "Model is healthy")
 
             mock_snapshot = MagicMock()
@@ -942,7 +919,7 @@ class TestCloneEdgeCases:
              patch('mlxk2.operations.clone._apfs_clone_directory') as mock_clone, \
              patch('mlxk2.operations.clone._cleanup_temp_cache_safe'):
 
-            mock_create_cache.return_value = temp_cache
+            mock_create_cache.return_value = (temp_cache, True)  # (temp_cache, should_download)
             mock_pull.return_value = {"status": "success", "data": {"model": model_spec}}
 
             # Mock snapshot resolution
@@ -977,7 +954,7 @@ class TestCloneEdgeCases:
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve:
 
-            mock_create_cache.return_value = real_temp_cache
+            mock_create_cache.return_value = (real_temp_cache, True)  # (temp_cache, should_download)
 
             mock_pull.return_value = {"status": "success", "data": {"model": model_spec}}
             mock_resolve.return_value = None  # Snapshot not found
@@ -988,8 +965,9 @@ class TestCloneEdgeCases:
             assert result["data"]["clone_status"] == "cache_not_found"
             assert "Temp cache snapshot not found" in result["error"]["message"]
 
-            # Verify real cleanup happened
-            assert not real_temp_cache.exists()
+            # ADR-018 Phase 0b: Temp cache is KEPT on failure with complete download
+            assert real_temp_cache.exists()
+            assert (real_temp_cache / ".mlxk2_download_complete").exists()
 
     def test_clone_operation_target_existing_empty(self, tmp_path):
         """Test clone operation with existing empty target directory."""
@@ -1009,7 +987,7 @@ class TestCloneEdgeCases:
              patch('mlxk2.operations.clone._apfs_clone_directory') as mock_clone, \
              patch('mlxk2.operations.clone._cleanup_temp_cache_safe'):
 
-            mock_create_cache.return_value = temp_cache
+            mock_create_cache.return_value = (temp_cache, True)  # (temp_cache, should_download)
             mock_pull.return_value = {"status": "success", "data": {"model": "test/model"}}
             mock_health.return_value = (True, "Model is healthy")
 
@@ -1071,7 +1049,7 @@ class TestUnhealthyModelClone:
         # Setup mocks
         temp_cache = tmp_path / "temp"
         temp_cache.mkdir()
-        mock_temp_cache.return_value = temp_cache
+        mock_temp_cache.return_value = (temp_cache, True)  # (temp_cache, should_download)
 
         mock_pull.return_value = {
             "status": "success",
@@ -1125,7 +1103,7 @@ class TestUnhealthyModelClone:
         # Setup mocks
         temp_cache = tmp_path / "temp"
         temp_cache.mkdir()
-        mock_temp_cache.return_value = temp_cache
+        mock_temp_cache.return_value = (temp_cache, True)  # (temp_cache, should_download)
 
         mock_pull.return_value = {
             "status": "success",
@@ -1172,7 +1150,7 @@ class TestUnhealthyModelClone:
         # Setup mocks
         temp_cache = tmp_path / "temp"
         temp_cache.mkdir()
-        mock_temp_cache.return_value = temp_cache
+        mock_temp_cache.return_value = (temp_cache, True)  # (temp_cache, should_download)
 
         mock_pull.return_value = {
             "status": "success",
@@ -1195,3 +1173,227 @@ class TestUnhealthyModelClone:
         # Health status should NOT be in result
         assert "health" not in result["data"]
         assert "health_reason" not in result["data"]
+
+class TestResumableClone:
+    """Test suite for ADR-018 Phase 0b: Resumable Clone functionality."""
+
+    def test_deterministic_temp_cache_name_consistency(self, tmp_path):
+        """Test that temp cache name is deterministic for same inputs."""
+        model_spec = "mlx-community/Llama-3.2-3B"
+        target = tmp_path / "workspace"
+        
+        # Same inputs should produce same name
+        name1 = _get_deterministic_temp_cache_name(model_spec, target)
+        name2 = _get_deterministic_temp_cache_name(model_spec, target)
+        
+        assert name1 == name2
+        assert name1.startswith(".mlxk2_temp_")
+        assert len(name1) == 28  # ".mlxk2_temp_" + 16 hex chars
+
+    def test_deterministic_temp_cache_name_different_inputs(self, tmp_path):
+        """Test that different inputs produce different names."""
+        target = tmp_path / "workspace"
+        
+        name1 = _get_deterministic_temp_cache_name("model-a", target)
+        name2 = _get_deterministic_temp_cache_name("model-b", target)
+        name3 = _get_deterministic_temp_cache_name("model-a", tmp_path / "other")
+        
+        assert name1 != name2  # Different model
+        assert name1 != name3  # Different target
+        assert name2 != name3
+
+    def test_check_temp_cache_resume_no_existing(self, tmp_path):
+        """Test resume check when temp cache doesn't exist."""
+        temp_cache = tmp_path / "nonexistent"
+        
+        can_resume, reason, is_healthy = _check_temp_cache_resume(temp_cache, "model")
+        
+        assert can_resume is False
+        assert "No existing download" in reason
+        assert is_healthy is False
+
+    def test_check_temp_cache_resume_incomplete_download(self, tmp_path):
+        """Test resume check when download is incomplete (no marker) - should be resumable."""
+        temp_cache = tmp_path / "temp"
+        temp_cache.mkdir()
+
+        # Create some files but no completion marker (simulates Ctrl-C)
+        (temp_cache / "partial.bin").write_text("data")
+
+        can_resume, reason, is_healthy = _check_temp_cache_resume(temp_cache, "model")
+
+        # Partial downloads are resumable via HuggingFace snapshot_download
+        assert can_resume is True
+        assert "Partial download" in reason
+        assert "resumable" in reason.lower()
+        assert is_healthy is False  # Not complete yet
+
+    def test_check_temp_cache_resume_complete_healthy(self, tmp_path):
+        """Test resume check when download is complete and healthy."""
+        temp_cache = tmp_path / "temp"
+        temp_cache.mkdir()
+        
+        # Mark as complete
+        (temp_cache / ".mlxk2_download_complete").write_text("completed")
+        
+        # Mock healthy check
+        with patch('mlxk2.operations.health.health_from_cache', return_value=(True, "OK")):
+            can_resume, reason, is_healthy = _check_temp_cache_resume(temp_cache, "model")
+        
+        assert can_resume is True
+        assert "healthy" in reason.lower()
+        assert is_healthy is True
+
+    def test_check_temp_cache_resume_complete_unhealthy(self, tmp_path):
+        """Test resume check when download is complete but unhealthy."""
+        temp_cache = tmp_path / "temp"
+        temp_cache.mkdir()
+        
+        # Mark as complete
+        (temp_cache / ".mlxk2_download_complete").write_text("completed")
+        
+        # Mock unhealthy check
+        with patch('mlxk2.operations.health.health_from_cache', return_value=(False, "Missing weights")):
+            can_resume, reason, is_healthy = _check_temp_cache_resume(temp_cache, "model")
+        
+        assert can_resume is True
+        assert "unhealthy" in reason.lower()
+        assert is_healthy is False
+
+    def test_create_temp_cache_new(self, tmp_path):
+        """Test creating new temp cache when none exists."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+        
+        with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+            temp_cache, should_download = _create_temp_cache_same_volume(target, model_spec, False)
+        
+        assert temp_cache.exists()
+        assert should_download is True
+        assert (temp_cache / ".mlxk2_temp_cache_sentinel").exists()
+
+    def test_create_temp_cache_resume_healthy(self, tmp_path):
+        """Test resuming healthy existing temp cache."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+        
+        # Create existing temp cache with deterministic name
+        with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+            temp_name = _get_deterministic_temp_cache_name(model_spec, target)
+            temp_cache = tmp_path / temp_name
+            temp_cache.mkdir()
+            (temp_cache / ".mlxk2_download_complete").write_text("completed")
+            
+            # Mock healthy
+            with patch('mlxk2.operations.health.health_from_cache', return_value=(True, "OK")):
+                result_cache, should_download = _create_temp_cache_same_volume(target, model_spec, False)
+        
+        assert result_cache == temp_cache
+        assert should_download is False  # Skip download - healthy resume
+
+    def test_create_temp_cache_resume_unhealthy_force(self, tmp_path):
+        """Test force resuming unhealthy temp cache."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+        
+        with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+            temp_name = _get_deterministic_temp_cache_name(model_spec, target)
+            temp_cache = tmp_path / temp_name
+            temp_cache.mkdir()
+            (temp_cache / ".mlxk2_download_complete").write_text("completed")
+            
+            # Mock unhealthy
+            with patch('mlxk2.operations.health.health_from_cache', return_value=(False, "Broken")):
+                result_cache, should_download = _create_temp_cache_same_volume(target, model_spec, force_resume=True)
+        
+        assert result_cache == temp_cache
+        assert should_download is False  # Skip download - forced resume
+
+    def test_create_temp_cache_resume_unhealthy_no_force(self, tmp_path):
+        """Test deleting unhealthy temp cache when not forcing."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+
+        with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+            temp_name = _get_deterministic_temp_cache_name(model_spec, target)
+            temp_cache = tmp_path / temp_name
+            temp_cache.mkdir()
+            (temp_cache / ".mlxk2_download_complete").write_text("completed")
+            (temp_cache / "data.bin").write_text("old data")
+
+            # Mock unhealthy
+            with patch('mlxk2.operations.health.health_from_cache', return_value=(False, "Broken")):
+                result_cache, should_download = _create_temp_cache_same_volume(target, model_spec, force_resume=False)
+
+        # Should have deleted and recreated
+        assert result_cache.exists()
+        assert should_download is True
+        assert not (result_cache / "data.bin").exists()  # Old data gone
+
+    def test_create_temp_cache_resume_partial_download(self, tmp_path):
+        """Test resuming partial download (no completion marker) - should call pull_to_cache."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+
+        with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+            temp_name = _get_deterministic_temp_cache_name(model_spec, target)
+            temp_cache = tmp_path / temp_name
+            temp_cache.mkdir()
+            # No completion marker - simulates Ctrl-C during download
+            (temp_cache / "partial.bin").write_text("partial data")
+
+            result_cache, should_download = _create_temp_cache_same_volume(target, model_spec, force_resume=False)
+
+        # Should resume partial download via HuggingFace
+        assert result_cache == temp_cache
+        assert should_download is True  # Call pull_to_cache to resume
+        assert (result_cache / "partial.bin").exists()  # Partial data preserved
+
+    def test_keyboard_interrupt_preserves_temp_cache(self, tmp_path):
+        """Test that KeyboardInterrupt (Ctrl-C) preserves temp cache for resume."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+
+        with patch('mlxk2.operations.clone._validate_apfs_filesystem'):
+            with patch('mlxk2.operations.clone._validate_same_volume'):
+                with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+                    # Mock pull_to_cache to raise KeyboardInterrupt
+                    with patch('mlxk2.operations.clone.pull_to_cache', side_effect=KeyboardInterrupt()):
+                        result = clone_operation(model_spec, str(target))
+
+        # Check result structure
+        assert result["status"] == "error"
+        assert result["error"]["type"] == "UserCancelledError"
+        assert result["data"]["clone_status"] == "cancelled"
+
+        # Check error message has resume instructions
+        error_msg = result["error"]["message"]
+        assert "Operation cancelled by user" in error_msg
+        assert "Partial download preserved" in error_msg
+        assert "To resume: Run the same command again" in error_msg
+
+        # Verify temp cache exists and was NOT deleted
+        temp_name = _get_deterministic_temp_cache_name(model_spec, target)
+        temp_cache = tmp_path / temp_name
+        assert temp_cache.exists(), "Temp cache should be preserved after Ctrl-C"
+        assert (temp_cache / ".mlxk2_temp_cache_sentinel").exists()
+
+    def test_keyboard_interrupt_early_no_temp_cache(self, tmp_path):
+        """Test KeyboardInterrupt before temp cache creation."""
+        target = tmp_path / "workspace"
+        model_spec = "test/model"
+
+        with patch('mlxk2.operations.clone._validate_apfs_filesystem'):
+            with patch('mlxk2.operations.clone._validate_same_volume'):
+                # Raise KeyboardInterrupt during volume mount check
+                with patch('mlxk2.operations.clone._get_volume_mount_point', side_effect=KeyboardInterrupt()):
+                    result = clone_operation(model_spec, str(target))
+
+        # Should handle gracefully even without temp cache
+        assert result["status"] == "error"
+        assert result["error"]["type"] == "UserCancelledError"
+        assert result["data"]["clone_status"] == "cancelled"
+
+        # Error message should be simple (no temp cache to preserve)
+        error_msg = result["error"]["message"]
+        assert error_msg == "Operation cancelled by user."

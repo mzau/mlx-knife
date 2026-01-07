@@ -91,6 +91,7 @@ def start_server(
     max_tokens: Optional[int] = None,
     reload: bool = False,
     log_level: str = "info",
+    chunk: int = 1,
     verbose: bool = False,
     supervise: bool = True,
 ) -> None:
@@ -105,24 +106,43 @@ def start_server(
         max_tokens: Default maximum tokens for generation
         reload: Enable auto-reload for development
         log_level: Logging level
+        chunk: Default batch size for vision requests (default: 1, max: 5)
         verbose: Show detailed output
         supervise: Run uvicorn in a supervised subprocess for instant Ctrl-C
     """
+    # Validate chunk size
+    from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
+    if chunk < 1:
+        raise ValueError(
+            f"chunk size must be at least 1 (got: {chunk})."
+        )
+    if chunk > MAX_SAFE_CHUNK_SIZE:
+        raise ValueError(
+            f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
+            f"This limit is based on empirically tested performance."
+        )
+
+    # Set environment variables for server configuration
+    # These apply to both supervised and non-supervised modes
+    os.environ["MLXK2_LOG_LEVEL"] = log_level
+    if model:
+        os.environ["MLXK2_PRELOAD_MODEL"] = model
+    if chunk != 1:
+        os.environ["MLXK2_VISION_BATCH_SIZE"] = str(chunk)
+
     if verbose:
         print("Starting MLX Knife Server 2.0...")
         if model:
             print(f"Pre-loading model: {model}")
         print(f"Server will bind to: http://{host}:{port}")
+        if chunk != 1:
+            print(f"Vision batch size: {chunk}")
 
     # Pre-load validation happens in server_base.py lifespan hook
     # via environment variable MLXK2_PRELOAD_MODEL
 
     if supervise:
-        # Pass log_level and model via environment to subprocess (ADR-004)
-        os.environ["MLXK2_LOG_LEVEL"] = log_level
-        if model:
-            os.environ["MLXK2_PRELOAD_MODEL"] = model
-        # Delegate to subprocess-managed uvicorn
+        # Delegate to subprocess-managed uvicorn (env vars already set above)
         _ = _run_supervised_uvicorn(host=host, port=port, log_level=log_level, reload=reload)
         return
 

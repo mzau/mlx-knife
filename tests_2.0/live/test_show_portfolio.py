@@ -6,9 +6,9 @@ Usage: pytest -m show_model_portfolio -s
 from __future__ import annotations
 import pytest
 
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.show_model_portfolio]
 
-@pytest.mark.show_model_portfolio
-@pytest.mark.live_e2e
+
 def test_show_portfolio(portfolio_models):
     """Display E2E test portfolio models (no actual testing).
 

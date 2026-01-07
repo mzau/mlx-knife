@@ -1,5 +1,243 @@
 # Changelog
 
+## [2.0.4-beta.6] - 2026-01-07
+
+### Highlights
+
+**Complete Local Development Workflow:** Beta.6 completes the workspace story started in beta.5. Full local development cycle without HuggingFace round-trips:
+1. Clone a model to a local workspace (`mlxk clone`)
+2. Repair or modify it locally (`mlxk convert --repair-index` fixes index/shard mismatches)
+3. Use it directly without pushing:
+   - Run inference: `mlxk run ./workspace "prompt"`
+   - Inspect metadata: `mlxk show ./workspace`
+   - Start a dev server: `mlxk server --model ./workspace`
+
+Enables model experimentation, repair (mlx-vlm #624 affected models), and testing before publishing to HuggingFace.
+
+**Vision Batch Processing:** Production-ready vision processing with automatic chunking for large image collections. Default: process one image at a time for maximum stability (prevents Metal OOM + model-specific hallucination). Server now accepts unlimited images with safe chunking. Complete Vision→Text pipe workflow support. Metadata now appears before model output (vision models can reference filenames, GPS, dates in their analysis).
+
+**Enhanced Reliability:** Resumable clone operations with `--force-resume`, deterministic temp cache naming for better debugging, and improved test architecture (umbrella marker convention) for multi-Python compatibility (3.9-3.14). 161 Wet Umbrella tests passing (includes new Vision→Geo pipe integration tests).
+
+---
+
+### Added
+
+- **Workspace Operation Support (ADR-018 Phase 0c):**
+  - Complete local workflow: `clone → convert → run/show/server` without HF push
+  - `mlxk run ./workspace "prompt"` - Direct inference on workspace paths
+  - `mlxk show ./workspace` - Metadata inspection for workspaces
+  - `mlxk server --model ./workspace` - Local dev server with workspace models
+  - Server `/v1/models` endpoint lists workspaces with `"owned_by": "workspace"`
+  - MLXRunner + VisionRunner now support workspace paths
+  - Central implementation via `resolve_model_for_operation()` + `is_workspace_path()`
+  - Files changed: 11 files (~250 LOC)
+  - See ADR-018.md Phase 0c for details
+
+- **Path Resolution Convention (README.md):**
+  - `model-name` → Cache resolution (expands to `mlx-community/...`)
+  - `./model-name` → Workspace path (local directory)
+  - `/abs/path` → Workspace path (absolute)
+  - `.` or `..` → Workspace path (current/parent directory)
+  - Explicit path prefixes required to treat local directories as workspaces
+  - Prevents ambiguity when workspace name matches cache model name
+
+- **Health command workspace support:**
+  - `mlxk health ./workspace` - Integrity checks for workspace directories
+  - Returns minimal format per JSON API Schema 0.1.5: `{name, status, reason}`
+  - Uses same integrity checks as list/show commands (consistency)
+
+- **Resumable Clone with --force-resume (ADR-018 Phase 0b):**
+  - `mlxk clone <model> <workspace> --force-resume` - Skip confirmation prompt for partial downloads
+  - Deterministic temp cache naming: `.mlxk2_temp_{hash(model+target)}` (SHA256-based, replaces PID random names)
+  - Resume detection: Verifies health + download completion marker before resuming
+  - Conditional cleanup: Keeps complete downloads on failure (debugging/retry), cleanup incomplete
+  - Helper functions: `_get_deterministic_temp_cache_name()`, `_create_temp_cache_same_volume()`
+  - Files: `operations/clone.py` (~100 LOC)
+
+- **Portfolio Discovery Blacklist (Testing Infrastructure):**
+  - `KNOWN_BROKEN_MODELS` config in `tests_2.0/live/test_utils.py`
+  - Filters models with upstream runtime bugs (pass static health checks, fail at runtime)
+  - Policy: Add only when static health ✅ but runtime initialization ❌ due to verified upstream bug
+  - First entry: `mlx-community/MiMo-VL-7B-RL-bf16` (mlx-vlm NoneType iteration bug)
+  - Portfolio Discovery now filters against blacklist (27 → 26 models)
+  - Files: `tests_2.0/live/test_utils.py` (+29 LOC blacklist config)
+
+- **Vision Batch Processing (ADR-012 Phase 1c, #47):**
+  - Automatic chunking for large image collections (prevents Metal OOM crashes)
+  - CLI: `mlxk run model --image *.jpg --chunk N` (N = images per batch)
+  - Server: `POST /v1/chat/completions {"chunk": N, ...}` + `mlxk serve --chunk N`
+  - Model loaded once per chunk (isolation guarantees no state leakage between batches)
+  - Global image numbering preserved (Image 1..N across all chunks)
+  - Batch context markers in prompt: `[Processing batch 1/2: Images 1-4 (chunk_size=4, 8 total)]`
+  - Collapsible batch info in output: `📸 Batch 1/2: Images 1-4` (WebUI-friendly)
+  - Environment variable: `MLXK2_VISION_BATCH_SIZE` sets default chunk size
+  - Server unlimited images: Removed MAX_IMAGES_PER_REQUEST limit, added MAX_SAFE_CHUNK_SIZE=5 validation
+  - Chunk size validation: CLI + Server validate against MAX_SAFE_CHUNK_SIZE (HTTP 400 if chunk>5)
+  - Files: `cli.py`, `operations/run.py`, `operations/serve.py`, `core/server_base.py`, `core/vision_runner.py`, `tools/vision_adapter.py` (~200 LOC)
+
+- **Vision Chunk Isolation (Prevents State Leakage):**
+  - Fresh VisionRunner created per chunk (no KV-cache or model state persistence)
+  - Fixes chunk hallucination bug where model "remembered" images from previous batches
+  - Trade-off: Model load overhead (~2-3s per chunk) vs guaranteed isolation
+  - Alternative approach deferred: Model reuse + cache clearing (2.0.5-beta, requires mlx-vlm API support)
+
+- **Flexible Prompt Argument Order (UX Improvement):**
+  - Added `--prompt` flag as alternative to positional argument
+  - Use case: Test different prompts with same parameters: `mlxk run model --image *.jpg --chunk 5 --prompt "prompt"`
+  - Solves argparse limitation where `--image` with `nargs='+'` consumes following arguments
+  - Both forms supported: `mlxk run model "prompt" --image file.jpg` OR `mlxk run model --image file.jpg --prompt "prompt"`
+  - Backward compatible: Positional prompt still works when placed before flags
+  - Pipe mode integration: `mlx-run pixtral ... | mlx-run qwen - --prompt "..."` combines stdin with additional prompt
+  - File: `cli.py` (+10 LOC)
+
+- **Vision→Geo Pipe Integration Tests (Wet Umbrella Phase 4):**
+  - Comprehensive smoke tests for Vision→Text pipe workflows
+  - Test suite: `tests_2.0/live/test_pipe_vision_geo.py` (3 tests, marker: `live_vision_pipe`)
+  - **Test 1:** Vision batch processing with `--chunk 1` (validates ADR-012 Phase 1c)
+  - **Test 2:** Complete Vision→Geo pipe (validates stdin + --prompt fix)
+  - **Test 3:** Chunk isolation (validates no state leakage between chunks)
+  - Test assets: `tests_2.0/assets/geo-test/` (9 publishable Stockholm photos with EXIF)
+  - Model selection: Hardcoded pixtral (vision) + Portfolio discovery for text model (largest eligible)
+  - Wet Umbrella integration: 161 total tests passed (Phase 1: 152, Phase 2: 3, Phase 3: 3, Phase 4: 3)
+  - Graceful skip: Tests skip cleanly if vision/text models unavailable
+  - **NOT a quality benchmark:** Pure workflow validation (pass = exit 0, no GOLD reference)
+
+- **Test Infrastructure Improvements (Umbrella Marker Convention):**
+  - Added `pytest.mark.live` umbrella marker for scalable test exclusion
+  - All 11 live test files decorated with umbrella + specific markers
+  - `test-multi-python.sh` simplified: `pytest -m "not live"` (future-proof)
+  - Documentation: TESTING-DETAILS.md "Writing New Live Tests: Umbrella Marker Convention"
+  - Rationale: Blacklist pattern (excluding individual markers) doesn't scale with new test categories
+
+### Changed
+
+- **BREAKING: Vision processing now defaults to processing one image at a time (ADR-012 Phase 1c, #47)**
+  - Previous: All images processed in single batch (could OOM crash with many images)
+  - New: Process one image at a time by default (maximum safety on all systems)
+  - Override with `--chunk N` (CLI) or `"chunk": N` (API) for faster batching when system can handle it
+  - Rationale: Safety over speed - prevents Metal OOM + model-specific hallucination with large batches
+  - **Important:** Chunk isolation (fresh VisionRunner per chunk) prevents state leakage but adds ~2-3s model load overhead per chunk
+  - Migration: Users with large image workflows should use `--chunk 5` or higher for old behavior
+  - Environment variable: `MLXK2_VISION_BATCH_SIZE=N` sets default (e.g., export `MLXK2_VISION_BATCH_SIZE=5`)
+  - **Model-specific hallucination triggers:**
+    - Larger chunks with global context hints (e.g., "8 total images" when batch only has 4)
+    - Plural prompts mismatched to actual count (e.g., "describe these images" with chunk=1)
+    - Default chunk=1 with singular prompts provides maximum robustness
+
+- **Model metadata `cached` field:** Now `false` for workspace paths, `true` for cache models
+  - Workspace paths are NOT in HuggingFace cache → `cached: false`
+  - Cache models remain `cached: true`
+  - Semantic distinction: cache-managed vs user-managed models
+
+### Fixed
+
+- **Vision model detection (False Negatives):**
+  - Fixed: Models with `vision_config` dict but `skip_vision: true` incorrectly marked as non-vision
+  - Root cause: `skip_vision` flag misinterpreted as "no vision support" (actually means "optional for text-only")
+  - Solution: Presence of `vision_config` dict now reliably indicates vision capability
+  - Impact: Mistral-Small 3.1, DeepSeek-OCR now correctly detected as vision models
+  - File: `operations/common.py:detect_vision_capability()`
+
+- **Health check improvements:**
+  - **processor_config.json support:** Vision models can use EITHER `preprocessor_config.json` OR `processor_config.json`
+    - Different models use different naming conventions (e.g., DeepSeek-OCR)
+    - Previously: Only `preprocessor_config.json` accepted → false "unhealthy" status
+    - Impact: More vision models pass health checks
+  - **mlx-vlm #624 specific error message:** Index/shard mismatch now distinguished from incomplete downloads
+    - Message: "Index/shard mismatch (mlx-vlm #624). Index references N shards but found M different files. Fix: mlxk convert <model> <output> --repair-index"
+    - Previously: Generic "Missing weight shards" message without fix guidance
+    - Impact: Users get actionable repair instructions
+  - **File Integrity Definition documented:** 5-point definition in `_check_snapshot_health()` docstring
+    - Clarifies: Required files, weight completeness, corruption markers, auxiliary assets
+    - Emphasizes: Integrity (health) vs Runtime (runtime_compatible) separation
+    - Ensures: Consistent checks across list/show/health commands
+  - File: `operations/health.py`
+
+- **Workspace health check bug:** `build_model_object()` now uses `health_check_workspace()` for workspace paths
+  - Previously: Workspace paths triggered cache-based health check → "Model not in cache"
+  - Now: Correct health reasons for workspaces (e.g., "Missing weight shards")
+  - Impact: `mlxk show ./workspace` displays accurate health status
+
+- **Path resolution priority:** Explicit path detection prevents cache bypass
+  - Previously: Any local directory matching model name would bypass cache resolution
+  - Now: Only paths with `./ ../ /` prefixes or `.` `..` are treated as workspaces
+  - Impact: `mlxk show Mistral-Small` tries cache first (even if local dir exists)
+
+- **Sentinel version fix:** Workspace metadata now uses dynamic version
+  - Previously: Hardcoded `"mlxk_version": "2.0.4"` in clone/convert operations
+  - Now: Dynamic import from `mlxk2.__init__.__version__`
+  - Impact: Sentinel metadata automatically tracks current version
+  - Files: `operations/clone.py`, `operations/convert.py`, `operations/workspace.py`
+
+- **Clone operation: Ctrl-C now preserves temp cache for resume:**
+  - Previously: KeyboardInterrupt during `mlxk clone` deleted partial downloads → resume impossible
+  - Root cause: Cleanup logic checked `result["status"] == "success"` first (initial value)
+  - Fix: `cancelled_by_user` flag + inner/outer KeyboardInterrupt handlers + correct cleanup order
+  - Impact: Ctrl-C during clone preserves temp cache, user can resume operation
+  - Files: `operations/clone.py` (lines 59, 139-143, 242-246, 279-302)
+
+- **Clone operation: Partial downloads now resumable automatically:**
+  - Previously: `--force-resume` only worked for "complete but unhealthy" models, not after Ctrl-C
+  - Root cause: Partial downloads (no `.mlxk2_download_complete` marker) treated as non-resumable
+  - Fix: `_check_temp_cache_resume()` now treats partial downloads as resumable
+  - Impact: `mlxk clone` automatically resumes after Ctrl-C (HuggingFace Hub native resume)
+  - Files: `operations/clone.py` (lines 393-424, 447-469)
+  - Note: Resume validation overhead (checksum) takes 5-10 min for large models (HF Hub behavior)
+
+- **Vision server scalability:**
+  - Server now accepts unlimited images (removed 5-image hardcoded limit from beta.5)
+  - Added safe chunk size validation (max 5 images per chunk for Metal stability)
+  - Impact: Large image collections work with server API
+  - Files: `tools/vision_adapter.py`, `operations/serve.py`, `core/server_base.py`
+
+- **Vision metadata positioning:**
+  - Metadata table now appears BEFORE model output (was: after in beta.5)
+  - Key benefit: Vision model can reference metadata in its analysis (filename, GPS, date visible in prompt context)
+  - Secondary benefit: Clearer association with output when processing multiple chunks
+  - File: `core/vision_runner.py`
+
+### Testing
+
+- **Unit tests:** 550 passed, 56 skipped (0 failures)
+  - New: `tests_2.0/test_model_resolution_workspace.py` (9 tests - workspace path resolution)
+  - Extended: `tests_2.0/test_workspace_sentinel.py` (+32 tests - sentinel version, health checks)
+  - Extended: `tests_2.0/test_clone_operation.py` (+10 tests - resumable clone, deterministic naming)
+  - Coverage: workspace detection, path resolution, health checks, resumable clone, sentinel metadata
+
+- **Vision pipe integration tests:** 3 new smoke tests for Vision→Text workflows
+  - Test suite: `tests_2.0/live/test_pipe_vision_geo.py` (marker: `live_vision_pipe`)
+  - Test assets: 9 publishable Stockholm photos with EXIF in `tests_2.0/assets/geo-test/`
+  - Coverage: Batch processing (`--chunk 1`), complete pipe workflow, chunk isolation
+  - Model selection: Hardcoded pixtral + portfolio discovery for text model
+  - **Note:** Smoke tests only (exit 0 = pass), not quality benchmarks
+
+- **Wet Umbrella test integration:** 161 tests total across 4 phases
+  - Phase 1: 152 tests (live_e2e marker)
+  - Phase 2: 3 tests (live_pull marker)
+  - Phase 3: 3 tests (live_clone marker)
+  - Phase 4: 3 tests (live_vision_pipe marker)
+  - Single entry point: `scripts/test-wet-umbrella.sh`
+  - RAM requirements: 64GB recommended (M2 Max tested), 32GB untested
+
+- **Test marker architecture improvements:**
+  - Added umbrella marker `pytest.mark.live` to all 11 live test files
+  - Simplified exclusion: `pytest -m "not live"` (future-proof, scalable)
+  - Old approach: Blacklist individual markers (doesn't scale with new test categories)
+  - Updated: `test-multi-python.sh` uses umbrella marker for clean isolation
+  - Documentation: TESTING-DETAILS.md "Writing New Live Tests: Umbrella Marker Convention"
+
+- **Test marker refactoring:** `live_resumable` → `live_pull` for consistency
+  - Renamed marker to match `live_push`, `live_list` pattern
+  - Updated Wet Umbrella script: 4-Phase separation (wet, live_pull, live_clone, live_vision_pipe)
+  - Files: `pytest.ini`, `conftest.py`, `scripts/test-wet-umbrella.sh`, `TESTING-DETAILS.md`
+
+### Documentation
+
+- **README.md:** Model reference path conventions documented
+- **operations/health.py:** File Integrity Definition documented in `_check_snapshot_health()` docstring
+
+---
+
 ## [2.0.4-beta.5] - 2025-12-31
 
 ### Added

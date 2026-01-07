@@ -159,10 +159,9 @@ def test_vision_adds_filename_mapping_for_multiple_images():
     result = VisionRunner._add_filename_mapping("Images 1 and 3 show motorboats.", images)
 
     # Updated for ADR-017 Phase 1: Collapsible HTML table with EXIF columns (enabled by default)
+    # Session 75: Metadata moved to BEGINNING for better UX in chunking scenarios
     # Hashes: sha256(b"data1")[:8] = 5b41362b, etc.
-    expected = """Images 1 and 3 show motorboats.
-
-<details>
+    expected = """<details>
 <summary>📸 Image Metadata (3 images)</summary>
 
 <!-- mlxk:filenames -->
@@ -173,7 +172,8 @@ def test_vision_adds_filename_mapping_for_multiple_images():
 | 3 | image_f60f2d65.jpeg | vacation3.jpg | - | - | - |
 
 </details>
-"""
+
+Images 1 and 3 show motorboats."""
     assert result == expected
 
 
@@ -185,10 +185,9 @@ def test_vision_no_mapping_for_single_image():
     result = VisionRunner._add_filename_mapping("A dog.", images)
 
     # Updated for ADR-017 Phase 1: Collapsible HTML table with EXIF columns (enabled by default)
+    # Session 75: Metadata moved to BEGINNING for better UX in chunking scenarios
     # Hash: sha256(b"data")[:8] = 3a6eb079
-    expected = """A dog.
-
-<details>
+    expected = """<details>
 <summary>📸 Image Metadata (1 image)</summary>
 
 <!-- mlxk:filenames -->
@@ -197,5 +196,6 @@ def test_vision_no_mapping_for_single_image():
 | 1 | image_3a6eb079.jpeg | single.jpg | - | - | - |
 
 </details>
-"""
+
+A dog."""
     assert result == expected

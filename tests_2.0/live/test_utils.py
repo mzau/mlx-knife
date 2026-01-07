@@ -29,6 +29,46 @@ finally:
     sys.path.remove(str(_parent_dir))
 
 
+# =============================================================================
+# KNOWN BROKEN MODELS - Upstream Runtime Bugs
+# =============================================================================
+# These models pass static health checks (files present, config valid) but fail
+# at runtime initialization due to upstream mlx-lm/mlx-vlm bugs. They are
+# excluded from portfolio discovery to prevent spurious test failures.
+#
+# Policy: Add models here ONLY when:
+#   1. Static health check passes (healthy files)
+#   2. Runtime initialization fails consistently
+#   3. Root cause is verified upstream bug (not mlx-knife bug)
+#   4. Issue is documented (session notes, upstream issue tracker)
+#
+# Format: Full HuggingFace model ID (org/name)
+# =============================================================================
+
+KNOWN_BROKEN_MODELS = {
+    # transformers 5.0 video processor bug: "argument of type 'NoneType' is not iterable"
+    # Root Cause: transformers sets video_processor=None when torchvision unavailable
+    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
+    # Details: docs/ISSUES/transformers-5.0-video-processor-bug.md
+    # Test: `mlxk run mlx-community/MiMo-VL-7B-RL-bf16 "test" --image foo.jpg` → Error
+    # Strategy: Waiting for mlx-vlm Issue #640 resolution
+    "mlx-community/MiMo-VL-7B-RL-bf16",
+
+    # transformers 5.0 video processor bug (same as MiMo-VL above)
+    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
+    # Details: docs/ISSUES/transformers-5.0-video-processor-bug.md
+    # Test: `mlxk run mlx-community/Qwen2-VL-7B-Instruct-4bit "test" --image foo.jpg` → Error
+    # Note: Image-only processing works, video processing broken
+    "mlx-community/Qwen2-VL-7B-Instruct-4bit",
+
+    # mlx-vlm vision feature mismatch: Image token positions (5476) ≠ features (1369)
+    # Status: Upstream mlx-vlm vision encoder/model compatibility bug (separate from #624)
+    # Test: `mlxk run ./Mistral-Small-3.1-24B-Instruct-2503-FIXED-4bit "test" --image foo.jpg` → Error
+    # Note: --repair-index fixes #624 (index mismatch) but NOT this vision feature bug
+    "mlx-community/Mistral-Small-3.1-24B-Instruct-2503-4bit",
+}
+
+
 # RAM calculation utilities (modularized for different model types)
 
 def calculate_text_model_ram_gb(size_bytes: int) -> float:

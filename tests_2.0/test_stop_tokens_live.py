@@ -181,9 +181,10 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
 
     Filters for:
     - Framework: MLX only (not GGUF/PyTorch)
-    - Health: healthy only
+    - Health: healthy only (static file integrity)
     - Runtime: runtime_compatible only (mlx-lm/mlx-vlm can load)
     - Type: chat models (TEXT + VISION, includes all model_type="chat")
+    - Exclusions: KNOWN_BROKEN_MODELS (upstream runtime bugs)
 
     Note: Returns BOTH text and vision models. Caller must filter by capabilities
     if needed (e.g., portfolio_models fixture filters to TEXT-only).
@@ -196,6 +197,15 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     import json
     from mlxk2.core.model_resolution import resolve_model_for_operation
     from mlxk2.core.cache import get_current_model_cache, hf_to_cache_dir
+
+    # Import blacklist (local import to avoid circular dependency)
+    # KNOWN_BROKEN_MODELS is defined in tests_2.0/live/test_utils.py
+    try:
+        sys.path.insert(0, str(Path(__file__).parent / "live"))
+        from test_utils import KNOWN_BROKEN_MODELS
+        sys.path.pop(0)
+    except ImportError:
+        KNOWN_BROKEN_MODELS = set()  # Fallback if import fails
 
     # Check HF_HOME is set (required for mlxk list)
     env = os.environ.copy()
@@ -247,6 +257,10 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
                         model_name = resolved_name
                 except Exception:
                     pass
+
+                # FILTER: Exclude known broken models (upstream runtime bugs)
+                if model_name in KNOWN_BROKEN_MODELS:
+                    continue
 
                 # Ensure cache directory exists (defensive against stale listings)
                 try:

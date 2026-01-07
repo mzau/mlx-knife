@@ -12,13 +12,51 @@ from pathlib import Path
 
 import pytest
 
+from mlxk2 import __version__
 from mlxk2.operations.workspace import (
     write_workspace_sentinel,
     is_managed_workspace,
+    is_workspace_path,
     read_workspace_metadata,
     SENTINEL_FILENAME
 )
 from mlxk2.operations.health import health_check_workspace
+
+
+class TestIsWorkspacePath:
+    """Test is_workspace_path() helper function (ADR-018 Phase 0c)."""
+
+    def test_is_workspace_path_valid_workspace(self, tmp_path):
+        """Test detects valid workspace with config.json."""
+        (tmp_path / "config.json").write_text('{"model_type": "llama"}')
+        assert is_workspace_path(tmp_path) is True
+        assert is_workspace_path(str(tmp_path)) is True  # String path
+
+    def test_is_workspace_path_no_config(self, tmp_path):
+        """Test returns False if config.json missing."""
+        (tmp_path / "other.json").write_text('{}')
+        assert is_workspace_path(tmp_path) is False
+
+    def test_is_workspace_path_nonexistent(self, tmp_path):
+        """Test returns False for nonexistent path."""
+        assert is_workspace_path(tmp_path / "nonexistent") is False
+
+    def test_is_workspace_path_hf_model_id(self, tmp_path):
+        """Test returns False for HF model IDs (not paths)."""
+        assert is_workspace_path("mlx-community/Phi-3-mini") is False
+        assert is_workspace_path("microsoft/phi-2") is False
+
+    def test_is_workspace_path_file_not_directory(self, tmp_path):
+        """Test returns False if path is a file, not directory."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{}')
+        assert is_workspace_path(config_file) is False
+
+    def test_is_workspace_path_invalid_input(self):
+        """Test handles invalid input gracefully."""
+        assert is_workspace_path(None) is False
+        assert is_workspace_path(123) is False
+        assert is_workspace_path([]) is False
 
 
 class TestWorkspaceSentinel:
@@ -27,7 +65,7 @@ class TestWorkspaceSentinel:
     def test_write_sentinel_atomic(self, tmp_path):
         """Test atomic write with rename."""
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "source_repo": "mlx-community/Llama-3.2-3B",
             "source_revision": "abc123",
@@ -43,14 +81,14 @@ class TestWorkspaceSentinel:
         # Verify JSON is valid and matches input
         data = json.loads(sentinel.read_text())
         assert data["managed"] is True
-        assert data["mlxk_version"] == "2.0.4"
+        assert data["mlxk_version"] == __version__
         assert data["operation"] == "clone"
         assert data["source_repo"] == "mlx-community/Llama-3.2-3B"
 
     def test_write_sentinel_creates_valid_json(self, tmp_path):
         """Test sentinel is well-formed JSON."""
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": True,
             "operation": "convert"
@@ -91,7 +129,7 @@ class TestWorkspaceSentinel:
     def test_write_sentinel_allows_additional_fields(self, tmp_path):
         """Test forward compatibility: extra fields allowed."""
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": True,
             "operation": "clone",
@@ -112,7 +150,7 @@ class TestManagedWorkspaceDetection:
     def test_is_managed_workspace_true(self, tmp_path):
         """Test managed workspace detection (has valid sentinel)."""
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": True,
             "operation": "clone"
@@ -129,7 +167,7 @@ class TestManagedWorkspaceDetection:
     def test_is_managed_workspace_false_managed_field_false(self, tmp_path):
         """Test sentinel exists but managed=False."""
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": False,  # Explicitly unmanaged
             "operation": "manual"
@@ -153,7 +191,7 @@ class TestManagedWorkspaceDetection:
     def test_read_workspace_metadata_valid(self, tmp_path):
         """Test reading sentinel metadata."""
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "source_repo": "mlx-community/Model",
             "managed": True,
@@ -162,7 +200,7 @@ class TestManagedWorkspaceDetection:
         write_workspace_sentinel(tmp_path, metadata)
 
         read_data = read_workspace_metadata(tmp_path)
-        assert read_data["mlxk_version"] == "2.0.4"
+        assert read_data["mlxk_version"] == __version__
         assert read_data["source_repo"] == "mlx-community/Model"
 
     def test_read_workspace_metadata_no_sentinel(self, tmp_path):
@@ -187,7 +225,7 @@ class TestWorkspaceHealthCheck:
         # Create minimal valid workspace
         (tmp_path / "config.json").write_text('{"model_type": "llama"}')
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": True,
             "operation": "clone"
@@ -211,7 +249,7 @@ class TestWorkspaceHealthCheck:
         """Test workspace without config.json is unhealthy."""
         # Empty directory
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": True,
             "operation": "clone"
@@ -248,7 +286,7 @@ class TestHealthCheckOperationWorkspaceIntegration:
         (tmp_path / "model.safetensors").write_text("fake weights")
 
         metadata = {
-            "mlxk_version": "2.0.4",
+            "mlxk_version": __version__,
             "created_at": "2025-12-29T10:30:00Z",
             "managed": True,
             "operation": "clone"

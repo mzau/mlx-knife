@@ -149,14 +149,15 @@ All commands that return model information use the same minimal model object.
 - `health`: "healthy" | "unhealthy" (always present).
 - `runtime_compatible`: `true` | `false` (0.1.5+, always present).
 - `reason`: `string | null` (0.1.5+, describes first problem found, null when both checks pass).
-- `cached`: true.
+- `cached`: `true` for cache-managed models (HuggingFace cache), `false` for workspace paths (user-managed local directories).
 
 Notes:
 - No human-readable `size` field; only `size_bytes`.
 - No human-readable "modified" field; `last_modified` is authoritative.
-- No absolute filesystem paths are exposed.
+- No absolute filesystem paths are exposed (except for workspace paths where `name` is the full path).
 - `runtime_compatible` and `reason` fields added in spec version 0.1.5 (Issue #36).
 - `vision` capability added in 0.1.5 as a backward-compatible enum extension (ADR-012 Phase 1a).
+- `cached` field distinguishes cache-managed models (`true`) from workspace paths (`false`). Workspace support added in ADR-018 Phase 0c.
 
 ### Supported Commands
 
@@ -168,11 +169,14 @@ Notes:
 | `pull` | Download models from HuggingFace | ✅ | - |
 | `rm` | Delete models from cache | ✅ | - |
 | `clone` | Clone models to workspace directory | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| `convert` | Repair vision model index files (--repair-index) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
 | `push` | Upload a local folder to Hugging Face (experimental) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
 | `run` | Execute model inference | ✅ | - |
 | `serve`/`server` | OpenAI-compatible API server | ✅ | - |
 
-**Note:** Commands marked with Alpha Feature require `MLXK2_ENABLE_ALPHA_FEATURES=1` environment variable to be available.
+**Notes:**
+- Commands marked with Alpha Feature require `MLXK2_ENABLE_ALPHA_FEATURES=1` environment variable to be available.
+- **Workspace Path Support (ADR-018 Phase 0c):** Commands `show`, `run`, `serve`/`server`, and `health` now accept workspace paths (e.g., `./workspace` or `/absolute/path`) in addition to HuggingFace model IDs. Models in workspaces return `"cached": false` to distinguish them from cache-managed models.
 
 ## Model Discovery & Metadata
 
@@ -213,6 +217,34 @@ Notes:
       }
     ],
     "count": 1
+  },
+  "error": null
+}
+```
+
+**Workspace Path Example (Phase 0c, ADR-018):**
+```json
+{
+  "status": "success",
+  "command": "show",
+  "data": {
+    "model": {
+      "name": "/Users/dev/my-workspace",
+      "hash": null,
+      "size_bytes": 4613734656,
+      "last_modified": "2025-12-29T14:30:00Z",
+      "framework": "MLX",
+      "model_type": "chat",
+      "capabilities": ["text-generation", "chat"],
+      "health": "healthy",
+      "runtime_compatible": true,
+      "reason": null,
+      "cached": false
+    },
+    "metadata": {
+      "model_type": "llama",
+      "quantization": "4bit"
+    }
   },
   "error": null
 }

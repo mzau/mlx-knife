@@ -40,7 +40,7 @@ from .test_utils import (
 # portfolio_models fixture is provided by conftest.py
 
 # Opt-in markers
-pytestmark = [pytest.mark.live_e2e, pytest.mark.slow]
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
 
 
 def _run_mlxk_subprocess(args: list[str], timeout: int = 60) -> tuple[str, str, int]:

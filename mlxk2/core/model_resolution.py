@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Tuple, Optional, List
 from .cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
+from ..operations.workspace import is_workspace_path
 
 
 def expand_model_name(model_name: str) -> str:
@@ -80,15 +81,31 @@ def find_model_by_hash(pattern: str, commit_hash: str) -> Optional[Tuple[Path, s
 
 def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optional[str], Optional[List[str]]]:
     """Resolve model specification for operations.
-    
+
+    Supports both HuggingFace model IDs and local workspace paths.
+
     Returns:
         (resolved_name, commit_hash, ambiguous_matches)
-        
+
     Examples:
         'Phi-3-mini' → ('mlx-community/Phi-3-mini-4k-instruct-4bit', None, None)
-        'Qwen3@e96' → ('Qwen/Qwen3-Coder-480B-A35B-Instruct', 'e96', None) 
+        'Qwen3@e96' → ('Qwen/Qwen3-Coder-480B-A35B-Instruct', 'e96', None)
+        './workspace' → ('/abs/path/to/workspace', None, None)
+        '/abs/path/workspace' → ('/abs/path/workspace', None, None)
+        'Mistral-Small' → cache resolution (NOT workspace, even if local dir exists)
         'ambig' → (None, None, ['model1', 'model2'])
     """
+    # NEW: Check if model_spec is an EXPLICIT workspace path (ADR-018 Phase 0c)
+    # Only paths starting with ./ ../ / or being . or .. are treated as workspace paths
+    # This ensures "model-name" goes through cache resolution even if a local dir exists
+    is_explicit_path = (
+        model_spec.startswith(('./', '../', '/')) or
+        model_spec in ('.', '..')
+    )
+    if is_explicit_path and is_workspace_path(model_spec):
+        # Explicit workspace path - return absolute path, skip cache logic
+        return (str(Path(model_spec).resolve()), None, None)
+
     model_name, commit_hash = parse_model_spec(model_spec)
     
     # For @hash syntax, find by pattern + hash verification
