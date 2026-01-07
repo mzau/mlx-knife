@@ -80,10 +80,10 @@ test_python_version() {
             if python -m mlxk2.cli --version --json > /dev/null 2>&1; then
                 echo -e "${GREEN}✅ CLI test (version) passed${NC}"
                 
-                # Run complete test suite
+                # Run complete test suite (exclude ALL live tests requiring models/network)
                 echo "🧪 Running 2.0 test suite..."
                 local test_log="test_results_${version_name//./_}.log"
-                if python -m pytest tests_2.0/ -v --tb=short > "$test_log" 2>&1; then
+                if python -m pytest tests_2.0/ -m "not live" -v --tb=short > "$test_log" 2>&1; then
                     local passed_count=$(grep -c "PASSED" "$test_log" 2>/dev/null)
                     local failed_count=$(grep -c "FAILED" "$test_log" 2>/dev/null)
                     passed_count=${passed_count:-0}

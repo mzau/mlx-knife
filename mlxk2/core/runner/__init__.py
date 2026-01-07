@@ -16,6 +16,7 @@ from typing import Optional
 from ..cache import get_current_model_cache, hf_to_cache_dir
 from ..model_resolution import resolve_model_for_operation
 from ..reasoning import ReasoningExtractor, StreamingReasoningParser
+from ...operations.workspace import is_workspace_path
 from .token_limits import get_model_context_length, calculate_dynamic_max_tokens
 from .chat_format import apply_user_prompt, format_conversation as _format_conversation_helper
 from .reasoning_format import format_reasoning_response as _format_reasoning_helper
@@ -176,7 +177,12 @@ class MLXRunner:
             # Fallback to provided spec (tests may patch load() to accept any path)
             resolved_name = str(self.model_spec)
 
-        if is_path_like:
+        # NEW: Check if resolved_name is a workspace path
+        if is_workspace_path(resolved_name):
+            # Workspace path - use directly
+            model_path = Path(resolved_name)
+        elif is_path_like:
+            # Cache model - existing logic
             model_cache_dir = (Path(model_cache) if not isinstance(model_cache, Path) else model_cache) / hf_to_cache_dir(resolved_name)
             if commit_hash:
                 model_path = model_cache_dir / "snapshots" / commit_hash

@@ -21,8 +21,8 @@ CLAUDE.md
 TODO_REAL_TESTS.md
 server.log
 install_*.log
-openwebui311/bin/
 .gitignore
+docs/ISSUES/
 
 # Test artifacts (generated reports)
 *_report.json

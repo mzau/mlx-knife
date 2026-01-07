@@ -12,30 +12,31 @@ This implementation:
 User cache is NEVER touched - only temp cache is used and cleaned up.
 """
 
+import hashlib
 import logging
-import os
-import random
 import re
 import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 from .pull import pull_to_cache
 from .workspace import write_workspace_sentinel
 from ..core.cache import hf_to_cache_dir, get_current_cache_root
+from mlxk2 import __version__
 
 logger = logging.getLogger(__name__)
 
 
-def clone_operation(model_spec: str, target_dir: str, health_check: bool = True) -> Dict[str, Any]:
+def clone_operation(model_spec: str, target_dir: str, health_check: bool = True, force_resume: bool = False) -> Dict[str, Any]:
     """Clone operation following ADR-007 Phase 1: Same-Volume APFS strategy.
 
     Args:
         model_spec: Model specification (org/repo[@revision])
         target_dir: Target directory for workspace
         health_check: Whether to run health check before copy (default: True)
+        force_resume: If True, skip unhealthy check and resume partial download (default: False)
 
     Returns:
         JSON response following API 0.1.4 schema
@@ -54,6 +55,7 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
     }
 
     temp_cache = None  # Initialize for cleanup in finally block
+    target_created_by_us = False  # Track if we created target dir (for cleanup on failure)
 
     try:
         # Validate target directory
@@ -105,14 +107,38 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
             result["data"]["clone_status"] = "filesystem_error"
             return result
 
-        # Phase 2: Create temp cache on same volume as workspace
+        # Phase 2: Create or resume temp cache on same volume as workspace (ADR-018 Phase 0b)
         result["data"]["clone_status"] = "preparing"
-        temp_cache = _create_temp_cache_same_volume(target_path)
+        temp_cache, should_download = _create_temp_cache_same_volume(
+            target_path, model_spec, force_resume
+        )
+
+        # Extract resolved model name early for health check
+        resolved_model = model_spec  # Will be updated from pull_result if download happens
 
         try:
-            # Phase 3: Pull to isolated temp cache (no HF_HOME patching needed)
-            result["data"]["clone_status"] = "pulling"
-            pull_result = pull_to_cache(model_spec, temp_cache)
+            # Phase 3: Pull to isolated temp cache (conditional, ADR-018 Phase 0b)
+            try:
+                if should_download:
+                    result["data"]["clone_status"] = "pulling"
+                    pull_result = pull_to_cache(model_spec, temp_cache)
+                else:
+                    # Resuming healthy existing download - skip pull
+                    result["data"]["clone_status"] = "resuming"
+                    logger.info("Skipping download - resuming healthy temp cache")
+                    # Create minimal pull_result for continuation
+                    pull_result = {
+                        "status": "success",
+                        "data": {
+                            "model": model_spec,
+                            "commit_hash": None  # Unknown for resumed cache
+                        }
+                    }
+
+            except KeyboardInterrupt:
+                # User cancelled - set status BEFORE finally block runs
+                result["data"]["clone_status"] = "cancelled"
+                raise  # Re-raise to outer handler
 
             if pull_result["status"] != "success":
                 result["status"] = "error"
@@ -159,6 +185,7 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
             # Phase 6: APFS clone temp cache → workspace (instant, CoW)
             result["data"]["clone_status"] = "cloning"
             target_path.mkdir(parents=True, exist_ok=True)
+            target_created_by_us = True  # Track for cleanup on failure
             clone_success = _apfs_clone_directory(temp_snapshot, target_path)
 
             if not clone_success:
@@ -178,7 +205,7 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
             commit_hash = pull_result["data"].get("commit_hash")
 
             metadata = {
-                "mlxk_version": "2.0.4",  # TODO: Read from __version__
+                "mlxk_version": __version__,
                 "created_at": datetime.utcnow().isoformat() + "Z",
                 "source_repo": resolved_model,
                 "source_revision": commit_hash,
@@ -200,13 +227,80 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True)
             result["data"]["message"] = f"Cloned to {target_dir}"
 
         finally:
-            # Phase 7: Cleanup temp cache (always) - with safety check
-            # TODO (ADR-018 Phase 0b): Make cleanup conditional based on:
-            # - .mlxk2_download_complete marker exists AND
-            # - health status (healthy → cleanup, unhealthy → keep for debugging/repair)
-            # - user choice (prompt if unhealthy: "Keep temp cache for inspection?")
+            # Phase 7: Conditional cleanup (ADR-018 Phase 0b)
+            # Cleanup strategy:
+            # 1. Success (clone complete) → always cleanup (workspace created, temp no longer needed)
+            # 2. User cancelled (Ctrl-C) → keep for resume (partial download, resumable)
+            # 3. Failure with complete download → keep for debugging/repair (user can retry)
+            # 4. Failure with incomplete download → cleanup (partial download, unusable - non-resumable error)
             if temp_cache and temp_cache.exists():
-                _cleanup_temp_cache_safe(temp_cache)
+                should_cleanup = False
+
+                # Check clone_status FIRST (set by inner except before finally runs)
+                if result["data"]["clone_status"] == "cancelled":
+                    # User cancelled - preserve for resume
+                    should_cleanup = False
+                    logger.info(f"Preserving partial download for resume: {temp_cache}")
+                    logger.info("Retry with same model+target to resume download")
+                elif result["status"] == "success":
+                    # Clone succeeded - always cleanup
+                    should_cleanup = True
+                    cleanup_reason = "clone succeeded"
+                else:
+                    # Clone failed - check if download was complete
+                    download_marker = temp_cache / ".mlxk2_download_complete"
+                    if download_marker.exists():
+                        # Complete download failed - keep for debugging
+                        should_cleanup = False
+                        logger.info(f"Keeping temp cache for inspection: {temp_cache}")
+                        logger.info("Retry with same target to resume, or use --force-resume")
+                    else:
+                        # Incomplete download - cleanup
+                        should_cleanup = True
+                        cleanup_reason = "incomplete download"
+
+                if should_cleanup:
+                    logger.debug(f"Cleaning up temp cache ({cleanup_reason}): {temp_cache}")
+                    _cleanup_temp_cache_safe(temp_cache)
+
+            # Phase 8: Cleanup partial target directory on failure (defensive)
+            # If clone failed after we created target_path but before success,
+            # remove it so retries can proceed cleanly
+            if target_created_by_us and result["status"] != "success":
+                if target_path.exists() and not any(target_path.iterdir()):
+                    # Only remove if empty (safety check - don't delete user data)
+                    try:
+                        target_path.rmdir()
+                        logger.debug(f"Cleaned up empty target directory: {target_path}")
+                    except OSError as e:
+                        logger.warning(f"Failed to cleanup target directory: {e}")
+
+    except KeyboardInterrupt:
+        # User cancelled - set status (clone_status may already be set by inner except)
+        result["status"] = "error"
+        if result["data"]["clone_status"] != "cancelled":
+            # KeyboardInterrupt before inner try/except - set clone_status now
+            result["data"]["clone_status"] = "cancelled"
+
+        # Prepare error message (check temp_cache state)
+        if temp_cache and temp_cache.exists():
+            result["error"] = {
+                "type": "UserCancelledError",
+                "message": (
+                    "Operation cancelled by user.\n"
+                    f"Partial download preserved at: {temp_cache}\n"
+                    f"To resume: Run the same command again (same model + target).\n"
+                    f"To delete: rm -rf {temp_cache}"
+                )
+            }
+            logger.info("Operation cancelled - temp cache preserved for resume")
+        else:
+            result["error"] = {
+                "type": "UserCancelledError",
+                "message": "Operation cancelled by user."
+            }
+            logger.info("Operation cancelled - no temp cache to preserve")
+        # Don't re-raise - return error result for clean CLI output
 
     except Exception as e:
         result["status"] = "error"
@@ -277,29 +371,109 @@ def _is_apfs_filesystem(path: Path) -> bool:
         return False  # Safe fallback
 
 
-def _create_temp_cache_same_volume(target_workspace: Path) -> Path:
-    """Create temp cache on same APFS volume as target for CoW optimization.
+def _get_deterministic_temp_cache_name(model_spec: str, target_workspace: Path) -> str:
+    """Generate deterministic temp cache name for resumable clone (ADR-018 Phase 0b).
 
-    TODO (ADR-018 Phase 0b - Resumable Clone):
-    Change naming to deterministic for resume support:
-        OLD: f".mlxk2_temp_{os.getpid()}_{random.randint(...)}"  # ephemeral
-        NEW: f".mlxk2_temp_{hash(model_spec + target_workspace)}"  # deterministic
+    Args:
+        model_spec: Model specification (org/repo[@revision])
+        target_workspace: Target workspace path
 
-    This allows detection of existing partial downloads for resume prompts.
+    Returns:
+        Deterministic temp cache directory name (e.g., ".mlxk2_temp_a1b2c3d4e5f6g7h8")
+    """
+    # Deterministic hash: model_spec + target_workspace absolute path
+    # Use first 16 hex chars for readability (64-bit hash, collision unlikely)
+    hash_input = f"{model_spec}:{target_workspace.resolve()}"
+    hash_hex = hashlib.sha256(hash_input.encode()).hexdigest()[:16]
+    return f".mlxk2_temp_{hash_hex}"
+
+
+def _check_temp_cache_resume(temp_cache: Path, model_spec: str) -> Tuple[bool, str, bool]:
+    """Check if temp cache can be resumed (ADR-018 Phase 0b).
+
+    Args:
+        temp_cache: Temp cache directory path
+        model_spec: Model specification for health check
+
+    Returns:
+        Tuple of (can_resume, reason, is_healthy)
+        - can_resume: True if temp cache exists (partial or complete)
+        - reason: Human-readable explanation
+        - is_healthy: True if download is complete AND passed health check
+    """
+    # Check 1: Does temp cache exist?
+    if not temp_cache.exists():
+        return False, "No existing download", False
+
+    # Check 2: Is download complete?
+    download_marker = temp_cache / ".mlxk2_download_complete"
+    if not download_marker.exists():
+        # Partial download (e.g., Ctrl-C) - resumable via HuggingFace
+        # No health check needed for partial downloads
+        return True, "Partial download (resumable via HuggingFace)", False
+
+    # Check 3: Health check on completed download
+    from .health import health_from_cache
+    healthy, health_message = health_from_cache(model_spec, temp_cache)
+
+    if healthy:
+        return True, "Complete and healthy", True
+    else:
+        return True, f"Complete but unhealthy: {health_message}", False
+
+
+def _create_temp_cache_same_volume(target_workspace: Path, model_spec: str, force_resume: bool = False) -> Tuple[Path, bool]:
+    """Create or resume temp cache on same APFS volume (ADR-018 Phase 0b).
+
+    Args:
+        target_workspace: Target workspace path
+        model_spec: Model specification (for deterministic naming)
+        force_resume: If True, skip unhealthy check and resume
+
+    Returns:
+        Tuple of (temp_cache_path, should_download)
+        - temp_cache_path: Path to temp cache directory
+        - should_download: True if download needed, False if resuming healthy cache
     """
     # Get target volume mount point via st_dev
     target_volume = _get_volume_mount_point(target_workspace)
 
-    # Create temp cache on same volume
-    # NOTE: PID-based (ephemeral) - will become deterministic in Phase 0b
-    temp_cache = target_volume / f".mlxk2_temp_{os.getpid()}_{random.randint(1000,9999)}"
-    temp_cache.mkdir(parents=True)
+    # Deterministic naming (ADR-018 Phase 0b)
+    temp_cache_name = _get_deterministic_temp_cache_name(model_spec, target_workspace)
+    temp_cache = target_volume / temp_cache_name
+
+    # Check if we can resume existing temp cache
+    can_resume, resume_reason, is_healthy = _check_temp_cache_resume(temp_cache, model_spec)
+
+    if can_resume:
+        download_marker = temp_cache / ".mlxk2_download_complete"
+
+        if not download_marker.exists():
+            # Partial download (Ctrl-C) - resume via HuggingFace snapshot_download
+            logger.info(f"Resuming partial download: {resume_reason}")
+            return temp_cache, True  # should_download=True to call pull_to_cache (resumes automatically)
+        elif is_healthy:
+            # Complete + Healthy - skip download entirely, use existing
+            logger.info(f"Using existing healthy download: {resume_reason}")
+            return temp_cache, False  # should_download=False
+        elif force_resume:
+            # Complete + Unhealthy + force - use broken model without re-downloading
+            logger.warning(f"Force resuming unhealthy download: {resume_reason}")
+            return temp_cache, False  # should_download=False
+        else:
+            # Complete + Unhealthy + no force - delete and restart fresh
+            logger.warning(f"Deleting unhealthy temp cache: {resume_reason}")
+            shutil.rmtree(temp_cache)
+            # Fall through to create new
+
+    # Create new temp cache (either no existing or deleted unhealthy)
+    temp_cache.mkdir(parents=True, exist_ok=True)
 
     # SAFETY: Create sentinel file to prevent accidental user cache deletion
     sentinel = temp_cache / ".mlxk2_temp_cache_sentinel"
-    sentinel.write_text(f"mlxk2_temp_cache_created_{int(time.time())}")
+    sentinel.write_text(f"mlxk2_temp_cache_created_{int(time.time())}\n")
 
-    return temp_cache
+    return temp_cache, True
 
 
 def _get_volume_mount_point(path: Path) -> Path:

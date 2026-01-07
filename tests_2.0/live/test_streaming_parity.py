@@ -43,6 +43,7 @@ from .test_utils import (
 
 # Opt-in markers
 pytestmark = [
+    pytest.mark.live,
     pytest.mark.live_e2e,
     pytest.mark.slow,
     pytest.mark.skipif(

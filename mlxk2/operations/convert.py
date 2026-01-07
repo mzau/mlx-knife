@@ -28,6 +28,7 @@ from typing import Dict, Any
 from .workspace import write_workspace_sentinel, is_managed_workspace, read_workspace_metadata
 from .health import health_check_workspace
 from ..core.cache import get_current_cache_root
+from mlxk2 import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +252,7 @@ def convert_operation(
             src_metadata = read_workspace_metadata(src)
 
         target_metadata = {
-            "mlxk_version": "2.0.4",  # TODO: Read from __version__
+            "mlxk_version": __version__,
             "created_at": datetime.utcnow().isoformat() + "Z",
             "source_repo": src_metadata.get("source_repo", str(src)),
             "source_revision": src_metadata.get("source_revision"),

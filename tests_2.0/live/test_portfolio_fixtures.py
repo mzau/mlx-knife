@@ -5,8 +5,9 @@ These tests verify that text_portfolio and vision_portfolio fixtures work correc
 
 import pytest
 
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
-@pytest.mark.live_e2e
+
 def test_text_portfolio_contains_only_text_models(text_portfolio):
     """Verify that text_portfolio contains no vision models."""
     # Should have at least one text model (or be empty if no HF_HOME)

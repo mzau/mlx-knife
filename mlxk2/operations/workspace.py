@@ -10,7 +10,7 @@ Managed workspaces contain a `.mlxk_workspace.json` sentinel file that enables:
 
 Sentinel format:
 {
-  "mlxk_version": "2.0.4",
+  "mlxk_version": "<version>",  // e.g., "2.0.4b6"
   "created_at": "2025-12-29T10:30:00Z",
   "source_repo": "mlx-community/Llama-3.2-3B",
   "source_revision": "abc123def456",
@@ -140,3 +140,31 @@ def read_workspace_metadata(workspace_path: Path) -> Dict[str, Any]:
     except (json.JSONDecodeError, OSError) as e:
         logger.debug(f"Failed to read sentinel in {workspace_path}: {e}")
         return {}
+
+
+def is_workspace_path(path) -> bool:
+    """Check if path points to a workspace directory (managed or unmanaged).
+
+    A workspace is any directory containing a config.json file (MLX model structure).
+    This includes both managed workspaces (with .mlxk_workspace.json) and
+    unmanaged workspaces (3rd-party model directories).
+
+    Args:
+        path: Path-like object (str, Path) to check
+
+    Returns:
+        True if path exists and contains config.json, False otherwise
+
+    Examples:
+        >>> is_workspace_path("./my-workspace")
+        True
+        >>> is_workspace_path("/path/to/model")
+        True
+        >>> is_workspace_path("mlx-community/Phi-3-mini")
+        False  # HF model ID, not a path
+    """
+    try:
+        p = Path(path)
+        return p.exists() and (p / "config.json").exists()
+    except (TypeError, OSError):
+        return False

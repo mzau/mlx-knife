@@ -1171,11 +1171,12 @@ def pytest_collection_modifyitems(config, items):
 
     Wet Umbrella groups tests that can run together in one pytest invocation:
     - User Cache READ tests (live_e2e, live_stop_tokens, live_run, live_list)
-    - Workspace operations (live_push, live_clone)
+    - Workspace operations (live_push)
     - Issue reproduction (issue27)
 
-    Excluded from wet:
-    - live_resumable (Isolated Cache WRITE - requires clean import state)
+    Excluded from wet (Isolated Cache WRITE - requires clean import state):
+    - live_pull (resumable pull tests)
+    - live_clone (clone tests with internal pull)
     - Model validation tests (memory-intensive, belongs in separate benchmark suite)
 
     See: TESTING-DETAILS.md → Extended Truth Table
@@ -1187,7 +1188,6 @@ def pytest_collection_modifyitems(config, items):
         "live_run",           # User Cache READ
         "live_list",          # User Cache READ
         "live_push",          # Workspace (not Cache)
-        "live_clone",         # Workspace (not Cache)
         "issue27",            # User Cache READ
     }
 
@@ -1209,8 +1209,8 @@ def pytest_collection_modifyitems(config, items):
 
         # Wet marker for compatible tests
         if (test_markers & LIVE_MARKERS_FOR_WET) or is_in_live_dir:
-            # EXCLUDE live_resumable (Isolated Cache WRITE - incompatible!)
-            if "live_resumable" not in test_markers:
+            # EXCLUDE Isolated Cache WRITE tests (incompatible with Portfolio Discovery!)
+            if "live_pull" not in test_markers and "live_clone" not in test_markers:
                 item.add_marker(pytest.mark.wet)
 
 

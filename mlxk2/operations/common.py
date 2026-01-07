@@ -213,9 +213,18 @@ def detect_vision_capability(probe: Path, config: Optional[Dict[str, Any]]) -> b
 
     Video models (AutoVideoProcessor) are excluded as they require PyTorch/Torchvision.
     mlx-vlm only supports image vision models (AutoImageProcessor).
+
+    Note: skip_vision flag indicates vision components can be skipped for text-only
+    inference, but does NOT mean the model lacks vision capabilities.
     """
     try:
         if isinstance(config, dict):
+            # Check for vision_config presence (Mistral-Small 3.1 has vision_config with skip_vision)
+            vision_config = config.get("vision_config")
+            if isinstance(vision_config, dict):
+                # Vision config present = vision model (even if skip_vision=true)
+                return True
+
             mt = config.get("model_type")
             if isinstance(mt, str) and mt.lower() in VISION_MODEL_TYPES:
                 return True
@@ -330,8 +339,11 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     selected_path: points at the chosen snapshot directory when available; otherwise
     may be the model_root. Commit hash is taken from selected_path.name if it looks
     like a 40-char hex string, else None.
+
+    ADR-018 Phase 0c: Supports workspace paths (hf_name can be absolute path).
     """
-    from ..operations.health import is_model_healthy, check_runtime_compatibility  # local import to avoid cycle
+    from ..operations.health import is_model_healthy, check_runtime_compatibility, health_check_workspace
+    from ..operations.workspace import is_workspace_path
 
     # Compute commit hash if selected path is a snapshot dir
     commit_hash: Optional[str] = None
@@ -351,8 +363,13 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     capabilities = detect_capabilities(model_type, hf_name, tok, config, probe)
     has_vision = "vision" in capabilities
 
-    # Health: rely on existing operation (name-based)
-    healthy, health_reason = is_model_healthy(hf_name)
+    # Health: workspace-aware (ADR-018 Phase 0c)
+    if is_workspace_path(hf_name):
+        # Workspace path - use workspace health check directly
+        healthy, health_reason, _ = health_check_workspace(Path(hf_name))
+    else:
+        # Cache model - use name-based health check
+        healthy, health_reason = is_model_healthy(hf_name)
 
     # Runtime compatibility: ALWAYS computed (gate logic applies)
     # Gate 1: File integrity must be healthy
@@ -376,6 +393,10 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
 
     # Size/Modified computed from selected path (snapshot preferred)
     base = selected_path if selected_path is not None else model_root
+
+    # Cached flag: True for cache models, False for workspace paths (ADR-018 Phase 0c)
+    cached = not is_workspace_path(hf_name)
+
     model_obj = {
         "name": hf_name,
         "hash": commit_hash,
@@ -387,6 +408,6 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         "health": "healthy" if healthy else "unhealthy",
         "runtime_compatible": runtime_compatible,
         "reason": reason,
-        "cached": True,
+        "cached": cached,
     }
     return model_obj

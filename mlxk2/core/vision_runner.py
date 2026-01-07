@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Sequence, Tuple
 
+from ..operations.workspace import is_workspace_path
+
 
 @dataclass
 class ExifData:
@@ -96,9 +98,17 @@ class VisionRunner:
         if self._load is None or self._generate is None:
             raise RuntimeError("mlx-vlm is missing load()/generate() API")
 
-        # mlx-vlm expects HF repo_id, not local path
-        # local_files_only=True: Use mlx-knife's cache only, never download (pull's responsibility)
-        loaded = self._load(self.model_name, local_files_only=True)
+        # Check if model_path is a workspace directory
+        if is_workspace_path(self.model_path):
+            # Workspace path - use model_path directly
+            model_ref = str(self.model_path)
+            loaded = self._load(model_ref)  # No local_files_only needed for direct path
+        else:
+            # HF repo_id - use model_name with local_files_only
+            # local_files_only=True: Use mlx-knife's cache only, never download (pull's responsibility)
+            model_ref = self.model_name
+            loaded = self._load(model_ref, local_files_only=True)
+
         if isinstance(loaded, tuple):
             # Common pattern: (model, processor)
             self.model = loaded[0] if len(loaded) > 0 else None
@@ -112,8 +122,8 @@ class VisionRunner:
         if self.model is None:
             raise RuntimeError("mlx-vlm load() returned no model")
 
-        # Load config for chat template (local cache only)
-        self.config = self._load_config(self.model_name, local_files_only=True)
+        # Load config for chat template (use same model_ref)
+        self.config = self._load_config(model_ref, local_files_only=(model_ref == self.model_name))
 
     def _prepare_images(self, images: Sequence[Tuple[str, bytes]] | None):
         """
@@ -148,6 +158,7 @@ class VisionRunner:
         top_p: float = 0.9,
         repetition_penalty: float = 1.0,
         image_id_map: Optional[Dict[str, int]] = None,
+        total_images: Optional[int] = None,
     ) -> str:
         """Generate a response with optional images. Non-streaming.
 
@@ -160,15 +171,21 @@ class VisionRunner:
             repetition_penalty: Repetition penalty
             image_id_map: Optional mapping of content_hash -> image_id for stable
                          numbering across requests. If None, uses request-scoped IDs.
+            total_images: Total number of images in full batch (for chunking context)
         """
         # Prepare image file paths
         image_paths = self._prepare_images(images)
 
         try:
+            # Augment prompt with metadata context (GPS, datetime, camera, chunk info)
+            augmented_prompt = self._augment_prompt_with_metadata(
+                prompt, images, image_id_map, total_images
+            )
+
             # Apply chat template (required for vision models)
             num_images = len(image_paths) if image_paths else 0
             formatted_prompt = self._apply_chat_template(
-                self.processor, self.config, prompt, num_images=num_images
+                self.processor, self.config, augmented_prompt, num_images=num_images
             )
 
             # Build generation kwargs
@@ -196,7 +213,7 @@ class VisionRunner:
 
             # Add filename mapping (even for single images - enables cross-model workflows)
             if images:
-                normalized = self._add_filename_mapping(normalized, images, image_id_map)
+                normalized = self._add_filename_mapping(normalized, images, image_id_map, total_images)
 
             return normalized
         except Exception as e:
@@ -204,6 +221,104 @@ class VisionRunner:
         finally:
             # Clean up temp files after generation (success or error)
             self._cleanup_temp_files()
+
+    @staticmethod
+    def _augment_prompt_with_metadata(
+        prompt: str,
+        images: Sequence[Tuple[str, bytes]],
+        image_id_map: Optional[Dict[str, int]],
+        total_images: Optional[int],
+    ) -> str:
+        """Augment user prompt with image metadata context for better responses.
+
+        Prepends metadata (GPS coordinates, datetime, camera) to the user prompt
+        so the model can use this information in its response.
+
+        Feature flag: MLXK2_VISION_METADATA_CONTEXT=0 to disable (default: enabled)
+
+        Args:
+            prompt: User prompt
+            images: List of (filename, bytes) tuples
+            image_id_map: Mapping of content_hash -> image_id for stable numbering
+            total_images: Total images in full batch (for chunking context)
+
+        Returns:
+            Augmented prompt with metadata context prepended
+        """
+        # Feature flag: Can be disabled
+        if os.environ.get("MLXK2_VISION_METADATA_CONTEXT") == "0":
+            return prompt
+
+        if not images:
+            return prompt
+
+        # Extract EXIF for all images
+        metadata_lines = []
+
+        # Per-image metadata
+        for idx, (filename, img_bytes) in enumerate(images, 1):
+            # Determine image ID
+            if image_id_map:
+                content_hash = hashlib.sha256(img_bytes).hexdigest()[:8]
+                img_id = image_id_map.get(content_hash, idx)
+            else:
+                img_id = idx
+
+            # Add chunk context line before first image (if chunking active)
+            if idx == 1 and total_images and total_images > len(images):
+                # Calculate chunk info
+                chunk_size = len(images)
+                if image_id_map:
+                    # Find all IDs in current chunk to determine range
+                    chunk_ids = []
+                    for fn, ib in images:
+                        ch = hashlib.sha256(ib).hexdigest()[:8]
+                        if ch in image_id_map:
+                            chunk_ids.append(image_id_map[ch])
+
+                    if chunk_ids:
+                        start_id = min(chunk_ids)
+                        end_id = max(chunk_ids)
+                        batch_num = (start_id - 1) // chunk_size + 1
+                        total_batches = (total_images + chunk_size - 1) // chunk_size
+                        metadata_lines.append(
+                            f"[Processing batch {batch_num}/{total_batches}: "
+                            f"Images {start_id}-{end_id} (chunk_size={chunk_size}, {total_images} total)]"
+                        )
+
+            # Extract EXIF
+            exif = VisionRunner._extract_exif(img_bytes)
+
+            # Build metadata string for this image
+            meta_parts = [f"Image {img_id}"]
+
+            if exif:
+                if exif.gps_lat is not None and exif.gps_lon is not None:
+                    # Format GPS coordinates
+                    lat_dir = "N" if exif.gps_lat >= 0 else "S"
+                    lon_dir = "E" if exif.gps_lon >= 0 else "W"
+                    meta_parts.append(
+                        f"GPS: {abs(exif.gps_lat):.2f}°{lat_dir}, {abs(exif.gps_lon):.2f}°{lon_dir}"
+                    )
+
+                if exif.datetime:
+                    # Format datetime (just date for brevity)
+                    meta_parts.append(f"Date: {exif.datetime[:10]}")
+
+                if exif.camera:
+                    # Shorten camera name for token efficiency
+                    camera = exif.camera.replace("(", "").replace(")", "").replace("generation", "gen")
+                    meta_parts.append(f"Camera: {camera}")
+
+            if len(meta_parts) > 1:  # Only add if we have metadata beyond image ID
+                metadata_lines.append("[" + " | ".join(meta_parts) + "]")
+
+        # Prepend metadata to prompt
+        if metadata_lines:
+            metadata_context = "\n".join(metadata_lines)
+            return f"{metadata_context}\n\n{prompt}"
+        else:
+            return prompt
 
     @staticmethod
     def _extract_exif(image_bytes: bytes) -> Optional[ExifData]:
@@ -315,11 +430,12 @@ class VisionRunner:
         result: str,
         images: Sequence[Tuple[str, bytes]],
         image_id_map: Optional[Dict[str, int]] = None,
+        total_images: Optional[int] = None,
     ) -> str:
-        """Add filename mapping footer for multiple images (deterministic).
+        """Add filename mapping header for multiple images (deterministic).
 
         Vision models reference images by position (Image 1, Image 2, etc.).
-        This footer helps users map positions back to original filenames.
+        This header helps users map positions back to original filenames.
 
         The mapping is formatted as a Markdown table with an HTML comment marker
         '<!-- mlxk:filenames -->'. This makes it:
@@ -340,7 +456,7 @@ class VisionRunner:
                          numbering. If None, uses request-scoped sequential IDs.
 
         Returns:
-            Result with appended filename mapping
+            Result with prepended filename mapping (metadata before model output)
         """
         # Extract EXIF data (optional, controlled by feature flag)
         exif_enabled = os.environ.get("MLXK2_EXIF_METADATA") != "0"
@@ -414,12 +530,35 @@ class VisionRunner:
         # Build collapsible HTML details (collapsed by default)
         # The marker comment is preserved for backwards compatibility
         count = len(images)
-        mapping = "\n\n<details>\n"
-        mapping += f"<summary>📸 Image Metadata ({count} image{'s' if count != 1 else ''})</summary>\n\n"
+        mapping = "<details>\n"  # No leading newlines - this goes at beginning of output
+
+        # Determine summary text (with chunk info if chunking is active)
+        if total_images and total_images > count and image_id_map:
+            # Chunking is active - show batch info
+            chunk_ids = []
+            for _, raw_bytes in images:
+                content_hash = hashlib.sha256(raw_bytes).hexdigest()[:8]
+                if content_hash in image_id_map:
+                    chunk_ids.append(image_id_map[content_hash])
+
+            if chunk_ids:
+                start_id = min(chunk_ids)
+                end_id = max(chunk_ids)
+                chunk_size = len(images)
+                batch_num = (start_id - 1) // chunk_size + 1
+                total_batches = (total_images + chunk_size - 1) // chunk_size
+                mapping += f"<summary>📸 Batch {batch_num}/{total_batches}: Images {start_id}-{end_id}</summary>\n\n"
+            else:
+                # Fallback if chunk_ids calculation fails
+                mapping += f"<summary>📸 Image Metadata ({count} image{'s' if count != 1 else ''})</summary>\n\n"
+        else:
+            # No chunking - standard summary
+            mapping += f"<summary>📸 Image Metadata ({count} image{'s' if count != 1 else ''})</summary>\n\n"
         mapping += "<!-- mlxk:filenames -->\n"
         mapping += f"{header}\n"
         mapping += f"{separator}\n"
         mapping += "\n".join(rows) + "\n"
-        mapping += "\n</details>\n"
+        mapping += "\n</details>\n\n"  # Spacing after metadata table
 
-        return result + mapping
+        # Metadata goes BEFORE model output (matches input order, clearer UX in chunking)
+        return mapping + result

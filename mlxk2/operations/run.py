@@ -3,10 +3,13 @@ Run operation for 2.0 implementation.
 Ported from 1.x with 2.0 architecture integration.
 """
 
+import hashlib
 import json
+import os
 import subprocess
 import sys
-from typing import Optional, Sequence, Tuple
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
 
 from ..core.runner import MLXRunner
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
@@ -147,10 +150,98 @@ def check_memory_for_server(
     return None
 
 
+def _process_images_in_chunks(
+    model_path: str,
+    model_name: str,
+    prompt: str,
+    images: List[Tuple[str, bytes]],
+    chunk_size: int,
+    max_tokens: Optional[int],
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    verbose: bool,
+    json_output: bool = False,
+) -> str:
+    """Process images in batches with isolated model instances per chunk.
+
+    Each chunk creates a fresh VisionRunner to prevent state leakage between batches.
+    This ensures each image is processed independently without context from previous images.
+
+    Args:
+        model_path: Path to model snapshot directory
+        model_name: Model name for VisionRunner
+        prompt: User prompt
+        images: Full list of (filename, bytes) tuples
+        chunk_size: Images per batch
+        max_tokens, temperature, top_p, repetition_penalty: Generation params
+        verbose: Show chunk progress
+        json_output: If True, suppress incremental output and return full result
+
+    Returns:
+        Combined text with merged filename mappings (or empty if printed incrementally)
+    """
+    # Lazy import: only load VisionRunner when needed (Python 3.10+ required)
+    from ..core.vision_runner import VisionRunner
+
+    # Pre-assign global image IDs (1..N) before chunking
+    # IMPORTANT: Use [:8] to match vision_runner.py hash length (line 367, 373)
+    image_id_map = {}
+    for idx, (filename, image_bytes) in enumerate(images, start=1):
+        content_hash = hashlib.sha256(image_bytes).hexdigest()[:8]
+        image_id_map[content_hash] = idx
+
+    # Split into chunks
+    chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
+
+    # Process each chunk with fresh runner (prevents state leakage)
+    all_results = []
+    for chunk_idx, chunk in enumerate(chunks, start=1):
+        if verbose:
+            start_img = (chunk_idx - 1) * chunk_size + 1
+            end_img = min(chunk_idx * chunk_size, len(images))
+            print(
+                f"Processing images {start_img}-{end_img} (chunk {chunk_idx}/{len(chunks)})...",
+                file=sys.stderr
+            )
+
+        # Fresh runner per chunk to prevent KV-cache/state accumulation
+        with VisionRunner(model_path, model_name, verbose=verbose) as runner:
+            chunk_result = runner.generate(
+                prompt=prompt,
+                images=chunk,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                image_id_map=image_id_map,  # Global numbering preserved
+                total_images=len(images),  # Enable chunk context line
+            )
+
+        # Incremental output for better UX (show results as they come)
+        if not json_output:
+            try:
+                print(chunk_result)
+                print()  # Blank line between chunks
+                sys.stdout.flush()  # Ensure immediate output
+            except BrokenPipeError:
+                sys.stderr.close()
+
+        all_results.append(chunk_result)
+
+    # Return combined results for json_output mode
+    # For non-json mode, return empty since we already printed incrementally
+    if json_output:
+        return "\n\n".join(all_results)
+    else:
+        return ""  # Already printed incrementally, avoid duplicate output
+
+
 def run_model(
     model_spec: str,
     prompt: Optional[str] = None,
     images: Optional[Sequence[Tuple[str, bytes]]] = None,
+    chunk: int = 1,
     stream: bool = True,
     max_tokens: Optional[int] = None,
     temperature: float = 0.7,
@@ -196,32 +287,52 @@ def run_model(
         # Only perform compatibility check if model is actually in cache
         is_vision_model = False
         model_path = None
+        model_cache_dir = None
         cfg = None
         if resolved_name:
-            model_cache = get_current_model_cache()
-            model_cache_dir = model_cache / hf_to_cache_dir(resolved_name)
+            from .workspace import is_workspace_path
 
-            if model_cache_dir.exists():
-                snapshots_dir = model_cache_dir / "snapshots"
-                if snapshots_dir.exists():
-                    # Resolve snapshot path (commit-pinned or latest)
-                    if commit_hash:
-                        model_path = snapshots_dir / commit_hash
-                    else:
-                        snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                        if snapshots:
-                            model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+            # Check if resolved_name is a workspace path (ADR-018 Phase 0c)
+            if is_workspace_path(resolved_name):
+                # Workspace path - use directly
+                model_path = Path(resolved_name)
+                model_cache_dir = model_path.parent  # For detect_framework compatibility
 
-                    # Detect vision capability to select backend
-                    cfg_path = model_path / "config.json" if model_path else None
-                    if cfg_path and cfg_path.exists():
-                        try:
-                            cfg = json.loads(cfg_path.read_text(encoding="utf-8", errors="ignore"))
-                        except Exception:
-                            cfg = None
+                # Detect vision capability from workspace
+                cfg_path = model_path / "config.json"
+                if cfg_path.exists():
+                    try:
+                        cfg = json.loads(cfg_path.read_text(encoding="utf-8", errors="ignore"))
+                    except Exception:
+                        cfg = None
 
-                    if model_path is not None:
-                        is_vision_model = detect_vision_capability(model_path, cfg)
+                is_vision_model = detect_vision_capability(model_path, cfg)
+            else:
+                # Cache model - existing logic
+                model_cache = get_current_model_cache()
+                model_cache_dir = model_cache / hf_to_cache_dir(resolved_name)
+
+                if model_cache_dir.exists():
+                    snapshots_dir = model_cache_dir / "snapshots"
+                    if snapshots_dir.exists():
+                        # Resolve snapshot path (commit-pinned or latest)
+                        if commit_hash:
+                            model_path = snapshots_dir / commit_hash
+                        else:
+                            snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                            if snapshots:
+                                model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+
+                        # Detect vision capability to select backend
+                        cfg_path = model_path / "config.json" if model_path else None
+                        if cfg_path and cfg_path.exists():
+                            try:
+                                cfg = json.loads(cfg_path.read_text(encoding="utf-8", errors="ignore"))
+                            except Exception:
+                                cfg = None
+
+                        if model_path is not None:
+                            is_vision_model = detect_vision_capability(model_path, cfg)
 
                     # If images are provided but model is not vision-capable, fail fast
                     if images and not is_vision_model:
@@ -302,17 +413,56 @@ def run_model(
                 return error_result
 
             try:
-                # Lazy import: only load VisionRunner when needed (Python 3.10+ required)
-                from ..core.vision_runner import VisionRunner
+                # Get chunk size (with env var override)
+                chunk_size = chunk if chunk != 1 else int(os.environ.get("MLXK2_VISION_BATCH_SIZE", "1"))
 
-                with VisionRunner(model_path, resolved_name or model_spec, verbose=verbose) as runner:
-                    result = runner.generate(
+                # Validate chunk size for Metal API stability
+                from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
+                if chunk_size < 1:
+                    error_result = (
+                        f"Error: chunk size must be at least 1 (got: {chunk_size})."
+                    )
+                    if not json_output:
+                        print(error_result, file=sys.stderr)
+                    return error_result
+                if chunk_size > MAX_SAFE_CHUNK_SIZE:
+                    error_result = (
+                        f"Error: chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
+                        f"This limit is based on empirically tested performance."
+                    )
+                    if not json_output:
+                        print(error_result, file=sys.stderr)
+                    return error_result
+
+                images_list = list(images or [])
+
+                if len(images_list) <= chunk_size:
+                    # Single batch (no chunking needed) - use single runner instance
+                    from ..core.vision_runner import VisionRunner
+
+                    with VisionRunner(model_path, resolved_name or model_spec, verbose=verbose) as runner:
+                        result = runner.generate(
+                            prompt=prompt,
+                            images=images_list,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            top_p=top_p,
+                            repetition_penalty=repetition_penalty,
+                        )
+                else:
+                    # Multi-batch chunking - creates fresh runner per chunk
+                    result = _process_images_in_chunks(
+                        model_path=model_path,
+                        model_name=resolved_name or model_spec,
                         prompt=prompt,
-                        images=list(images or []),
+                        images=images_list,
+                        chunk_size=chunk_size,
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
                         repetition_penalty=repetition_penalty,
+                        verbose=verbose,
+                        json_output=json_output,
                     )
             except Exception as e:
                 error_result = f"Error: {e}"
@@ -532,6 +682,7 @@ def run_model_enhanced(
     model_spec: str,
     prompt: Optional[str],
     images: Optional[Sequence[Tuple[str, bytes]]] = None,
+    chunk: int = 1,
     stream: bool = True,
     max_tokens: Optional[int] = None,
     temperature: float = 0.7,
@@ -576,6 +727,7 @@ def run_model_enhanced(
         model_spec=model_spec,
         prompt=prompt,
         images=images,
+        chunk=chunk,
         stream=stream,
         max_tokens=max_tokens,
         temperature=temperature,

@@ -30,6 +30,7 @@ from .test_utils import should_skip_model
 
 # Skip entire module if httpx not installed
 pytestmark = [
+    pytest.mark.live,
     pytest.mark.skipif(httpx is None, reason="httpx required for E2E tests"),
     pytest.mark.live_e2e,
 ]

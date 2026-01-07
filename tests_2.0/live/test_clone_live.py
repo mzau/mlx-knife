@@ -12,7 +12,9 @@ Enable with ALL required env vars:
 
 Run:
 - pytest -m live_clone -v
-- or umbrella: pytest -m wet -v
+- or umbrella Phase 3: scripts/test-wet-umbrella.sh (isolated run)
+
+NOT part of wet marker (incompatible with Portfolio Discovery - does fresh HF download).
 
 ADR-007 Phase 1 Requirements:
 - Same volume: workspace and HF_HOME cache must be on same volume
@@ -39,7 +41,7 @@ model = os.environ.get("MLXK2_LIVE_CLONE_MODEL")
 workspace = os.environ.get("MLXK2_LIVE_CLONE_WORKSPACE")
 
 pytestmark = [
-    pytest.mark.wet,
+    pytest.mark.live,
     pytest.mark.live_clone,
     pytest.mark.skipif(
         not (alpha_enabled and live_enabled and hf_token_present and model and workspace),

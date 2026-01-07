@@ -16,7 +16,7 @@ from typing import List, Dict
 
 import pytest
 
-pytestmark = [pytest.mark.wet, pytest.mark.live_list]
+pytestmark = [pytest.mark.live, pytest.mark.wet, pytest.mark.live_list]
 
 
 def _run_cli(argv: List[str], capsys) -> str:

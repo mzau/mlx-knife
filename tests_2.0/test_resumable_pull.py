@@ -12,7 +12,7 @@ IMPORTANT: This test MUST stay in tests_2.0/ (NOT tests_2.0/live/).
 The live/ directory has pytest hooks for Portfolio Discovery that interfere
 with the isolated_cache fixture, causing the test to fail.
 
-IMPORTANT: This test uses live_resumable marker (not live_e2e) because
+IMPORTANT: This test uses live_pull marker (not live_e2e) because
 module-scoped fixtures from live/conftest.py (_use_real_mlx_modules,
 vision_portfolio, text_portfolio) interfere with HuggingFace Hub's symlink
 creation mechanism during resume. These fixtures manipulate sys.path and
@@ -20,7 +20,7 @@ run subprocesses, causing import resolution issues. Must run independently.
 
 Opt-in: Requires MLXK2_TEST_RESUMABLE_DOWNLOAD=1 (network test)
 
-Run: MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_resumable tests_2.0/test_resumable_pull.py -v
+Run: MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v
 """
 
 import os
@@ -30,8 +30,8 @@ import subprocess
 import pytest
 from pathlib import Path
 
-# Mark as live_resumable (isolated from live_e2e module fixtures)
-pytestmark = [pytest.mark.live_resumable]
+# Mark as live_pull (isolated from live_e2e module fixtures)
+pytestmark = [pytest.mark.live_pull]
 
 
 @pytest.mark.skipif(

@@ -10,9 +10,8 @@ import pytest
 # No MLXKError import needed - using standard ValueError
 from mlxk2.tools.vision_adapter import (
     VisionHTTPAdapter,
-    MAX_IMAGES_PER_REQUEST,
+    MAX_SAFE_CHUNK_SIZE,
     MAX_IMAGE_SIZE_BYTES,
-    MAX_TOTAL_IMAGE_BYTES,
 )
 
 
@@ -301,48 +300,9 @@ class TestParseOpenAIMessages:
 
         assert "url cannot be empty" in str(exc.value).lower()
 
-    def test_too_many_images_raises_error(self):
-        """Test that exceeding image count limit raises validation error."""
-        # Create more than MAX_IMAGES_PER_REQUEST images
-        content = [{"type": "text", "text": "Many images"}]
-        for _ in range(MAX_IMAGES_PER_REQUEST + 1):
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{VALID_JPEG_B64}"}
-            })
-
-        messages = [{"role": "user", "content": content}]
-
-        with pytest.raises(ValueError) as exc:
-            VisionHTTPAdapter.parse_openai_messages(messages)
-
-        assert "Too many images" in str(exc.value)
-        assert str(MAX_IMAGES_PER_REQUEST) in str(exc.value)
-
-    def test_total_image_size_limit_enforced(self):
-        """Test that total image size limit is enforced (critical for Metal API)."""
-        # Create images that individually pass but collectively exceed total limit
-        # Each image ~3 MB → 5 images would be ~15 MB (under 50 MB limit)
-        # But we'll create larger images to trigger the limit
-        large_data = "A" * (12 * 1024 * 1024)  # 12 MB per image
-        large_b64 = base64.b64encode(large_data.encode()).decode()
-
-        content = [{"type": "text", "text": "Many large images"}]
-        # 5 images × 12 MB = 60 MB → exceeds 50 MB limit
-        for _ in range(5):
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{large_b64}"}
-            })
-
-        messages = [{"role": "user", "content": content}]
-
-        with pytest.raises(ValueError) as exc:
-            VisionHTTPAdapter.parse_openai_messages(messages)
-
-        assert "Total image size" in str(exc.value)
-        assert "exceeds limit" in str(exc.value)
-        assert "Try fewer or smaller images" in str(exc.value)
+    # Note: Image count/size limits removed in Session 74 (ADR-012 Phase 1c)
+    # Chunking now handles batch safety - unlimited images allowed in adapter
+    # Validation happens at request level (run.py/server_base.py) not adapter level
 
 
 class TestSequentialImageExtraction:
