@@ -199,14 +199,14 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
 
             # Phase 6b: Write workspace sentinel (ADR-018 Phase 0a)
             # Sentinel written AFTER clone success, BEFORE declaring operation complete
-            from datetime import datetime
+            from datetime import datetime, timezone
 
             # Extract commit hash if available from pull result
             commit_hash = pull_result["data"].get("commit_hash")
 
             metadata = {
                 "mlxk_version": __version__,
-                "created_at": datetime.utcnow().isoformat() + "Z",
+                "created_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 "source_repo": resolved_model,
                 "source_revision": commit_hash,
                 "managed": True,

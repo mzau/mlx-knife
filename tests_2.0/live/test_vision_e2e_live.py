@@ -38,6 +38,7 @@ class TestVisionDeterministicQueries:
     to validate actual image understanding rather than hallucination.
     """
 
+    @pytest.mark.benchmark_inference
     def test_chess_position_e6(self):
         """Test reading specific chess position (e6 = black king)."""
         result = subprocess.run(
@@ -59,6 +60,7 @@ class TestVisionDeterministicQueries:
         # Expected: "black king" on e6 - either "black king" or just "black" (if truncated)
         assert "black" in output or "king" in output, f"Expected 'black' or 'king' in output: {result.stdout}"
 
+    @pytest.mark.benchmark_inference
     def test_contract_name_extraction(self):
         """Test OCR: extract name from contract document."""
         result = subprocess.run(
@@ -80,6 +82,7 @@ class TestVisionDeterministicQueries:
         assert "John" in output, f"Expected 'John' in output: {result.stdout}"
         assert "Smith" in output, f"Expected 'Smith' in output: {result.stdout}"
 
+    @pytest.mark.benchmark_inference
     def test_mug_color_identification(self):
         """Test color recognition: blue mug."""
         result = subprocess.run(
@@ -100,6 +103,7 @@ class TestVisionDeterministicQueries:
         # Expected: "blue"
         assert "blue" in output, f"Expected 'blue' in output: {result.stdout}"
 
+    @pytest.mark.benchmark_inference
     def test_chart_axis_label_reading(self):
         """Test chart OCR: read Y-axis label."""
         result = subprocess.run(
@@ -120,6 +124,7 @@ class TestVisionDeterministicQueries:
         # Expected: "tokens/s" or "tokens per second"
         assert "token" in output, f"Expected 'token' in output: {result.stdout}"
 
+    @pytest.mark.benchmark_inference
     def test_large_image_support(self):
         """Test that 2.7MB image (T2.png) is accepted (10MB limit)."""
         image_path = Path("tests_2.0/assets/T2.png")

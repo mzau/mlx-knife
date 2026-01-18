@@ -97,7 +97,8 @@ class TestVisionGeoPipeline:
         """Get vision model (hardcoded for now - pixtral only viable model)."""
         # TODO: Use vision_portfolio when more vision models are viable
         # Currently only pixtral works reliably (blacklist filters others)
-        return "pixtral"
+        # Use full ID for consistency in benchmark reports (not "pixtral" shorthand)
+        return "mlx-community/pixtral-12b-8bit"
 
     @pytest.fixture(scope="class")
     def text_model_id(self, text_portfolio):
@@ -126,11 +127,11 @@ class TestVisionGeoPipeline:
 
         assert len(GEO_IMAGES) == 9, f"Expected 9 images, found {len(GEO_IMAGES)}"
 
-    def test_vision_batch_processing_chunk_1(self, check_prerequisites, vision_model_id):
+    def test_vision_batch_processing_chunk_1(self, check_prerequisites, vision_model_id, request):
         """Test vision batch processing with chunk=1 (incremental output).
 
-        Validates: ADR-012 Phase 1c, Sessions 73-75 fixes
-        PASSED: Process succeeds, output not empty, multiple images mentioned
+        Validates: ADR-012 Phase 1c, Sessions 73-75 fixes, Session 93 chunk streaming
+        PASSED: Process succeeds, output not empty, all chunks processed
         """
         image_paths = [str(p) for p in GEO_IMAGES]
 
@@ -140,11 +141,7 @@ class TestVisionGeoPipeline:
             "--image", *image_paths,
             "--chunk", "1",
             "--max-tokens", "12000",
-            "--prompt", (
-                "Describe each image in best possible detail. "
-                "Don't repeat unimportant camera information. "
-                "Number images according to metadata image number."
-            ),
+            "--prompt", "Describe each image in best possible detail.",
         ]
 
         stdout, stderr, code = _run_cli(args, timeout=600)
@@ -153,19 +150,25 @@ class TestVisionGeoPipeline:
         assert code == 0, f"Vision phase failed: exit={code}\nstderr={stderr}"
         assert stdout.strip(), "Vision output is empty"
 
-        # Heuristic: Output should mention multiple images (smoke test)
-        image_mentions = sum(1 for i in range(1, 10) if f"Image {i}" in stdout or f"image {i}" in stdout.lower())
-        assert image_mentions >= 5, f"Only {image_mentions}/9 images mentioned (expected most/all)"
+        # Session 93: With chunk=1, no image numbers in metadata (hallucination fix)
+        # Instead, verify all chunks were processed by checking chunk markers
+        chunk_markers = sum(1 for i in range(1, 10) if f"Chunk {i}/9" in stdout)
+        assert chunk_markers == 9, f"Only {chunk_markers}/9 chunks found (expected all chunks processed)"
 
-    def test_vision_to_geo_pipe(self, check_prerequisites, vision_model_id, text_model_id):
+    def test_vision_to_geo_pipe(self, check_prerequisites, vision_model_id, text_model_id, request):
         """Test complete Vision→Geo pipeline.
 
         Validates: Session 73 pipe stdin + --prompt, complete integration
         PASSED: Both phases succeed, geo output mentions location concepts
         """
+        import time
+        import json
+        from datetime import datetime, timezone
+
         image_paths = [str(p) for p in GEO_IMAGES]
 
         # Phase 1: Vision descriptions
+        vision_start = time.time()
         vision_args = [
             "run",
             vision_model_id,
@@ -180,11 +183,28 @@ class TestVisionGeoPipeline:
         ]
 
         vision_stdout, vision_stderr, vision_code = _run_cli(vision_args, timeout=600)
+        vision_end = time.time()
+
+        # Log Vision phase as sub-test
+        if request.config.report_file:
+            vision_entry = {
+                "schema_version": "0.2.1",
+                "timestamp": datetime.fromtimestamp(vision_end, timezone.utc).isoformat(),
+                "mlx_knife_version": __import__("mlxk2").__version__,
+                "test": f"{request.node.nodeid}[vision_phase]",
+                "outcome": "passed" if vision_code == 0 else "failed",
+                "duration": vision_end - vision_start,
+                "model": {"id": vision_model_id, "size_gb": 12.6, "family": "pixtral"},
+                "metadata": {"inference_modality": "vision"},
+            }
+            request.config.report_file.write(json.dumps(vision_entry) + "\n")
+            request.config.report_file.flush()
 
         assert vision_code == 0, f"Vision phase failed: {vision_stderr}"
         assert vision_stdout.strip(), "Vision output is empty"
 
         # Phase 2: Geo inference via pipe
+        text_start = time.time()
         geo_args = [
             "run",
             text_model_id,
@@ -197,6 +217,27 @@ class TestVisionGeoPipeline:
         ]
 
         geo_stdout, geo_stderr, geo_code = _run_cli(geo_args, stdin=vision_stdout, timeout=300)
+        text_end = time.time()
+
+        # Log Text phase as sub-test
+        # Note: size_gb lookup from portfolio would be ideal, but hardcoded for Mixtral-8x7B as fallback
+        # TODO: Extract size_gb from portfolio when available (Session 80 follow-up)
+        if request.config.report_file:
+            # Best-effort size_gb lookup (Mixtral-8x7B is 24.5GB, but might vary by quantization)
+            text_size_gb = 24.5 if "mixtral" in text_model_id.lower() else 0
+
+            text_entry = {
+                "schema_version": "0.2.1",
+                "timestamp": datetime.fromtimestamp(text_end, timezone.utc).isoformat(),
+                "mlx_knife_version": __import__("mlxk2").__version__,
+                "test": f"{request.node.nodeid}[text_phase]",
+                "outcome": "passed" if geo_code == 0 else "failed",
+                "duration": text_end - text_start,
+                "model": {"id": text_model_id, "size_gb": text_size_gb},
+                "metadata": {"inference_modality": "text"},
+            }
+            request.config.report_file.write(json.dumps(text_entry) + "\n")
+            request.config.report_file.flush()
 
         assert geo_code == 0, f"Geo phase failed: exit={geo_code}\nstderr={geo_stderr}"
         assert geo_stdout.strip(), "Geo output is empty"
@@ -211,7 +252,7 @@ class TestVisionGeoPipeline:
 
         assert has_location_terms, f"Geo output lacks location terms (pipe may have failed):\n{geo_stdout[:300]}"
 
-    def test_vision_chunk_isolation_no_hallucination(self, check_prerequisites, vision_model_id):
+    def test_vision_chunk_isolation_no_hallucination(self, check_prerequisites, vision_model_id, request):
         """Test chunk isolation with chunk=1 (Session 73 regression test).
 
         Validates: Fresh VisionRunner per chunk, no state leakage
@@ -235,7 +276,7 @@ class TestVisionGeoPipeline:
         assert code == 0, f"exit={code}\nstderr={stderr}"
         assert stdout.strip(), "Output is empty"
 
-        # Smoke test: Both batches should be visible (chunk workflow functioning)
-        # NOTE: We don't verify isolation quality - just that 2 batches were processed
-        assert "batch 1/2" in stdout.lower(), "Batch 1/2 not found (chunking failed?)"
-        assert "batch 2/2" in stdout.lower(), "Batch 2/2 not found (chunking failed?)"
+        # Smoke test: Both chunks should be visible (chunk workflow functioning)
+        # NOTE: We don't verify isolation quality - just that 2 chunks were processed
+        assert "chunk 1/2" in stdout.lower(), "Chunk 1/2 not found (chunking failed?)"
+        assert "chunk 2/2" in stdout.lower(), "Chunk 2/2 not found (chunking failed?)"

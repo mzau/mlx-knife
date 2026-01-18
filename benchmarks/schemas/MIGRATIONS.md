@@ -34,23 +34,67 @@ This document tracks schema evolution for MLX Knife test reports.
 
 ---
 
+### 0.2.0 (2025-12-08) - Scheduling-Enhanced
+
+**Status:** Stable (used in 2.0.4-beta.3+)
+
+**Added fields:**
+- `model.framework`: Model framework identifier (e.g., 'MLX', 'GGUF')
+- `model.quantization`: Quantization format (e.g., '4bit', '8bit', 'fp16')
+- `performance.model_load_time_s`: Model loading time (critical for scheduling)
+- `performance.time_to_first_token_s`: User-perceived latency metric
+- `performance.cleanup_time_s`: Resource release timing
+- `performance.peak_ram_gb`: Peak RAM usage during inference
+- `performance.stable_ram_gb`: Steady-state RAM after warmup
+- `system.hardware_profile`: Detailed hardware profiling (Mac model, cores, GPU)
+- `system_health`: System health metrics (swap, RAM, zombies, quality flags)
+- `timeline`: Optional detailed execution timeline for bottleneck analysis
+
+**Design rationale:**
+- Enables memory-based scheduling decisions (ADR-016)
+- Supports hardware profiling for benchmark clustering
+- Quality assessment flags for benchmark validation
+- Backward compatible: v0.1.0 reports remain valid
+
+**Breaking changes:** None (additive only)
+
+**Migration:** N/A (automatic upgrade)
+
+---
+
+### 0.2.1 (2026-01-09) - Inference Modality
+
+**Status:** Stable (used in 2.0.4-beta.7+)
+
+**Added fields:**
+- `metadata.inference_modality`: Type of inference performed
+  - Values: `"vision"` | `"text"` | `"audio"` | `"video"`
+  - Purpose: Differentiate Vision/Text inference for multimodal models
+  - Example: Pixtral can do both Vision (with --image) and Text (without --image)
+
+**Design rationale:**
+- Vision-capable models perform BOTH Vision and Text inference
+- Benchmark reports need to differentiate these for accurate statistics
+- Per-model stats can now show: "Vision: 136s (90%), Text: 15s (10%)"
+- Future-proof for audio/video/multimodal inference types
+
+**Automatic detection:**
+- Vision inference: Tests with `vision_model_key` fixture OR `--image` CLI arg
+- Text inference: Tests with `text_model_key` fixture OR no `--image` arg
+- Pipe tests: Explicit per-phase tagging (e.g., `[vision_phase]`, `[text_phase]`)
+
+**Backward compatible:**
+- Old reports without `inference_modality` remain valid
+- Tools gracefully degrade: show only total time for legacy entries
+- Mixed data (old + new) shows "Unknown (legacy)" breakdown
+
+**Breaking changes:** None (additive only)
+
+**Migration:** N/A (automatic upgrade, optional field)
+
+---
+
 ## Future Versions (Planned)
-
-### 0.2.0 (TBD - Phase 1, when model field stabilizes)
-
-**Proposed changes:**
-- Make `model.id` required when `outcome == "passed"` (enforce for model tests)
-- Add `model.framework_version` (mlx-lm version for reproducibility)
-- Standardize `stop_tokens.workaround` enum (based on collected data)
-- Add `test_type` enum (stop_tokens, performance, health, etc.)
-
-**Migration:**
-- Scripts will backfill `model.framework_version` from git history
-- `stop_tokens.workaround` will be normalized (free text → enum)
-- Old reports remain valid (historical data preserved)
-
-**Breaking changes:**
-- TBD based on Phase 0 learnings
 
 ---
 

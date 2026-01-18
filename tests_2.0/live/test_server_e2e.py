@@ -37,7 +37,7 @@ from .test_utils import (
     TEST_PROMPT,
     MAX_TOKENS,
 )
-# portfolio_models fixture is provided by conftest.py
+# text_portfolio fixture is provided by conftest.py (Portfolio Separation)
 
 # Server request timeout (increased from 30s to 45s in Session 22)
 # Accounts for: baseline (15s) + probe/policy overhead (2.7s) + generation + safety margin
@@ -126,6 +126,7 @@ class TestChatCompletionsBatch:
     """
 
     @pytest.mark.live_e2e
+    @pytest.mark.benchmark_inference
     def test_chat_completions_batch(self, text_portfolio, text_model_key, report_benchmark):
         """Validate non-streaming chat completions.
 
@@ -217,6 +218,7 @@ class TestChatCompletionsStreaming:
     """
 
     @pytest.mark.live_e2e
+    @pytest.mark.benchmark_inference
     def test_chat_completions_streaming(self, text_portfolio, text_model_key, report_benchmark):
         """Validate SSE streaming chat completions.
 

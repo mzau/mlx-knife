@@ -69,6 +69,38 @@ class TestExifExtraction:
         exif = VisionRunner._extract_exif(image_bytes)
         assert exif is None
 
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="PIL required (mlx-vlm needs Python 3.10+)")
+    def test_datetime_tag_306_ignored(self):
+        """Tag 306 (DateTime) should be ignored.
+
+        Priority: GPS-Timestamp (Tag 7+29) → DateTimeOriginal (Tag 36867) → Tag 306 NEVER.
+
+        Rationale: Tag 306 is updated by image editors to modification time.
+        GPS-Timestamp and DateTimeOriginal preserve the actual capture time.
+        """
+        from io import BytesIO
+        from PIL import Image
+
+        # Create image with ONLY Tag 306 (DateTime), no Tag 36867 (DateTimeOriginal)
+        img = Image.new("RGB", (10, 10), color="green")
+
+        # Manually set EXIF with Tag 306 but NOT 36867
+        from PIL import Image as PILImage
+        exif_ifd = img.getexif()
+        exif_ifd[306] = "2026:01:06 19:12:02"  # Tag 306 = DateTime (modification time)
+        # Explicitly NOT setting 36867 (DateTimeOriginal)
+
+        buf = BytesIO()
+        img.save(buf, format="JPEG", exif=exif_ifd)
+        image_bytes = buf.getvalue()
+
+        # Should return None for datetime (Tag 306 ignored)
+        exif = VisionRunner._extract_exif(image_bytes)
+
+        # EXIF object may exist (for other metadata), but datetime should be None
+        if exif:
+            assert exif.datetime is None, "Tag 306 should be ignored, datetime must be None"
+
     def test_collapsible_table_without_exif(self):
         """Table should be collapsible without EXIF data."""
         result = "A beach."
@@ -145,7 +177,7 @@ class TestExifExtraction:
             images = [("test.jpg", b"\x00\x01")]
             output = VisionRunner._add_filename_mapping(result, images)
 
-            assert "📍 32.79°N, 16.92°W" in output
+            assert "📍 32.7900°N, 16.9200°W" in output
 
         # Test case 2: Southern + Eastern (hypothetical)
         mock_exif = ExifData(gps_lat=-10.5, gps_lon=20.3, datetime=None, camera=None)
@@ -155,7 +187,7 @@ class TestExifExtraction:
             images = [("test.jpg", b"\x00\x01")]
             output = VisionRunner._add_filename_mapping(result, images)
 
-            assert "📍 10.50°S, 20.30°E" in output
+            assert "📍 10.5000°S, 20.3000°E" in output
 
 
 class TestImageIdMapWithExif:

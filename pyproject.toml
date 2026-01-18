@@ -66,7 +66,7 @@ dev = [
     "mypy>=1.5.0",
 ]
 vision = [
-    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c536165df2b3b4aece3a795b2e414349f935e750",  # Vision Language Models support (ADR-012, requires Python 3.10+; beta.4 uses git commit with Pixtral pad_token fix, will switch to v0.3.10 PyPI when released)
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@fc8c92e31983a52761f37d503f903ec40bebbd62",  # Vision Language Models support (ADR-012, requires Python 3.10+; beta.7 uses upstream main (MXFP4 support), will switch to v0.3.10 PyPI when released)
 ]
 
 [tool.setuptools]

@@ -1210,7 +1210,10 @@ def pytest_collection_modifyitems(config, items):
         # Wet marker for compatible tests
         if (test_markers & LIVE_MARKERS_FOR_WET) or is_in_live_dir:
             # EXCLUDE Isolated Cache WRITE tests (incompatible with Portfolio Discovery!)
-            if "live_pull" not in test_markers and "live_clone" not in test_markers:
+            # EXCLUDE Vision Pipe tests (opt-in only, run via -m live_vision_pipe)
+            if ("live_pull" not in test_markers and
+                "live_clone" not in test_markers and
+                "live_vision_pipe" not in test_markers):
                 item.add_marker(pytest.mark.wet)
 
 
@@ -1230,7 +1233,14 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    """Initialize report file if --report-output is specified."""
+    """Initialize report file and register custom markers."""
+    # Register benchmark_inference marker (ADR-013 Phase 1)
+    config.addinivalue_line(
+        "markers",
+        "benchmark_inference: Pure inference tests suitable for benchmarking (ADR-013 Phase 1)"
+    )
+
+    # Initialize benchmark report file if --report-output is specified
     from pathlib import Path
     config.report_file = None
     if report_path := config.getoption("--report-output"):
@@ -1434,8 +1444,13 @@ def pytest_runtest_makereport(item, call):
     Reports are written as JSONL (one JSON object per line) to allow
     streaming and easy appending across test runs.
 
-    Schema version: 0.2.0 (Phase 0.5 - System Health + Hardware Profile)
-    See: ADR-013 Phase 0.5 implementation
+    Schema version: 0.2.1 (Inference Modality)
+    See: benchmarks/schemas/MIGRATIONS.md
+
+    Changelog from 0.2.0 → 0.2.1:
+        - Added: metadata.inference_modality (vision/text/audio/video)
+        - Automatic detection via fixtures and user_properties
+        - Backward compatible: All 0.2.0 fields preserved
 
     Changelog from 0.1.0 → 0.2.0:
         - Added: system.hardware_profile (Mac model, cores)
@@ -1458,7 +1473,7 @@ def pytest_runtest_makereport(item, call):
 
         # Build report data (required fields)
         data = {
-            "schema_version": "0.2.0",
+            "schema_version": "0.2.1",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "mlx_knife_version": __version__,
             "test": item.nodeid,
@@ -1485,6 +1500,27 @@ def pytest_runtest_makereport(item, call):
             else:
                 # Everything else goes to metadata
                 data.setdefault("metadata", {})[key] = value
+
+        # ADR-013 Phase 1: Automatic inference_modality detection (v0.2.1)
+        # Differentiates Vision/Text inference for multimodal models (e.g., Pixtral)
+        inference_modality = None
+
+        # Priority 1: Explicit override via user_properties (pipe tests use this)
+        if "metadata" in data and "inference_modality" in data["metadata"]:
+            inference_modality = data["metadata"]["inference_modality"]
+
+        # Priority 2: Detect from pytest fixtures (parametrized tests)
+        elif not inference_modality:
+            # Vision tests: use vision_model_key fixture
+            if hasattr(item, "fixturenames") and "vision_model_key" in item.fixturenames:
+                inference_modality = "vision"
+            # Text tests: use text_model_key fixture
+            elif hasattr(item, "fixturenames") and "text_model_key" in item.fixturenames:
+                inference_modality = "text"
+
+        # Set inference_modality if detected
+        if inference_modality:
+            data.setdefault("metadata", {})["inference_modality"] = inference_modality
 
         # ADR-013 Phase 0.5: Collect system health metrics (v0.2.0)
         # Enables automatic regression quality assessment

@@ -64,6 +64,7 @@ class TestVisionServerE2E:
     """
 
     @pytest.mark.live_e2e
+    @pytest.mark.benchmark_inference
     def test_single_image_chat_completion(self, vision_portfolio, vision_model_key):
         """Vision model should describe an image sent via Base64.
 
@@ -123,6 +124,7 @@ class TestVisionServerE2E:
             print(f"\n✅ Vision response: {content[:200]}...")
 
     @pytest.mark.live_e2e
+    @pytest.mark.benchmark_inference
     def test_streaming_graceful_degradation(self, vision_portfolio, vision_model_key):
         """Vision request with stream=True should gracefully degrade via SSE emulation.
 
@@ -187,12 +189,19 @@ class TestVisionServerE2E:
                 print(f"\n✅ SSE emulation response: {full_content[:100]}...")
 
     @pytest.mark.live_e2e
-    def test_text_request_still_works_on_vision_model(self, vision_portfolio, vision_model_key):
+    @pytest.mark.benchmark_inference
+    def test_text_request_still_works_on_vision_model(self, vision_portfolio, vision_model_key, request):
         """Text-only requests should still work on vision model server.
 
         Parametrized test (one instance per VISION model in portfolio).
         Tests that vision models can handle pure text requests (no images).
+
+        Note: Uses vision_model_key fixture but does TEXT inference (no --image).
+        Explicit modality override required for correct benchmark classification.
         """
+        # Override auto-detection: vision_model_key fixture but TEXT inference
+        request.node.user_properties.append(("inference_modality", "text"))
+
         model_info = vision_portfolio[vision_model_key]
         model_id = model_info["id"]
 

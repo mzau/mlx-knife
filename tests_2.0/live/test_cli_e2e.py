@@ -37,7 +37,7 @@ from .test_utils import (
     MAX_TOKENS,
     TEST_TEMPERATURE,
 )
-# portfolio_models fixture is provided by conftest.py
+# text_portfolio fixture is provided by conftest.py (Portfolio Separation)
 
 # Opt-in markers
 pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
@@ -70,25 +70,27 @@ class TestRunCommandBasic:
     """
 
     @pytest.mark.live_e2e
-    def test_run_command(self, portfolio_models, model_key, report_benchmark):
+    @pytest.mark.benchmark_inference
+    def test_run_command(self, text_portfolio, text_model_key, report_benchmark):
         """Validate `mlxk run` with model.
 
-        Parametrized test (one instance per model in portfolio).
+        Parametrized test (one instance per model in text portfolio).
+        Uses text_model_key for automatic inference_modality detection (v0.2.1).
 
         Tests:
         - Exit code 0 on success
         - No visible stop tokens in output
         - Output is non-empty
         """
-        model_info = portfolio_models[model_key]
+        model_info = text_portfolio[text_model_key]
         model_id = model_info["id"]
 
         # RAM gating
-        should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(text_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 
-        print(f"\nTesting {model_key}: {model_id}")
+        print(f"\nTesting {text_model_key}: {model_id}")
 
         args = ["run", model_id, TEST_PROMPT, "--max-tokens", str(MAX_TOKENS), "--temperature", str(TEST_TEMPERATURE)]
         stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90)
@@ -114,7 +116,7 @@ class TestRunCommandBasic:
             f"Output: {stdout!r}"
         )
 
-        print(f"✓ {model_key}: Passed (output: {len(stdout)} chars)")
+        print(f"✓ {text_model_key}: Passed (output: {len(stdout)} chars)")
 
         # Benchmark reporting (ADR-013 Phase 0)
         report_benchmark(stop_tokens={
@@ -133,10 +135,12 @@ class TestRunCommandJSON:
     """
 
     @pytest.mark.live_e2e
-    def test_run_json_output(self, portfolio_models, model_key, report_benchmark):
+    @pytest.mark.benchmark_inference
+    def test_run_json_output(self, text_portfolio, text_model_key, report_benchmark):
         """Validate `mlxk run --json` output format.
 
-        Parametrized test (one instance per model in portfolio).
+        Parametrized test (one instance per model in text portfolio).
+        Uses text_model_key for automatic inference_modality detection (v0.2.1).
 
         Tests:
         - JSON envelope structure
@@ -144,15 +148,15 @@ class TestRunCommandJSON:
         - data.response contains output
         - No visible stop tokens
         """
-        model_info = portfolio_models[model_key]
+        model_info = text_portfolio[text_model_key]
         model_id = model_info["id"]
 
         # RAM gating
-        should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(text_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 
-        print(f"\nTesting {model_key}: {model_id}")
+        print(f"\nTesting {text_model_key}: {model_id}")
 
         args = ["run", model_id, TEST_PROMPT, "--max-tokens", str(MAX_TOKENS), "--temperature", str(TEST_TEMPERATURE), "--json"]
         stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90)
@@ -184,7 +188,7 @@ class TestRunCommandJSON:
             f"Response: {response!r}"
         )
 
-        print(f"✓ {model_key}: Passed (JSON output: {len(response)} chars)")
+        print(f"✓ {text_model_key}: Passed (JSON output: {len(response)} chars)")
 
         # Benchmark reporting (ADR-013 Phase 0)
         report_benchmark(stop_tokens={
@@ -257,23 +261,24 @@ class TestRunCommandStopTokens:
     """Specific stop token filtering validation."""
 
     @pytest.mark.live_e2e
-    def test_run_no_visible_stop_tokens_mxfp4(self, portfolio_models):
+    def test_run_no_visible_stop_tokens_mxfp4(self, text_portfolio):
         """Validate MXFP4 model has no visible stop tokens via CLI.
 
         Specific regression test for Issue #32 at CLI level.
+        Uses text_portfolio (MXFP4 is a text model quantization format).
         """
         # Find MXFP4 model in portfolio (or skip)
         mxfp4_model = None
-        for model_key, model_info in portfolio_models.items():
+        for model_key, model_info in text_portfolio.items():
             if "mxfp4" in model_key.lower() or "gpt-oss" in model_info["id"].lower():
                 # Check RAM
-                should_skip, skip_reason = should_skip_model(model_key, portfolio_models)
+                should_skip, skip_reason = should_skip_model(model_key, text_portfolio)
                 if not should_skip:
                     mxfp4_model = model_info["id"]
                     break
 
         if mxfp4_model is None:
-            pytest.skip("MXFP4 model not available in portfolio or exceeds RAM")
+            pytest.skip("MXFP4 model not available in text portfolio or exceeds RAM")
 
         print(f"\nTesting MXFP4: {mxfp4_model}")
 

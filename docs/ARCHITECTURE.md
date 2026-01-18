@@ -126,4 +126,4 @@ See module docstring for detailed API documentation.
 
 ## Changelog
 
-- **2025-12-07:** Initial version (Session 19, extracted from vision_server_leitplanken.md)
+- **2025-12-07:** Initial version

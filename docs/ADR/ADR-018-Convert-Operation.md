@@ -1,17 +1,22 @@
 # ADR-018: Convert Operation
 
-**Status:** Partially Implemented
+**Status:** Implemented (Phases 0a-0c + 1 complete in 2.0.4-beta.6)
 **Created:** 2025-12-18
-**Updated:** 2025-12-30 (Phase 0a+1 complete for 2.0.4-beta.5, Phase 0b+0c planned for beta.6)
+**Updated:** 2026-01-10 (Gate status: clone/push production, convert experimental)
 **Context:** Users need to (a) quantize MLX workspaces locally without polluting the HF cache and (b) repair MLX/HF compliance issues (notably safetensors index/shard mismatches) in a deterministic way.
 
 **Phase Status:**
 - **Phase 0a:** Workspace infrastructure — ✅ Implemented (2.0.4-beta.5)
-- **Phase 0b:** Resumable clone — 🚧 Planned (2.0.4-beta.6)
-- **Phase 0c:** Workspace run/show/server support — 🚧 Planned (2.0.4-beta.6)
+- **Phase 0b:** Resumable clone — ✅ Implemented (2.0.4-beta.6)
+- **Phase 0c:** Workspace run/show/server support — ✅ Implemented (2.0.4-beta.6)
 - **Phase 1:** `--repair-index` — ✅ Implemented (2.0.4-beta.5)
 
-**Note:** Phase 0b+0c complete the workspace infrastructure before 2.0.4 stable release. This enables full `clone → convert → run` workflow with resume support and no HF push requirement.
+**Feature Gates (2.0.4-beta.7+):**
+- `clone`, `push`: **Production** (no gate required)
+- `convert`: **Experimental** (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`)
+  - Rationale: `--quantize` not yet implemented, only `--repair-index` available
+
+**Note:** Complete workspace infrastructure shipped in 2.0.4-beta.6. Full `clone → convert → run/show/server` workflow with resume support, no HF push requirement.
 
 ---
 
@@ -462,23 +467,21 @@ mlxk health ./ws-fixed  # Should be healthy
   - **Files:** `mlxk2/operations/workspace.py` (NEW), `health.py` (extended), `clone.py` (integrated)
   - **Tests:** 20 new tests, all passing
 
-- [ ] **Phase 0b (2.0.4-beta.6):** 🚧 Resumable clone
+- [x] **Phase 0b (2.0.4-beta.6):** ✅ Resumable clone
   - Temp cache reuse with user prompt (analog to resumable pull)
   - Conditional cleanup based on workspace health
   - UX parity with pull operation
   - `--force-resume` flag for non-interactive use
-  - **Effort:** ~1 session
+  - **Status:** Complete (Sessions 67-70, beta.6)
 
-- [ ] **Phase 0c (2.0.4-beta.6):** 🚧 Workspace run/show/server support
+- [x] **Phase 0c (2.0.4-beta.6):** ✅ Workspace run/show/server support
   - Direct workspace execution: `mlxk run ./workspace "prompt"`
   - Workspace inspection: `mlxk show ./workspace`
   - Local dev server: `mlxk server --model ./workspace`
   - Central implementation in `resolve_model_for_operation()` + runners
   - Server: `/v1/models` shows workspace with `"owned_by": "workspace"`
-  - **Files:** `model_resolution.py`, `runner/__init__.py`, `vision_runner.py`, `show.py`, `server_base.py` (~85 LOC)
-  - **Tests:** +10-12 tests
-  - **Effort:** ~1 session
-  - **Benefit:** Complete local workflow without HF push
+  - **Files:** `model_resolution.py`, `runner/__init__.py`, `vision_runner.py`, `show.py`, `server_base.py`
+  - **Status:** Complete (Sessions 68-69, beta.6)
 
 - [x] **Phase 1 (2.0.4-beta.5):** ✅ `--repair-index` for safetensors index/shard mismatch
   - `rebuild_safetensors_index()` primitive

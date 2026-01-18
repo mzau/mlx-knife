@@ -168,14 +168,14 @@ Notes:
 | `health` | Check model integrity and corruption | ✅ | - |
 | `pull` | Download models from HuggingFace | ✅ | - |
 | `rm` | Delete models from cache | ✅ | - |
-| `clone` | Clone models to workspace directory | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
-| `convert` | Repair vision model index files (--repair-index) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
-| `push` | Upload a local folder to Hugging Face (experimental) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| `clone` | Clone models to workspace directory | ✅ | - |
+| `convert` | Workspace transformations (experimental: --repair-index) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| `push` | Upload a local folder to Hugging Face | ✅ | - |
 | `run` | Execute model inference | ✅ | - |
 | `serve`/`server` | OpenAI-compatible API server | ✅ | - |
 
 **Notes:**
-- Commands marked with Alpha Feature require `MLXK2_ENABLE_ALPHA_FEATURES=1` environment variable to be available.
+- Commands marked with `MLXK2_ENABLE_ALPHA_FEATURES=1` are experimental and require this environment variable.
 - **Workspace Path Support (ADR-018 Phase 0c):** Commands `show`, `run`, `serve`/`server`, and `health` now accept workspace paths (e.g., `./workspace` or `/absolute/path`) in addition to HuggingFace model IDs. Models in workspaces return `"cached": false` to distinguish them from cache-managed models.
 
 ## Model Discovery & Metadata
@@ -808,8 +808,6 @@ mlxk-json rm "locked-model" --json               # Error: requires --force due t
 
 ### `mlxk-json clone <model> <target_dir> --json`
 
-**Requires:** `MLXK2_ENABLE_ALPHA_FEATURES=1`
-
 **Usage:**
 ```bash
 mlxk-json clone "Phi-3-mini" ./workspace --json              # Clone to workspace directory
@@ -902,8 +900,6 @@ mlxk-json clone "microsoft/DialoGPT-small" ./workspace --json # Non-MLX model
 ```
 
 ### `mlxk-json push <dir> <org/model> [--create] [--private] [--branch <b>] [--commit "..."] [--verbose] [--check-only] --json`
-
-**Requires:** `MLXK2_ENABLE_ALPHA_FEATURES=1`
 
 Behavior:
 - Requires `HF_TOKEN` env.

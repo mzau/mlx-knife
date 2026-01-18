@@ -142,6 +142,40 @@ def read_workspace_metadata(workspace_path: Path) -> Dict[str, Any]:
         return {}
 
 
+def is_explicit_path(pattern: str) -> bool:
+    """Check if pattern is an explicit filesystem path (not an HF model ID).
+
+    Only paths with explicit path markers are treated as filesystem paths.
+    This ensures "model-name" goes through cache resolution even if a local dir exists.
+
+    Args:
+        pattern: The pattern string to check
+
+    Returns:
+        True if pattern is an explicit path, False otherwise
+
+    Examples:
+        >>> is_explicit_path("./gemma-3n")
+        True
+        >>> is_explicit_path("../parent/model")
+        True
+        >>> is_explicit_path("/abs/path/model")
+        True
+        >>> is_explicit_path(".")
+        True
+        >>> is_explicit_path("mlx-community/Phi-3")
+        False  # HF model ID
+        >>> is_explicit_path("my-model")
+        False  # Ambiguous, treated as HF ID
+    """
+    if not pattern or not isinstance(pattern, str):
+        return False
+    return (
+        pattern.startswith(('./', '../', '/')) or
+        pattern in ('.', '..')
+    )
+
+
 def is_workspace_path(path) -> bool:
     """Check if path points to a workspace directory (managed or unmanaged).
 
@@ -168,3 +202,77 @@ def is_workspace_path(path) -> bool:
         return p.exists() and (p / "config.json").exists()
     except (TypeError, OSError):
         return False
+
+
+def find_matching_workspaces(pattern: str) -> list:
+    """Find all workspace directories matching an explicit path pattern.
+
+    Supports three modes:
+    1. Exact match: Pattern points to existing workspace directory
+    2. Directory scan: Pattern is existing directory (not workspace) → find all workspaces inside
+    3. Prefix match: Pattern is partial path → find directories starting with prefix
+
+    Args:
+        pattern: Explicit path pattern (e.g., "./gemma-" or "/path/to/model" or ".")
+                 Must start with ./, ../, / or be . or ..
+
+    Returns:
+        List of Path objects for matching workspaces (directories with config.json).
+        Empty list if pattern is not an explicit path or no matches found.
+
+    Examples:
+        >>> find_matching_workspaces("./gemma-3n-E2B-it-4bit")
+        [PosixPath('/path/to/gemma-3n-E2B-it-4bit')]  # Exact match
+
+        >>> find_matching_workspaces(".")
+        [PosixPath('/path/to/model1'), PosixPath('/path/to/model2')]  # Directory scan
+
+        >>> find_matching_workspaces("./gemma-")
+        [PosixPath('/path/to/gemma-3n-E2B-it-4bit'),
+         PosixPath('/path/to/gemma-3n-E2B-it-FIXED-4bit')]  # Prefix match
+
+        >>> find_matching_workspaces("mlx-community/Phi-3")
+        []  # Not an explicit path
+    """
+    if not is_explicit_path(pattern):
+        return []
+
+    try:
+        p = Path(pattern).expanduser()
+
+        # Case 1: Exact match - pattern is already a complete workspace
+        if is_workspace_path(p):
+            return [p.resolve()]
+
+        # Case 2: Directory scan - pattern is existing directory (not a workspace)
+        # Find all workspaces inside this directory
+        if p.exists() and p.is_dir():
+            matches = []
+            for entry in p.iterdir():
+                if entry.is_dir() and (entry / "config.json").exists():
+                    matches.append(entry.resolve())
+            matches.sort(key=lambda x: x.name)
+            return matches
+
+        # Case 3: Prefix match - find directories starting with pattern
+        parent = p.parent
+        prefix = p.name
+
+        if not parent.exists() or not parent.is_dir():
+            return []
+
+        # Find all directories in parent that start with prefix
+        matches = []
+        for entry in parent.iterdir():
+            if entry.is_dir() and entry.name.startswith(prefix):
+                # Only include if it's a valid workspace (has config.json)
+                if (entry / "config.json").exists():
+                    matches.append(entry.resolve())
+
+        # Sort by name for consistent output
+        matches.sort(key=lambda p: p.name)
+        return matches
+
+    except (TypeError, OSError) as e:
+        logger.debug(f"Error finding workspaces for pattern '{pattern}': {e}")
+        return []

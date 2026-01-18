@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Tuple, Optional, List
 from .cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
-from ..operations.workspace import is_workspace_path
+from ..operations.workspace import is_workspace_path, is_explicit_path
 
 
 def expand_model_name(model_name: str) -> str:
@@ -95,14 +95,10 @@ def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optiona
         'Mistral-Small' → cache resolution (NOT workspace, even if local dir exists)
         'ambig' → (None, None, ['model1', 'model2'])
     """
-    # NEW: Check if model_spec is an EXPLICIT workspace path (ADR-018 Phase 0c)
+    # Check if model_spec is an EXPLICIT workspace path (ADR-018 Phase 0c)
     # Only paths starting with ./ ../ / or being . or .. are treated as workspace paths
     # This ensures "model-name" goes through cache resolution even if a local dir exists
-    is_explicit_path = (
-        model_spec.startswith(('./', '../', '/')) or
-        model_spec in ('.', '..')
-    )
-    if is_explicit_path and is_workspace_path(model_spec):
+    if is_explicit_path(model_spec) and is_workspace_path(model_spec):
         # Explicit workspace path - return absolute path, skip cache logic
         return (str(Path(model_spec).resolve()), None, None)
 

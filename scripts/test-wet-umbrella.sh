@@ -14,25 +14,26 @@ PYTEST_OPTS="--tb=no --capture=sys"
 # Run 1: Compatible live tests (User Cache READ + Workspace)
 echo ""
 echo "📦 Phase 1: User Cache READ tests (wet umbrella)..."
-MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m wet -v $PYTEST_OPTS
+# Override addopts to allow live tests (pytest.ini has -m "not live" for default run)
+pytest -m wet -v $PYTEST_OPTS -o addopts=""
 
 # Run 2: Isolated Cache WRITE - Pull (incompatible with Portfolio)
 echo ""
 echo "📥 Phase 2: Isolated Cache WRITE - Pull tests..."
-MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull -v $PYTEST_OPTS
+MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull -v $PYTEST_OPTS -o addopts=""
 
 # Run 3: Isolated Cache WRITE - Clone (incompatible with Portfolio)
 echo ""
 echo "🔄 Phase 3: Isolated Cache WRITE - Clone tests..."
 # Note: live_clone tests are opt-in (require env vars), will skip if not configured
-MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_clone -v $PYTEST_OPTS
+pytest -m live_clone -v $PYTEST_OPTS -o addopts=""
 
 # Run 4: Vision→Geo Pipe Integration
 echo ""
 echo "🖼️  Phase 4: Vision→Geo Pipe tests..."
 # Note: Requires vision model (e.g., pixtral) + text model (e.g., Qwen3-Next)
 # Will skip if models not found in cache (graceful degradation)
-MLXK2_ENABLE_PIPES=1 pytest -m live_vision_pipe -v $PYTEST_OPTS
+MLXK2_ENABLE_PIPES=1 pytest -m live_vision_pipe -v $PYTEST_OPTS -o addopts=""
 
 echo ""
 echo "✅ All real tests completed!"

@@ -4,7 +4,7 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.4-beta.6** — Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone.
+✅ **2.0.4-beta.7** — Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.1** (Vision/Text inference modality differentiation).
 
 ### Test Results (Official Reference)
 
@@ -12,7 +12,7 @@ This document contains version-specific details, complete file listings, and imp
 ```
 Platform: macOS 26.2 (Tahoe), M2 Max, 64GB RAM
 Python: 3.9-3.14 (Multi-Python verified)
-Results: 550 passed, 56 skipped
+Results: 553 passed, 56 skipped (includes 4 vision chunk streaming tests)
 Note: Default suite works on 16GB. Wet-umbrella: 64GB recommended (M1 Max 32GB untested)
 ```
 
@@ -23,11 +23,11 @@ Results: 144+ passed, 21 skipped
 
 **Wet Umbrella (4-Phase Integration):**
 ```
-Phase 1 (wet marker):        152 passed, 34 skipped, 579 deselected
+Phase 1 (wet marker):        161 passed, 72 skipped, 579 deselected (Schema v0.2.1)
 Phase 2 (live_pull):           3 passed, 630 deselected
 Phase 3 (live_clone):          3 passed, 630 deselected
 Phase 4 (live_vision_pipe):    3 passed (requires vision+text models, skips if unavailable)
-Total:                       161 passed across all phases
+Total:                       170 passed across all phases
 ```
 
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
@@ -52,46 +52,7 @@ Total:                       161 passed across all phases
 - **2 Show Portfolio tests** - Display text/vision portfolios separately (requires HF_HOME)
 - **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
-**Portfolio Discovery** (ADR-009) is implemented in `tests_2.0/test_stop_tokens_live.py`. When `HF_HOME` is set, tests auto-discover all MLX chat models in user cache using `mlxk list --json` (production command). This ensures Issue #32 fix is validated across the full model portfolio. **Current validation:** 17 models discovered, 15 testable (60% RAM budget), 73/81 tests passing, 0 failures. Portfolio includes: Phi-3, DeepSeek-R1, GPT-oss, Llama, Qwen, Mistral, Mixtral families.
-
-**New coverage in 2.0.4-beta.1:**
-- JSON-mode interactive rejection emits JSON on stdout with exit code 1.
-- Pipe stdin semantics for `mlxk run` (`-` reads stdin, non-TTY forces batch) behind `MLXK2_ENABLE_PIPES=1`.
-- **SIGPIPE handling:** Handler set to SIG_DFL for graceful pipe termination (e.g., `mlxk run | head -1`).
-- **BrokenPipeError handling:** Streaming and batch output catch BrokenPipeError for robust pipe chains.
-- **Vision CLI support (ADR-012 Phase 1-2):** Implementation with `--image` flag
-  - VisionRunner wraps mlx-vlm backend (non-streaming, batch-only)
-  - Auto-routing: Vision models use mlx-vlm; text models use mlx-lm
-  - **5 deterministic CLI E2E tests:** Chess position reading, OCR text extraction, color recognition, chart label reading, large image support (2.7MB validates 10MB limit)
-- **Vision Server support (ADR-012 Phase 3):** HTTP API for vision requests
-  - Backend-aware `get_or_load_model()`: Loads MLXRunner OR VisionRunner based on policy
-  - `ChatMessage.content` extended for OpenAI Vision format (`Union[str, List[Dict]]`)
-  - Streaming graceful degradation (SSE emulation) for vision models (mlx-vlm doesn't support true streaming)
-  - **17 unit tests** in `test_server_vision.py` (ChatMessage, image detection, helpers)
-  - **3 E2E tests** in `test_vision_server_e2e.py` (Base64 image, streaming graceful degradation, text on vision server)
-- **Test Portfolio Separation (CLAUDE.md):** Text and Vision models tested independently
-  - **Separate discovery functions:** `discover_text_models()` and `discover_vision_models()` with vision capability filtering
-  - **RAM calculation modularization:** Text models use 1.2x multiplier; Vision models use 0.70 threshold (ADR-016)
-  - **New fixtures:** `text_portfolio`, `vision_portfolio`, `text_model_info`, `vision_model_info`
-  - **Parametrized E2E tests:** text_XX (23 text models), vision_XX (3 vision models) - deterministic indices
-  - **21 new unit tests:** 10 portfolio discovery tests, 11 RAM calculation tests
-  - **Benchmark reporting updated:** Dynamically selects correct model_info fixture
-  - **Diagnostic tool:** `show_portfolios.py` displays separated portfolios with RAM estimates
-- `mlx-run` wrapper entrypoint argv injection.
-- Tests added: `tests_2.0/test_cli_run_exit_codes.py` (pipe/JSON/SIGPIPE/BrokenPipe), `tests_2.0/test_cli_run_wrapper.py`, `tests_2.0/live/test_vision_e2e_live.py` (5 vision CLI E2E tests), `tests_2.0/test_server_vision.py` (17 vision server unit tests), `tests_2.0/live/test_vision_server_e2e.py` (3 vision server E2E tests), `tests_2.0/test_portfolio_discovery.py` (10 tests), `tests_2.0/test_ram_calculation.py` (11 tests), `tests_2.0/live/test_portfolio_fixtures.py` (7 validation tests), `tests_2.0/show_portfolios.py` (diagnostic script).
-
-**New coverage in 2.0.4-beta.6:**
-- **Vision Batch Processing (ADR-012 Phase 1c):** `--chunk N` flag for processing images in isolated batches
-  - Default: `--chunk 1` (incremental output, fresh VisionRunner per chunk)
-  - Server support: Unlimited images with safe chunking (MAX_SAFE_CHUNK_SIZE=5)
-  - Context-line in prompt: Batch info visible to model and user
-- **Vision→Geo Pipe Integration Tests:** Smoke tests for complete pipeline (marker: `live_vision_pipe`)
-  - **3 tests** in `tests_2.0/live/test_pipe_vision_geo.py`: Vision batch processing, complete pipe workflow, chunk isolation
-  - Validates: Sessions 72-75 fixes (chunk isolation, pipe stdin + `--prompt`, server chunking)
-  - Uses: `tests_2.0/assets/geo-test/` (9 JPEGs with EXIF metadata)
-  - PASSED criteria: Process exits 0, output not empty, mentions expected terms (smoke test only, no quality metrics)
-
-For complete test file structure, see [Appendix](#complete-test-file-structure-201).
+**Portfolio Discovery** (ADR-009) auto-discovers MLX models in user cache using `mlxk list --json`. Validates fixes across the full model portfolio with RAM-aware skipping.
 
 ---
 
@@ -102,13 +63,13 @@ For complete test file structure, see [Appendix](#complete-test-file-structure-2
 | Default suite | `pytest -v` | — | JSON-API (list/show/health), Human-Output, Model-Resolution, Health-Policy, Push Offline (`--check-only`, `--dry-run`), Spec/Schema checks | No |
 | Spec only | `pytest -m spec -v` | `spec` | Schema/contract tests, version sync, docs example validation | No |
 | Exclude spec | `pytest -m "not spec" -v` | `not spec` | Everything except spec/schema checks | No |
-| Push offline | `pytest -k push -v` | — | Push offline tests (tests alpha feature: `--check-only`, `--dry-run`, error handling); no network, no credentials needed | No |
+| Push offline | `pytest -k push -v` | — | Push offline tests (`--check-only`, `--dry-run`, error handling); no network, no credentials needed | No |
 | Live pipe mode | `MLXK2_ENABLE_PIPES=1 pytest -m live_e2e tests_2.0/live/test_cli_pipe_live.py -v` | `live_e2e`; Env: `HF_HOME`, `MLXK2_ENABLE_PIPES=1` | Stdin `-`, pipe auto-batch, JSON interactive error path, list→run pipe; first eligible model from portfolio discovery | No (uses local cache) |
 | Vision→Geo pipe | `MLXK2_ENABLE_PIPES=1 pytest -m live_vision_pipe -v` | `live_vision_pipe` (new marker); Env: `HF_HOME` (requires vision + text models), `MLXK2_ENABLE_PIPES=1`; Optional: `MLXK2_VISION_BATCH_SIZE=N` (default: 1) | **Smoke test for complete Vision→Geo pipeline.** Validates: Vision batch processing (`--chunk 1`), chunk isolation (no state leakage), pipe stdin + `--prompt` combination, geo inference. **PASSED criteria:** Process exits 0, output not empty, output mentions expected terms. Uses `tests_2.0/assets/geo-test/` (9 JPEGs with EXIF). | No (uses local cache) |
-| Live push | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_push -v` | `live_push` (subset of `wet`) + Env: `MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
+| Live push | `pytest -m live_push -v` | `live_push` (subset of `wet`) + Env: `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
 | Live list | `pytest -m live_list -v` | `live_list` (subset of `wet`) + Env: `HF_HOME` (user cache with models) | Tests list/health against user cache models | No (uses local cache) |
-| Clone offline | `pytest -k clone -v` | — | Clone offline tests (tests alpha feature: APFS validation, temp cache, CoW workflow); no network needed | No |
-| Live clone (ADR-007) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK2_LIVE_CLONE_WORKSPACE` | Real clone workflow: pull→temp cache→APFS same-volume clone→workspace (ADR-007 Phase 1 constraints: same volume + APFS required) | Yes |
+| Clone offline | `pytest -k clone -v` | — | Clone offline tests (APFS validation, temp cache, CoW workflow); no network needed | No |
+| Live clone (ADR-007) | `pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK2_LIVE_CLONE_WORKSPACE` | Real clone workflow: pull→temp cache→APFS same-volume clone→workspace (ADR-007 Phase 1 constraints: same volume + APFS required) | Yes |
 | Live stop tokens (ADR-009) | `pytest -m live_stop_tokens -v` | `live_stop_tokens` (required); Optional: `HF_HOME` (enables portfolio discovery) | Issue #32: Validates stop token behavior with real models. **With HF_HOME:** Portfolio Discovery auto-discovers all MLX chat models (filter: MLX+healthy+runtime+chat), RAM-aware skip, empirical report. **Without HF_HOME:** Uses 3 predefined models (see "Optional Setup" section for model requirements). | No (uses local cache) |
 | Live run | `pytest -m live_run -v` | `live_run` + Env: `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache with `mlx-community/Phi-3-mini-4k-instruct-4bit`) | Regression tests for Issue #37: Validates private/org MLX model framework detection in run command (renames Phi-3 to simulate private-org model) | No (uses local cache) |
 | Live E2E (ADR-011) | `HF_HOME=/path/to/cache pytest -m live_e2e -v` | `live_e2e` (required) + Env: `HF_HOME` (optional, enables Portfolio Discovery); Requires: `httpx` installed | **✅ Working:** Server/HTTP/CLI validation with real models. Portfolio Discovery auto-discovers all MLX chat models via `mlxk list --json` (filter: MLX+healthy+runtime+chat), parametrized tests (one server per model), RAM-aware skip. | No (uses local cache) |
@@ -135,10 +96,10 @@ pytest -k "clone and not live" -v
 pytest -m "not spec" -v
 
 # Live Push only
-MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v
+MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v
 
 # Live Clone only
-MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK2_LIVE_CLONE=1 HF_TOKEN=... MLXK2_LIVE_CLONE_MODEL=... MLXK2_LIVE_CLONE_WORKSPACE=... pytest -m live_clone -v
+MLXK2_LIVE_CLONE=1 HF_TOKEN=... MLXK2_LIVE_CLONE_MODEL=... MLXK2_LIVE_CLONE_WORKSPACE=... pytest -m live_clone -v
 
 # Live List only
 HF_HOME=/path/to/user/cache pytest -m live_list -v
@@ -380,6 +341,75 @@ def test_my_feature(text_portfolio):
 ```
 
 **Why:** Default test run excludes ALL `live` tests via `pytest -m "not live"` (used in `test-multi-python.sh`). New live tests are automatically excluded without script changes.
+
+### Fixture Guidelines (Schema v0.2.1 - Benchmark Modality Detection)
+
+**CRITICAL:** New live tests MUST use modality-specific fixtures for accurate benchmark reporting:
+
+```python
+# ✅ CORRECT - Use modality-specific fixtures
+def test_my_text_feature(text_model_key, text_model_info):
+    """Text inference test - automatically tagged as 'text' modality."""
+    pass
+
+def test_my_vision_feature(vision_model_key, vision_model_info):
+    """Vision inference test - automatically tagged as 'vision' modality."""
+    pass
+
+# ❌ DEPRECATED - Avoid legacy fixtures
+def test_old_style(model_key):  # Don't use - shows as "Unknown (legacy)" in reports
+    pass
+```
+
+**Available Fixtures:**
+
+| Fixture | Modality | Use Case |
+|---------|----------|----------|
+| `text_model_key` | Text | Parametrized text model tests |
+| `text_model_info` | Text | Access model metadata (size, path) |
+| `vision_model_key` | Vision | Parametrized vision model tests |
+| `vision_model_info` | Vision | Access vision model metadata |
+
+**DEPRECATED Fixtures (do not use in new code):**
+
+| Deprecated | Replacement | Reason |
+|------------|-------------|--------|
+| `model_key` | `text_model_key` | No modality detection |
+| `portfolio_models` | `text_portfolio` | Ambiguous modality |
+
+**How Modality Detection Works (Schema v0.2.1):**
+
+The pytest hooks in `tests_2.0/conftest.py` automatically detect inference modality:
+
+1. **Fixture-based detection:** Tests using `vision_model_key` → `inference_modality: "vision"`
+2. **Fixture-based detection:** Tests using `text_model_key` → `inference_modality: "text"`
+3. **Explicit override:** Pipe tests can set modality via `request.node.user_properties`
+4. **Legacy fallback:** Tests without modality fixtures → `inference_modality: "unknown"`
+
+**Why This Matters:**
+
+Benchmark reports differentiate Vision vs Text inference for mixed-modality models:
+
+```
+Model                       Size     Mode   Tests  Time      RAM (GB)
+pixtral-12b-8bit           12.6GB   Vision 8      316.0s    17.5-29.1
+pixtral-12b-8bit           12.6GB   Text   1       14.3s    20.3
+```
+
+Without modality-specific fixtures, tests appear as "Unknown (legacy)" - making reports less useful.
+
+**Non-Parametrized Tests:**
+
+For tests that don't use parametrized fixtures but still need modality reporting:
+
+```python
+@pytest.fixture(autouse=True)
+def _report_text_modality(request):
+    """Explicitly tag non-parametrized tests as text inference."""
+    request.node.user_properties.append(("inference_modality", "text"))
+```
+
+See `tests_2.0/live/test_cli_pipe_live.py` for an example.
 
 ### Compatibility Rule (Technical Background)
 
@@ -829,7 +859,7 @@ find "$MLXK2_USER_HF_HOME/hub" -type f \
 
 ### Copy-on-Write (CoW) Optimization
 
-**New in 2.0.4-beta.1:** Test model copies use CoW on macOS/APFS for instant, disk-free clones.
+Test model copies use CoW on macOS/APFS for instant, disk-free clones.
 
 **How it works:**
 - Volume detection: `_get_volume_root()` finds mount point, `_is_apfs_volume()` verifies APFS
@@ -872,7 +902,7 @@ find "$MLXK2_USER_HF_HOME/hub" -type f \
 
 ### Vision Model Health Tests (ADR-012 Phase 2)
 
-**New in 2.0.4-beta.1:** Real vision model health validation with controlled mutations.
+Real vision model health validation with controlled mutations.
 
 ```bash
 # Set user cache
@@ -995,7 +1025,7 @@ mlxk pull mlx-community/Llama-3.2-3B-Instruct-4bit   # ~4GB RAM
 
 ### E2E Tests with Portfolio Separation (ADR-011 + Portfolio Separation)
 
-**Status:** ✅ Working (Portfolio Separation complete, CLAUDE.md)
+**Status:** ✅ Working (Portfolio Separation complete)
 
 Auto-discovers and validates Server/HTTP/CLI interfaces with real models, separated into text and vision portfolios.
 
@@ -1086,7 +1116,7 @@ pytest -m live_e2e --collect-only  # Should work without errors
 # Llama-3.2-90B-Vision (46.4GB, 72.5% ratio) → ⏭️ SKIP (exceeds 70%)
 ```
 
-### max_tokens Strategy: Vision vs Text (Session 31)
+### max_tokens Strategy: Vision vs Text
 
 **Problem:** Vision and text models have fundamentally different context management strategies.
 
@@ -1108,15 +1138,10 @@ pytest -m live_e2e --collect-only  # Should work without errors
 - **Example:** Llama-3.2-11B-Vision (128K context) → Default: 2048 max_tokens
 - **Implementation:** `get_effective_max_tokens_vision(runner, requested_max_tokens)`
 
-**Future (Phase 1c - Batch Processing):**
-- Vision: Processes 24 images → Batched stateless (each image independent)
+**Batch Processing:**
+- Vision: Processes multiple images → Batched stateless (each image independent)
 - Text: Receives ALL vision outputs → Full shift-window context for complex queries
 - Example: "Compare Image 1 and Image 15" requires text model with full history
-
-**Test Updates (Session 31):**
-- E2E Vision tests: Updated from `50-100` → `2048` tokens
-- Reflects realistic server defaults (no artificial limits)
-- Prevents test failures from truncated responses
 
 ### Text Portfolio E2E Tests
 
@@ -1191,7 +1216,7 @@ pytest -m live_e2e --collect-only  # Should work without errors
 4. **test_vision_to_text_model_switch_filters_images** (special integration test)
    - Tests Vision→Text model switching with conversation history
    - Server filters `image_url` content for text models
-   - Validates: Multimodal history filtering (Session 26, VISION-MULTIMODAL-HISTORY-ISSUE.md)
+   - Validates: Multimodal history filtering
    - **1 test** (uses both portfolios)
 
 **RAM Gating:**
@@ -1345,7 +1370,7 @@ MLXK2_LIVE_PUSH=1 \
 
 ---
 
-### A5. Complete Test File Structure (2.0.4-beta.5)
+### A5. Complete Test File Structure (2.0.4-beta.7)
 
 ```
 scripts/
@@ -1391,7 +1416,7 @@ tests_2.0/
 │   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
 │   └── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
 ├── test_adr004_error_logging.py       # ADR-004 error logging and redaction (tokens, paths)
-├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016, Session 18-19, 45 tests)
+├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016, 45 tests)
 ├── test_cli_log_json_flag.py          # CLI --log-json flag behavior and JSON log format
 ├── test_cli_push_args.py              # Push CLI args and JSON error/output handling (offline)
 ├── test_cli_run_exit_codes.py         # CLI exit codes + pipe/JSON regressions, stdin '-', non-TTY batch, interactive JSON error, SIGPIPE, BrokenPipeError
@@ -1413,7 +1438,8 @@ tests_2.0/
 ├── test_json_api_show.py              # JSON API show contract (base/files/config)
 ├── test_legacy_formats.py             # Legacy model format detection (Issue #37)
 ├── test_model_naming.py               # Conversion rules, bijection, parsing
-├── test_multimodal_filtering.py       # Multimodal history filtering (Vision→Text model switching, Session 27)
+├── test_model_resolution_workspace.py # Workspace path resolution tests (ADR-018, explicit path detection, prefix matching)
+├── test_multimodal_filtering.py       # Multimodal history filtering (Vision→Text model switching)
 ├── test_portfolio_discovery.py        # Portfolio separation discovery tests (10 tests: text/vision filtering, RAM formulas)
 ├── test_push_dry_run.py               # Push dry-run diff planning (added/modified/deleted)
 ├── test_push_extended.py              # Extended push: no-op vs commit, branch/retry, .hfignore
@@ -1435,7 +1461,8 @@ tests_2.0/
 ├── test_stop_tokens_live.py           # Stop token validation with real models (marker: live_stop_tokens, ADR-009)
 ├── test_token_limits.py               # Dynamic token calculation; server vs run policies
 ├── test_vision_adapter.py             # Vision HTTP adapter unit tests (46 tests: Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
-├── test_vision_exif.py                # EXIF extraction tests (ADR-017 Phase 1, 8 tests: GPS, DateTime, Camera, collapsible table, privacy controls)
+├── test_vision_chunk_streaming.py     # Vision chunk streaming tests (4 tests: SSE format, multi-chunk streaming, single-chunk routing, generator integration)
+├── test_vision_exif.py                # EXIF extraction tests (8 tests: GPS, DateTime, Camera, collapsible table, privacy controls)
 ├── test_workspace_sentinel.py         # Workspace infrastructure tests (ADR-018 Phase 0a, 20 tests: sentinel primitives, atomic write, managed/unmanaged detection, health checks, CLI integration)
 └── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1, 11 tests: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
 ```

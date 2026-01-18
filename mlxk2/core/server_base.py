@@ -602,9 +602,14 @@ def get_effective_max_tokens(runner: MLXRunner, requested_max_tokens: Optional[i
     Text models use shift-window context management:
     - server_mode=True: context_length / 2 (reserve half for history)
     - server_mode=False: context_length (full context for CLI)
+
+    Priority: requested_max_tokens > _default_max_tokens (from --max-tokens CLI) > dynamic calculation
     """
     if requested_max_tokens is not None:
         return requested_max_tokens
+    elif _default_max_tokens is not None:
+        # Use server-wide default from CLI --max-tokens flag
+        return _default_max_tokens
     else:
         # Use runner's dynamic calculation with server_mode flag
         return runner._calculate_dynamic_max_tokens(server_mode=server_mode)
@@ -621,10 +626,13 @@ def get_effective_max_tokens_vision(runner, requested_max_tokens: Optional[int])
     - Vision models typically have large context (128K+), but generation is slow
     - 2048 tokens ≈ 1500 words, enough for detailed image descriptions
 
-    Future: Could use context_length from config if available, but 2048 is safe.
+    Priority: requested_max_tokens > _default_max_tokens (from --max-tokens CLI) > 2048 default
     """
     if requested_max_tokens is not None:
         return requested_max_tokens
+    elif _default_max_tokens is not None:
+        # Use server-wide default from CLI --max-tokens flag
+        return _default_max_tokens
 
     # Conservative default for vision (stateless, no history to reserve)
     # Vision inference is slow, so we don't want to generate 64K tokens by default
@@ -637,19 +645,31 @@ def count_tokens(text: str) -> int:
 
 
 def _request_has_images(messages: List[ChatMessage]) -> bool:
-    """Check if any message contains image content (Vision API format).
+    """Check if LAST USER MESSAGE contains image content (Vision API format).
+
+    OpenAI API semantics: Only images from the last user message are processed.
+    Historical images are preserved in context but not re-processed.
+
+    This function determines routing (vision vs text path).
+    Must match actual vision processing behavior (ADR-012 Phase 3).
 
     Args:
         messages: List of ChatMessage objects
 
     Returns:
-        True if any message contains image_url content
+        True if the last user message contains image_url content
     """
-    for msg in messages:
-        if isinstance(msg.content, list):
-            for item in msg.content:
-                if isinstance(item, dict) and item.get("type") == "image_url":
-                    return True
+    # Find last user message (iterate backwards for efficiency)
+    for msg in reversed(messages):
+        if msg.role == "user":
+            # Check if THIS message has images
+            if isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, dict) and item.get("type") == "image_url":
+                        return True
+            # Found last user message, no images
+            return False
+    # No user messages at all (shouldn't happen with validation, but be defensive)
     return False
 
 
@@ -807,8 +827,12 @@ async def list_models():
     model_list = []
     model_cache = get_current_model_cache()
 
-    # Find all model directories
-    models = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
+    # Find all model directories (handle missing cache gracefully)
+    if not model_cache.exists():
+        # Fresh installation or custom cache location - no models yet
+        models = []
+    else:
+        models = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
 
     for model_dir in models:
         model_name = cache_dir_to_hf(model_dir.name)
@@ -1184,20 +1208,171 @@ def _process_vision_chunks_server(
     return "\n\n".join(all_results)
 
 
+async def _stream_vision_chunks(
+    model_path,
+    model_name: str,
+    prompt: str,
+    images: List[tuple],
+    chunk_size: int,
+    image_id_map: Dict[str, int],
+    max_tokens: Optional[int],
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float,
+    completion_id: str,
+    created: int,
+    model: str,
+) -> AsyncGenerator[str, None]:
+    """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
+
+    Unlike _process_vision_chunks_server() which waits for all chunks,
+    this yields SSE events immediately after each chunk finishes.
+    Uses asyncio.to_thread() to keep the event loop responsive.
+
+    Args:
+        model_path: Path to model snapshot directory
+        model_name: Model name for VisionRunner
+        prompt: User prompt
+        images: Full list of (filename, bytes) tuples
+        chunk_size: Images per chunk
+        image_id_map: Pre-computed global image IDs (from conversation history)
+        max_tokens, temperature, top_p, repetition_penalty: Generation params
+        completion_id: Unique completion ID for SSE events
+        created: Timestamp for SSE events
+        model: Model name for SSE events
+
+    Yields:
+        SSE event strings (data: {...}\n\n format)
+    """
+    import asyncio
+    from .vision_runner import VisionRunner
+
+    chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
+    total_images = len(images)
+
+    # Initial role event
+    initial_event = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {"role": "assistant"},
+            "finish_reason": None
+        }]
+    }
+    yield f"data: {json.dumps(initial_event)}\n\n"
+
+    # Process each chunk and stream result immediately
+    for chunk_idx, chunk in enumerate(chunks, start=1):
+        logger.info(
+            f"Vision chunk {chunk_idx}/{len(chunks)} starting",
+            chunk=chunk_idx,
+            total_chunks=len(chunks),
+            images_in_chunk=len(chunk)
+        )
+
+        # Check shutdown before processing
+        if _shutdown_event.is_set():
+            interrupt_event = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": "\n\n[Generation interrupted]"},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(interrupt_event)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Process chunk in thread pool (keeps event loop responsive)
+        # NOTE: Pass chunk_images as argument to avoid closure late-binding issues
+        def process_chunk(chunk_images):
+            with VisionRunner(model_path, model_name, verbose=False) as runner:
+                return runner.generate(
+                    prompt=prompt,
+                    images=chunk_images,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    image_id_map=image_id_map,
+                    total_images=total_images,
+                )
+
+        try:
+            chunk_result = await asyncio.to_thread(process_chunk, chunk)
+        except Exception as e:
+            logger.error(f"Vision chunk {chunk_idx}/{len(chunks)} failed: {e}")
+            error_event = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": f"\n\n[Error in chunk {chunk_idx}: {str(e)}]"},
+                    "finish_reason": "error"
+                }]
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Content event for this chunk (with separator for multi-chunk)
+        separator = "\n\n" if chunk_idx < len(chunks) else ""
+        content_event = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {"content": chunk_result + separator},
+                "finish_reason": None
+            }]
+        }
+        yield f"data: {json.dumps(content_event)}\n\n"
+
+        logger.info(
+            f"Vision chunk {chunk_idx}/{len(chunks)} streamed",
+            chunk=chunk_idx,
+            total_chunks=len(chunks),
+            output_length=len(chunk_result)
+        )
+
+    # Final event with finish_reason
+    final_event = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }]
+    }
+    yield f"data: {json.dumps(final_event)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner: Any = None) -> ChatCompletionResponse:
     """Handle vision chat completion with images (ADR-012 Phase 3).
 
-    Non-streaming only. Uses VisionHTTPAdapter to parse OpenAI format
-    and VisionRunner for generation. Reuses cached model if available.
+    Supports per-chunk streaming for multi-image requests (stream=True yields
+    SSE events as each chunk completes). Single-chunk requests use batch mode
+    with optional SSE emulation.
 
     Args:
         request: Chat completion request
         runner: Pre-loaded model runner (optional, will load if not provided)
     """
-    # Graceful degradation: ignore stream=true (mlx-vlm doesn't support streaming)
-    if request.stream:
-        logger.info("Vision request: stream=true ignored (not supported), using batch")
-
     # Lazy import vision components (Python 3.9 compatibility)
     from ..tools.vision_adapter import VisionHTTPAdapter
 
@@ -1254,7 +1429,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
     created = int(time.time())
 
     # Get chunk size (with env var override)
-    chunk_size = request.chunk if request.chunk != 1 else int(os.environ.get("MLXK2_VISION_BATCH_SIZE", "1"))
+    chunk_size = request.chunk if request.chunk != 1 else int(os.environ.get("MLXK2_VISION_CHUNK_SIZE", "1"))
 
     # Validate chunk size for Metal API stability
     from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
@@ -1284,7 +1459,35 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
             image_id_map=image_id_map,
         )
     else:
-        # Multi-batch chunking - creates fresh runner per chunk
+        # Multi-chunk processing
+        if request.stream:
+            # True per-chunk streaming (yields SSE events as chunks complete)
+            logger.info(
+                f"Vision request: chunk streaming ({len(images)} images, chunk_size={chunk_size})",
+                model=request.model,
+                image_count=len(images),
+                chunk_size=chunk_size
+            )
+            return StreamingResponse(
+                _stream_vision_chunks(
+                    model_path=runner.model_path,
+                    model_name=runner.model_name,
+                    prompt=prompt,
+                    images=images,
+                    chunk_size=chunk_size,
+                    image_id_map=image_id_map,
+                    max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
+                    temperature=0.0,
+                    top_p=request.top_p or 0.9,
+                    repetition_penalty=request.repetition_penalty or 1.0,
+                    completion_id=completion_id,
+                    created=created,
+                    model=request.model,
+                ),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache"}
+            )
+        # Non-streaming multi-chunk (batch mode)
         generated_text = _process_vision_chunks_server(
             model_path=runner.model_path,
             model_name=runner.model_name,
@@ -1308,9 +1511,9 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
     prompt_tokens = count_tokens(prompt)
     completion_tokens = count_tokens(generated_text)
 
-    # Graceful degradation: emulate SSE for stream=true
+    # Graceful degradation: emulate SSE for stream=true (single-chunk only)
     if request.stream:
-        logger.info("Vision request: emulating SSE stream (batch response as single event)")
+        logger.info("Vision request: emulating SSE stream (single-chunk batch response)")
         return StreamingResponse(
             _emulate_sse_stream(completion_id, created, request.model, generated_text),
             media_type="text/event-stream",
@@ -1557,6 +1760,18 @@ def run_server(
 ):
     """Run the MLX Knife server 2.0."""
     import os
+
+    # Suppress transformers/tokenizers noise (Session 89 + Session 90 fix)
+    # ENV variables already set by serve.py subprocess, but set logging programmatically
+    # IMPORTANT: Do NOT import transformers in global scope (breaks huggingface_hub downloads)
+    try:
+        from transformers import logging as transformers_logging
+        import logging as python_logging
+        transformers_logging.set_verbosity_error()
+        python_logging.getLogger("transformers.tokenization_utils").setLevel(python_logging.ERROR)
+        python_logging.getLogger("transformers.tokenization_utils_base").setLevel(python_logging.ERROR)
+    except ImportError:
+        pass  # transformers not installed (optional dependency for vision)
 
     # Import uvicorn lazily to keep module import light when server isn't used
     try:

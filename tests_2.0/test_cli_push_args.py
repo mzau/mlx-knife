@@ -31,7 +31,6 @@ def _run_cli(argv: list[str], capsys):
 
 def test_cli_push_missing_args_json_error(capsys, monkeypatch):
     # Missing required positional args but with --json should emit JSON error
-    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     stdout, stderr = _run_cli(["mlxk2", "push", "--private", "--json"], capsys)
     # JSON mode: all output to stdout (for scripting)
     data = json.loads(stdout)
@@ -42,7 +41,6 @@ def test_cli_push_missing_args_json_error(capsys, monkeypatch):
 
 def test_cli_push_workspace_missing_json_error(tmp_path, monkeypatch, capsys):
     # Provide missing workspace; ensure JSON error and specific error type
-    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
     missing = str(tmp_path / "nope")
     stdout, stderr = _run_cli(["mlxk2", "push", "--private", missing, "user/repo", "--json"], capsys)
@@ -89,7 +87,6 @@ def test_cli_push_no_changes_json_output(tmp_path, monkeypatch, capsys):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "x.txt").write_text("x")
-    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
 
     _install_fake_hf(monkeypatch, mode="no_changes")
@@ -108,7 +105,6 @@ def test_cli_push_with_changes_json_output(tmp_path, monkeypatch, capsys):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "x.txt").write_text("x")
-    monkeypatch.setenv("MLXK2_ENABLE_ALPHA_FEATURES", "1")
     monkeypatch.setenv("HF_TOKEN", "dummy")
 
     _install_fake_hf(monkeypatch, mode="with_changes")

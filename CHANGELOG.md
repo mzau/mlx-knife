@@ -1,5 +1,64 @@
 # Changelog
 
+## [2.0.4-beta.7] - 2026-01-18
+
+### Highlights
+
+**Production Ready Clone & Push:** `mlxk clone` and `mlxk push` operations are not anymore  alpha gated. The `convert` operation remains experimental (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`).
+
+**Test Isolation Fix:** Live tests (requiring models/network) are now properly excluded from default `pytest` runs. Previously documented but never enforced, this critical fix prevents accidental execution of resource-intensive tests during development.
+
+**Vision Batch Processing Terminology:** Clarified that mlx-knife uses "batch" in the traditional computing sense (sequential job processing) rather than ML inference batching (parallel batch_size > 1). Output now shows "Chunk 1/3" instead of "Batch 1/3" to reduce confusion with ML terminology. Environment variable renamed to `MLXK2_VISION_CHUNK_SIZE` for consistency with `--chunk` parameter.
+
+**Vision/Text Inference Differentiation:** Benchmark reports now differentiate between Vision and Text inference for multimodal models. Vision-capable models (e.g., Pixtral) can perform BOTH Vision inference (with `--image` flag) and Text inference (without `--image`), but previous reports only showed total time. Beta.7 introduces separate rows per modality with Mode column and per-modality RAM tracking. Automatic detection via pytest fixtures (`vision_model_key`/`text_model_key`), explicit tagging for pipe tests. Schema v0.2.1 adds `metadata.inference_modality` field (backward compatible with v0.2.0).
+
+**Workspace Discovery for `list`:** The `list` command now supports local workspace paths with flexible pattern matching. Use `mlxk list ./` to scan current directory, `mlxk list ./gemma-` for prefix matching, or `mlxk list ./path/to/workspace` for exact paths. Push command now validates ambiguous patterns (multiple matches) with descriptive errors.
+
+### Added
+
+- **Workspace Support for `list` Operation:** Local workspace paths with flexible pattern matching. Three modes: exact match, directory scan (`./`), prefix match (`./gemma-`). JSON API adds `display_name` field. See README.md "Local Paths" section.
+
+- **Ambiguous Pattern Handling for `push`:** Prefix patterns with multiple matches return `ambiguous_workspace` error with `matches` array.
+
+- **Vision Chunk Streaming:** Multi-image vision requests now stream SSE events per-chunk (real-time feedback). WebUI shows progress during processing instead of silent wait.
+
+- **Benchmark Schema v0.2.1:** New `metadata.inference_modality` field differentiates Vision/Text inference. Automatic detection via pytest fixtures, per-modality RAM tracking in reports. Backward compatible with v0.2.0.
+
+- **`MLXK2_MAX_TOKENS` Environment Variable:** Server respects `MLXK2_MAX_TOKENS` env var as alternative to `--max-tokens` CLI flag (useful for launchd/systemd service configs).
+
+### Changed
+
+- **Vision Model Hallucination Fix:** Fixed models describing images they weren't seeing. Local numbering strategy prevents cross-chunk hallucination. See README.md "Reliability" section.
+
+- **Code Quality & Compatibility:** Ruff linter fixes, Python 3.12+ datetime compatibility, resumable clone filesystem settle time.
+
+- **EXIF Metadata:** GPS precision increased to 4 decimals (~11m). GPS-Timestamp primary, DateTimeOriginal fallback.
+
+- **mlx-vlm Upstream Update:** c536165 → fc8c92e (MXFP4 quantization support).
+
+- **Clean Server Logging:** Suppressed transformers noise in `--log-json` output.
+
+- **Alpha-Gate Removal:** `clone` and `push` now production-ready. `convert` remains experimental.
+
+- **Test Isolation Fix:** Live tests properly excluded from default `pytest` run via `pytest.ini`.
+
+- **Vision Terminology:** **Breaking:** `MLXK2_VISION_BATCH_SIZE` → `MLXK2_VISION_CHUNK_SIZE`. Output shows "Chunk 1/3".
+
+- **SERVER-HANDBOOK.md:** Documented `chunk` parameter and corrected 7 documentation inaccuracies (see Fixed).
+
+### Fixed
+
+- **Server Robustness (3 Fixes):**
+  - `/v1/models`: Crash prevention when cache directory doesn't exist
+  - Exit codes: Proper propagation for CI/CD (including negative signal codes)
+  - Vision routing: Multi-turn conversations now correctly check only last user message for images
+
+- **Benchmark Report:** Hardware scan now handles JSONL files without system block in first entry.
+
+- **SERVER-HANDBOOK.md (7 Corrections):** Image limits (no 50MB total), /v1/models schema, vision streaming, text placeholder, supervised mode, GIF/WebP. See handbook for details.
+
+---
+
 ## [2.0.4-beta.6] - 2026-01-07
 
 ### Highlights
@@ -658,7 +717,7 @@ This release completes the 2.0.2 recovery plan (Issue #32) with extensive empiri
   - **De-versioned**: Changed from "Validation (2.0.2)" to "Current validation" (timeless guide, not version-specific)
   - **ADR references maintained**: Architecture context preserved
 
-- **CLAUDE.md accuracy audit**:
+- **Internal documentation audit**:
   - **ADR-009 status**: Updated to reflect 2.0.1 + 2.0.2 completion timeline
   - **ADR-011 status**: Updated to 73/81 tests passing, 17 models discovered
   - **Roadmap**: Updated with recovery plan progress
@@ -1120,8 +1179,7 @@ Experimental `push` (upload only) and documentation/testing refinements.
   - Uploaded file count: Remains `null` when hub does not return per-file operations; no heuristic guessing.
 
 ### Docs
-- TESTING.md: Added “Reference: Push CLI and JSON”, `--dry-run` examples, and a mini matrix (default vs markers/opt-in).
-- CLAUDE.md: Updated Current Focus/Decisions + session summary for push quiet mode, no-op, `--dry-run`.
+- TESTING.md: Added "Reference: Push CLI and JSON", `--dry-run` examples, and a mini matrix (default vs markers/opt-in).
 
 ### Tests
 - Offline push tests added/extended, including dry-run planning; live push remains opt-in via `wet`/`live_push` markers and required env vars.

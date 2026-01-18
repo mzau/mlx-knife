@@ -413,6 +413,9 @@ def _auto_report_vision_model(request):
             "family": "pixtral",
             "variant": "12b-8bit",
         }))
+        # Explicit inference_modality for CLI vision tests (v0.2.1)
+        # Required because these tests don't use vision_model_key fixture
+        request.node.user_properties.append(("inference_modality", "vision"))
 
 
 def _parse_model_family(model_id: str) -> tuple[str, str]:

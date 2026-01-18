@@ -270,6 +270,20 @@ def run_model(
     Returns:
         Generated text on success, "Error: ..." string on failure (both modes)
     """
+    # Suppress transformers/tokenizers noise (Session 89 + Session 90 fix)
+    # Set ENV variables for subprocess/tokenizer
+    os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    # IMPORTANT: Do NOT import transformers in global scope (breaks huggingface_hub downloads)
+    try:
+        from transformers import logging as transformers_logging
+        import logging as python_logging
+        transformers_logging.set_verbosity_error()
+        python_logging.getLogger("transformers.tokenization_utils").setLevel(python_logging.ERROR)
+        python_logging.getLogger("transformers.tokenization_utils_base").setLevel(python_logging.ERROR)
+    except ImportError:
+        pass  # transformers not installed (optional dependency for vision)
+
     json_mode = json_output
     # Pre-flight check: Verify runtime compatibility before attempting to load
     # This is a "best effort" check - if the model is in cache, verify it's compatible
@@ -414,7 +428,7 @@ def run_model(
 
             try:
                 # Get chunk size (with env var override)
-                chunk_size = chunk if chunk != 1 else int(os.environ.get("MLXK2_VISION_BATCH_SIZE", "1"))
+                chunk_size = chunk if chunk != 1 else int(os.environ.get("MLXK2_VISION_CHUNK_SIZE", "1"))
 
                 # Validate chunk size for Metal API stability
                 from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
