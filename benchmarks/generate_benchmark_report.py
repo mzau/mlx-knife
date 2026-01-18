@@ -19,7 +19,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 try:
     import jsonschema
@@ -142,16 +142,35 @@ def calculate_statistics(data: List[dict]) -> Dict:
     degraded_ram = sum(1 for flags in quality_flags if "degraded_ram" in flags)
     degraded_zombies = sum(1 for flags in quality_flags if "degraded_zombies" in flags)
 
-    # Per-model statistics
+    # Per-model statistics (with inference modality breakdown)
+    # Filter: Only count actual inference tests (duration >= 0.5s)
+    # This excludes infrastructure tests like test_vision_model_info_fixture_works
+    inference_tests = [e for e in passed_with_model if e["duration"] >= 0.5]
+
     model_stats = {}
-    for entry in passed_with_model:
+    for entry in inference_tests:
         model_id = entry["model"]["id"]
         if model_id not in model_stats:
             model_stats[model_id] = {
                 "id": model_id,
-                "size_gb": entry["model"]["size_gb"],
+                "size_gb": entry["model"].get("size_gb", 0),  # Default to 0 if missing (e.g., pipe tests)
+                # Total stats (legacy, always populated)
                 "count": 0,
                 "total_time": 0,
+                # Per-modality breakdown (NEW in v0.2.1)
+                "vision_count": 0,
+                "vision_time": 0.0,
+                "vision_ram_min": float("inf"),
+                "vision_ram_max": 0,
+                "text_count": 0,
+                "text_time": 0.0,
+                "text_ram_min": float("inf"),
+                "text_ram_max": 0,
+                "unknown_count": 0,
+                "unknown_time": 0.0,
+                "unknown_ram_min": float("inf"),
+                "unknown_ram_max": 0,
+                # System health (global, for backward compat)
                 "ram_min": float("inf"),
                 "ram_max": 0,
                 "swap_max": 0,
@@ -159,19 +178,50 @@ def calculate_statistics(data: List[dict]) -> Dict:
             }
 
         stats = model_stats[model_id]
+        duration = entry["duration"]
+
+        # Update totals (always)
         stats["count"] += 1
-        stats["total_time"] += entry["duration"]
+        stats["total_time"] += duration
+
+        # Update modality-specific stats (NEW in v0.2.1)
+        modality = entry.get("metadata", {}).get("inference_modality", "unknown")
+        if modality == "vision":
+            stats["vision_count"] += 1
+            stats["vision_time"] += duration
+        elif modality == "text":
+            stats["text_count"] += 1
+            stats["text_time"] += duration
+        else:  # "unknown" or any other value (backward compat)
+            stats["unknown_count"] += 1
+            stats["unknown_time"] += duration
+
         # Handle optional system_health (backward compatibility)
+        if "system_health" in entry:
+            ram_gb = entry["system_health"].get("ram_free_gb", 0)
+            # Update per-modality RAM stats
+            if modality == "vision":
+                stats["vision_ram_min"] = min(stats["vision_ram_min"], ram_gb)
+                stats["vision_ram_max"] = max(stats["vision_ram_max"], ram_gb)
+            elif modality == "text":
+                stats["text_ram_min"] = min(stats["text_ram_min"], ram_gb)
+                stats["text_ram_max"] = max(stats["text_ram_max"], ram_gb)
+            else:
+                stats["unknown_ram_min"] = min(stats["unknown_ram_min"], ram_gb)
+                stats["unknown_ram_max"] = max(stats["unknown_ram_max"], ram_gb)
+
+        # Handle optional system_health - global stats (backward compatibility)
         if "system_health" in entry:
             stats["ram_min"] = min(stats["ram_min"], entry["system_health"].get("ram_free_gb", 0))
             stats["ram_max"] = max(stats["ram_max"], entry["system_health"].get("ram_free_gb", 0))
             stats["swap_max"] = max(stats["swap_max"], entry["system_health"].get("swap_used_mb", 0))
             stats["zombies_max"] = max(stats["zombies_max"], entry["system_health"].get("zombie_processes", 0))
 
-    # Per-test statistics
+    # Per-test statistics (use inference_tests to filter infrastructure tests)
+    # Group by (test_name, modality) to differentiate Vision/Text phases of same test
     import statistics
     test_stats = {}
-    for entry in passed_with_model:
+    for entry in inference_tests:
         # Extract test function name and normalize (remove parametrization)
         test_full = entry["test"].split("::")[-1]
         test_name = test_full.split("[")[0]  # Remove [discovered_XX] part
@@ -179,39 +229,46 @@ def calculate_statistics(data: List[dict]) -> Dict:
         model_id = entry["model"]["id"]
         model_short = model_id.replace("mlx-community/", "").split("-")[0]  # Short name
         duration = entry["duration"]
+        modality = entry.get("metadata", {}).get("inference_modality", "unknown")
 
-        if test_name not in test_stats:
-            test_stats[test_name] = {
+        # Key: (test_name, modality) to separate Vision/Text phases
+        key = (test_name, modality)
+
+        if key not in test_stats:
+            test_stats[key] = {
                 "name": test_name,
+                "modality": modality,
                 "models": set(),
                 "runs": [],
             }
 
-        test_stats[test_name]["models"].add(model_id)
-        test_stats[test_name]["runs"].append({
+        test_stats[key]["models"].add(model_id)
+        test_stats[key]["runs"].append({
             "model": model_id,
             "model_short": model_short,
             "duration": duration
         })
 
-    # Calculate aggregates per test
-    for test_name, stats in test_stats.items():
-        durations = [r["duration"] for r in stats["runs"]]
-        stats["model_count"] = len(stats["models"])
-        stats["median_time"] = statistics.median(durations) if durations else 0
+    # Calculate aggregates per test (key is now tuple: (test_name, modality))
+    for key, test_data in test_stats.items():
+        durations = [r["duration"] for r in test_data["runs"]]
+        test_data["model_count"] = len(test_data["models"])
+        test_data["median_time"] = statistics.median(durations) if durations else 0
 
         # Find fastest and slowest
-        sorted_runs = sorted(stats["runs"], key=lambda r: r["duration"])
-        stats["fastest"] = sorted_runs[0] if sorted_runs else None
-        stats["slowest"] = sorted_runs[-1] if sorted_runs else None
+        sorted_runs = sorted(test_data["runs"], key=lambda r: r["duration"])
+        test_data["fastest"] = sorted_runs[0] if sorted_runs else None
+        test_data["slowest"] = sorted_runs[-1] if sorted_runs else None
 
         # Convert set to list for JSON serialization
-        stats["models"] = list(stats["models"])
+        test_data["models"] = list(test_data["models"])
 
-    # Hardware profile (from first entry, optional for backward compatibility)
+    # Hardware profile (scan for first entry with data, handles manual JSONL entries)
     hw_profile = {}
-    if data and "system" in data[0] and "hardware_profile" in data[0]["system"]:
-        hw_profile = data[0]["system"]["hardware_profile"]
+    for entry in data:
+        if "system" in entry and "hardware_profile" in entry["system"]:
+            hw_profile = entry["system"]["hardware_profile"]
+            break
 
     return {
         "total_tests": len(data),
@@ -252,7 +309,7 @@ def generate_markdown(stats: Dict, input_file: Path, compare_file: Optional[Path
     """Generate Markdown report from statistics."""
     version = stats["mlx_knife_version"]
     date = input_file.stem.split("-v")[0]  # Extract date from filename
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S UTC")
 
     # Header
     md = f"""# Benchmark Report v{TEMPLATE_VERSION}: {version}
@@ -371,31 +428,92 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
 
     if compare_stats:
         md += f"""```
-{'Model':<42} {'Size':<7} {'Tests':<5} {'Time':<8} {'Old':<8} {'Δ':<8} {'Change':<10} {'RAM (GB)':<12}
-{'='*42} {'='*7} {'='*5} {'='*8} {'='*8} {'='*8} {'='*10} {'='*12}
+{'Model':<40} {'Size':<7} {'Mode':<6} {'Tests':<5} {'Time':<8} {'Old':<8} {'Δ':<8} {'Change':<10} {'RAM (GB)':<12}
+{'='*40} {'='*7} {'='*6} {'='*5} {'='*8} {'='*8} {'='*8} {'='*10} {'='*12}
 """
     else:
         md += f"""```
-{'Model':<50} {'Size':<8} {'Tests':<6} {'Time':<10} {'RAM (GB)':<20}
-{'='*50} {'='*8} {'='*6} {'='*10} {'='*20}
+{'Model':<50} {'Size':<8} {'Mode':<6} {'Tests':<6} {'Time':<10} {'RAM (GB)':<20}
+{'='*50} {'='*8} {'='*6} {'='*6} {'='*10} {'='*20}
 """
 
     for model in sorted_models:
         # Shorten model ID (remove mlx-community/ prefix)
         model_short = model['id'].replace('mlx-community/', '')
-        max_len = 40 if compare_stats else 48
+        max_len = 38 if compare_stats else 48
         if len(model_short) > max_len:
             model_short = model_short[:max_len-3] + "..."
 
+        # Global RAM range (for backward compat / fallback)
         ram_range = f"{model['ram_min']:.1f}-{model['ram_max']:.1f}"
 
         if compare_stats:
             old_model = compare_models.get(model['id'])
-            if old_model:
+
+            # Separate rows per modality (same as non-comparison mode)
+            rows_written = 0
+
+            # Vision modality
+            if model['vision_count'] > 0:
+                v_ram_min = model['vision_ram_min']
+                v_ram_max = model['vision_ram_max']
+                if v_ram_min == float('inf'):
+                    v_ram_range = "-"
+                elif v_ram_min == v_ram_max:
+                    v_ram_range = f"{v_ram_min:.1f}"
+                else:
+                    v_ram_range = f"{v_ram_min:.1f}-{v_ram_max:.1f}"
+
+                # Get old vision stats (if available)
+                if old_model and old_model.get('vision_count', 0) > 0:
+                    old_time = old_model['vision_time']
+                    delta = model['vision_time'] - old_time
+                    change_pct = (delta / old_time * 100) if old_time > 0 else 0
+                    if change_pct > 5:
+                        status = "⚠️"
+                    elif change_pct < -1:
+                        status = "✅"
+                    else:
+                        status = ""
+                    change_str = f"{change_pct:+.1f}% {status}"
+                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Vision':<6} {model['vision_count']:<5} {model['vision_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {v_ram_range:<12}\n"
+                else:
+                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Vision':<6} {model['vision_count']:<5} {model['vision_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {v_ram_range:<12}\n"
+                rows_written += 1
+
+            # Text modality
+            if model['text_count'] > 0:
+                t_ram_min = model['text_ram_min']
+                t_ram_max = model['text_ram_max']
+                if t_ram_min == float('inf'):
+                    t_ram_range = "-"
+                elif t_ram_min == t_ram_max:
+                    t_ram_range = f"{t_ram_min:.1f}"
+                else:
+                    t_ram_range = f"{t_ram_min:.1f}-{t_ram_max:.1f}"
+
+                # Get old text stats (if available)
+                if old_model and old_model.get('text_count', 0) > 0:
+                    old_time = old_model['text_time']
+                    delta = model['text_time'] - old_time
+                    change_pct = (delta / old_time * 100) if old_time > 0 else 0
+                    if change_pct > 5:
+                        status = "⚠️"
+                    elif change_pct < -1:
+                        status = "✅"
+                    else:
+                        status = ""
+                    change_str = f"{change_pct:+.1f}% {status}"
+                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Text':<6} {model['text_count']:<5} {model['text_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {t_ram_range:<12}\n"
+                else:
+                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Text':<6} {model['text_count']:<5} {model['text_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {t_ram_range:<12}\n"
+                rows_written += 1
+
+            # Fallback for legacy data (no modality info) - rare in comparison mode
+            if rows_written == 0 and old_model:
                 old_time = old_model['total_time']
                 delta = model['total_time'] - old_time
                 change_pct = (delta / old_time * 100) if old_time > 0 else 0
-                # Status indicator
                 if change_pct > 5:
                     status = "⚠️"
                 elif change_pct < -1:
@@ -403,37 +521,121 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 else:
                     status = ""
                 change_str = f"{change_pct:+.1f}% {status}"
-                md += f"{model_short:<42} {model['size_gb']:>5.1f}GB {model['count']:<5} {model['total_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {ram_range:<12}\n"
-            else:
-                md += f"{model_short:<42} {model['size_gb']:>5.1f}GB {model['count']:<5} {model['total_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {ram_range:<12}\n"
+                md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'-':<6} {model['count']:<5} {model['total_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {ram_range:<12}\n"
+            elif rows_written == 0:
+                # New model with no modality info
+                md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'-':<6} {model['count']:<5} {model['total_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {ram_range:<12}\n"
         else:
-            md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {model['count']:<6} {model['total_time']:>8.1f}s  {ram_range:<20}\n"
+            # Separate rows per modality (no "Mixed" ambiguity)
+            # Each modality gets its own line with specific stats + RAM
+            rows_written = 0
+
+            if model['vision_count'] > 0:
+                # Use modality-specific RAM range (single value if min==max)
+                v_ram_min = model['vision_ram_min']
+                v_ram_max = model['vision_ram_max']
+                if v_ram_min == float('inf'):
+                    v_ram_range = "-"
+                elif v_ram_min == v_ram_max:
+                    v_ram_range = f"{v_ram_min:.1f}"
+                else:
+                    v_ram_range = f"{v_ram_min:.1f}-{v_ram_max:.1f}"
+                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Vision':<6} {model['vision_count']:<6} {model['vision_time']:>8.1f}s  {v_ram_range:<20}\n"
+                rows_written += 1
+
+            if model['text_count'] > 0:
+                # Use modality-specific RAM range (single value if min==max)
+                t_ram_min = model['text_ram_min']
+                t_ram_max = model['text_ram_max']
+                if t_ram_min == float('inf'):
+                    t_ram_range = "-"
+                elif t_ram_min == t_ram_max:
+                    t_ram_range = f"{t_ram_min:.1f}"
+                else:
+                    t_ram_range = f"{t_ram_min:.1f}-{t_ram_max:.1f}"
+                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Text':<6} {model['text_count']:<6} {model['text_time']:>8.1f}s  {t_ram_range:<20}\n"
+                rows_written += 1
+
+            # Fallback for legacy data (no modality info)
+            if rows_written == 0:
+                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'-':<6} {model['count']:<6} {model['total_time']:>8.1f}s  {ram_range:<20}\n"
 
     md += "```\n\n"
 
-    # Model Categories
+    # Model Categories (with modality differentiation)
     large_models = [m for m in sorted_models if m['size_gb'] >= 20]
     medium_models = [m for m in sorted_models if 10 <= m['size_gb'] < 20]
     small_models = [m for m in sorted_models if m['size_gb'] < 10]
 
+    def format_category_stats(models_list, category_name):
+        """Format category statistics with Vision/Text breakdown."""
+        if not models_list:
+            return ""
+
+        # Collect Vision and Text stats
+        vision_models = [m for m in models_list if m.get('vision_count', 0) > 0]
+        text_models = [m for m in models_list if m.get('text_count', 0) > 0]
+
+        output = f"{category_name}: {len(models_list)} models\n"
+        output += f"  Avg size:               {sum(m['size_gb'] for m in models_list) / len(models_list):.1f} GB\n"
+
+        # Vision stats
+        if vision_models:
+            avg_vision_time = sum(m['vision_time']/m['vision_count'] for m in vision_models) / len(vision_models)
+
+            # Collect RAM values (filter sentinel values)
+            vision_ram_mins = [m['vision_ram_min'] for m in vision_models if m['vision_ram_min'] != float('inf')]
+            vision_ram_maxs = [m['vision_ram_max'] for m in vision_models if m['vision_ram_max'] > 0]
+
+            output += f"  Vision Tests:\n"
+            output += f"    Models tested:        {len(vision_models)}\n"
+            output += f"    Avg test time:        {avg_vision_time:.1f}s\n"
+
+            # Only output RAM range if data available
+            if vision_ram_mins and vision_ram_maxs:
+                all_vision_ram_min = min(vision_ram_mins)
+                all_vision_ram_max = max(vision_ram_maxs)
+                output += f"    RAM range:            {all_vision_ram_min:.1f}-{all_vision_ram_max:.1f} GB\n"
+
+        # Text stats
+        if text_models:
+            avg_text_time = sum(m['text_time']/m['text_count'] for m in text_models) / len(text_models)
+
+            # Collect RAM values (filter sentinel values)
+            text_ram_mins = [m['text_ram_min'] for m in text_models if m['text_ram_min'] != float('inf')]
+            text_ram_maxs = [m['text_ram_max'] for m in text_models if m['text_ram_max'] > 0]
+
+            output += f"  Text Tests:\n"
+            output += f"    Models tested:        {len(text_models)}\n"
+            output += f"    Avg test time:        {avg_text_time:.1f}s\n"
+
+            # Only output RAM range if data available
+            if text_ram_mins and text_ram_maxs:
+                all_text_ram_min = min(text_ram_mins)
+                all_text_ram_max = max(text_ram_maxs)
+                output += f"    RAM range:            {all_text_ram_min:.1f}-{all_text_ram_max:.1f} GB\n"
+
+        # Fallback for legacy data (no modality info)
+        if not vision_models and not text_models:
+            avg_time = sum(m['total_time']/m['count'] for m in models_list) / len(models_list)
+            avg_ram = sum(m['ram_min'] for m in models_list) / len(models_list)
+            output += f"  Avg test time:          {avg_time:.1f}s\n"
+            output += f"  Avg min RAM:            {avg_ram:.1f} GB\n"
+
+        return output
+
     md += "### Model Categories\n\n"
-    md += f"""```
-LARGE MODELS (≥20 GB):    {len(large_models)} models
-  Avg size:               {sum(m['size_gb'] for m in large_models) / len(large_models):.1f} GB
-  Avg test time:          {sum(m['total_time']/m['count'] for m in large_models) / len(large_models):.1f}s
-  Avg min RAM:            {sum(m['ram_min'] for m in large_models) / len(large_models):.1f} GB
-
-MEDIUM MODELS (10-20 GB): {len(medium_models)} models
-  Avg size:               {sum(m['size_gb'] for m in medium_models) / len(medium_models):.1f} GB
-  Avg test time:          {sum(m['total_time']/m['count'] for m in medium_models) / len(medium_models):.1f}s
-  Avg min RAM:            {sum(m['ram_min'] for m in medium_models) / len(medium_models):.1f} GB
-
-SMALL MODELS (<10 GB):    {len(small_models)} models
-  Avg size:               {sum(m['size_gb'] for m in small_models) / len(small_models):.1f} GB
-  Avg test time:          {sum(m['total_time']/m['count'] for m in small_models) / len(small_models):.1f}s
-  Avg min RAM:            {sum(m['ram_min'] for m in small_models) / len(small_models):.1f} GB
-```
-""" if large_models and medium_models and small_models else ""
+    if large_models or medium_models or small_models:
+        md += "```\n"
+        if large_models:
+            md += format_category_stats(large_models, "LARGE MODELS (≥20 GB)")
+            md += "\n"
+        if medium_models:
+            md += format_category_stats(medium_models, "MEDIUM MODELS (10-20 GB)")
+            md += "\n"
+        if small_models:
+            md += format_category_stats(small_models, "SMALL MODELS (<10 GB)")
+        md += "```\n"
 
     md += "\n---\n\n"
 
@@ -444,35 +646,44 @@ SMALL MODELS (<10 GB):    {len(small_models)} models
     # Sort tests by model count (descending) - most representative tests first
     sorted_tests = sorted(stats['tests'].values(), key=lambda t: t['model_count'], reverse=True)
 
-    # Build comparison lookup for tests
+    # Build comparison lookup for tests (key: (name, modality))
     compare_tests = {}
     if compare_stats:
-        compare_tests = {t['name']: t for t in compare_stats['tests'].values()}
+        compare_tests = {(t['name'], t.get('modality', 'unknown')): t for t in compare_stats['tests'].values()}
 
     if compare_stats:
         md += f"""```
-{'Test Name':<40} {'Models':<7} {'Fastest':<20} {'Slowest':<20} {'Med':<6} {'Old':<6} {'Δ Med':<8}
-{'='*40} {'='*7} {'='*20} {'='*20} {'='*6} {'='*6} {'='*8}
+{'Test Name':<38} {'Mode':<6} {'Models':<7} {'Fastest':<18} {'Slowest':<18} {'Med':<6} {'Old':<6} {'Δ Med':<8}
+{'='*38} {'='*6} {'='*7} {'='*18} {'='*18} {'='*6} {'='*6} {'='*8}
 """
     else:
         md += f"""```
-{'Test Name':<50} {'Models':<7} {'Fastest':<25} {'Slowest':<25} {'Med Time'}
-{'='*50} {'='*7} {'='*25} {'='*25} {'='*8}
+{'Test Name':<44} {'Mode':<6} {'Models':<7} {'Fastest':<22} {'Slowest':<22} {'Med Time'}
+{'='*44} {'='*6} {'='*7} {'='*22} {'='*22} {'='*8}
 """
 
     for test in sorted_tests:
         # Shorten test name if needed
-        max_test_len = 38 if compare_stats else 48
+        max_test_len = 36 if compare_stats else 42
         test_short = test['name']
         if len(test_short) > max_test_len:
             test_short = test_short[:max_test_len-3] + "..."
+
+        # Format modality (Vision/Text/-)
+        modality = test.get('modality', 'unknown')
+        if modality == 'vision':
+            mode_str = 'Vision'
+        elif modality == 'text':
+            mode_str = 'Text'
+        else:
+            mode_str = '-'
 
         # Format fastest/slowest
         fastest = test['fastest']
         slowest = test['slowest']
 
         if fastest and slowest:
-            max_model_len = 18 if compare_stats else 23
+            max_model_len = 16 if compare_stats else 20
             fastest_str = f"{fastest['model_short']} ({fastest['duration']:.1f}s)"
             slowest_str = f"{slowest['model_short']} ({slowest['duration']:.1f}s)"
             if len(fastest_str) > max_model_len:
@@ -483,16 +694,16 @@ SMALL MODELS (<10 GB):    {len(small_models)} models
             med_time = test['median_time']
 
             if compare_stats:
-                old_test = compare_tests.get(test['name'])
+                old_test = compare_tests.get((test['name'], test.get('modality', 'unknown')))
                 if old_test:
                     old_med = old_test['median_time']
                     delta_pct = ((med_time - old_med) / old_med * 100) if old_med > 0 else 0
                     delta_str = f"{delta_pct:+.1f}%"
-                    md += f"{test_short:<40} {test['model_count']:<7} {fastest_str:<20} {slowest_str:<20} {med_time:<5.1f}s {old_med:<5.1f}s {delta_str:<8}\n"
+                    md += f"{test_short:<38} {mode_str:<6} {test['model_count']:<7} {fastest_str:<18} {slowest_str:<18} {med_time:<5.1f}s {old_med:<5.1f}s {delta_str:<8}\n"
                 else:
-                    md += f"{test_short:<40} {test['model_count']:<7} {fastest_str:<20} {slowest_str:<20} {med_time:<5.1f}s {'N/A':<6} {'NEW':<8}\n"
+                    md += f"{test_short:<38} {mode_str:<6} {test['model_count']:<7} {fastest_str:<18} {slowest_str:<18} {med_time:<5.1f}s {'N/A':<6} {'NEW':<8}\n"
             else:
-                md += f"{test_short:<50} {test['model_count']:<7} {fastest_str:<25} {slowest_str:<25} {med_time:.1f}s\n"
+                md += f"{test_short:<44} {mode_str:<6} {test['model_count']:<7} {fastest_str:<22} {slowest_str:<22} {med_time:.1f}s\n"
 
     md += "```\n\n"
 

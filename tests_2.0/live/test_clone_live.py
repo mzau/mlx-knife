@@ -4,7 +4,6 @@ Runs only when explicitly selected via markers/env, per TESTING.md mini‑matrix
 Validates ADR-007 Phase 1 compliance: real pull→temp cache→APFS same-volume clone→workspace.
 
 Enable with ALL required env vars:
-- MLXK2_ENABLE_ALPHA_FEATURES=1 (clone is alpha)
 - MLXK2_LIVE_CLONE=1 (enable live test)
 - HF_TOKEN=<your_token> (for model access)
 - MLXK2_LIVE_CLONE_MODEL=<model_name> (e.g., "mlx-community/bge-small-en-v1.5-4bit")
@@ -34,7 +33,6 @@ import pytest
 
 
 # Environment validation
-alpha_enabled = os.environ.get("MLXK2_ENABLE_ALPHA_FEATURES") == "1"
 live_enabled = os.environ.get("MLXK2_LIVE_CLONE") == "1"
 hf_token_present = bool(os.environ.get("HF_TOKEN"))
 model = os.environ.get("MLXK2_LIVE_CLONE_MODEL")
@@ -44,9 +42,9 @@ pytestmark = [
     pytest.mark.live,
     pytest.mark.live_clone,
     pytest.mark.skipif(
-        not (alpha_enabled and live_enabled and hf_token_present and model and workspace),
+        not (live_enabled and hf_token_present and model and workspace),
         reason=(
-            "Live clone disabled. Set MLXK2_ENABLE_ALPHA_FEATURES=1, MLXK2_LIVE_CLONE=1, "
+            "Live clone disabled. Set MLXK2_LIVE_CLONE=1, "
             "HF_TOKEN, MLXK2_LIVE_CLONE_MODEL, and MLXK2_LIVE_CLONE_WORKSPACE to enable."
         ),
     ),

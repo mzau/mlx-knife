@@ -19,13 +19,23 @@ from .test_utils import should_skip_model, MAX_TOKENS, TEST_TEMPERATURE
 pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
 
 
-def _pick_first_eligible_model(portfolio_models: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    """Select the first model that passes RAM gating."""
-    for key, info in portfolio_models.items():
-        should_skip, _ = should_skip_model(key, portfolio_models)
+@pytest.fixture(autouse=True)
+def _report_text_modality(request):
+    """Report text inference modality for benchmark reports (v0.2.1).
+
+    All pipe tests in this file are text inference (no vision).
+    Required because these tests don't use text_model_key fixture.
+    """
+    request.node.user_properties.append(("inference_modality", "text"))
+
+
+def _pick_first_eligible_model(text_portfolio: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Select the first text model that passes RAM gating."""
+    for key, info in text_portfolio.items():
+        should_skip, _ = should_skip_model(key, text_portfolio)
         if not should_skip:
             return info
-    pytest.skip("No suitable models found in portfolio (RAM gating)")
+    pytest.skip("No suitable text models found in portfolio (RAM gating)")
 
 
 def _run_cli(args: list[str], stdin: str | None = None, timeout: int = 120) -> Tuple[str, str, int]:
@@ -44,10 +54,10 @@ class TestPipeModeSingleModel:
     """Exercise pipe workflows against one dynamically discovered model."""
 
     @pytest.fixture(scope="class")
-    def model_id(self, portfolio_models):
+    def model_id(self, text_portfolio):
         if not os.getenv("MLXK2_ENABLE_PIPES"):
             pytest.skip("Pipe mode gated by MLXK2_ENABLE_PIPES=1")
-        model = _pick_first_eligible_model(portfolio_models)
+        model = _pick_first_eligible_model(text_portfolio)
         return model["id"]
 
     def test_stdin_dash_appends_trailing_text(self, model_id):

@@ -72,7 +72,7 @@ See `schemas/LEARNINGS-FOR-v1.0.md` for details.
 
 ## Memory Timeline Visualization
 
-**Tool:** `tools/memplot.py` | **Created:** Session 45 (2025-12-21)
+**Tool:** `tools/memplot.py`
 
 ### Quick Start
 

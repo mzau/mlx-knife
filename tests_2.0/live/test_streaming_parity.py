@@ -39,7 +39,7 @@ from .test_utils import (
     TEST_PROMPT,
     MAX_TOKENS,
 )
-# portfolio_models fixture is provided by conftest.py
+# text_portfolio fixture is provided by conftest.py (Portfolio Separation)
 
 # Opt-in markers
 pytestmark = [
@@ -53,8 +53,8 @@ pytestmark = [
 ]
 
 
-def _select_parity_test_models(portfolio: Dict[str, Dict[str, Any]]) -> List[str]:
-    """Select 2-3 representative models from portfolio for parity testing.
+def _select_parity_test_keys(portfolio: Dict[str, Dict[str, Any]]) -> set:
+    """Select 2-3 representative model keys from portfolio for parity testing.
 
     Strategy:
     - Only small models (<6GB RAM) for fast testing
@@ -63,10 +63,10 @@ def _select_parity_test_models(portfolio: Dict[str, Dict[str, Any]]) -> List[str
     - Limit to 3 models max (parity tests are slow)
 
     Args:
-        portfolio: Model portfolio from portfolio_models fixture
+        portfolio: Text model portfolio from text_portfolio fixture
 
     Returns:
-        List of model_keys to test (empty if no suitable models)
+        Set of model_keys to test (empty if no suitable models)
     """
     # Filter: small models only
     candidates = {
@@ -75,7 +75,7 @@ def _select_parity_test_models(portfolio: Dict[str, Dict[str, Any]]) -> List[str
     }
 
     if not candidates:
-        return []
+        return set()
 
     # Exclude reasoning models (known Issue #20 regression - will fix in ADR-010)
     # Reasoning models have batch/stream inconsistency:
@@ -88,71 +88,33 @@ def _select_parity_test_models(portfolio: Dict[str, Dict[str, Any]]) -> List[str
     }
 
     if not candidates:
-        return []
+        return set()
 
     # Sort by RAM (smallest first) and select up to 3
     sorted_models = sorted(candidates.items(), key=lambda x: x[1]["ram_needed_gb"])
-    selected = [key for key, _ in sorted_models[:3]]
+    selected = {key for key, _ in sorted_models[:3]}
 
     return selected
 
 
-def pytest_generate_tests(metafunc):
-    """Custom parametrization for parity tests.
-
-    Parametrizes parity_model_key over 2-3 selected models from portfolio.
-    This hook runs at collection time.
-    """
-    if "parity_model_key" in metafunc.fixturenames:
-        # Check if live_e2e marker is requested
-        selected_markers = metafunc.config.getoption("-m") or ""
-        if "live_e2e" not in selected_markers:
-            # Parametrize with dummy value (tests will be skipped)
-            metafunc.parametrize("parity_model_key", ["_skipped"])
-            return
-
-        # Import portfolio discovery (same as conftest.py)
-        from .test_utils import discover_mlx_models_in_user_cache, TEST_MODELS
-
-        discovered = discover_mlx_models_in_user_cache()
-
-        if discovered:
-            # Build portfolio from discovered models
-            portfolio = {}
-            for i, model in enumerate(discovered):
-                key = f"discovered_{i:02d}"
-                portfolio[key] = {
-                    "id": model["model_id"],
-                    "ram_needed_gb": model["ram_needed_gb"],
-                    "expected_issue": None,
-                    "description": f"Discovered: {model['model_id']}"
-                }
-        else:
-            # Fallback to hardcoded test models
-            portfolio = TEST_MODELS
-
-        # Select 2-3 models for parity testing
-        selected = _select_parity_test_models(portfolio)
-
-        if not selected:
-            # No suitable models - parametrize with dummy for graceful skip
-            metafunc.parametrize("parity_model_key", ["_no_suitable_models"])
-        else:
-            metafunc.parametrize("parity_model_key", selected)
+# Note: No custom pytest_generate_tests - using parent conftest.py's hook
+# for text_model_key parametrization. Tests filter to parity subset internally.
 
 
 class TestRunnerStreamingParity:
     """MLXRunner direct streaming vs. batch parity.
 
-    Tests are parametrized over selected models from portfolio (2-3 models).
+    Tests are parametrized over text models, filtered to 2-3 parity subset.
+    Uses text_model_key for automatic inference_modality detection (v0.2.1).
     Each test runs independently for clean isolation.
     """
 
     @pytest.mark.live_e2e
-    def test_runner_streaming_batch_identical(self, _use_real_mlx_modules, portfolio_models, parity_model_key):
+    def test_runner_streaming_batch_identical(self, _use_real_mlx_modules, text_portfolio, text_model_key):
         """Validate MLXRunner streaming and batch produce identical output.
 
-        Parametrized test (one instance per selected parity model).
+        Parametrized test - runs for all text models, filters to parity subset.
+        Uses text_model_key for automatic inference_modality detection (v0.2.1).
 
         Issue #20: Previously, batch output had visible stop tokens while
         streaming did not. This validates the ADR-009 fix at Runner level.
@@ -161,22 +123,21 @@ class TestRunnerStreamingParity:
         """
         from mlxk2.core.runner import MLXRunner
 
-        # Handle graceful skips
-        if parity_model_key == "_skipped":
-            pytest.skip("Run with -m live_e2e to enable parity tests")
-        if parity_model_key == "_no_suitable_models":
-            pytest.skip("No suitable models for parity testing (<6GB, non-reasoning)")
+        # Parity subset filtering - only run for 2-3 representative models
+        parity_keys = _select_parity_test_keys(text_portfolio)
+        if text_model_key not in parity_keys:
+            pytest.skip(f"Not in parity subset (testing {len(parity_keys)} models)")
 
         # Get model info from portfolio
-        model_info = portfolio_models[parity_model_key]
+        model_info = text_portfolio[text_model_key]
         model_id = model_info["id"]
 
         # RAM gating
-        should_skip, skip_reason = should_skip_model(parity_model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(text_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 
-        print(f"\nTesting {parity_model_key}: {model_id}")
+        print(f"\nTesting {text_model_key}: {model_id}")
 
         with MLXRunner(model_id, verbose=False) as runner:
             # Batch generation (temperature=0 for deterministic output)
@@ -204,40 +165,41 @@ class TestRunnerStreamingParity:
                 f"Stream ({len(stream_output)} chars): {stream_output!r}"
             )
 
-            print(f"✓ {parity_model_key}: Parity verified ({len(batch_output)} chars)")
+            print(f"✓ {text_model_key}: Parity verified ({len(batch_output)} chars)")
 
 
 class TestServerStreamingParity:
     """Server API streaming vs. batch parity.
 
-    Tests are parametrized over selected models from portfolio (2-3 models).
+    Tests are parametrized over text models, filtered to 2-3 parity subset.
+    Uses text_model_key for automatic inference_modality detection (v0.2.1).
     Each test runs independently for clean isolation.
     """
 
     @pytest.mark.live_e2e
-    def test_server_api_streaming_batch_identical(self, portfolio_models, parity_model_key):
+    def test_server_api_streaming_batch_identical(self, text_portfolio, text_model_key):
         """Validate Server API streaming and batch produce identical output.
 
-        Parametrized test (one instance per selected parity model).
+        Parametrized test - runs for all text models, filters to parity subset.
+        Uses text_model_key for automatic inference_modality detection (v0.2.1).
 
         Tests parity at HTTP API level (closest to production usage).
         """
-        # Handle graceful skips
-        if parity_model_key == "_skipped":
-            pytest.skip("Run with -m live_e2e to enable parity tests")
-        if parity_model_key == "_no_suitable_models":
-            pytest.skip("No suitable models for parity testing (<6GB, non-reasoning)")
+        # Parity subset filtering - only run for 2-3 representative models
+        parity_keys = _select_parity_test_keys(text_portfolio)
+        if text_model_key not in parity_keys:
+            pytest.skip(f"Not in parity subset (testing {len(parity_keys)} models)")
 
         # Get model info from portfolio
-        model_info = portfolio_models[parity_model_key]
+        model_info = text_portfolio[text_model_key]
         model_id = model_info["id"]
 
         # RAM gating
-        should_skip, skip_reason = should_skip_model(parity_model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(text_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 
-        print(f"\nTesting {parity_model_key}: {model_id}")
+        print(f"\nTesting {text_model_key}: {model_id}")
 
         with LocalServer(model_id, port=8765) as server_url:
             # Batch request (temperature=0 for deterministic output)
@@ -280,35 +242,40 @@ class TestServerStreamingParity:
                 f"Stream ({len(stream_output)} chars): {stream_output!r}"
             )
 
-            print(f"✓ {parity_model_key}: Parity verified ({len(batch_output)} chars)")
+            print(f"✓ {text_model_key}: Parity verified ({len(batch_output)} chars)")
 
 
 class TestCrossInterfaceParity:
     """Parity across different interfaces (Runner vs Server)."""
 
     @pytest.mark.live_e2e
-    def test_runner_vs_server_consistency(self, _use_real_mlx_modules, portfolio_models):
+    def test_runner_vs_server_consistency(self, _use_real_mlx_modules, text_portfolio):
         """Validate MLXRunner and Server API produce consistent output.
 
         Tests that direct Runner usage and Server HTTP API yield
         the same results (validates no server-specific transformations).
 
+        Uses text_portfolio for text model selection.
         Requires real MLX modules (not stubs) since we use MLXRunner directly.
         """
         from mlxk2.core.runner import MLXRunner
 
         # Select smallest available model for fastest testing
-        selected = _select_parity_test_models(portfolio_models)
+        selected = _select_parity_test_keys(text_portfolio)
         if not selected:
             pytest.skip("No suitable models for cross-interface testing (<6GB, non-reasoning)")
 
-        # Use first (smallest) model
-        test_model_key = selected[0]
-        model_info = portfolio_models[test_model_key]
+        # Use first (smallest) model from sorted portfolio
+        sorted_models = sorted(
+            [(k, text_portfolio[k]) for k in selected],
+            key=lambda x: x[1]["ram_needed_gb"]
+        )
+        test_model_key = sorted_models[0][0]
+        model_info = text_portfolio[test_model_key]
         model_id = model_info["id"]
 
         # RAM check
-        should_skip, skip_reason = should_skip_model(test_model_key, portfolio_models)
+        should_skip, skip_reason = should_skip_model(test_model_key, text_portfolio)
         if should_skip:
             pytest.skip(skip_reason)
 

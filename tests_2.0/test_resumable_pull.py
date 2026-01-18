@@ -179,13 +179,23 @@ snapshot_download(
         print(f"[DEBUG] Before resume - HF_HOME: {os.environ.get('HF_HOME')}")
         print(f"[DEBUG] Before resume - Cache dir exists: {cache_dir.exists()}")
 
-        # CRITICAL CHECK: Is Phase 1 subprocess still running?
-        subprocess_status = proc.poll()
-        if subprocess_status is None:
-            print(f"[WARNING] Phase 1 subprocess (PID {proc.pid}) STILL RUNNING during Phase 3!")
-            print(f"[WARNING] This could cause race conditions with downloads")
-        else:
-            print(f"[DEBUG] Phase 1 subprocess terminated with code: {subprocess_status}")
+        # CRITICAL: Ensure Phase 1 subprocess is fully terminated before resuming
+        # Race condition: SIGTERM is sent but subprocess cleanup takes time
+        # If resume starts too early, huggingface_hub sees partial files and skips download
+        if proc.poll() is None:
+            print(f"[DEBUG] Waiting for Phase 1 subprocess (PID {proc.pid}) to terminate...")
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                pytest.fail("Phase 1 subprocess did not terminate within 15s")
+
+        # Additional wait for filesystem to settle (file locks, etc.)
+        # Without this, huggingface_hub may see incomplete state and skip download
+        # Testing shows marker-run needs longer wait (possibly pytest interference)
+        print(f"[DEBUG] Phase 1 subprocess terminated with code: {proc.poll()}")
+        print("[DEBUG] Waiting 10s for filesystem to settle...")
+        time.sleep(10)
 
         result = pull_operation(model, force_resume=True)
 

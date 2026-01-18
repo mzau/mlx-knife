@@ -5,7 +5,7 @@
 **Last Updated:** 2025-12-15
 
 > **Audience:** Server operators, DevOps, API consumers
-> **Not for:** Developers (see `ARCHITECTURE.md` and ADRs instead)
+> **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
 
 ---
 
@@ -63,9 +63,19 @@ mlxk serve --host 0.0.0.0 --port 8000
     }
   ],
   "max_tokens": 2048,
-  "temperature": 0.4
+  "temperature": 0.4,
+  "chunk": 1
 }
 ```
+
+**mlx-knife Extension Parameters:**
+- `chunk` (integer, optional): Batch size for vision processing (default: 1). Controls how many images are processed per inference session. Higher values may trigger OOM on resource-constrained systems. Maximum: 5 (enforced by server).
+
+**Default chunk size:**
+1. Request parameter `chunk` (highest priority)
+2. Server startup: `mlxk server --chunk N`
+3. Environment: `MLXK2_VISION_CHUNK_SIZE=N`
+4. Default: 1 (maximum safety)
 
 **Response:**
 ```json
@@ -114,6 +124,9 @@ mlxk serve --host 0.0.0.0 --port 8000
 
 **List available models.**
 
+Returns all cached models that are healthy and runtime-compatible.
+Models are sorted with preloaded model first (if any), then alphabetically.
+
 **Response:**
 ```json
 {
@@ -122,12 +135,30 @@ mlxk serve --host 0.0.0.0 --port 8000
     {
       "id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
       "object": "model",
-      "created": 1702345678,
-      "owned_by": "mlx-community"
+      "owned_by": "mlx-knife-2.0",
+      "permission": [],
+      "context_length": 8192
     }
   ]
 }
 ```
+
+**Fields:**
+- `id`: Model identifier (HuggingFace name or workspace path)
+- `object`: Always `"model"` (OpenAI-compatible)
+- `owned_by`: `"mlx-knife-2.0"` for cached models, `"workspace"` for local directories
+- `permission`: Empty array (OpenAI legacy field)
+- `context_length`: Maximum context window in tokens (may be `null` if unavailable)
+
+**Why context_length matters:**
+
+MLX Knife uses **client-side context management** (unlike OpenAI's server-side history):
+- **Vision models:** Fully stateless - client holds entire conversation history
+- **Text models:** Shift-window (context_length / 2 reserved for history on server)
+- **Clients need this** to manage conversation pruning and token budgets
+- **Load balancing:** BROKE Cluster and similar tools use this for scheduling decisions
+
+Note: LM Studio provides similar field as `max_context_length`.
 
 ---
 
@@ -146,11 +177,10 @@ See `examples/vision_pipe.sh` for a practical Vision→Text pipeline example (CL
 **Supported:**
 - ✅ Base64 data URLs (`data:image/jpeg;base64,...`)
 - ✅ Multiple images (up to 5 per request)
-- ✅ Formats: JPEG, PNG
+- ✅ Formats: JPEG, PNG, GIF, WebP
 
 **Limits:**
 - **Per-image:** 20 MB max
-- **Total:** 50 MB max per request
 - **Count:** 5 images max per request
 
 **Important Characteristics:**
@@ -259,9 +289,10 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 - **Completion:** `data: [DONE]\n\n`
 
 #### Vision Models
-- ⚠️ **Graceful degradation:** SSE emulation (batch result split into chunks)
-- **Reason:** mlx-vlm doesn't guarantee streaming support
-- **Behavior:** Returns full result via SSE format for client compatibility
+- ✅ **Per-chunk streaming:** Real SSE events as each image chunk completes (2.0.4-beta.7+)
+- **Multiple images:** Each chunk (1-5 images) streams as it finishes processing
+- **Single image:** Behaves like batch mode (one SSE event)
+- **Format:** OpenAI-compatible SSE with per-chunk deltas
 
 **Request:**
 ```json
@@ -303,9 +334,11 @@ MLXK2_ENABLE_PIPES=1      # Unix pipe integration (2.0.4-beta.1)
 ### Supervised Mode (Default)
 
 **Behavior:**
-- Server auto-restarts on crashes
+- Handles Ctrl-C gracefully (clean shutdown with 5s timeout)
+- Runs server in subprocess for improved signal handling
 - Logs go to stderr
 - `--log-json` produces 100% JSON output
+- **Note:** No auto-restart on crashes (use systemd/supervisor for production)
 
 **Start:**
 ```bash
@@ -359,7 +392,8 @@ python -m mlxk2.core.server_base
 **Vision Models:**
 - **Slower than text:** Vision Encoder adds overhead
 - **Per-image:** ~2-5 seconds baseline + generation time
-- **Multiple images:** Linear scaling (no batching in 2.0.4-beta.1)
+- **Multiple images:** Processed in chunks (default: 1, max: 5 via `--chunk`)
+- **Streaming:** Each chunk delivers results immediately (see Streaming section above)
 
 ### Concurrent Requests
 - **Current:** Sequential processing (one request at a time)
@@ -412,10 +446,10 @@ pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290
 ### Image Upload Fails (HTTP 400)
 
 **Common causes:**
-- Image size > 20MB per image
-- Total size > 50MB
-- More than 5 images
-- External URLs (not supported, use Base64)
+- Image size > 20 MB per image
+- More than 5 images per request
+- Unsupported format (use JPEG, PNG, GIF, WebP)
+- External URLs (not supported, use Base64 data URLs)
 - Invalid Base64 encoding
 
 **Solution:** Resize images, reduce count, or check encoding
@@ -542,15 +576,15 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 When switching from Vision to Text model mid-conversation:
 
 1. **Client:** Continue sending full history (including previous image_url content)
-2. **Server:** Automatically filters images for text models, preserves text context
-3. **Result:** Text model sees `[Image 1: beach...]` placeholders instead of binary data
+2. **Server:** Automatically filters images for text models, replaces with placeholders
+3. **Result:** Text model sees `[n image(s) were attached]` instead of binary data
 
 **Example workflow:**
 ```
-1. Vision model: User sends beach.jpg → "Image 1 shows a beach"
-2. Vision model: User sends mountain.jpg → "Image 2 shows a mountain"
+1. Vision model: User sends 2 images → Model describes both
+2. Vision model: User asks "What's different?" → Model compares
 3. Switch to Text model: User asks "Which is better for vacation?"
-4. Text model: Can reference "Image 1" and "Image 2" from context
+4. Text model: Sees "[2 image(s) were attached]" in history, can reference the conversation
 ```
 
 ### Image Deduplication

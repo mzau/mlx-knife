@@ -109,3 +109,248 @@ def test_list_empty_cache(isolated_cache):
     assert result["status"] == "success"
     assert result["data"]["models"] == []
     assert result["data"]["count"] == 0
+
+
+class TestListWorkspacePrefix:
+    """Test list_models() with workspace path patterns (Session 103)."""
+
+    def test_list_workspace_exact_match(self, tmp_path):
+        """Test list_models with exact workspace path."""
+        import os
+
+        ws = tmp_path / "my-model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{"model_type": "llama"}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./my-model")
+
+            assert result["status"] == "success"
+            assert result["data"]["count"] == 1
+            assert len(result["data"]["models"]) == 1
+            assert "my-model" in result["data"]["models"][0]["name"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_prefix_match(self, tmp_path):
+        """Test list_models with workspace prefix pattern."""
+        import os
+
+        # Create multiple workspaces with common prefix
+        for name in ["gemma-3n-4bit", "gemma-3n-FIXED-4bit", "gemma-3n-8bit"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{"model_type": "gemma"}')
+
+        # Create non-matching workspace
+        other = tmp_path / "llama-3"
+        other.mkdir()
+        (other / "config.json").write_text('{"model_type": "llama"}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./gemma-")
+
+            assert result["status"] == "success"
+            assert result["data"]["count"] == 3
+            # All matches should contain gemma
+            for m in result["data"]["models"]:
+                assert "gemma" in m["name"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_prefix_no_match(self, tmp_path):
+        """Test list_models with non-matching prefix returns empty list."""
+        import os
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./nonexistent-")
+
+            assert result["status"] == "success"
+            assert result["data"]["count"] == 0
+            assert result["data"]["models"] == []
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_does_not_fall_through_to_cache(self, tmp_path, isolated_cache):
+        """Test explicit path patterns don't fall through to cache search."""
+        import os
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            # ./gemma- should NOT match cache models even if they contain "gemma"
+            # It should only search local workspaces
+            result = list_models(pattern="./gemma-")
+
+            assert result["status"] == "success"
+            # Should be empty (no local workspaces) not cache models
+            assert result["data"]["count"] == 0
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_sorted_by_name(self, tmp_path):
+        """Test workspace results are sorted by name."""
+        import os
+
+        for name in ["model-c", "model-a", "model-b"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./model-")
+
+            names = [m["name"] for m in result["data"]["models"]]
+            # Should be sorted (names contain full path, but sorted by name)
+            assert "model-a" in names[0]
+            assert "model-b" in names[1]
+            assert "model-c" in names[2]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_absolute_path(self, tmp_path):
+        """Test list_models with absolute workspace path."""
+        ws = tmp_path / "model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{}')
+
+        result = list_models(pattern=str(ws))
+
+        assert result["status"] == "success"
+        assert result["data"]["count"] == 1
+
+    def test_list_workspace_has_all_fields(self, tmp_path):
+        """Test workspace model objects have all required fields."""
+        import os
+
+        ws = tmp_path / "my-model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{"model_type": "llama"}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./my-model")
+
+            m = result["data"]["models"][0]
+            # Check required fields exist
+            required = ["name", "hash", "size_bytes", "last_modified",
+                       "framework", "model_type", "capabilities", "health", "cached"]
+            for field in required:
+                assert field in m, f"Missing field: {field}"
+
+            # Workspace-specific: hash should be None, cached should be False
+            assert m["hash"] is None
+            assert m["cached"] is False
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_display_name_relative(self, tmp_path):
+        """Test display_name is relative for relative input patterns."""
+        import os
+
+        ws = tmp_path / "my-model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./my-model")
+
+            m = result["data"]["models"][0]
+            # name should be absolute (for programmatic use)
+            assert m["name"].startswith("/")
+            # display_name should be relative
+            assert m["display_name"] == "my-model"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_display_name_absolute(self, tmp_path):
+        """Test display_name is absolute for absolute input patterns."""
+        ws = tmp_path / "my-model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{}')
+
+        # Use absolute path pattern
+        result = list_models(pattern=str(ws))
+
+        m = result["data"]["models"][0]
+        # Both name and display_name should be absolute
+        assert m["name"].startswith("/")
+        assert m["display_name"].startswith("/")
+        assert m["display_name"] == str(ws)
+
+    def test_list_workspace_display_name_prefix_match(self, tmp_path):
+        """Test display_name works correctly with prefix matching."""
+        import os
+
+        for name in ["gemma-a", "gemma-b"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern="./gemma-")
+
+            # Both should have relative display_name
+            display_names = [m["display_name"] for m in result["data"]["models"]]
+            assert "gemma-a" in display_names
+            assert "gemma-b" in display_names
+            # None should be absolute
+            assert not any(dn.startswith("/") for dn in display_names)
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_directory_scan(self, tmp_path):
+        """Test listing all workspaces in a directory (. pattern)."""
+        import os
+
+        # Create multiple workspaces
+        for name in ["model-a", "model-b"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            result = list_models(pattern=".")
+
+            assert result["status"] == "success"
+            assert result["data"]["count"] == 2
+            # display_names should be just the directory names
+            display_names = [m["display_name"] for m in result["data"]["models"]]
+            assert "model-a" in display_names
+            assert "model-b" in display_names
+        finally:
+            os.chdir(old_cwd)
+
+    def test_list_workspace_directory_scan_absolute(self, tmp_path):
+        """Test listing all workspaces with absolute directory path."""
+        # Create workspaces
+        for name in ["model-a", "model-b"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        # Use absolute path
+        result = list_models(pattern=str(tmp_path))
+
+        assert result["status"] == "success"
+        assert result["data"]["count"] == 2
+        # display_names should be absolute (because input was absolute)
+        for m in result["data"]["models"]:
+            assert m["display_name"].startswith("/")
+            # name should also be absolute
+            assert m["name"].startswith("/")

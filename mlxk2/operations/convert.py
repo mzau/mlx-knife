@@ -21,7 +21,7 @@ Philosophy:
 import json
 import logging
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any
 
@@ -253,7 +253,7 @@ def convert_operation(
 
         target_metadata = {
             "mlxk_version": __version__,
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             "source_repo": src_metadata.get("source_repo", str(src)),
             "source_revision": src_metadata.get("source_revision"),
             "managed": True,

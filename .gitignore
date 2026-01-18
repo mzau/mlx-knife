@@ -1,6 +1,6 @@
 venv/
 venv39/
-venv310/
+venv31?/
 venv_*/
 test_env*/
 test_results*.log

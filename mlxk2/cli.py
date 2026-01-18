@@ -169,36 +169,36 @@ def main():
     pull_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     pull_parser.add_argument("--force-resume", action="store_true", help="Force resume of partial downloads without prompting")
 
-    # Clone command (alpha) - only show if alpha features enabled
-    if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
-        clone_parser = subparsers.add_parser("clone", help="ALPHA: Clone a model to a local workspace")
-        clone_parser.add_argument("model", help="Model name to clone (org/repo[@revision])")
-        clone_parser.add_argument("target_dir", help="Target directory for workspace")
-        clone_parser.add_argument("--branch", help="Specific branch/revision to clone")
-        clone_parser.add_argument("--no-health-check", action="store_true", help="Skip health validation before copy")
-        clone_parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
-        clone_parser.add_argument("--json", action="store_true", help="Output in JSON format")
-        clone_parser.add_argument("--force-resume", action="store_true", help="Force resume of partial downloads without prompting")
+    # Clone command - create local workspace from cached model
+    clone_parser = subparsers.add_parser("clone", help="Clone a model to a local workspace")
+    clone_parser.add_argument("model", help="Model name to clone (org/repo[@revision])")
+    clone_parser.add_argument("target_dir", help="Target directory for workspace")
+    clone_parser.add_argument("--branch", help="Specific branch/revision to clone")
+    clone_parser.add_argument("--no-health-check", action="store_true", help="Skip health validation before copy")
+    clone_parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    clone_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    clone_parser.add_argument("--force-resume", action="store_true", help="Force resume of partial downloads without prompting")
 
-    # Convert command (ADR-018 Phase 1)
-    convert_parser = subparsers.add_parser(
-        "convert",
-        help="Convert workspace to workspace with transformations",
-        description="Transform model workspaces (repair-index, quantize, etc.)"
-    )
-    convert_parser.add_argument("source", help="Source workspace path")
-    convert_parser.add_argument("target", help="Target workspace path")
-    convert_parser.add_argument(
-        "--repair-index",
-        action="store_true",
-        help="Rebuild model.safetensors.index.json from shards (fixes mlx-vlm #624)"
-    )
-    convert_parser.add_argument(
-        "--skip-health",
-        action="store_true",
-        help="Skip health check on output (debug only)"
-    )
-    convert_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    # Convert command (alpha) - only show if alpha features enabled
+    if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+        convert_parser = subparsers.add_parser(
+            "convert",
+            help="ALPHA: Convert workspace to workspace with transformations",
+            description="Transform model workspaces (repair-index, quantize, etc.)"
+        )
+        convert_parser.add_argument("source", help="Source workspace path")
+        convert_parser.add_argument("target", help="Target workspace path")
+        convert_parser.add_argument(
+            "--repair-index",
+            action="store_true",
+            help="Rebuild model.safetensors.index.json from shards (fixes mlx-vlm #624)"
+        )
+        convert_parser.add_argument(
+            "--skip-health",
+            action="store_true",
+            help="Skip health check on output (debug only)"
+        )
+        convert_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
     # Remove command
     rm_parser = subparsers.add_parser("rm", help="Delete a model")
@@ -264,25 +264,24 @@ def main():
         add_help=False,
     )
 
-    # Push command (alpha) - only show if alpha features enabled
-    if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
-        push_parser = subparsers.add_parser("push", help="ALPHA: Upload a local folder to Hugging Face")
-        push_parser.add_argument("local_dir", help="Local folder to upload")
-        push_parser.add_argument("repo_id", help="Target repo as org/model")
-        push_parser.add_argument("--create", action="store_true", help="Create repository/branch if missing")
-        # Alpha.1 safety: require --private to avoid accidental public uploads
-        push_parser.add_argument(
-            "--private",
-            action="store_true",
-            required=True,
-            help="REQUIRED (alpha.1): Proceed only when targeting a private repo",
-        )
-        push_parser.add_argument("--branch", default="main", help="Target branch (default: main)")
-        push_parser.add_argument("--commit", dest="commit_message", default="mlx-knife push", help="Commit message")
-        push_parser.add_argument("--verbose", action="store_true", help="Verbose details (human output)")
-        push_parser.add_argument("--check-only", action="store_true", help="Analyze workspace content; do not upload")
-        push_parser.add_argument("--dry-run", action="store_true", help="Compute changes against remote; do not upload")
-        push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    # Push command - upload local folder to Hugging Face
+    push_parser = subparsers.add_parser("push", help="Upload a local folder to Hugging Face")
+    push_parser.add_argument("local_dir", help="Local folder to upload")
+    push_parser.add_argument("repo_id", help="Target repo as org/model")
+    push_parser.add_argument("--create", action="store_true", help="Create repository/branch if missing")
+    # Safety: require --private to avoid accidental public uploads
+    push_parser.add_argument(
+        "--private",
+        action="store_true",
+        required=True,
+        help="REQUIRED: Proceed only when targeting a private repo",
+    )
+    push_parser.add_argument("--branch", default="main", help="Target branch (default: main)")
+    push_parser.add_argument("--commit", dest="commit_message", default="mlx-knife push", help="Commit message")
+    push_parser.add_argument("--verbose", action="store_true", help="Verbose details (human output)")
+    push_parser.add_argument("--check-only", action="store_true", help="Analyze workspace content; do not upload")
+    push_parser.add_argument("--dry-run", action="store_true", help="Compute changes against remote; do not upload")
+    push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     
     args = parser.parse_args()
     
@@ -371,12 +370,6 @@ def main():
 
             print_result(result, render_pull, args.json)
         elif args.command == "clone":
-            # Check if alpha features are enabled (should not reach here if not, but double-check)
-            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
-                result = handle_error("CommandError", "Clone command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
-                print_result(result, None, True)  # Always JSON for this error
-                sys.exit(1)
-
             # Handle branch parameter by modifying model spec
             model_spec = args.model
             if getattr(args, "branch", None):
@@ -393,6 +386,12 @@ def main():
             print_result(result, render_clone, args.json,
                         quiet=getattr(args, "quiet", False))
         elif args.command == "convert":
+            # Check if alpha features are enabled (should not reach here if not, but double-check)
+            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+                result = handle_error("CommandError", "Convert command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
+                print_result(result, None, True)  # Always JSON for this error
+                sys.exit(1)
+
             from .operations.convert import convert_operation
 
             # Validate mode flags
@@ -573,11 +572,6 @@ def main():
             # Should never reach here (server runs indefinitely)
             result = {"status": "success"}
         elif args.command == "push":
-            # Check if alpha features are enabled (should not reach here if not, but double-check)
-            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
-                result = handle_error("CommandError", "Push command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
-                print_result(result, None, True)  # Always JSON for this error
-                sys.exit(1)
             result = push_operation(
                 local_dir=args.local_dir,
                 repo_id=args.repo_id,

@@ -26,6 +26,12 @@ def _run_supervised_uvicorn(host: str, port: int, log_level: str, reload: bool =
     env["MLXK2_HOST"] = host
     env["MLXK2_PORT"] = str(port)
     env["MLXK2_LOG_LEVEL"] = log_level
+
+    # Suppress transformers/tokenizers noise in server subprocess (Session 89 + Session 90 fix)
+    # IMPORTANT: Set in subprocess ENV, NOT in global __init__.py (breaks huggingface_hub downloads)
+    env["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"  # Prevent fork warning in uvicorn/multiprocessing
+
     if reload:
         env["MLXK2_RELOAD"] = "1"
 
@@ -127,8 +133,10 @@ def start_server(
     os.environ["MLXK2_LOG_LEVEL"] = log_level
     if model:
         os.environ["MLXK2_PRELOAD_MODEL"] = model
+    if max_tokens is not None:
+        os.environ["MLXK2_MAX_TOKENS"] = str(max_tokens)
     if chunk != 1:
-        os.environ["MLXK2_VISION_BATCH_SIZE"] = str(chunk)
+        os.environ["MLXK2_VISION_CHUNK_SIZE"] = str(chunk)
 
     if verbose:
         print("Starting MLX Knife Server 2.0...")
@@ -143,7 +151,12 @@ def start_server(
 
     if supervise:
         # Delegate to subprocess-managed uvicorn (env vars already set above)
-        _ = _run_supervised_uvicorn(host=host, port=port, log_level=log_level, reload=reload)
+        exit_code = _run_supervised_uvicorn(host=host, port=port, log_level=log_level, reload=reload)
+        # Propagate failure exit codes to caller (for CI/CD)
+        # Python's Popen.wait() returns negative values for signal deaths (-SIGTERM=-15, -SIGKILL=-9)
+        # Any non-zero exit code indicates failure and should be propagated
+        if exit_code != 0:
+            sys.exit(exit_code)
         return
 
     # Default: run uvicorn in-process

@@ -17,6 +17,8 @@ from mlxk2.operations.workspace import (
     write_workspace_sentinel,
     is_managed_workspace,
     is_workspace_path,
+    is_explicit_path,
+    find_matching_workspaces,
     read_workspace_metadata,
     SENTINEL_FILENAME
 )
@@ -57,6 +59,204 @@ class TestIsWorkspacePath:
         assert is_workspace_path(None) is False
         assert is_workspace_path(123) is False
         assert is_workspace_path([]) is False
+
+
+class TestIsExplicitPath:
+    """Test is_explicit_path() helper function."""
+
+    def test_explicit_path_relative_dot_slash(self):
+        """Test ./ prefix is explicit path."""
+        assert is_explicit_path("./model") is True
+        assert is_explicit_path("./gemma-3n") is True
+        assert is_explicit_path("./") is True
+
+    def test_explicit_path_relative_dot_dot_slash(self):
+        """Test ../ prefix is explicit path."""
+        assert is_explicit_path("../model") is True
+        assert is_explicit_path("../parent/model") is True
+
+    def test_explicit_path_absolute(self):
+        """Test / prefix is explicit path."""
+        assert is_explicit_path("/abs/path/model") is True
+        assert is_explicit_path("/model") is True
+
+    def test_explicit_path_dot_only(self):
+        """Test . and .. alone are explicit paths."""
+        assert is_explicit_path(".") is True
+        assert is_explicit_path("..") is True
+
+    def test_not_explicit_path_hf_model_id(self):
+        """Test HF model IDs are NOT explicit paths."""
+        assert is_explicit_path("mlx-community/Phi-3") is False
+        assert is_explicit_path("microsoft/phi-2") is False
+
+    def test_not_explicit_path_bare_name(self):
+        """Test bare names without path prefix are NOT explicit paths."""
+        assert is_explicit_path("my-model") is False
+        assert is_explicit_path("gemma-3n-E2B") is False
+
+    def test_not_explicit_path_invalid_input(self):
+        """Test handles invalid input gracefully."""
+        assert is_explicit_path(None) is False
+        assert is_explicit_path("") is False
+        assert is_explicit_path(123) is False
+
+
+class TestFindMatchingWorkspaces:
+    """Test find_matching_workspaces() prefix matching."""
+
+    def test_find_exact_match(self, tmp_path):
+        """Test exact match returns single workspace."""
+        ws = tmp_path / "my-model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{"model_type": "llama"}')
+
+        # Use ./ prefix to make it explicit path
+        matches = find_matching_workspaces(f"./{ws.name}")
+        # Must be in correct directory for ./ to work
+        import os
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            matches = find_matching_workspaces("./my-model")
+            assert len(matches) == 1
+            assert matches[0].name == "my-model"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_find_prefix_match(self, tmp_path):
+        """Test prefix match returns multiple workspaces."""
+        # Create multiple workspaces with common prefix
+        for name in ["gemma-3n-4bit", "gemma-3n-FIXED-4bit", "gemma-3n-8bit"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{"model_type": "gemma"}')
+
+        # Create non-matching workspace
+        other = tmp_path / "llama-3"
+        other.mkdir()
+        (other / "config.json").write_text('{"model_type": "llama"}')
+
+        import os
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            matches = find_matching_workspaces("./gemma-")
+            assert len(matches) == 3
+            assert all("gemma" in m.name for m in matches)
+            # Should NOT include llama-3
+            assert not any("llama" in m.name for m in matches)
+        finally:
+            os.chdir(old_cwd)
+
+    def test_find_prefix_match_sorted(self, tmp_path):
+        """Test prefix match returns sorted results."""
+        for name in ["model-c", "model-a", "model-b"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        import os
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            matches = find_matching_workspaces("./model-")
+            names = [m.name for m in matches]
+            assert names == ["model-a", "model-b", "model-c"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_find_no_match(self, tmp_path):
+        """Test returns empty list when no workspaces match."""
+        import os
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            matches = find_matching_workspaces("./nonexistent-")
+            assert matches == []
+        finally:
+            os.chdir(old_cwd)
+
+    def test_find_skips_non_workspaces(self, tmp_path):
+        """Test skips directories without config.json."""
+        # Valid workspace
+        valid = tmp_path / "gemma-valid"
+        valid.mkdir()
+        (valid / "config.json").write_text('{}')
+
+        # Directory without config.json (not a workspace)
+        invalid = tmp_path / "gemma-invalid"
+        invalid.mkdir()
+        (invalid / "other.txt").write_text("not a workspace")
+
+        import os
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            matches = find_matching_workspaces("./gemma-")
+            assert len(matches) == 1
+            assert matches[0].name == "gemma-valid"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_find_absolute_path(self, tmp_path):
+        """Test works with absolute paths."""
+        ws = tmp_path / "model"
+        ws.mkdir()
+        (ws / "config.json").write_text('{}')
+
+        matches = find_matching_workspaces(str(ws))
+        assert len(matches) == 1
+
+    def test_find_not_explicit_path(self):
+        """Test returns empty list for non-explicit paths."""
+        # HF model ID is not explicit path
+        matches = find_matching_workspaces("mlx-community/model")
+        assert matches == []
+
+        # Bare name is not explicit path
+        matches = find_matching_workspaces("my-model")
+        assert matches == []
+
+    def test_find_directory_scan(self, tmp_path):
+        """Test directory scan (existing directory, not workspace) finds all workspaces inside."""
+        import os
+
+        # Create multiple workspaces in tmp_path
+        for name in ["model-a", "model-b", "model-c"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        # Create a non-workspace directory
+        other = tmp_path / "not-a-workspace"
+        other.mkdir()
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            # Pattern "." should find all 3 workspaces
+            matches = find_matching_workspaces(".")
+            assert len(matches) == 3
+            names = [m.name for m in matches]
+            assert "model-a" in names
+            assert "model-b" in names
+            assert "model-c" in names
+            # Should NOT include non-workspace directory
+            assert "not-a-workspace" not in names
+        finally:
+            os.chdir(old_cwd)
+
+    def test_find_directory_scan_absolute(self, tmp_path):
+        """Test directory scan with absolute path."""
+        for name in ["ws1", "ws2"]:
+            ws = tmp_path / name
+            ws.mkdir()
+            (ws / "config.json").write_text('{}')
+
+        # Use absolute path to directory
+        matches = find_matching_workspaces(str(tmp_path))
+        assert len(matches) == 2
 
 
 class TestWorkspaceSentinel:

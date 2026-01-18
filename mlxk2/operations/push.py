@@ -19,6 +19,7 @@ import json as _json
 # Import APFS check from clone operation and cache utilities
 from mlxk2.operations.clone import _is_apfs_filesystem
 from mlxk2.core.cache import get_current_cache_root
+from mlxk2.operations.workspace import is_explicit_path, find_matching_workspaces
 
 
 DEFAULT_PUSH_BRANCH = "main"
@@ -78,9 +79,39 @@ def push_operation(
             }
             return result
 
-        # 2) Local folder
+        # 2) Local folder - with explicit path pattern support
         p = Path(local_dir)
-        if not p.exists() or not p.is_dir():
+
+        # If path exists as a directory, use it directly (backward compatible)
+        # Only use pattern matching for non-existent paths (prefix patterns)
+        if p.exists() and p.is_dir():
+            # Direct path - use as-is (even without config.json for backward compat)
+            pass
+        elif is_explicit_path(local_dir):
+            # Explicit path pattern that doesn't exist as directory
+            # Could be: prefix pattern (./gemma-) or directory scan (.)
+            matches = find_matching_workspaces(local_dir)
+            if len(matches) == 0:
+                result["status"] = "error"
+                result["error"] = {
+                    "type": "workspace_not_found",
+                    "message": f"No workspace found matching: {local_dir}",
+                }
+                return result
+            elif len(matches) > 1:
+                # Ambiguous pattern - multiple workspaces match
+                match_names = [m.name for m in matches]
+                result["status"] = "error"
+                result["error"] = {
+                    "type": "ambiguous_workspace",
+                    "message": f"Ambiguous pattern '{local_dir}' matches {len(matches)} workspaces: {', '.join(match_names)}. Please specify exact path.",
+                    "matches": [str(m) for m in matches],
+                }
+                return result
+            else:
+                # Exactly one match - use it
+                p = matches[0]
+        else:
             result["status"] = "error"
             result["error"] = {
                 "type": "workspace_not_found",

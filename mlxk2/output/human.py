@@ -151,7 +151,9 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
 
     rows: List[List[str]] = []
     for m in filtered:
-        name = str(m.get("name", "-"))
+        # Use display_name for human output if available (workspace paths)
+        # Otherwise fall back to name (cache models)
+        name = str(m.get("display_name") or m.get("name", "-"))
         if not verbose and name.startswith("mlx-community/"):
             # Compact name without the default org prefix
             name = name.split("/", 1)[1]

@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.6** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.7** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.6-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.7-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.10+(3.9)-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -24,7 +24,7 @@
 - **Community Model Repair Tool** - Fix broken mlx-vlm models with `--repair-index`
 - **Resumable Downloads** - Interrupted clone/pull operations continue automatically
 - **Safe Vision Batch Processing** - Automatic chunking prevents Metal OOM crashes
-- **Workspace Path Support** - Run/show/server commands work with local directories
+- **Workspace Path Support** - Run/show/server/list commands work with local directories
 
 ### Core Functionality
 - **List & Manage Models**: Browse your HuggingFace cache with MLX-specific filtering
@@ -76,7 +76,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 MLX Knife has been comprehensively tested and verified on:
 
 ✅ **Python 3.9.6 - 3.14** - Text LLMs fully supported (mlx-lm 0.28.4+)
-✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.4 uses commit c536165df2b3b4aece3a795b2e414349f935e750 with Pixtral fix)
+✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.7 uses commit fc8c92e31983a52761f37d503f903ec40bebbd62 with MXFP4 support)
 
 **Note:** Vision features require Python 3.10+. Native macOS Python 3.9.6 users need to upgrade (e.g., via Homebrew).
 
@@ -106,17 +106,17 @@ mlxk --version  # → mlxk 2.0.3 (latest stable on PyPI)
 ### Via GitHub (Latest Beta)
 
 ```bash
-# Install 2.0.4-beta.6 (Workspace operations + Resumable clone)
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.6"
+# Install 2.0.4-beta.7 (Workspace discovery + Server robustness)
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.7"
 
 # With Vision support (Python 3.10+ required)
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.6#egg=mlx-knife[vision]"
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.7#egg=mlx-knife[vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4b6
+mlxk --version  # → mlxk 2.0.4b7
 ```
 
-**Beta.6 note:** Uses mlx-vlm commit c536165df2b3b4aece3a795b2e414349f935e750 (includes Pixtral text-only fix). The `[vision]` extra automatically installs the correct version.
+**Beta.7 note:** Uses mlx-vlm commit fc8c92e (includes MXFP4 quantization support). The `[vision]` extra automatically installs the correct version.
 
 **For production use:** Wait for 2.0.4 stable on PyPI (requires mlx-vlm 0.3.10 release).
 
@@ -134,7 +134,7 @@ pip install -e ".[dev,test]"
 pip install -e ".[dev,test,vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4b5
+mlxk --version  # → mlxk 2.0.4b7
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -176,6 +176,22 @@ mlxk run "Phi-3-mini" -c
 mlxk serve --port 8080
 ```
 
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | Model discovery with JSON output; supports cache and workspace paths |
+| `show` | Detailed model information with --files, --config |
+| `health` | Corruption detection and cache analysis |
+| `pull` | HuggingFace model downloads with corruption detection |
+| `rm` | Model deletion with lock cleanup and fuzzy matching |
+| `run` | Interactive and single-shot model execution with streaming/batch modes |
+| `server`/`serve` | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
+| `clone` | Model workspace cloning - create local editable copy from cache |
+| `push` | Upload to HuggingFace Hub (requires `--private` flag for safety) |
+| 🔒 `convert` | **Experimental** - Workspace transformations; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
+
 ## Model References
 
 MLX-Knife supports multiple ways to reference models:
@@ -194,15 +210,21 @@ mlxk run "Phi-4" "Hello"                    # Fuzzy match
 mlxk show "Qwen3@e96" --json                # Specific version
 ```
 
-### Local Paths (2.0.4-beta.6+)
+### Local Paths (2.0.4-beta.7+)
 
 | Format | Example |
 |--------|---------|
 | Relative | `./my-workspace` |
 | Absolute | `/Volumes/External/model` |
-| Home | `~/models/fine-tuned` |
+| Prefix match | `./gemma-` (all workspaces starting with "gemma-") |
+| Directory | `.` (all workspaces in current directory) |
 
 ```bash
+# List workspaces
+mlxk list .                        # All workspaces in current directory
+mlxk list ./gemma-                 # Prefix match: gemma-3n-4bit, gemma-3n-FIXED-4bit, ...
+mlxk list $PWD/models              # Absolute path → absolute output
+
 # Clone → Run
 mlxk clone org/model ./workspace
 mlxk run ./workspace "Hello"
@@ -212,20 +234,21 @@ mlxk convert ./broken ./fixed --repair-index
 mlxk run ./fixed "Test"
 ```
 
+**Output format:** List output mirrors input format - relative patterns produce relative names (like `ls`), absolute paths produce absolute names.
+
 **Disambiguating paths vs cache names:** When a local directory exists with the same name as a cached model, use `./` prefix to force workspace resolution. Otherwise, cache lookup is attempted first.
 
 ---
 
-## Workspace Development Workflow (2.0.4-beta.6+)
+## Workspace Development Workflow (2.0.4-beta.7+)
 
 **Complete local development cycle** for model experimentation, repair, and testing without HuggingFace round-trips:
 
 ```bash
-export MLXK2_ENABLE_ALPHA_FEATURES=1
-
 # Clone → Repair → Test → Publish (optional)
 mlxk clone "model" ./workspace
-mlxk convert ./workspace ./fixed --repair-index    # Fix mlx-vlm #624 models
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk convert ./workspace ./fixed --repair-index
+mlxk list .                                        # See all local workspaces
 mlxk run ./fixed "test prompt"                     # Local inference
 mlxk server --model ./fixed                        # Dev server
 mlxk push ./fixed "your-org/model"                 # Optional publish
@@ -248,8 +271,9 @@ mlxk push ./fixed "your-org/model"                 # Optional publish
 | `clone` | ✅ Creates | `mlxk clone model ./workspace` |
 | `convert` | ✅ Yes | `mlxk convert ./in ./out --repair-index` |
 | `push` | ✅ Yes | `mlxk push ./workspace "org/name"` |
+| `list` | ✅ Yes | `mlxk list .` or `mlxk list ./gemma-` |
 | `pull` | ❌ Cache only | Downloads to HuggingFace cache |
-| `list` | ❌ Cache only | Lists cached models only |
+| `rm` | ❌ Cache only | Use `rm -rf ./workspace` for local directories |
 
 ---
 
@@ -272,23 +296,6 @@ open webui/index.html
 **On-Prem:** Pure HTML/CSS/JS - runs entirely locally, zero dependencies.
 
 **Note:** nChat is a separate project designed for the entire BROKE ecosystem (MLX Knife + BROKE Cluster). See [nChat README](https://github.com/mzau/broke-nchat/blob/main/README.md) for CORS configuration.
-
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `server`/`serve` | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
-| `run` | Interactive and single-shot model execution with streaming/batch modes |
-| `list` | Model discovery with JSON output |
-| `health` | Corruption detection and cache analysis |
-| `show` | Detailed model information with --files, --config |
-| `pull` | HuggingFace model downloads with corruption detection |
-| `rm` | Model deletion with lock cleanup and fuzzy matching |
-| 🔒 `push` | **Alpha feature** - Upload to HuggingFace Hub; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
-| 🔒 `clone` | **Alpha feature** - Model workspace cloning; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
-| 🔒 `convert` | **Beta feature** - Workspace transformations (repair-index, quantize); `--repair-index` fixes mlx-vlm #624 models |
-| 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
 
 ## Multi-Modal Support
@@ -326,6 +333,8 @@ mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "What is 2+2?"
 
 #### Batch Processing
 
+**Terminology Note:** mlx-knife uses "batch" in the traditional computing sense (sequential job processing in groups), not ML inference batching (parallel batch_size > 1 in a single forward pass). Images are processed sequentially in groups for memory safety, not performance parallelization.
+
 **Breaking Change (2.0.4-beta.6):** Vision processing now defaults to processing **one image at a time** for maximum stability on all systems. Use `--chunk N` to process multiple images per batch when your system can handle it.
 
 ```bash
@@ -338,21 +347,21 @@ mlxk run pixtral "Describe images" --chunk 5 --image photos/*.jpg
 # Alternative: Use --prompt flag (useful when experimenting with different prompts)
 mlxk run pixtral --chunk 5 --image photos/*.jpg --prompt "Describe images"
 
-# Set default batch size via environment variable
-export MLXK2_VISION_BATCH_SIZE=3
+# Set default chunk size via environment variable
+export MLXK2_VISION_CHUNK_SIZE=3
 mlxk run pixtral "Describe images" --image photos/*.jpg
 ```
 
 **Why chunking?**
-- **Safety:** Prevents Metal OOM crashes with large image batches
-- **Isolation:** Fresh model load per chunk prevents state leakage between batches
+- **Safety:** Prevents Metal OOM crashes by limiting images per processing group (`--chunk N`)
+- **Isolation:** Fresh inference session per chunk (KV cache cleared, conversation context reset)
 - **Trade-off:** ~2-3s model load overhead per chunk vs guaranteed isolation
 
-**⚠️ Important:** Some vision models may hallucinate details about non-existent images when:
-- Processing larger chunks (model sees global context like "8 total images" but only has 4 in current batch)
-- Prompts use plural forms that don't match actual image count (e.g., "describe these images" when chunk=1)
+**Reliability (2.0.4-beta.7):** Vision models can sometimes describe details they didn't actually see. MLX Knife prevents this automatically:
+- **Default (chunk=1):** Most reliable - each image processed independently
+- **Larger chunks:** Still safe, but models may occasionally confuse details between images in the same batch
 
-Default chunk=1 with singular prompts provides maximum robustness.
+For maximum accuracy, use the default chunk=1 (no configuration needed).
 
 **Server API:**
 ```bash
@@ -361,39 +370,42 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "pixtral", "chunk": 3, "messages": [...]}'
 ```
 
+**Note:** `chunk` is an mlx-knife extension parameter. See [SERVER-HANDBOOK.md](docs/SERVER-HANDBOOK.md) for details.
+
 #### Metadata Output Format
 
 When processing images, MLX Knife automatically prepends metadata in a **collapsible table** (collapsed by default) **before** the model output:
 
 ```
 <details>
-<summary>📸 Batch 1/3: Images 1-4</summary>
+<summary>📸 Chunk 1/3: Images 1-4</summary>
 
 | Image | Filename | Original | Location | Date | Camera |
 |-------|----------|----------|----------|------|--------|
-| 1 | image_abc123.jpeg | beach.jpg | 📍 32.79°N, 16.92°W | 📅 2023-12-06 12:19 | 📷 Apple iPhone SE |
-| 2 | image_def456.jpeg | mountain.jpg | 📍 32.87°N, 17.17°W | 📅 2023-12-10 15:42 | 📷 Apple iPhone SE |
-| 3 | image_xyz789.jpeg | sunset.jpg | 📍 32.82°N, 17.05°W | 📅 2023-12-08 18:30 | 📷 Apple iPhone SE |
-| 4 | image_uvw456.jpeg | forest.jpg | 📍 32.88°N, 17.12°W | 📅 2023-12-09 10:15 | 📷 Apple iPhone SE |
+| 1 | image_abc123.jpeg | beach.jpg | 📍 32.7900°N, 16.9200°W | 📅 2023-12-06 12:19 | 📷 Apple iPhone SE |
+| 2 | image_def456.jpeg | mountain.jpg | 📍 32.8700°N, 17.1700°W | 📅 2023-12-10 15:42 | 📷 Apple iPhone SE |
+| 3 | image_xyz789.jpeg | sunset.jpg | 📍 32.8200°N, 17.0500°W | 📅 2023-12-08 18:30 | 📷 Apple iPhone SE |
+| 4 | image_uvw456.jpeg | forest.jpg | 📍 32.8800°N, 17.1200°W | 📅 2023-12-09 10:15 | 📷 Apple iPhone SE |
 
 </details>
 
 A beach with palm trees and clear blue water. A mountain landscape with snow-capped peaks...
 ```
 
-**Batch information in summary:**
-- Shows current batch and total batches (e.g., "Batch 1/3")
-- Shows image range in current batch (e.g., "Images 1-4")
+**Chunk information in summary:**
+- Shows current chunk and total chunks (e.g., "Chunk 1/3")
+- Shows image range in current chunk (e.g., "Images 1-4")
 - Helps track progress in WebUI and prevents confusion about which images are being described
-- **Important:** Batch context prevents hallucination by making scope clear to both model and user
 
 **Why metadata comes first:**
-- Vision models can **reference metadata in their analysis** (filename, GPS coordinates, date visible in prompt context)
-- Clearer association with output when processing multiple chunks
+- The model sees GPS, date, and camera info when analyzing images (enables location/time-aware descriptions)
+- The markdown table shows you exactly what the model knows about each image
+- Helps verify which description belongs to which file
 
 **Metadata includes:**
 - **Image ID** → **Filename mapping** (identify which description belongs to which file)
 - **GPS coordinates** (latitude/longitude, if available in EXIF)
+  - Precision: 4 decimal places (~11m accuracy) for street-level context
 - **Capture date/time** (ISO 8601 format)
 - **Camera model** (device info)
 
@@ -410,12 +422,11 @@ mlxk run vision-model --image photo.jpg "describe"
 
 #### Limitations
 
-- **Non-streaming:** Vision runs always use batch mode (no streaming output)
-- **Image limits:** Model-dependent due to Metal buffer constraints (~41.7GB on Apple Silicon)
+- **Image limits:** Model-dependent due to Metal / unified-memory constraints and peak activation usage
   - **pixtral-12b-8bit:** Up to 5 images tested on M2 Max 64GB (multi-image capable)
   - **Llama-3.2-11B / Other models:** Single-image only
   - **Larger models (24B+):** Limited to 1-2 images on 64GB RAM
-  - **Per-image:** 20 MB max, 50 MB total per request
+  - **Default server guardrails:** 20 MB per image, 50 MB total (configurable). Base64 encoding adds ~33% overhead.
 
 #### Server API
 
@@ -799,7 +810,7 @@ Enable experimental and alpha features:
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|
-| `MLXK2_ENABLE_ALPHA_FEATURES` | Enable alpha commands (`clone`, `push`) | `0` (disabled) | 2.0.0 |
+| `MLXK2_ENABLE_ALPHA_FEATURES` | Enable alpha commands (`convert`) | `0` (disabled) | 2.0.0 |
 | `MLXK2_ENABLE_PIPES` | Enable Unix pipe integration (`mlxk run <model> -`) | `0` (disabled) | 2.0.4 |
 | `MLXK2_EXIF_METADATA` | Extract EXIF metadata from images (Vision models) | `1` (enabled) | 2.0.4 |
 
@@ -813,10 +824,9 @@ echo "Hello" | mlxk run model - "translate to Spanish"
 export MLXK2_EXIF_METADATA=0
 mlxk run vision-model --image photo.jpg "describe this"
 
-# Enable alpha features for development
+# Enable alpha features for convert command
 export MLXK2_ENABLE_ALPHA_FEATURES=1
-mlxk clone model-name ./workspace
-mlxk push ./workspace org/model --private --create
+mlxk convert ./broken ./fixed --repair-index
 ```
 
 ### Server Configuration
@@ -837,12 +847,12 @@ Control vision model behavior (Python 3.10+, beta):
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|
-| `MLXK2_VISION_BATCH_SIZE` | Default chunk size for vision image processing | `1` | 2.0.4-beta.6 |
+| `MLXK2_VISION_CHUNK_SIZE` | Default chunk size for vision image processing | `1` | 2.0.4-beta.7 |
 
 **Examples:**
 ```bash
-# Process 3 images per batch instead of 1 (faster but requires more RAM)
-export MLXK2_VISION_BATCH_SIZE=3
+# Process 3 images per chunk instead of 1 (faster but requires more RAM)
+export MLXK2_VISION_CHUNK_SIZE=3
 mlxk run pixtral --image photos/*.jpg "Describe images"
 
 # CLI flag overrides environment variable
@@ -949,7 +959,7 @@ mlxk health --json | jq '.data.summary'
 ```
 
 
-## Feature Gates: `clone`, `push` (Alpha), `pipe mode` (Beta)
+## Workspace Features: `clone`, `push`, `convert`
 
 ### Workspace Structure
 
@@ -992,25 +1002,23 @@ workspace/
 
 ### `clone` - Model Workspace Creation
 
-`mlxk clone` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It creates a local workspace from a cached model for modification and development.
+`mlxk clone` creates a local workspace from a cached model for modification and development.
 
 - Creates isolated workspace from cached models
 - Supports APFS copy-on-write optimization on same-volume scenarios
 - Includes health check integration for workspace validation
+- Resumable: Interrupted pulls resume automatically
 - Use case: Fork-modify-push workflows
 
 Example:
 ```bash
-# Enable alpha features
-export MLXK2_ENABLE_ALPHA_FEATURES=1
-
 # Clone model to workspace
 mlxk clone org/model ./workspace
 ```
 
 ### `push` - Upload to Hub
 
-`mlxk push` is a hidden alpha feature. Enable with `MLXK2_ENABLE_ALPHA_FEATURES=1`. It uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
+`mlxk push` uploads a local folder to a Hugging Face model repository using `huggingface_hub/upload_folder`.
 
 - Requires `HF_TOKEN` (write-enabled).
 - Default branch: `main` (explicitly override with `--branch`).
@@ -1024,23 +1032,18 @@ mlxk clone org/model ./workspace
 - Local workspace check: use `--check-only` to validate a workspace without uploading. Produces `workspace_health` in JSON (no token/network required).
 - Dry-run planning: use `--dry-run` to compute a plan vs remote without uploading. Returns `dry_run: true`, `dry_run_summary {added, modified:null, deleted}`, and sample `added_files`/`deleted_files`.
 - Testing: see TESTING.md ("Push Testing (2.0)") for offline tests and opt-in live checks with markers/env.
-- Intended for early testers only. Carefully review the result on the Hub after pushing.
+- Carefully review the result on the Hub after pushing.
 - Responsibility: **You are responsible for complying with Hugging Face Hub policies and applicable laws (e.g., copyright/licensing) for any uploaded content.**
 
 Example:
 ```bash
-# Enable alpha features
-export MLXK2_ENABLE_ALPHA_FEATURES=1
-
-# Use push command
+# Upload to private repo
 mlxk push --private ./workspace org/model --create --commit "init"
 ```
 
-These features are not final and may change or be removed in future releases.
+### `convert` - Workspace Transformations (Experimental)
 
-### `convert` - Workspace Transformations (Beta)
-
-`mlxk convert` transforms workspaces (repair, quantize, etc.). The `--repair-index` mode is beta (feature complete) and fixes safetensors index/shard mismatches.
+`mlxk convert` is **experimental** and requires `MLXK2_ENABLE_ALPHA_FEATURES=1`. Currently implements `--repair-index` for fixing safetensors index mismatches (mlx-vlm #624). Future modes like `--quantize` are planned but not yet implemented.
 
 **Use case:** Repair models affected by mlx-vlm #624 conversion bug (7+ mlx-community Vision models).
 
@@ -1179,7 +1182,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.6 | January 2026</i><br>
+  <i>Version 2.0.4-beta.7 | January 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

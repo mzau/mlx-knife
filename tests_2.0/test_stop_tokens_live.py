@@ -58,18 +58,28 @@ def _use_real_mlx_modules():
         sys.path = [p for p in sys.path if p != stub_path_str]
         path_removed = True
 
-    # Remove stub modules from sys.modules so real modules can be imported
-    removed_modules: Dict[str, Any] = {}
+    # Clear transformers modules FIRST (depends on huggingface_hub, uses lazy imports)
+    # Must happen before any getattr() calls on sys.modules to avoid triggering lazy imports
+    removed_transformers_modules: Dict[str, Any] = {}
     for module_name, module in list(sys.modules.items()):
-        module_file = getattr(module, "__file__", "") or ""
-        if module_file and stub_path_str in module_file:
-            removed_modules[module_name] = module
+        if module_name == "transformers" or module_name.startswith("transformers."):
+            removed_transformers_modules[module_name] = module
             sys.modules.pop(module_name, None)
+
     # Also clear any previously installed huggingface_hub shims
     removed_hf_modules: Dict[str, Any] = {}
     for module_name, module in list(sys.modules.items()):
         if module_name == "huggingface_hub" or module_name.startswith("huggingface_hub."):
             removed_hf_modules[module_name] = module
+            sys.modules.pop(module_name, None)
+
+    # Remove stub modules from sys.modules so real modules can be imported
+    # (AFTER transformers/huggingface_hub cleanup to avoid lazy import triggers)
+    removed_modules: Dict[str, Any] = {}
+    for module_name, module in list(sys.modules.items()):
+        module_file = getattr(module, "__file__", "") or ""
+        if module_file and stub_path_str in module_file:
+            removed_modules[module_name] = module
             sys.modules.pop(module_name, None)
 
     # Require real mlx / mlx-lm; skip entire module if not available
@@ -90,6 +100,8 @@ def _use_real_mlx_modules():
                     sys.modules[name] = mod
                 for name, mod in removed_hf_modules.items():
                     sys.modules[name] = mod
+                for name, mod in removed_transformers_modules.items():
+                    sys.modules[name] = mod
                 if path_removed and stub_path_str not in sys.path:
                     sys.path.insert(0, stub_path_str)
                 pytest.skip(
@@ -101,6 +113,8 @@ def _use_real_mlx_modules():
         sys.modules.update({name: mod for name, mod in removed_modules.items()
                             if name not in sys.modules})
         sys.modules.update({name: mod for name, mod in removed_hf_modules.items()
+                            if name not in sys.modules})
+        sys.modules.update({name: mod for name, mod in removed_transformers_modules.items()
                             if name not in sys.modules})
         if path_removed and stub_path_str not in sys.path:
             sys.path.insert(0, stub_path_str)
@@ -116,6 +130,8 @@ def _use_real_mlx_modules():
         for name, module in removed_modules.items():
             sys.modules[name] = module
         for name, module in removed_hf_modules.items():
+            sys.modules[name] = module
+        for name, module in removed_transformers_modules.items():
             sys.modules[name] = module
 
         # Ensure stub path is back at the front for unit tests

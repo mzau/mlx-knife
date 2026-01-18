@@ -31,6 +31,6 @@ fi
 SIGNATURE="$1"
 DATE=$(date +%Y-%m-%d)
 
-python -u benchmarks/tools/memmon.py \
+env MLXK2_ENABLE_PIPES=1 python -u benchmarks/tools/memmon.py \
   --output benchmarks/reports/${DATE}-wet-memory-${SIGNATURE}.jsonl -- \
-  venv310/bin/pytest -m wet -v -s --tb=no --report-output=benchmarks/reports/${DATE}-wet-benchmark-${SIGNATURE}.jsonl
+  pytest -m wet -v -s --tb=no --report-output=benchmarks/reports/${DATE}-wet-benchmark-${SIGNATURE}.jsonl -o addopts=""

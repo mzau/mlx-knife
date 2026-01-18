@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..operations.workspace import is_workspace_path
 
@@ -234,6 +234,8 @@ class VisionRunner:
         Prepends metadata (GPS coordinates, datetime, camera) to the user prompt
         so the model can use this information in its response.
 
+        Uses _extract_all_image_metadata() for Single Source of Truth.
+
         Feature flag: MLXK2_VISION_METADATA_CONTEXT=0 to disable (default: enabled)
 
         Args:
@@ -252,53 +254,35 @@ class VisionRunner:
         if not images:
             return prompt
 
-        # Extract EXIF for all images
+        # Single Source of Truth: Extract metadata once
+        metadata_list = VisionRunner._extract_all_image_metadata(images, image_id_map)
+
         metadata_lines = []
 
-        # Per-image metadata
-        for idx, (filename, img_bytes) in enumerate(images, 1):
-            # Determine image ID
-            if image_id_map:
-                content_hash = hashlib.sha256(img_bytes).hexdigest()[:8]
-                img_id = image_id_map.get(content_hash, idx)
-            else:
-                img_id = idx
+        # DO NOT add chunk context - causes models to hallucinate missing images
+        # Problem: "chunk 2/5" tells model 5 total exist → hallucinates others
 
-            # Add chunk context line before first image (if chunking active)
-            if idx == 1 and total_images and total_images > len(images):
-                # Calculate chunk info
-                chunk_size = len(images)
-                if image_id_map:
-                    # Find all IDs in current chunk to determine range
-                    chunk_ids = []
-                    for fn, ib in images:
-                        ch = hashlib.sha256(ib).hexdigest()[:8]
-                        if ch in image_id_map:
-                            chunk_ids.append(image_id_map[ch])
-
-                    if chunk_ids:
-                        start_id = min(chunk_ids)
-                        end_id = max(chunk_ids)
-                        batch_num = (start_id - 1) // chunk_size + 1
-                        total_batches = (total_images + chunk_size - 1) // chunk_size
-                        metadata_lines.append(
-                            f"[Processing batch {batch_num}/{total_batches}: "
-                            f"Images {start_id}-{end_id} (chunk_size={chunk_size}, {total_images} total)]"
-                        )
-
-            # Extract EXIF
-            exif = VisionRunner._extract_exif(img_bytes)
+        # Per-image metadata in bracket format
+        # Strategy: Use LOCAL numbering within chunk to prevent hallucinations
+        # - Single image (chunk_size=1): No number, just EXIF
+        # - Multiple images: Local numbers (1, 2, 3...) not global
+        for local_idx, meta in enumerate(metadata_list, 1):
+            exif = meta['exif']
 
             # Build metadata string for this image
-            meta_parts = [f"Image {img_id}"]
+            meta_parts = []
+
+            # Only add image reference if multiple images in this chunk
+            if len(metadata_list) > 1:
+                meta_parts.append(f"Image {local_idx}")  # Local numbering
 
             if exif:
                 if exif.gps_lat is not None and exif.gps_lon is not None:
-                    # Format GPS coordinates
+                    # Format GPS coordinates (4 decimals = ~11m precision for street-level accuracy)
                     lat_dir = "N" if exif.gps_lat >= 0 else "S"
                     lon_dir = "E" if exif.gps_lon >= 0 else "W"
                     meta_parts.append(
-                        f"GPS: {abs(exif.gps_lat):.2f}°{lat_dir}, {abs(exif.gps_lon):.2f}°{lon_dir}"
+                        f"GPS: {abs(exif.gps_lat):.4f}°{lat_dir}, {abs(exif.gps_lon):.4f}°{lon_dir}"
                     )
 
                 if exif.datetime:
@@ -310,7 +294,9 @@ class VisionRunner:
                     camera = exif.camera.replace("(", "").replace(")", "").replace("generation", "gen")
                     meta_parts.append(f"Camera: {camera}")
 
-            if len(meta_parts) > 1:  # Only add if we have metadata beyond image ID
+            # Add metadata line if we have any metadata
+            # (either image number for multi-image, or EXIF data, or both)
+            if meta_parts:
                 metadata_lines.append("[" + " | ".join(meta_parts) + "]")
 
         # Prepend metadata to prompt
@@ -319,6 +305,54 @@ class VisionRunner:
             return f"{metadata_context}\n\n{prompt}"
         else:
             return prompt
+
+    @staticmethod
+    def _extract_all_image_metadata(
+        images: Sequence[Tuple[str, bytes]],
+        image_id_map: Optional[Dict[str, int]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Extract metadata for all images (Single Source of Truth).
+
+        Central function that extracts all metadata once, used by both:
+        - Bracket format (_augment_prompt_with_metadata)
+        - HTML table format (_add_filename_mapping)
+
+        Args:
+            images: List of (filename, bytes) tuples
+            image_id_map: Optional mapping of content_hash -> image_id for stable numbering
+
+        Returns:
+            List of metadata dicts, one per image:
+            {
+                'image_id': int,
+                'filename': str,
+                'content_hash': str,
+                'exif': ExifData or None,
+            }
+        """
+        metadata_list = []
+
+        for idx, (filename, img_bytes) in enumerate(images, 1):
+            # Calculate content hash
+            content_hash = hashlib.sha256(img_bytes).hexdigest()[:8]
+
+            # Determine image ID (stable across requests if image_id_map provided)
+            if image_id_map:
+                img_id = image_id_map.get(content_hash, idx)
+            else:
+                img_id = idx
+
+            # Extract EXIF (respects MLXK2_EXIF_METADATA flag)
+            exif = VisionRunner._extract_exif(img_bytes)
+
+            metadata_list.append({
+                'image_id': img_id,
+                'filename': filename,
+                'content_hash': content_hash,
+                'exif': exif,
+            })
+
+        return metadata_list
 
     @staticmethod
     def _extract_exif(image_bytes: bytes) -> Optional[ExifData]:
@@ -378,15 +412,41 @@ class VisionRunner:
                 exif.gps_lat = lat
                 exif.gps_lon = lon
 
-            # Extract DateTime (tag 36867 = DateTimeOriginal, 306 = DateTime)
-            dt_original = exif_data.get(36867) or exif_data.get(306)
-            if dt_original:
-                try:
-                    # EXIF format: "2023:12:06 12:19:21"
-                    dt = datetime.strptime(str(dt_original), "%Y:%m:%d %H:%M:%S")
-                    exif.datetime = dt.isoformat()  # Convert to ISO 8601
-                except Exception:
-                    pass
+            # Extract DateTime
+            # Priority:
+            # 1. GPS-Timestamp (Tag 7+29) - precise UTC, cannot be misconfigured
+            # 2. DateTimeOriginal (Tag 36867) - fallback if no GPS
+            # 3. Tag 306 (DateTime) - NEVER use, gets modified by image editors
+            #
+            # Phase 1: Date only (time component not displayed in metadata table)
+            # Always UTC for consistency
+            dt = None
+
+            # Try GPS timestamp first (Tag 29 = GPSDateStamp, Tag 7 = GPSTimeStamp)
+            if gps_info:
+                gps_date = gps_dict.get("GPSDateStamp")  # "2025:05:11"
+                gps_time = gps_dict.get("GPSTimeStamp")  # (12, 40, 22)
+
+                if gps_date and gps_time:
+                    try:
+                        # Combine GPS date + time (always UTC)
+                        gps_dt_str = f"{gps_date} {int(gps_time[0]):02d}:{int(gps_time[1]):02d}:{int(gps_time[2]):02d}"
+                        dt = datetime.strptime(gps_dt_str, "%Y:%m:%d %H:%M:%S")
+                    except Exception:
+                        pass  # Fall through to DateTimeOriginal
+
+            # Fallback: DateTimeOriginal (Tag 36867)
+            if not dt:
+                dt_original = exif_data.get(36867)
+                if dt_original:
+                    try:
+                        # EXIF format: "2023:12:06 12:19:21"
+                        dt = datetime.strptime(str(dt_original), "%Y:%m:%d %H:%M:%S")
+                    except Exception:
+                        pass
+
+            if dt:
+                exif.datetime = dt.isoformat()  # Convert to ISO 8601
 
             # Extract Camera model (tag 272 = Model)
             camera = exif_data.get(272)
@@ -458,26 +518,20 @@ class VisionRunner:
         Returns:
             Result with prepended filename mapping (metadata before model output)
         """
-        # Extract EXIF data (optional, controlled by feature flag)
+        # Single Source of Truth: Extract metadata once
+        metadata_list = VisionRunner._extract_all_image_metadata(images, image_id_map)
+
+        # Check if EXIF is enabled
         exif_enabled = os.environ.get("MLXK2_EXIF_METADATA") != "0"
-        exif_list = []
-        if exif_enabled:
-            for _, raw_bytes in images:
-                exif_list.append(VisionRunner._extract_exif(raw_bytes))
 
-        # Build table rows
+        # Build table rows from metadata
         rows = []
-        for i, (filename, raw_bytes) in enumerate(images, 1):
-            if image_id_map:
-                # Use history-based stable IDs
-                content_hash = hashlib.sha256(raw_bytes).hexdigest()[:8]
-                img_id = image_id_map.get(content_hash, i)  # Fallback to sequential
-            else:
-                # CLI mode: request-scoped sequential IDs
-                img_id = i
+        for meta in metadata_list:
+            img_id = meta['image_id']
+            content_hash = meta['content_hash']
+            filename = meta['filename']
+            exif = meta['exif']
 
-            # Compute hashed filename for display
-            content_hash = hashlib.sha256(raw_bytes).hexdigest()[:8]
             hashed_name = f"image_{content_hash}.jpeg"
 
             # Build row with optional EXIF columns
@@ -485,8 +539,6 @@ class VisionRunner:
 
             if exif_enabled:
                 # EXIF mode enabled: Always show Original + metadata columns
-                exif = exif_list[i - 1] if i <= len(exif_list) else None
-
                 # Original filename (always show when exif_enabled)
                 row += f" | {Path(filename).name}"
 
@@ -495,7 +547,7 @@ class VisionRunner:
                     if exif.gps_lat is not None and exif.gps_lon is not None:
                         lat_dir = "N" if exif.gps_lat >= 0 else "S"
                         lon_dir = "E" if exif.gps_lon >= 0 else "W"
-                        row += f" | 📍 {abs(exif.gps_lat):.2f}°{lat_dir}, {abs(exif.gps_lon):.2f}°{lon_dir}"
+                        row += f" | 📍 {abs(exif.gps_lat):.4f}°{lat_dir}, {abs(exif.gps_lon):.4f}°{lon_dir}"
                     else:
                         row += " | -"
 
@@ -547,7 +599,7 @@ class VisionRunner:
                 chunk_size = len(images)
                 batch_num = (start_id - 1) // chunk_size + 1
                 total_batches = (total_images + chunk_size - 1) // chunk_size
-                mapping += f"<summary>📸 Batch {batch_num}/{total_batches}: Images {start_id}-{end_id}</summary>\n\n"
+                mapping += f"<summary>📸 Chunk {batch_num}/{total_batches}: Images {start_id}-{end_id}</summary>\n\n"
             else:
                 # Fallback if chunk_ids calculation fails
                 mapping += f"<summary>📸 Image Metadata ({count} image{'s' if count != 1 else ''})</summary>\n\n"
