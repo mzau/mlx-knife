@@ -36,11 +36,12 @@ Total:                       170 passed across all phases
 ✅ **3-category test strategy** - optimized for performance and safety
 ✅ **Portfolio Separation** - Text and Vision models tested independently with separate RAM formulas
 
-### Skipped Tests Breakdown (60 total Python 3.10+, 69 total Python 3.9, standard run without HF_HOME)
-- **34 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011 + Portfolio Separation)
+### Skipped Tests Breakdown (64 total Python 3.10+, 73 total Python 3.9, standard run without HF_HOME)
+- **38 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011 + Portfolio Separation)
   - **23 Text model tests** - Parametrized across text_portfolio (chat completions batch/streaming)
   - **3 Vision model tests** - Parametrized across vision_portfolio (multimodal, SSE, text-on-vision)
   - **5 Vision CLI E2E tests** - Deterministic vision queries (requires vision model in cache, ADR-012)
+  - **4 Audio CLI E2E tests** - Audio transcription tests parametrized across audio_portfolio (ADR-019)
   - **3 Non-parametrized tests** - Health, models list, vision→text switching
 - **4 Live Stop Tokens tests** - Stop token validation with real models (requires `pytest -m live_stop_tokens`, ADR-009)
 - **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
@@ -75,6 +76,7 @@ Total:                       170 passed across all phases
 | Live E2E (ADR-011) | `HF_HOME=/path/to/cache pytest -m live_e2e -v` | `live_e2e` (required) + Env: `HF_HOME` (optional, enables Portfolio Discovery); Requires: `httpx` installed | **✅ Working:** Server/HTTP/CLI validation with real models. Portfolio Discovery auto-discovers all MLX chat models via `mlxk list --json` (filter: MLX+healthy+runtime+chat), parametrized tests (one server per model), RAM-aware skip. | No (uses local cache) |
 | Vision CLI E2E (ADR-012) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache, e.g., pixtral-12b-8bit or Llama-3.2-Vision); Requires: `mlx-vlm` installed (Python 3.10+) | **✅ Working:** Deterministic vision queries validate actual image understanding (not hallucination). Tests: chess position reading (e6=black king), OCR text extraction (contract name), color recognition (blue mug), chart label reading (Y-axis), large image support (2.7MB). | No (uses local cache) |
 | Vision Server E2E (ADR-012 Phase 3) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_server_e2e.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache); Requires: `mlx-vlm` installed (Python 3.10+), `httpx` | **✅ Working:** Vision API over HTTP. Tests: Base64 image chat completion, streaming graceful degradation (SSE emulation), text request on vision model server. | No (uses local cache) |
+| Audio CLI E2E (ADR-019) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_audio_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (audio model in cache, e.g., gemma-3n); Requires: `mlx-vlm` installed (Python 3.10+) | **✅ Working:** Audio transcription with real models. Portfolio Discovery auto-discovers audio-capable models. Tests: WAV transcription (short/long), MP3 format support, output validation. Known limitation: ~30s audio duration (Gemma-3n architecture). | No (uses local cache) |
 | Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v` | `live_pull` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
 | Show E2E portfolios | `HF_HOME=/path/to/cache python tests_2.0/show_portfolios.py` OR `pytest -m show_model_portfolio -s` | Env: `HF_HOME` | Displays TEXT and VISION portfolios separately. Shows model keys (text_XX, vision_XX), RAM requirements, and test/skip status. Diagnostic tool for understanding portfolio separation. Use script for detailed output, or pytest marker for quick check. | No (uses local cache) |
 | Manual debug mode | `mlxk run <model> "test prompt" --verbose` | Manual CLI usage with `--verbose` flag | Shows token generation details including multiple EOS token warnings. Use this for manual debugging of model quality issues. Output includes `[DEBUG] Token generation analysis` and `⚠️ WARNING: Multiple EOS tokens detected` for broken models. | No (uses local cache) |
@@ -369,6 +371,8 @@ def test_old_style(model_key):  # Don't use - shows as "Unknown (legacy)" in rep
 | `text_model_info` | Text | Access model metadata (size, path) |
 | `vision_model_key` | Vision | Parametrized vision model tests |
 | `vision_model_info` | Vision | Access vision model metadata |
+| `audio_model_key` | Audio | Parametrized audio model tests |
+| `audio_model_info` | Audio | Access audio model metadata |
 
 **DEPRECATED Fixtures (do not use in new code):**
 
@@ -381,10 +385,11 @@ def test_old_style(model_key):  # Don't use - shows as "Unknown (legacy)" in rep
 
 The pytest hooks in `tests_2.0/conftest.py` automatically detect inference modality:
 
-1. **Fixture-based detection:** Tests using `vision_model_key` → `inference_modality: "vision"`
-2. **Fixture-based detection:** Tests using `text_model_key` → `inference_modality: "text"`
-3. **Explicit override:** Pipe tests can set modality via `request.node.user_properties`
-4. **Legacy fallback:** Tests without modality fixtures → `inference_modality: "unknown"`
+1. **Fixture-based detection:** Tests using `text_model_key` → `inference_modality: "text"`
+2. **Fixture-based detection:** Tests using `vision_model_key` → `inference_modality: "vision"`
+3. **Fixture-based detection:** Tests using `audio_model_key` → `inference_modality: "audio"`
+4. **Explicit override:** Pipe tests can set modality via `request.node.user_properties`
+5. **Legacy fallback:** Tests without modality fixtures → `inference_modality: "unknown"`
 
 **Why This Matters:**
 
@@ -1238,6 +1243,52 @@ pytest -m live_e2e --collect-only  # Should work without errors
 - Deterministic test indices (text_XX, vision_XX) replace flaky discovered_XX
 - Tests validate model-type-specific behavior (e.g., text-only on vision models)
 
+### Audio Portfolio E2E Tests
+
+**Status:** ✅ Complete (ADR-019, Portfolio Separation)
+
+**Location:** `tests_2.0/live/test_audio_e2e_live.py`
+**Fixture:** `audio_portfolio` (provides audio-capable models)
+**Parametrization:** `audio_model_key` (audio_00, audio_01, ...)
+
+**Test Class: TestAudioTranscription**
+
+1. **test_transcribe_short_audio_wav[audio_XX]** (parametrized)
+   - Short audio transcription (~3 seconds)
+   - Validates: Key semantic content (universe, sir, exist)
+   - **N tests** (one per audio model in portfolio)
+
+2. **test_transcribe_longer_audio_wav[audio_XX]** (parametrized)
+   - Longer audio transcription (~14 seconds)
+   - Validates: At least 2 keywords from passage (royal, cavern, throne, crown, gong)
+   - **N tests** (one per audio model in portfolio)
+
+3. **test_transcribe_mp3_format[audio_XX]** (parametrized)
+   - MP3 format support validation
+   - Validates: Key semantic content (universe, sir, exist) - same as WAV test
+   - **N tests** (one per audio model in portfolio)
+
+4. **test_audio_output_not_empty[audio_XX]** (parametrized)
+   - Basic sanity test
+   - Validates: Output length > 10 characters
+   - **N tests** (one per audio model in portfolio)
+
+**RAM Gating:**
+- Uses `calculate_vision_model_ram_gb()` (0.70 threshold, no multiplier)
+- Audio models go through VisionRunner infrastructure
+- Same conservative gate as Vision models
+
+**Known Limitations (ADR-019):**
+- Audio duration limit: ~30 seconds (Gemma-3n architecture constraint)
+- Phonetic errors on 4-bit models: "A man" → "Amen" (expected)
+- Complex prompts + MP3: Can cause multilingual drift (fixed: simple prompt default)
+
+**Example:**
+```python
+# 64GB system → 44.8GB threshold (70%)
+# audio_00: gemma-3n-E2B-it-4bit (4.2GB, 6.5%) → ✅ RUN
+```
+
 ---
 
 ## Appendix
@@ -1398,10 +1449,11 @@ tests_2.0/
 │   └── test_spec_version_sync.py              # Code/docs version consistency check
 ├── live/                              # Opt-in live tests (markers)
 │   ├── __init__.py
-│   ├── conftest.py                              # Shared fixtures for live E2E tests (text_portfolio, vision_portfolio, pytest_generate_tests hook)
+│   ├── conftest.py                              # Shared fixtures for live E2E tests (text_portfolio, vision_portfolio, audio_portfolio, pytest_generate_tests hook)
 │   ├── server_context.py                       # LocalServer context manager for E2E testing (45s timeout for MLX cleanup)
 │   ├── sse_parser.py                           # SSE parsing utilities for streaming validation
-│   ├── test_utils.py                           # Portfolio Discovery (text/vision separation), RAM calculation modularization, RAM gating utilities
+│   ├── test_utils.py                           # Portfolio Discovery (text/vision/audio separation), RAM calculation modularization, RAM gating utilities
+│   ├── test_audio_e2e_live.py                  # Audio CLI E2E tests with real models (ADR-019, 4 transcription tests, parametrized: audio_XX)
 │   ├── test_cli_e2e.py                         # CLI integration E2E tests (ADR-011, parametrized)
 │   ├── test_cli_pipe_live.py                   # Pipe-mode E2E (stdin '-', JSON interactive error, list→run pipe) using first eligible model
 │   ├── test_clone_live.py                      # Live clone flow (requires MLXK2_LIVE_CLONE, HF_TOKEN)
@@ -1416,6 +1468,7 @@ tests_2.0/
 │   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
 │   └── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
 ├── test_adr004_error_logging.py       # ADR-004 error logging and redaction (tokens, paths)
+├── test_audio_cli.py                  # Audio CLI argument tests (ADR-019 Phase 2, 8 tests: --audio parsing, file validation, capability checks)
 ├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016, 45 tests)
 ├── test_cli_log_json_flag.py          # CLI --log-json flag behavior and JSON log format
 ├── test_cli_push_args.py              # Push CLI args and JSON error/output handling (offline)
@@ -1454,6 +1507,7 @@ tests_2.0/
 ├── test_runtime_compatibility_reason_chain.py  # Runtime compatibility reason field decision chain (Issue #36)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
+├── test_server_audio.py               # Audio server unit tests (ADR-019 Phase 4, 23 tests: request detection, Base64 decoding, format validation)
 ├── test_server_models_and_errors.py   # Server model loading and error handling
 ├── test_server_streaming_minimal.py   # Server SSE streaming functionality
 ├── test_server_token_limits_api.py    # Server token limit enforcement

@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.7** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.8** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.7-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.8-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.10+(3.9)-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -18,6 +18,7 @@
 ## Features
 
 ### What's New in 2.0.4 (Coming Soon - Currently Beta)
+- **Audio Transcription (Experimental)** - Speech-to-text via `--audio` flag (CLI + Server API)
 - **Vision Models with EXIF Metadata** - Image analysis + automatic GPS/date/camera extraction visible to the model
 - **Unix Pipe Integration** - Chain models without temp files (`vision → text` workflows)
 - **Local Development Workflow** - Clone → Repair → Test models without HuggingFace round-trips
@@ -76,7 +77,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 MLX Knife has been comprehensively tested and verified on:
 
 ✅ **Python 3.9.6 - 3.14** - Text LLMs fully supported (mlx-lm 0.28.4+)
-✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.7 uses commit fc8c92e31983a52761f37d503f903ec40bebbd62 with MXFP4 support)
+✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.8 uses commit 5812270 with audio + MXFP4 support)
 
 **Note:** Vision features require Python 3.10+. Native macOS Python 3.9.6 users need to upgrade (e.g., via Homebrew).
 
@@ -106,17 +107,17 @@ mlxk --version  # → mlxk 2.0.3 (latest stable on PyPI)
 ### Via GitHub (Latest Beta)
 
 ```bash
-# Install 2.0.4-beta.7 (Workspace discovery + Server robustness)
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.7"
+# Install 2.0.4-beta.8 (Audio transcription + Server enhancements)
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.8"
 
 # With Vision support (Python 3.10+ required)
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.7#egg=mlx-knife[vision]"
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.8#egg=mlx-knife[vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4b7
+mlxk --version  # → mlxk 2.0.4b8
 ```
 
-**Beta.7 note:** Uses mlx-vlm commit fc8c92e (includes MXFP4 quantization support). The `[vision]` extra automatically installs the correct version.
+**Beta.8 note:** Uses mlx-vlm commit 5812270 (includes audio support + MXFP4 quantization). The `[vision]` extra automatically installs the correct version.
 
 **For production use:** Wait for 2.0.4 stable on PyPI (requires mlx-vlm 0.3.10 release).
 
@@ -134,7 +135,7 @@ pip install -e ".[dev,test]"
 pip install -e ".[dev,test,vision]"
 
 # Verify installation
-mlxk --version  # → mlxk 2.0.4b7
+mlxk --version  # → mlxk 2.0.4b8
 
 # Run tests and quality checks (before committing)
 pytest -v
@@ -210,7 +211,7 @@ mlxk run "Phi-4" "Hello"                    # Fuzzy match
 mlxk show "Qwen3@e96" --json                # Specific version
 ```
 
-### Local Paths (2.0.4-beta.7+)
+### Local Paths (2.0.4-beta.6+)
 
 | Format | Example |
 |--------|---------|
@@ -240,7 +241,7 @@ mlxk run ./fixed "Test"
 
 ---
 
-## Workspace Development Workflow (2.0.4-beta.7+)
+## Workspace Development Workflow (2.0.4-beta.6+)
 
 **Complete local development cycle** for model experimentation, repair, and testing without HuggingFace round-trips:
 
@@ -310,8 +311,8 @@ Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+.
 
 - **Python 3.10+** (mlx-vlm dependency)
 - **Installation:** `pip install mlx-knife[vision]`
-- **Backend:** mlx-vlm commit c536165df2b3b4aece3a795b2e414349f935e750 (auto-installed)
-- **Beta.4 note:** The `[vision]` extra automatically installs mlx-vlm from git with the Pixtral pad_token fix. Will switch to PyPI v0.3.10 when released.
+- **Backend:** mlx-vlm commit 5812270 (audio + MXFP4 support, auto-installed)
+- **Beta.8 note:** The `[vision]` extra automatically installs mlx-vlm from git with audio support. Will switch to PyPI v0.3.10 when released.
 
 #### Usage
 
@@ -474,6 +475,54 @@ mlxk convert <model> <output> --repair-index
 **Recommendation:** Test models with real images before production use. The vision ecosystem is evolving rapidly - this list will be updated as mlx-vlm matures.
 
 **Reporting Issues:** If you encounter vision model failures, please report with model name and error message to help improve compatibility tracking.
+
+### Audio Model Compatibility
+
+> **🧪 Experimental:** Audio support is new in v2.0.4-beta.8. Currently only Gemma-3n tested.
+
+**✅ Tested & Working Models** (mlx-knife v2.0.4-beta.8):
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `gemma-3n-E2B-it-4bit` | ~2.1GB | Requires workspace repair workflow (see below) |
+
+**⚠️ Setup Required:** The mlx-community model has an index mismatch (mlx-vlm #624). Prepare once:
+
+```bash
+MLXK2_ENABLE_ALPHA_FEATURES=1
+mlxk clone mlx-community/gemma-3n-E2B-it-4bit ./gemma-3n-audio
+mlxk convert ./gemma-3n-audio ./gemma-3n-audio-FIXED --repair-index
+mlxk run ./gemma-3n-audio-FIXED --audio test.wav  # Now works
+```
+
+**⚙️ Audio-Specific Defaults:**
+
+| Setting | Audio Default | Text/Vision Default | Reason |
+|---------|---------------|---------------------|--------|
+| Temperature | 0.2 | 0.7 | Reduces multilingual drift on 4-bit models |
+| Default Prompt | "Transcribe this audio." | - | Simple prompt reduces multilingual drift |
+
+**⚠️ Known Limitations:**
+
+| Limitation | Details | Workaround |
+|------------|---------|------------|
+| **Duration limit** | ~30 seconds max (Gemma-3n model constraint: 188 tokens at 6.25 tokens/sec) | Split longer recordings |
+| File size | 5MB limit | Split larger files |
+| Multi-audio | Not supported (mlx-vlm token mismatch bug) | Process one file at a time |
+| Audio+Vision combined | Audio silently ignored when images present | Use audio-only or vision-only |
+| Phonetic errors | Mishearing observed (e.g., "A man" → "Amen") | Try `--temperature 0` for consistency |
+| Format support | WAV confirmed; other formats untested | Convert to WAV |
+
+**💡 Tips for Best Results:**
+
+```bash
+# After workspace setup (see above):
+# Explicit transcription with greedy sampling for consistency
+mlxk run ./gemma-3n-audio-FIXED --audio speech.wav --temperature 0
+
+# Default settings (temperature 0.2, simple prompt)
+mlxk run ./gemma-3n-audio-FIXED --audio speech.wav
+```
 
 
 ## JSON API
@@ -1182,7 +1231,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.7 | January 2026</i><br>
+  <i>Version 2.0.4-beta.8 | January 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

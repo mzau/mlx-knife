@@ -27,6 +27,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+class Capability(str, Enum):
+    """Known model capabilities.
+
+    Note: Not normative - these are capabilities mlx-knife currently detects.
+    Models may have capabilities not listed here.
+    """
+    TEXT_GENERATION = "text-generation"
+    CHAT = "chat"
+    EMBEDDINGS = "embeddings"
+    VISION = "vision"
+    AUDIO = "audio"
+
+
+# Convenience set for validation/iteration
+KNOWN_CAPABILITIES = frozenset(c.value for c in Capability)
+
+
 class Backend(Enum):
     """Available model backends."""
     MLX_LM = "mlx_lm"      # Text models via mlx-lm
@@ -58,6 +75,13 @@ VISION_MODEL_TYPES = frozenset({
     "smolvlm",
 })
 
+# Audio model types (ADR-019)
+# Note: Only models verified to work with mlx-vlm audio support
+AUDIO_MODEL_TYPES = frozenset({
+    "gemma3n",        # Google Gemma 3n (Vision + Audio + Text)
+    "gemma3n_audio",  # Audio encoder subcomponent
+})
+
 
 @dataclass
 class ModelCapabilities:
@@ -73,6 +97,7 @@ class ModelCapabilities:
     is_vision: bool = False
     is_chat: bool = False
     is_embedding: bool = False
+    is_audio: bool = False
 
     # File integrity
     config_valid: bool = False
@@ -353,15 +378,24 @@ def probe_model_capabilities(
     if "embed" in name_lower:
         caps.is_embedding = True
 
+    # Detect audio capability (ADR-019)
+    try:
+        from ..operations.common import detect_audio_capability
+        caps.is_audio = detect_audio_capability(model_path, caps.config)
+    except Exception:
+        caps.is_audio = False
+
     # Build capabilities list (for JSON API compatibility)
     if caps.is_embedding:
-        caps.capabilities_list = ["embeddings"]
+        caps.capabilities_list = [Capability.EMBEDDINGS.value]
     else:
-        caps.capabilities_list = ["text-generation"]
+        caps.capabilities_list = [Capability.TEXT_GENERATION.value]
         if caps.is_chat:
-            caps.capabilities_list.append("chat")
+            caps.capabilities_list.append(Capability.CHAT.value)
         if caps.is_vision:
-            caps.capabilities_list.append("vision")
+            caps.capabilities_list.append(Capability.VISION.value)
+        if caps.is_audio:
+            caps.capabilities_list.append(Capability.AUDIO.value)
 
     # Check runtime availability
     caps.python_version = sys.version_info[:3]

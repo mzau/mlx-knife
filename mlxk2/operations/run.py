@@ -17,6 +17,7 @@ from ..core.model_resolution import resolve_model_for_operation
 from ..operations.health import check_runtime_compatibility
 from ..operations.common import (
     _total_size_bytes,
+    detect_audio_capability,
     detect_framework,
     detect_vision_capability,
     read_front_matter,
@@ -155,6 +156,7 @@ def _process_images_in_chunks(
     model_name: str,
     prompt: str,
     images: List[Tuple[str, bytes]],
+    audio: Optional[Sequence[Tuple[str, bytes]]],
     chunk_size: int,
     max_tokens: Optional[int],
     temperature: float,
@@ -210,6 +212,7 @@ def _process_images_in_chunks(
             chunk_result = runner.generate(
                 prompt=prompt,
                 images=chunk,
+                audio=list(audio) if audio else None,  # Pass audio with each chunk
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
@@ -241,6 +244,7 @@ def run_model(
     model_spec: str,
     prompt: Optional[str] = None,
     images: Optional[Sequence[Tuple[str, bytes]]] = None,
+    audio: Optional[Sequence[Tuple[str, bytes]]] = None,
     chunk: int = 1,
     stream: bool = True,
     max_tokens: Optional[int] = None,
@@ -300,6 +304,7 @@ def run_model(
 
         # Only perform compatibility check if model is actually in cache
         is_vision_model = False
+        is_audio_model = False
         model_path = None
         model_cache_dir = None
         cfg = None
@@ -321,6 +326,7 @@ def run_model(
                         cfg = None
 
                 is_vision_model = detect_vision_capability(model_path, cfg)
+                is_audio_model = detect_audio_capability(model_path, cfg)
             else:
                 # Cache model - existing logic
                 model_cache = get_current_model_cache()
@@ -347,10 +353,19 @@ def run_model(
 
                         if model_path is not None:
                             is_vision_model = detect_vision_capability(model_path, cfg)
+                            is_audio_model = detect_audio_capability(model_path, cfg)
 
                     # If images are provided but model is not vision-capable, fail fast
                     if images and not is_vision_model:
                         error_msg = f"Model '{resolved_name}' does not support vision inputs (no vision capability detected)."
+                        error_result = f"Error: {error_msg}"
+                        if not json_output:
+                            print(error_result, file=sys.stderr)
+                        return error_result
+
+                    # If audio is provided but model is not audio-capable, fail fast
+                    if audio and not is_audio_model:
+                        error_msg = f"Model '{resolved_name}' does not support audio inputs (no audio capability detected)."
                         error_result = f"Error: {error_msg}"
                         if not json_output:
                             print(error_result, file=sys.stderr)
@@ -400,12 +415,18 @@ def run_model(
             print(error_result, file=sys.stderr)
         return error_result
 
+    if audio and not is_audio_model:
+        error_result = "Error: Audio inputs require an audio-capable model in cache (config not found)"
+        if not json_output:
+            print(error_result, file=sys.stderr)
+        return error_result
+
     # Runtime compatibility verified, proceed with model loading
     try:
-        if is_vision_model:
-            # Vision path uses mlx-vlm backend (non-streaming)
+        # Vision/Audio path uses mlx-vlm backend (non-streaming)
+        if is_vision_model or is_audio_model:
             if model_path is None or not model_path.exists():
-                error_result = "Error: Vision model not found in cache"
+                error_result = "Error: Vision/Audio model not found in cache"
                 if not json_output:
                     print(error_result, file=sys.stderr)
                 return error_result
@@ -413,8 +434,10 @@ def run_model(
             if prompt is None:
                 if images:
                     prompt = "Describe the image."
+                elif audio:
+                    prompt = "What do you hear in this audio?"
                 else:
-                    error_result = "Error: Vision run requires a prompt"
+                    error_result = "Error: Vision/Audio run requires a prompt"
                     if not json_output:
                         print(error_result, file=sys.stderr)
                     return error_result
@@ -458,6 +481,7 @@ def run_model(
                         result = runner.generate(
                             prompt=prompt,
                             images=images_list,
+                            audio=list(audio) if audio else None,
                             max_tokens=max_tokens,
                             temperature=temperature,
                             top_p=top_p,
@@ -470,6 +494,7 @@ def run_model(
                         model_name=resolved_name or model_spec,
                         prompt=prompt,
                         images=images_list,
+                        audio=audio,
                         chunk_size=chunk_size,
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -696,6 +721,7 @@ def run_model_enhanced(
     model_spec: str,
     prompt: Optional[str],
     images: Optional[Sequence[Tuple[str, bytes]]] = None,
+    audio: Optional[Sequence[Tuple[str, bytes]]] = None,
     chunk: int = 1,
     stream: bool = True,
     max_tokens: Optional[int] = None,
@@ -741,6 +767,7 @@ def run_model_enhanced(
         model_spec=model_spec,
         prompt=prompt,
         images=images,
+        audio=audio,
         chunk=chunk,
         stream=stream,
         max_tokens=max_tokens,

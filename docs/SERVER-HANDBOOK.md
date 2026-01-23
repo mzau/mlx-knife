@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.4-beta.1 (WIP)
+**Version:** 2.0.4-beta.8 (WIP)
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2025-12-15
+**Last Updated:** 2026-01-20
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -24,9 +24,81 @@ mlxk serve --host 0.0.0.0 --port 8000
 
 **Requirements:**
 - Python 3.9+ (Text models)
-- Python 3.10+ (Vision models)
+- Python 3.10+ (Vision and Audio models)
 - mlx-lm 0.28.4+
-- mlx-vlm 0.3.9+ (optional, for vision; beta.3 recommends commit c4ea290e47e2155b67d94c708c662f8ab64e1b37)
+- mlx-vlm ≥0.3.10 (required for audio; currently GitHub-only, not yet on PyPI)
+
+---
+
+## OpenAI API Compatibility
+
+MLX Knife implements a **subset** of the OpenAI API with documented behavioral differences.
+
+### Supported Endpoints
+
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| `/v1/chat/completions` | ✅ Supported | Text, Vision (`image_url`), Audio (`input_audio`) |
+| `/v1/completions` | ✅ Supported | Legacy text completion |
+| `/v1/models` | ✅ Supported | Extended with `context_length` field |
+| `/health` | ✅ Custom | MLX Knife extension |
+
+### Not Implemented
+
+| Endpoint | Status |
+|----------|--------|
+| `/v1/embeddings` | ❌ Planned (ADR-015) |
+| `/v1/audio/*` | ❌ Not planned (use `input_audio` in chat) |
+| `/v1/files` | ❌ Not planned |
+| `/v1/moderations` | ❌ Not planned |
+| `/v1/responses` | ❌ Not planned |
+
+### Authentication
+
+MLX Knife **ignores** authentication headers. The server accepts but does not validate:
+- `Authorization: Bearer ...`
+- Any API key
+
+**Note:** For production deployments requiring authentication, use a reverse proxy (nginx, Caddy).
+
+### Request Headers
+
+```
+Content-Type: application/json  (required)
+Authorization: Bearer ...       (optional, ignored)
+```
+
+### Behavioral Deviations from OpenAI
+
+These are intentional design choices, not bugs:
+
+| Behavior | OpenAI | MLX Knife | Reason |
+|----------|--------|-----------|--------|
+| Vision history | Full history to model | Only last user message | Prevents pattern reproduction (hallucinations) |
+| Image URLs | HTTP URLs + Base64 + File IDs | Base64 data URLs only | No external fetching |
+| Audio+Vision | Both processed | Audio silently ignored | mlx-vlm limitation |
+| Multi-audio | Supported | 1 per request | mlx-vlm limitation |
+| Error format | `{"error": {"message", "type", "code"}}` | ADR-004 envelope (see below) | Richer error context |
+| `max_completion_tokens` | Preferred | Not supported (use `max_tokens`) | Legacy compatibility |
+| HTTP 507 | Not used | Memory constraint | Explicit OOM prevention |
+
+### Error Response Format
+
+MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "type": "validation_error",
+    "message": "No user message found",
+    "retryable": false
+  },
+  "request_id": "abc123..."
+}
+```
+
+**Error types:** `validation_error`, `model_not_found`, `internal_error`, `server_shutdown`, `insufficient_memory`, `access_denied`
 
 ---
 
@@ -68,12 +140,38 @@ mlxk serve --host 0.0.0.0 --port 8000
 }
 ```
 
+**Audio Request (OpenAI `input_audio` format):**
+```json
+{
+  "model": "mlx-community/gemma-3n-E2B-it-4bit",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Transcribe what is spoken in this audio"},
+        {
+          "type": "input_audio",
+          "input_audio": {
+            "data": "<base64-encoded>",
+            "format": "wav"
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 2048,
+  "temperature": 0.0
+}
+```
+
+**Supported audio formats:** `wav`, `mp3` (or `mpeg` alias)
+
 **mlx-knife Extension Parameters:**
 - `chunk` (integer, optional): Batch size for vision processing (default: 1). Controls how many images are processed per inference session. Higher values may trigger OOM on resource-constrained systems. Maximum: 5 (enforced by server).
 
 **Default chunk size:**
 1. Request parameter `chunk` (highest priority)
-2. Server startup: `mlxk server --chunk N`
+2. Server startup: `mlxk serve --chunk N`
 3. Environment: `MLXK2_VISION_CHUNK_SIZE=N`
 4. Default: 1 (maximum safety)
 
@@ -189,7 +287,7 @@ See `examples/vision_pipe.sh` for a practical Vision→Text pipeline example (CL
 - **Sequential Images:** Only images from the **last user message** are processed (OpenAI API compliant)
 - **Each request is independent:** No "shift-window" context like text models (Metal memory limitations)
 
-### Stable Image IDs (History-Based)
+#### Stable Image IDs (History-Based)
 
 **Problem:** How to maintain stable "Image 1, 2, 3..." numbering across multiple requests?
 
@@ -204,7 +302,7 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 ```
 
 **Properties:**
-- ✅ **100% OpenAI API compatible** — standard messages[] format, no custom headers
+- ✅ **Standard messages[] format** — no custom headers or protocol extensions
 - ✅ **Stateless server** — no registry, no TTL, no cleanup
 - ✅ **Content-hash deduplication** — same image always gets same ID
 - ✅ **Cross-model workflows** — "Image 1" stable across Vision↔Text model switches
@@ -219,9 +317,45 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 
 ---
 
-### Token Limits: Vision vs Text Models
+### Audio Support (2.0.4-beta.8)
 
-**Critical Difference:** Vision and text models use different `max_tokens` strategies.
+**Native audio input** for audio-capable models (Gemma-3n).
+
+**Supported:**
+- ✅ OpenAI `input_audio` format (Base64-encoded)
+- ✅ Formats: WAV, MP3
+- ✅ Temperature 0.0 (greedy sampling for transcription consistency)
+
+**Limits:**
+- **Per-audio:** 5 MB max (~2-3 minutes at 16kHz mono)
+- **Count:** 1 audio per request (multi-audio blocked)
+
+**Important Characteristics:**
+
+- **Stateless Server:** Same as Vision — no server-side state
+- **Single Audio:** Only one audio file per request (mlx-vlm limitation)
+- **Audio+Vision:** When both present, audio is silently ignored (mlx-vlm behavior)
+- **Temperature:** Fixed at 0.0 for transcription consistency (CLI default: 0.2)
+
+**Audio-Capable Models:**
+- `gemma-3n` (Google): Vision + Audio + Text
+- Qwen3-Omni: Not supported (mlx-lm architecture missing)
+
+**History Handling:**
+
+When switching from Audio to Text model mid-conversation:
+- Server filters `input_audio` content blocks
+- Text model sees `[n audio(s) were attached]` placeholder
+
+**Python Version:**
+- ✅ Python 3.10+ required (same as Vision)
+- ❌ Python 3.9: Audio requests → HTTP 501
+
+---
+
+### Token Limits: Text vs Multimodal Models
+
+**Critical Difference:** Text and multimodal (Vision/Audio) models use different `max_tokens` strategies.
 
 #### Text Models (MLXRunner)
 
@@ -236,7 +370,7 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 **Example:**
 - Llama-3.2-3B (128K context) → Server default: 64K max_tokens
 
-#### Vision Models (VisionRunner)
+#### Vision/Audio Models (VisionRunner)
 
 **Strategy:** Stateless processing
 - Each request is independent (no conversation history in context)
@@ -247,13 +381,13 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 
 **Rationale:**
 - No need for `/2` division (no history to reserve)
-- Vision inference is slow → 2048 adequate for image descriptions
+- Multimodal inference is slow → 2048 adequate for descriptions/transcriptions
 - Prevents accidentally generating 64K+ tokens
 
 **Override:**
 ```json
 {
-  "model": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
+  "model": "mlx-community/gemma-3n-E2B-it-4bit",
   "messages": [...],
   "max_tokens": 4096  // Explicit override
 }
@@ -294,6 +428,11 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 - **Single image:** Behaves like batch mode (one SSE event)
 - **Format:** OpenAI-compatible SSE with per-chunk deltas
 
+#### Audio Models
+- ⚠️ **Batch mode only:** Single SSE event with complete response
+- **Reason:** Single audio per request, no chunking needed
+- **Format:** Same as Vision single-image mode
+
 **Request:**
 ```json
 {
@@ -305,12 +444,16 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 
 **Response (SSE stream):**
 ```
-data: {"id":"chatcmpl-...","choices":[{"delta":{"content":"Hello"},"index":0}],...}
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"mlx-community/Llama-3.2-3B-Instruct-4bit","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-...","choices":[{"delta":{"content":" there"},"index":0}],...}
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"mlx-community/Llama-3.2-3B-Instruct-4bit","choices":[{"index":0,"delta":{"content":" there"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"mlx-community/Llama-3.2-3B-Instruct-4bit","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: [DONE]
 ```
+
+**Note:** `stream_options.include_usage` is not supported.
 
 ---
 
@@ -365,7 +508,7 @@ python -m mlxk2.core.server_base
 - **201 Created:** Resource created (future)
 
 ### Client Errors (4xx)
-- **400 Bad Request:** Invalid input (e.g., missing images for vision model, too many images)
+- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures)
 - **404 Not Found:** Model not found in cache
 
 ### Server Errors (5xx)
@@ -404,9 +547,9 @@ python -m mlxk2.core.server_base
 
 ## Troubleshooting
 
-### Vision Model Fails on Python 3.9
+### Multimodal Request Fails on Python 3.9
 
-**Symptom:** HTTP 501 "Vision models require Python 3.10+"
+**Symptom:** HTTP 501 "Vision/Audio models require Python 3.10+"
 
 **Solution:**
 ```bash
@@ -415,8 +558,8 @@ pyenv install 3.10
 pyenv local 3.10
 pip install mlx-lm mlx-vlm
 
-# Beta.3 (pre-0.3.10 fix)
-pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290e47e2155b67d94c708c662f8ab64e1b37"
+# Until mlx-vlm 0.3.10 on PyPI (Vision + Audio support)
+pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@58122703b0bba7c574d23c9c751f01cf60485d4f"
 ```
 
 ### Memory Constraint Errors (HTTP 507)
@@ -454,6 +597,44 @@ pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290
 
 **Solution:** Resize images, reduce count, or check encoding
 
+### Audio Errors
+
+#### Audio Request Fails (HTTP 400)
+
+**Common causes:**
+- Audio size > 5 MB
+- More than 1 audio per request (multi-audio not supported)
+- Unsupported format (use WAV or MP3)
+- Invalid Base64 encoding
+
+**Solution:** Compress audio, ensure single audio per request, use supported format
+
+#### Audio Model Not Found
+
+**Symptom:** `Model does not support audio input`
+
+**Cause:** Model lacks audio capability
+
+**Solution:** Use an audio-capable model:
+```bash
+mlxk list | grep +audio
+```
+
+**Note:** Some HuggingFace models may require `mlxk convert --repair-index` before use.
+
+#### Audio Output is Garbled/Multilingual
+
+**Symptom:** Transcription includes unexpected languages (Arabic, Hindi, etc.)
+
+**Cause:** Temperature too high (default text temperature 0.7 causes drift)
+
+**Solution:** Use temperature 0.0 for audio:
+```json
+{
+  "temperature": 0.0
+}
+```
+
 ---
 
 ## Limits Summary
@@ -463,14 +644,32 @@ pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@c4ea290
 | Images per request | 5 | Metal OOM prevention |
 | Image size | 20 MB | Metal OOM prevention |
 | Total image size | 50 MB | Metal OOM prevention |
+| **Audio per request** | **1** | **mlx-vlm limitation** |
+| **Audio size** | **5 MB** | **Token count constraint** |
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
 | Vision max_tokens | 2048 (default) | Stateless, slow inference |
+| Audio max_tokens | 2048 (default) | Stateless, like Vision |
 | Text max_tokens | context_length/2 | Shift-window reservation |
 
 ---
 
 ## Migration Guide
+
+### From 2.0.4-beta.7 → 2.0.4-beta.8
+
+**New Features:**
+- ✅ Audio input support via OpenAI `input_audio` format
+- ✅ Supported audio formats: WAV, MP3
+- ✅ Audio history filtering: `[n audio(s) were attached]`
+
+**Breaking Changes:**
+- None (audio is additive)
+
+**Recommendations:**
+- Update mlx-vlm to ≥0.3.10 (GitHub install required, not yet on PyPI)
+- Use temperature 0.0 for audio transcription requests
+- Test with Gemma-3n or other audio-capable models
 
 ### From 2.0.3 → 2.0.4-beta.1
 
@@ -510,7 +709,7 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 
 ### Conversation History
 
-**Clients MUST send the full conversation history** with each request:
+**Clients MUST send the full message list** with each request:
 
 ```json
 {
@@ -524,6 +723,33 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 ```
 
 **Why:** The server reconstructs stable image IDs from the history. Without full history, image numbering restarts at 1 with each request.
+
+**What "full history" means:**
+- ✅ All messages with correct roles (`user`, `assistant`, `system`)
+- ✅ Complete assistant responses (including `<!-- mlxk:filenames -->` markers)
+- ⚠️ Media payloads (Base64) can be dropped after first Vision request (see [Image ID Persistence](#image-id-persistence-stateless))
+
+**Note:** For Vision models, the server only forwards the last user message to the model (stateless prompt), but still scans the full history for image ID reconstruction.
+
+### Vision Messages Format
+
+**Multimodal content** uses the OpenAI array format:
+
+```json
+{
+  "role": "user",
+  "content": [
+    {"type": "text", "text": "What's in this image?"},
+    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+  ]
+}
+```
+
+**Image URLs:**
+- ✅ **Base64 Data URLs:** `data:image/jpeg;base64,/9j/4AAQ...`
+- ❌ **HTTP URLs:** Not supported (no external fetching)
+
+**Supported formats:** JPEG, PNG, GIF, WebP
 
 ### Vision: Stateless Prompt, History-Based IDs
 
@@ -551,42 +777,6 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 - Sending history caused pattern reproduction (model hallucinating mappings)
 - Clean separation: Vision=describe, Text=discuss
 
-### Vision Messages Format
-
-**Multimodal content** uses the OpenAI array format:
-
-```json
-{
-  "role": "user",
-  "content": [
-    {"type": "text", "text": "What's in this image?"},
-    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
-  ]
-}
-```
-
-**Image URLs:**
-- ✅ **Base64 Data URLs:** `data:image/jpeg;base64,/9j/4AAQ...`
-- ❌ **HTTP URLs:** Not supported (no external fetching)
-
-**Supported formats:** JPEG, PNG, GIF, WebP
-
-### Cross-Model Workflows (Vision → Text)
-
-When switching from Vision to Text model mid-conversation:
-
-1. **Client:** Continue sending full history (including previous image_url content)
-2. **Server:** Automatically filters images for text models, replaces with placeholders
-3. **Result:** Text model sees `[n image(s) were attached]` instead of binary data
-
-**Example workflow:**
-```
-1. Vision model: User sends 2 images → Model describes both
-2. Vision model: User asks "What's different?" → Model compares
-3. Switch to Text model: User asks "Which is better for vacation?"
-4. Text model: Sees "[2 image(s) were attached]" in history, can reference the conversation
-```
-
 ### Image Deduplication
 
 Same image content = same ID (content-hash based).
@@ -595,7 +785,7 @@ Same image content = same ID (content-hash based).
 - Re-uploading the same image → Server assigns same ID
 - No client-side deduplication needed
 
-### Image ID Persistence (100% OpenAI-Compatible)
+### Image ID Persistence (Stateless)
 
 **Problem:** How do Image IDs remain stable across Vision→Text→Vision workflows when clients drop Base64 data from history (storage optimization)?
 
@@ -611,15 +801,23 @@ Same image content = same ID (content-hash based).
    ]}
    ```
 
-2. **Server Response:** Includes filename mapping table
-   ```
-   A sandy beach with blue water.
+2. **Server Response:** Includes filename mapping table (wrapped in `<details>`)
+   ```html
+   <details>
+   <summary>📸 Image Metadata (1 image)</summary>
 
    <!-- mlxk:filenames -->
-   | Image | Filename |
-   |-------|----------|
-   | 1 | image_5733332c.jpeg |
+   | Image | Filename | Original | Location | Date | Camera |
+   |-------|----------|----------|----------|------|--------|
+   | 1 | image_5733332c.jpeg | beach.jpg | 📍 34.0522°N, 118.2437°W | 📅 2024-06-15 | iPhone 14 |
+
+   </details>
+
+   A sandy beach with blue water.
    ```
+
+   **Note:** EXIF columns (Original, Location, Date, Camera) are enabled by default.
+   Disable with `MLXK2_EXIF_METADATA=0` for minimal output (Image, Filename only).
 
 3. **Client Storage Optimization:** Client can **drop Base64 from history**, keep only:
    ```json
@@ -649,9 +847,9 @@ Same image content = same ID (content-hash based).
    - Assigns: mountain.jpg → Image ID 2 ✅
 
 **Benefits:**
-- ✅ **Zero client changes** - Works with standard OpenAI API
+- ✅ **Zero client changes** - Works with standard OpenAI message format
 - ✅ **Storage optimization** - Client can drop large Base64 data (2 MB → 2 KB)
-- ✅ **100% OpenAI-compatible** - No protocol extensions needed
+- ✅ **No protocol extensions** - Standard messages[] array, no custom headers
 - ✅ **Stateless server** - No server-side session state required
 - ✅ **Scales to 100+ images** - Clients only store small text mappings
 
@@ -659,14 +857,67 @@ Same image content = same ID (content-hash based).
 - **After first Vision request:** Drop Base64 image_url from history, keep text + assistant response
 - **Store locally:** Small thumbnails for UI (~20 KB/image via IndexedDB)
 - **History format:** Text-only user messages + full assistant responses (with mapping tables)
+- **⚠️ Preserve verbatim:** Do not sanitize or strip HTML comments from assistant responses — the `<!-- mlxk:filenames -->` markers are required for ID reconstruction
 
 **Example client storage (100 images):**
 - ❌ **Before:** 100 images × 2 MB Base64 = 200 MB (exceeds browser limits)
 - ✅ **After:** 100 thumbnails × 20 KB + text history = ~2 MB (fits in IndexedDB)
 
+### Audio Messages Format
+
+**Audio content** uses the OpenAI `input_audio` format:
+
+```json
+{
+  "role": "user",
+  "content": [
+    {"type": "text", "text": "Transcribe this audio"},
+    {
+      "type": "input_audio",
+      "input_audio": {
+        "data": "<base64-encoded>",
+        "format": "wav"
+      }
+    }
+  ]
+}
+```
+
+**Supported formats:** `wav`, `mp3` (or `mpeg` alias)
+
+**Limitations:**
+- ❌ Only 1 audio per request (multi-audio causes mlx-vlm token mismatch)
+- ❌ Audio + Vision combined: audio is silently ignored
+
+### Cross-Model Workflows (Vision/Audio → Text)
+
+When switching from Vision or Audio to Text model mid-conversation:
+
+1. **Client:** Continue sending full message list (media payloads can be stripped if mapping tables exist)
+2. **Server:** Automatically filters any remaining media for text models, replaces with placeholders
+3. **Result:** Text model sees `[n image(s) were attached]` or `[n audio(s) were attached]`
+
+**Example workflow:**
+```
+1. Vision model: User sends 2 images → Model describes both
+2. Vision model: User asks "What's different?" → Model compares
+3. Switch to Text model: User asks "Which is better for vacation?"
+4. Text model: Sees "[2 image(s) were attached]" in history, can reference the conversation
+```
+
+**Storage optimization:** After the first Vision request, clients can drop Base64 payloads from history while preserving assistant responses with `<!-- mlxk:filenames -->` markers. The server reconstructs image IDs from these markers.
+
 ---
 
 ## Changelog
+
+- **2026-01-20:** 2.0.4-beta.8
+  - **NEW:** Audio input support via OpenAI `input_audio` format
+  - Supported formats: WAV, MP3
+  - Audio-capable models: Gemma-3n (others as available)
+  - Limits: 5 MB per audio, 1 audio per request
+  - Temperature: 0.0 for transcription consistency
+  - History filter: `input_audio` → `[n audio(s) were attached]`
 
 - **2025-12-15:** 2.0.4-beta.1 WIP
   - Vision support: Base64 images, multiple images, limits

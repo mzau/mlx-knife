@@ -21,6 +21,7 @@ from .test_utils import (
     discover_mlx_models_in_user_cache,
     discover_text_models,
     discover_vision_models,
+    discover_audio_models,
     parse_vm_stat_page_size,
     TEST_MODELS,
 )
@@ -138,6 +139,27 @@ def pytest_generate_tests(metafunc):
             model_keys = ["_no_vision_models"]
 
         metafunc.parametrize("vision_model_key", model_keys)
+        return
+
+    # Handle audio_model_key (NEW - Portfolio Separation)
+    if "audio_model_key" in metafunc.fixturenames:
+        if not is_live_e2e:
+            metafunc.parametrize("audio_model_key", ["_skipped"])
+            return
+
+        # Discover audio-only models
+        audio_models = discover_audio_models()
+        if audio_models:
+            model_keys = [f"audio_{i:02d}" for i in range(len(audio_models))]
+        else:
+            # No fallback for audio (needs real models)
+            model_keys = []
+
+        # If no audio models, parametrize with skip marker
+        if not model_keys:
+            model_keys = ["_no_audio_models"]
+
+        metafunc.parametrize("audio_model_key", model_keys)
         return
 
     # Handle model_key (DEPRECATED - Mixed Text+Vision, use text_model_key/vision_model_key instead)
@@ -288,6 +310,47 @@ def vision_portfolio():
         return {}
 
 
+@pytest.fixture(scope="module")
+def audio_portfolio():
+    """Audio-only model portfolio (NEW - Portfolio Separation).
+
+    Discovers audio models using discover_audio_models() which filters to
+    only models with audio capabilities. Uses Vision-specific RAM calculation
+    (audio goes through VisionRunner infrastructure).
+
+    Returns:
+        Dict[str, Dict[str, Any]]: Audio model portfolio keyed by audio_model_key
+            {
+                "audio_00": {
+                    "id": "mlx-community/gemma-3n-E2B-it-4bit",
+                    "ram_needed_gb": 3.2,
+                    "expected_issue": None,
+                    "description": "Audio: gemma-3n-E2B-it-4bit"
+                },
+                ...
+            }
+    """
+    audio_models = discover_audio_models()
+
+    if audio_models:
+        result = {}
+        for i, model in enumerate(audio_models):
+            key = f"audio_{i:02d}"
+            result[key] = {
+                "id": model["model_id"],
+                "ram_needed_gb": model["ram_needed_gb"],
+                "expected_issue": None,
+                "description": f"Audio: {model['model_id'].split('/')[-1]}"
+            }
+
+        print(f"\n🔊 Audio Portfolio: Found {len(result)} audio-capable models")
+        return result
+    else:
+        # No fallback for audio - requires real models
+        print(f"\n⚠️  Audio Portfolio: No audio models found in cache")
+        return {}
+
+
 @pytest.fixture
 def model_info(portfolio_models, model_key):
     """Get model info for the current parametrized model_key.
@@ -360,6 +423,34 @@ def vision_model_info(vision_portfolio, vision_model_key):
             - description: Human-readable description
     """
     return vision_portfolio[vision_model_key]
+
+
+@pytest.fixture
+def audio_model_info(audio_portfolio, audio_model_key):
+    """Get model info for the current parametrized audio_model_key (NEW).
+
+    This fixture provides convenient access to audio model metadata in
+    parametrized tests. It automatically looks up the audio_model_key
+    in the audio_portfolio and returns the model info dict.
+
+    Usage:
+        def test_something(audio_model_info):
+            model_id = audio_model_info["id"]
+            ram_needed = audio_model_info["ram_needed_gb"]
+            ...
+
+    Returns:
+        Dict[str, Any]: Audio model metadata with keys:
+            - id: Model ID (e.g., "mlx-community/gemma-3n-E2B-it-4bit")
+            - ram_needed_gb: Estimated RAM requirement (0.70 threshold vision formula)
+            - expected_issue: Known issue or None
+            - description: Human-readable description
+
+        Returns None for skip markers (_skipped, _no_audio_models).
+    """
+    if audio_model_key.startswith("_"):
+        return None
+    return audio_portfolio[audio_model_key]
 
 
 @pytest.fixture(autouse=True)

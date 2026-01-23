@@ -19,6 +19,7 @@ class ErrorType(str, Enum):
     PUSH_OPERATION_FAILED = "push_operation_failed"
     SERVER_SHUTDOWN = "server_shutdown"
     INSUFFICIENT_MEMORY = "insufficient_memory"  # ADR-016: Model exceeds memory threshold
+    NOT_IMPLEMENTED = "not_implemented"  # HTTP 501: Feature not supported
     INTERNAL_ERROR = "internal_error"
 
 
@@ -32,6 +33,7 @@ ERROR_TYPE_TO_HTTP_STATUS: Dict[ErrorType, int] = {
     ErrorType.PUSH_OPERATION_FAILED: 500,
     ErrorType.SERVER_SHUTDOWN: 503,
     ErrorType.INSUFFICIENT_MEMORY: 507,  # ADR-016: HTTP 507 Insufficient Storage
+    ErrorType.NOT_IMPLEMENTED: 501,  # Feature not supported
     ErrorType.INTERNAL_ERROR: 500,
 }
 

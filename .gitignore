@@ -23,13 +23,16 @@ server.log
 install_*.log
 .gitignore
 docs/ISSUES/
+docs/reviews/
 
 # Test artifacts (generated reports)
 *_report.json
 test-img-collection/
 small-img-collection
 benchmarks/reports/*.html
+benchmarks/reports/2025-12*.jsonl
+benchmarks/reports/2026-0[12]*.jsonl
 
 # Benchmark reports (ADR-013 Phase 0)
 # These reports ARE tracked in git for historical data
-!benchmarks/reports/*.jsonl
+#!benchmarks/reports/*.jsonl

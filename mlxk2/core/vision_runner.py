@@ -149,10 +149,35 @@ class VisionRunner:
 
         return image_paths
 
+    def _prepare_audio(self, audio: Sequence[Tuple[str, bytes]] | None):
+        """
+        Convert (filename, bytes) tuples to temporary file paths.
+
+        mlx-vlm expects audio file paths as strings.
+        We write the audio bytes to temporary files and return the paths.
+        """
+        if not audio:
+            return None
+
+        audio_paths = []
+        for filename, raw in audio:
+            # Create a temporary file with appropriate extension
+            suffix = Path(filename).suffix or ".wav"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(raw)
+            tmp.flush()
+            tmp.close()
+            audio_paths.append(tmp.name)
+            # Track temp file for cleanup
+            self._temp_files.append(tmp.name)
+
+        return audio_paths
+
     def generate(
         self,
         prompt: str,
         images: Sequence[Tuple[str, bytes]] | None,
+        audio: Sequence[Tuple[str, bytes]] | None = None,
         max_tokens: Optional[int] = None,
         temperature: float = 0.4,
         top_p: float = 0.9,
@@ -160,11 +185,12 @@ class VisionRunner:
         image_id_map: Optional[Dict[str, int]] = None,
         total_images: Optional[int] = None,
     ) -> str:
-        """Generate a response with optional images. Non-streaming.
+        """Generate a response with optional images and audio. Non-streaming.
 
         Args:
             prompt: Text prompt for generation
-            images: List of (filename, bytes) tuples
+            images: List of (filename, bytes) tuples for images
+            audio: List of (filename, bytes) tuples for audio files
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             top_p: Top-p sampling
@@ -173,8 +199,9 @@ class VisionRunner:
                          numbering across requests. If None, uses request-scoped IDs.
             total_images: Total number of images in full batch (for chunking context)
         """
-        # Prepare image file paths
+        # Prepare image and audio file paths
         image_paths = self._prepare_images(images)
+        audio_paths = self._prepare_audio(audio)
 
         try:
             # Augment prompt with metadata context (GPS, datetime, camera, chunk info)
@@ -182,10 +209,12 @@ class VisionRunner:
                 prompt, images, image_id_map, total_images
             )
 
-            # Apply chat template (required for vision models)
+            # Apply chat template (required for vision/audio models)
             num_images = len(image_paths) if image_paths else 0
+            num_audios = len(audio_paths) if audio_paths else 0
             formatted_prompt = self._apply_chat_template(
-                self.processor, self.config, augmented_prompt, num_images=num_images
+                self.processor, self.config, augmented_prompt,
+                num_images=num_images, num_audios=num_audios
             )
 
             # Build generation kwargs
@@ -207,6 +236,7 @@ class VisionRunner:
                 self.processor,
                 formatted_prompt,
                 image_paths,  # List of file paths
+                audio=audio_paths,  # List of audio file paths (None if no audio)
                 **gen_kwargs,
             )
             normalized = self._normalize_result(result)
