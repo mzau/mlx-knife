@@ -1,8 +1,8 @@
 """
-Vision HTTP adapter for converting OpenAI-compatible requests to VisionRunner format.
+Vision/Audio HTTP adapter for converting OpenAI-compatible requests to VisionRunner format.
 
-This module handles Base64 image decoding and OpenAI message format parsing
-for the server Vision API (ADR-012 Phase 3).
+This module handles Base64 image/audio decoding and OpenAI message format parsing
+for the server Vision/Audio API (ADR-012 Phase 3, ADR-019 Phase 4).
 """
 
 from __future__ import annotations
@@ -16,11 +16,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Limits for vision requests (safety and resource management)
 # Per-image size limit prevents Metal OOM crashes (ADR-012 Phase 3)
-# Total image count is unlimited - chunking (ADR-012 Phase 1c) handles batch safety
-# chunk_size controls memory usage: default=1 (safest), can be increased via request param
 MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per image (Metal API limit)
+MAX_IMAGES_PER_REQUEST = 5  # Maximum images per request (Metal OOM prevention)
+MAX_TOTAL_IMAGE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB total (Metal OOM prevention)
 MAX_SAFE_CHUNK_SIZE = 5  # Empirically tested stable (5 images @ ~50MB total)
 SUPPORTED_MIME_TYPES = frozenset({"jpeg", "jpg", "png", "gif", "webp"})
+
+# Audio limits (ADR-019 Phase 4)
+# 5MB limit matches CLI (~2-3 min at 16kHz mono, token count is the real constraint)
+MAX_AUDIO_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB per audio file
+# mlx-vlm natively supports WAV and MP3 (verified in mlx-vlm README)
+SUPPORTED_AUDIO_FORMATS = frozenset({"wav", "mp3", "mpeg"})
 
 
 class VisionHTTPAdapter:
@@ -29,9 +35,9 @@ class VisionHTTPAdapter:
     @staticmethod
     def parse_openai_messages(
         messages: List[Dict[str, Any]]
-    ) -> Tuple[str, List[Tuple[str, bytes]]]:
+    ) -> Tuple[str, List[Tuple[str, bytes]], List[Tuple[str, bytes]]]:
         """
-        Parse OpenAI-style messages and extract text prompt + images.
+        Parse OpenAI-style messages and extract text prompt + images + audio.
 
         OpenAI Vision API format:
         [
@@ -39,27 +45,29 @@ class VisionHTTPAdapter:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What's in this image?"},
-                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}},
+                    {"type": "input_audio", "input_audio": {"data": "base64...", "format": "wav"}}
                 ]
             }
         ]
 
-        Important: Images are extracted ONLY from the most recent user message.
+        Important: Images/audio are extracted ONLY from the most recent user message.
         Text context is extracted from ALL messages (including assistant responses).
 
-        This follows OpenAI Vision API behavior where previous images remain in
-        history for text context but are NOT sent as visual input to the model.
+        This follows OpenAI Vision API behavior where previous media remain in
+        history for text context but are NOT sent as visual/audio input to the model.
 
         Args:
             messages: List of message dicts (OpenAI format)
 
         Returns:
-            (prompt, images) tuple where:
+            (prompt, images, audio) tuple where:
             - prompt: str - Combined text from all text content blocks
             - images: List[Tuple[str, bytes]] - List of (filename, raw_bytes) tuples
+            - audio: List[Tuple[str, bytes]] - List of (filename, raw_bytes) tuples
 
         Raises:
-            MLXKError: If message format is invalid or images cannot be decoded
+            ValueError: If message format is invalid or media cannot be decoded
 
         See: docs/ISSUES/VISION-SEQUENTIAL-IMAGES-ISSUE.md
         """
@@ -102,8 +110,9 @@ class VisionHTTPAdapter:
                     if text:
                         text_parts.append(text)
 
-        # Extract images ONLY from the most recent user message
+        # Extract images and audio ONLY from the most recent user message
         images = []
+        audio = []
 
         for msg in reversed(messages):
             if not isinstance(msg, dict):
@@ -115,10 +124,10 @@ class VisionHTTPAdapter:
 
             content = msg.get("content")
             if content is None or not isinstance(content, list):
-                # Last user message has no images (text-only follow-up)
+                # Last user message has no media (text-only follow-up)
                 break
 
-            # Process image_url items from this message only
+            # Process image_url and input_audio items from this message only
             for item in content:
                 if not isinstance(item, dict):
                     continue
@@ -142,26 +151,67 @@ class VisionHTTPAdapter:
                     filename, raw_bytes = VisionHTTPAdapter.decode_base64_image(url)
                     images.append((filename, raw_bytes))
 
-                    # Note: Total image count/size is unlimited - chunking handles batch safety
-                    # chunk_size (default=1) controls memory usage per batch
+                elif item_type == "input_audio":
+                    # OpenAI input_audio format (ADR-019 Phase 4)
+                    input_audio_obj = item.get("input_audio")
+                    if not isinstance(input_audio_obj, dict):
+                        raise ValueError(
+                            "input_audio content must have 'input_audio' dict"
+                        )
+
+                    data = input_audio_obj.get("data", "")
+                    fmt = input_audio_obj.get("format", "wav")
+
+                    if not data:
+                        raise ValueError(
+                            "input_audio.data cannot be empty"
+                        )
+
+                    # Decode base64 audio (validates size and format)
+                    filename, raw_bytes = VisionHTTPAdapter.decode_base64_audio(data, fmt)
+                    audio.append((filename, raw_bytes))
 
             # Stop after processing first (most recent) user message
             break
 
+        # Validate image limits (F-01: SERVER-HANDBOOK conformity)
+        if len(images) > MAX_IMAGES_PER_REQUEST:
+            raise ValueError(
+                f"Too many images ({len(images)}). Maximum: {MAX_IMAGES_PER_REQUEST}"
+            )
+
+        if images:
+            total_size = sum(len(data) for _, data in images)
+            if total_size > MAX_TOTAL_IMAGE_SIZE_BYTES:
+                size_mb = total_size / (1024 * 1024)
+                limit_mb = MAX_TOTAL_IMAGE_SIZE_BYTES / (1024 * 1024)
+                raise ValueError(
+                    f"Total image size ({size_mb:.1f} MB) exceeds limit ({limit_mb:.0f} MB)"
+                )
+
+        # Validate audio limits (F-02: Only 1 audio per request, mlx-vlm limitation)
+        if len(audio) > 1:
+            raise ValueError(
+                f"Only 1 audio per request (mlx-vlm limitation). Got: {len(audio)}"
+            )
+
         # Combine text parts
         prompt = " ".join(text_parts).strip()
 
-        # Validation: Must have either text or images
-        if not prompt and not images:
+        # Validation: Must have either text or images or audio
+        if not prompt and not images and not audio:
             raise ValueError(
-                "Request must contain at least text or images"
+                "Request must contain at least text, images, or audio"
             )
 
-        # If no text provided but images present, use default prompt
-        if not prompt and images:
-            prompt = "Describe the image."
+        # Default prompts based on media type
+        if not prompt:
+            if images:
+                prompt = "Describe the image."
+            elif audio:
+                prompt = "Transcribe what is spoken in this audio."
 
-        return prompt, images
+        return prompt, images, audio
 
     @staticmethod
     def decode_base64_image(url: str) -> Tuple[str, bytes]:
@@ -237,6 +287,70 @@ class VisionHTTPAdapter:
         # Generate deterministic filename from content hash
         content_hash = hashlib.sha256(raw_bytes).hexdigest()[:8]
         filename = f"image_{content_hash}.{mime_type}"
+
+        return filename, raw_bytes
+
+    @staticmethod
+    def decode_base64_audio(data: str, fmt: str) -> Tuple[str, bytes]:
+        """
+        Decode Base64-encoded audio data.
+
+        OpenAI input_audio format:
+        {
+            "type": "input_audio",
+            "input_audio": {
+                "data": "<base64-encoded-audio>",
+                "format": "wav"  # or "mp3"
+            }
+        }
+
+        Args:
+            data: Base64-encoded audio data (without data URL prefix)
+            fmt: Audio format ("wav", "mp3")
+
+        Returns:
+            (filename, raw_bytes) tuple where:
+            - filename: Generated name based on content hash (e.g., "audio_a1b2c3.wav")
+            - raw_bytes: Decoded audio bytes
+
+        Raises:
+            ValueError: If format is unsupported or base64 decoding fails
+        """
+        # Normalize format (audio/mpeg -> mp3)
+        fmt_lower = fmt.lower()
+        if fmt_lower == "mpeg":
+            fmt_lower = "mp3"
+
+        # Validate format
+        if fmt_lower not in SUPPORTED_AUDIO_FORMATS:
+            raise ValueError(
+                f"Unsupported audio format: {fmt}. "
+                f"Supported formats: {', '.join(sorted(SUPPORTED_AUDIO_FORMATS))}"
+            )
+
+        # Decode base64
+        try:
+            raw_bytes = base64.b64decode(data, validate=True)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to decode base64 audio data: {e}"
+            ) from e
+
+        # Validate that we got some data
+        if not raw_bytes:
+            raise ValueError("Decoded audio data is empty")
+
+        # Enforce size limit
+        if len(raw_bytes) > MAX_AUDIO_SIZE_BYTES:
+            size_mb = len(raw_bytes) / (1024 * 1024)
+            limit_mb = MAX_AUDIO_SIZE_BYTES / (1024 * 1024)
+            raise ValueError(
+                f"Audio size ({size_mb:.1f} MB) exceeds limit ({limit_mb:.0f} MB)"
+            )
+
+        # Generate deterministic filename from content hash
+        content_hash = hashlib.sha256(raw_bytes).hexdigest()[:8]
+        filename = f"audio_{content_hash}.{fmt_lower}"
 
         return filename, raw_bytes
 

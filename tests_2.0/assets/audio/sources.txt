@@ -1,0 +1,11 @@
+Audio Test Assets - Attribution
+
+Source: LibriSpeech ASR corpus
+Dataset: hf-internal-testing/librispeech_asr_dummy
+License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+Original: https://www.openslr.org/12
+
+Citation:
+  Panayotov, V., Chen, G., Povey, D., & Khudanpur, S. (2015).
+  "Librispeech: An ASR corpus based on public domain audio books."
+  ICASSP 2015.

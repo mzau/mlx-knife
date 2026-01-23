@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -71,7 +72,7 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = None
     repetition_penalty: Optional[float] = 1.1
-    chunk: Optional[int] = 1  # Vision batch processing (default: 1 for maximum safety)
+    chunk: Optional[int] = None  # Vision batch processing (None = use ENV/default)
 
 
 class CompletionResponse(BaseModel):
@@ -673,6 +674,35 @@ def _request_has_images(messages: List[ChatMessage]) -> bool:
     return False
 
 
+def _request_has_audio(messages: List[ChatMessage]) -> bool:
+    """Check if LAST USER MESSAGE contains audio content (input_audio format).
+
+    OpenAI API semantics: Only audio from the last user message is processed.
+    Historical audio references are preserved in context but not re-processed.
+
+    This function determines routing (audio vs text path).
+    Must match actual audio processing behavior (ADR-019 Phase 4).
+
+    Args:
+        messages: List of ChatMessage objects
+
+    Returns:
+        True if the last user message contains input_audio content
+    """
+    # Find last user message (iterate backwards for efficiency)
+    for msg in reversed(messages):
+        if msg.role == "user":
+            # Check if THIS message has audio
+            if isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, dict) and item.get("type") == "input_audio":
+                        return True
+            # Found last user message, no audio
+            return False
+    # No user messages at all
+    return False
+
+
 def _messages_to_dicts(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     """Convert ChatMessage objects to dict format for adapters.
 
@@ -786,11 +816,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
     # Map HTTP status to error type
     error_type_map = {
+        400: ErrorType.VALIDATION_ERROR,
         403: ErrorType.ACCESS_DENIED,
         404: ErrorType.MODEL_NOT_FOUND,
-        400: ErrorType.VALIDATION_ERROR,
-        503: ErrorType.SERVER_SHUTDOWN,
         500: ErrorType.INTERNAL_ERROR,
+        501: ErrorType.NOT_IMPLEMENTED,
+        503: ErrorType.SERVER_SHUTDOWN,
         507: ErrorType.INSUFFICIENT_MEMORY,
     }
 
@@ -804,6 +835,36 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     envelope = error_envelope(error, request_id=request_id)
     return JSONResponse(
         status_code=exc.status_code,
+        content=envelope
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Convert FastAPI validation errors (422) to ADR-004 envelope (400).
+
+    FastAPI returns 422 Unprocessable Entity for validation errors by default.
+    We convert to 400 Bad Request with ADR-004 envelope for API consistency.
+    """
+    request_id = getattr(request.state, "request_id", None)
+
+    # Format validation errors for detail field
+    errors = exc.errors()
+    detail = "; ".join(
+        f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+        for e in errors
+    )
+
+    error = MLXKError(
+        type=ErrorType.VALIDATION_ERROR,
+        message="Request validation failed",
+        detail=detail,
+        retryable=False
+    )
+
+    envelope = error_envelope(error, request_id=request_id)
+    return JSONResponse(
+        status_code=400,
         content=envelope
     )
 
@@ -980,35 +1041,36 @@ async def create_completion(request: CompletionRequest):
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
-    """Create a chat completion (text or vision)."""
+    """Create a chat completion (text, vision, or audio)."""
     try:
         if _shutdown_event.is_set():
             raise HTTPException(status_code=503, detail="Server is shutting down")
 
-        # Detect if request contains images (Vision API format)
+        # Detect if request contains images or audio (Vision/Audio API format)
         has_images = _request_has_images(request.messages)
+        has_audio = _request_has_audio(request.messages)
 
         # Load model to determine type (uses cache if already loaded)
         # This ensures we route based on MODEL type, not just request content
         runner = get_or_load_model(request.model, verbose=False)
 
-        # Check if this is a vision model
+        # Check if this is a vision model (VisionRunner handles both vision and audio)
         from .vision_runner import VisionRunner
         is_vision_model = isinstance(runner, VisionRunner)
 
         # Routing logic:
-        # - Vision model + images → Vision path (normal vision processing)
-        # - Vision model + no images → Text path (text-only on vision model)
-        # - Text model + images → Text path (filters multimodal history)
-        # - Text model + no images → Text path (normal text processing)
-        if is_vision_model and has_images:
-            # === VISION PATH (ADR-012 Phase 3) ===
-            # Vision model with images → full vision processing
+        # - Vision model + images/audio → Vision path (vision/audio processing)
+        # - Vision model + no media → Text path (text-only on vision model)
+        # - Text model + images/audio → Text path (filters multimodal history)
+        # - Text model + no media → Text path (normal text processing)
+        if is_vision_model and (has_images or has_audio):
+            # === VISION/AUDIO PATH (ADR-012 Phase 3, ADR-019 Phase 4) ===
+            # Vision model with images/audio → full vision/audio processing
             return await _handle_vision_chat_completion(request, runner=runner)
         else:
             # === TEXT PATH (existing behavior + multimodal filtering) ===
-            # - Vision model without images: Use VisionRunner.generate(images=None)
-            # - Text model with/without images: Filter multimodal history if needed
+            # - Vision model without media: Use VisionRunner.generate(images=None)
+            # - Text model with/without media: Filter multimodal history if needed
             return await _handle_text_chat_completion(request, runner=runner)
 
     except HTTPException as http_exc:
@@ -1163,6 +1225,7 @@ def _process_vision_chunks_server(
     temperature: float,
     top_p: float,
     repetition_penalty: float,
+    audio: Optional[List[tuple]] = None,
 ) -> str:
     """Process vision images in batches with isolated model instances per chunk.
 
@@ -1178,6 +1241,7 @@ def _process_vision_chunks_server(
         chunk_size: Images per batch
         image_id_map: Pre-computed global image IDs (from conversation history)
         max_tokens, temperature, top_p, repetition_penalty: Generation params
+        audio: Optional list of (filename, bytes) tuples for audio input
 
     Returns:
         Combined text with merged filename mappings
@@ -1195,6 +1259,7 @@ def _process_vision_chunks_server(
             chunk_result = runner.generate(
                 prompt=prompt,
                 images=chunk,
+                audio=audio,  # Pass audio with each chunk
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
@@ -1222,6 +1287,7 @@ async def _stream_vision_chunks(
     completion_id: str,
     created: int,
     model: str,
+    audio: Optional[List[tuple]] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
 
@@ -1240,6 +1306,7 @@ async def _stream_vision_chunks(
         completion_id: Unique completion ID for SSE events
         created: Timestamp for SSE events
         model: Model name for SSE events
+        audio: Optional list of (filename, bytes) tuples for audio input
 
     Yields:
         SSE event strings (data: {...}\n\n format)
@@ -1297,6 +1364,7 @@ async def _stream_vision_chunks(
                 return runner.generate(
                     prompt=prompt,
                     images=chunk_images,
+                    audio=audio,  # Pass audio with each chunk
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
@@ -1363,7 +1431,7 @@ async def _stream_vision_chunks(
 
 
 async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner: Any = None) -> ChatCompletionResponse:
-    """Handle vision chat completion with images (ADR-012 Phase 3).
+    """Handle vision/audio chat completion with images or audio (ADR-012 Phase 3, ADR-019 Phase 4).
 
     Supports per-chunk streaming for multi-image requests (stream=True yields
     SSE events as each chunk completes). Single-chunk requests use batch mode
@@ -1376,7 +1444,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
     # Lazy import vision components (Python 3.9 compatibility)
     from ..tools.vision_adapter import VisionHTTPAdapter
 
-    # Vision requests are STATELESS for the model prompt, but we track image IDs
+    # Vision/Audio requests are STATELESS for the model prompt, but we track image IDs
     # across the session for consistent numbering (Image 1, 2, 3...).
     #
     # Rationale:
@@ -1397,16 +1465,19 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
         raise HTTPException(status_code=400, detail="No user message found")
 
     # Parse only the last user message (stateless prompt)
-    prompt, images = VisionHTTPAdapter.parse_openai_messages([last_user_msg])
+    # Returns (prompt, images, audio) tuple
+    prompt, images, audio = VisionHTTPAdapter.parse_openai_messages([last_user_msg])
 
     # But use FULL history for image ID assignment (consistent numbering)
     image_id_map = VisionHTTPAdapter.assign_image_ids_from_history(message_dicts)
 
     image_count = len(images)
+    audio_count = len(audio)
     logger.info(
-        f"Vision request: {image_count} image(s), model={request.model}",
+        f"Vision/Audio request: {image_count} image(s), {audio_count} audio(s), model={request.model}",
         model=request.model,
-        image_count=image_count
+        image_count=image_count,
+        audio_count=audio_count
     )
 
     # Get or load VisionRunner (uses cache if model already loaded)
@@ -1428,8 +1499,13 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
-    # Get chunk size (with env var override)
-    chunk_size = request.chunk if request.chunk != 1 else int(os.environ.get("MLXK2_VISION_CHUNK_SIZE", "1"))
+    # Get chunk size: request param > ENV > default (F-05: respect explicit chunk=1)
+    env_chunk = int(os.environ.get("MLXK2_VISION_CHUNK_SIZE", "1"))
+    chunk_size = request.chunk if request.chunk is not None else env_chunk
+
+    # F-03: Audio+Vision - audio silently ignored when images present (SERVER-HANDBOOK)
+    # mlx-vlm behavior is undefined for combined audio+vision, so we enforce single modality
+    effective_audio = None if images else audio
 
     # Validate chunk size for Metal API stability
     from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
@@ -1448,15 +1524,16 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
         )
 
     if len(images) <= chunk_size:
-        # Single batch (no chunking)
+        # Single batch (no chunking) - also handles audio-only requests
         generated_text = runner.generate(
             prompt=prompt,
-            images=images,
+            images=images if images else None,
+            audio=effective_audio,
             max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
             temperature=0.0,  # Experiment: greedy sampling to reduce hallucinations
             top_p=request.top_p or 0.9,
             repetition_penalty=request.repetition_penalty or 1.0,
-            image_id_map=image_id_map,
+            image_id_map=image_id_map if images else None,
         )
     else:
         # Multi-chunk processing
@@ -1483,6 +1560,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
                     completion_id=completion_id,
                     created=created,
                     model=request.model,
+                    audio=effective_audio,
                 ),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache"}
@@ -1499,6 +1577,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
             temperature=0.0,
             top_p=request.top_p or 0.9,
             repetition_penalty=request.repetition_penalty or 1.0,
+            audio=effective_audio,
         )
 
     logger.info(
@@ -1625,10 +1704,10 @@ def _filter_multimodal_history_for_text_models(messages: List[ChatMessage]) -> L
     """Filter multimodal content from message history for text-only models.
 
     Handles the case where conversation history contains multimodal content
-    (e.g., from previous Vision model interaction) but the current model is
-    text-only and cannot process image_url content.
+    (e.g., from previous Vision/Audio model interaction) but the current model is
+    text-only and cannot process image_url or input_audio content.
 
-    This enables model switching in clients (Vision → Text) while preserving
+    This enables model switching in clients (Vision/Audio → Text) while preserving
     the assistant's responses for context.
 
     Args:
@@ -1665,10 +1744,11 @@ def _filter_multimodal_history_for_text_models(messages: List[ChatMessage]) -> L
             filtered.append(msg)
             continue
 
-        # Array content: extract text parts and add image placeholder
+        # Array content: extract text parts and add media placeholder
         if isinstance(msg.content, list):
             text_parts = []
             image_count = 0
+            audio_count = 0
 
             for item in msg.content:
                 if not isinstance(item, dict):
@@ -1684,12 +1764,21 @@ def _filter_multimodal_history_for_text_models(messages: List[ChatMessage]) -> L
                 elif item_type == "image_url":
                     image_count += 1
 
+                elif item_type == "input_audio":
+                    audio_count += 1
+
             # Combine text parts
             combined_text = " ".join(text_parts)
 
-            # Add placeholder if images were present
+            # Add placeholder if media were present
+            placeholders = []
             if image_count > 0:
-                placeholder = f"[{image_count} image(s) were attached]"
+                placeholders.append(f"{image_count} image(s)")
+            if audio_count > 0:
+                placeholders.append(f"{audio_count} audio(s)")
+
+            if placeholders:
+                placeholder = f"[{', '.join(placeholders)} were attached]"
                 if combined_text:
                     combined_text = f"{combined_text}\n\n{placeholder}"
                 else:

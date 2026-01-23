@@ -227,6 +227,13 @@ def main():
         help="Attach image file(s) for vision models. Accepts multiple files per flag or use multiple flags.",
     )
     run_parser.add_argument(
+        "--audio",
+        nargs='+',
+        action="append",
+        metavar="FILE",
+        help="Attach audio file(s) for audio-capable models (e.g., Gemma-3n). Accepts WAV format.",
+    )
+    run_parser.add_argument(
         "--chunk",
         type=int,
         default=1,
@@ -234,7 +241,7 @@ def main():
         help="Process images in batches of N (default: 1 for maximum safety)",
     )
     run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate")
-    run_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature (default: 0.7)")
+    run_parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature (default: 0.7, audio: 0.2)")
     run_parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
     run_parser.add_argument("--repetition-penalty", type=float, default=1.1, help="Repetition penalty (default: 1.1)")
     run_parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
@@ -476,21 +483,58 @@ def main():
                 if prompt_value is None:
                     prompt_value = "Describe the image."
 
+            # Audio file processing (ADR-019 Phase 2)
+            audio_inputs = []
+            audios = getattr(args, "audio", None) or []
+            # Flatten nested list from nargs='+' + action='append'
+            if audios and isinstance(audios[0], list):
+                audios = [item for sublist in audios for item in sublist]
+
+            if audios:
+                for audio_path in audios:
+                    aud_path = Path(audio_path)
+                    if not aud_path.exists() or not aud_path.is_file():
+                        result = handle_error("CommandError", f"Audio file not found: {audio_path}")
+                        print_result(result, None, True if args.json else False)
+                        sys.exit(1)
+                    data = aud_path.read_bytes()
+                    # 5MB limit for audio (~2-3 min at 16kHz mono; token count is the real constraint)
+                    if len(data) > 5 * 1024 * 1024:
+                        result = handle_error("CommandError", f"Audio file too large (>5MB): {audio_path}")
+                        print_result(result, None, True if args.json else False)
+                        sys.exit(1)
+                    audio_inputs.append((aud_path.name, data))
+                # Multi-audio not supported by mlx-vlm (token mismatch bug)
+                if len(audio_inputs) > 1:
+                    result = handle_error("CommandError", "Multiple audio files not supported. Process one file at a time.")
+                    print_result(result, None, args.json)
+                    sys.exit(1)
+                if prompt_value is None:
+                    # Simple prompt - complex prompts cause multilingual drift in Gemma-3n with MP3
+                    prompt_value = "Transcribe this audio."
+
             stream_mode = not args.no_stream
-            if image_inputs:
+            if image_inputs or audio_inputs:
                 stream_mode = False
             elif not sys.stdout.isatty() and not args.json:
                 stream_mode = False
+
+            # Context-aware temperature default (audio: 0.2 for stability, else: 0.7)
+            if args.temperature is None:
+                temperature = 0.2 if audio_inputs else 0.7
+            else:
+                temperature = args.temperature
 
             # Handle run command with proper parameter mapping
             result_text = run_model_enhanced(
                 model_spec=args.model,
                 prompt=prompt_value,  # Can be None for interactive mode
                 images=image_inputs if images else None,
+                audio=audio_inputs if audios else None,
                 chunk=args.chunk,
                 stream=stream_mode,
                 max_tokens=getattr(args, "max_tokens", None),
-                temperature=args.temperature,
+                temperature=temperature,
                 top_p=getattr(args, "top_p", 0.9),
                 repetition_penalty=getattr(args, "repetition_penalty", 1.1),
                 use_chat_template=not getattr(args, "no_chat_template", False),

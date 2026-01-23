@@ -161,6 +161,8 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
         type_label = str(m.get("model_type", "-"))
         if "vision" in caps and type_label != "-":
             type_label = f"{type_label}+vision"
+        if "audio" in caps and type_label != "-":
+            type_label = f"{type_label}+audio"
         if compact:
             row = [
                 name,
@@ -265,9 +267,14 @@ def render_show(data: Dict[str, Any]) -> str:
     else:
         health_str = health
 
+    # Build capabilities string
+    caps = model.get('capabilities', [])
+    caps_str = ', '.join(caps) if caps else '-'
+
     details = [
         f"Framework: {model.get('framework','-')}",
         f"Type: {model.get('model_type','-')}",
+        f"Capabilities: {caps_str}",
         f"Size: {humanize_size(model.get('size_bytes'))}",
         f"Modified: {fmt_time(model.get('last_modified'))}",
         f"Health: {health_str}",

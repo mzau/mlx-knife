@@ -1,6 +1,6 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.6
+**Specification Version:** 0.1.7
 **Status:** Stable (backward-compatible)
 **Released:** MLX-Knife 2.0.4-beta.1
 
@@ -107,7 +107,7 @@ JSON output example:
   "command": "version",
   "data": {
     "cli_version": "2.0.4-beta.1",
-    "json_api_spec_version": "0.1.6",
+    "json_api_spec_version": "0.1.7",
     "system": {
       "memory_total_bytes": 137438953472
     }
@@ -182,18 +182,21 @@ Notes:
 
 ### Model Type & Capabilities
 
-**Model Types:**
+**Model Types** *(currently detected values, not normative)*:
 - `"chat"` - Language models with chat/instruction capability
 - `"embedding"` - Embedding models for vector representations
-- `"completion"` - Base models for text completion (no chat template)
+- `"base"` - Base models for text completion (no chat template)
 - `"unknown"` - Cannot determine model type from config
 
 **Capabilities Array:**
-- `"text-generation"` - Can generate text
-- `"chat"` - Supports chat template/instruction format
-- `"embeddings"` - Can generate embeddings
-- `"completion"` - Text completion without chat format
+
+*Note: This list is not normative. mlx-knife reports capabilities it detects - models may have additional capabilities. See `mlxk2/core/capabilities.py` `Capability` enum for the authoritative list of currently detected values.*
+
+- `"text-generation"` - Can generate text (all non-embedding models)
+- `"chat"` - Supports chat template/instruction format (absence = base/completion model)
+- `"embeddings"` - Can generate embeddings (mutually exclusive with text-generation)
 - `"vision"` - Accepts image inputs (detected via `model_type` in vision families or presence of `preprocessor_config.json`)
+- `"audio"` - Accepts audio inputs (detected via `audio_config` or `model_type` in audio families)
 
 **Vision Example (Phase 1a, ADR-012):**
 ```json
@@ -582,6 +585,21 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
   }
 }
 ```
+
+## Changes in 0.1.7 (2.0.4-beta.8)
+
+**Non-normative schema for capabilities and model_type**
+
+- Removed enum constraints from `capabilities` and `model_type` in JSON schema
+- Schema now accepts any string values (permissive, non-breaking change)
+- mlx-knife is not a normative authority - it reports what it detects
+- Authoritative list of currently detected values: `mlxk2/core/capabilities.py`
+
+**Capabilities: Single Source of Truth**
+
+- Added `Capability` enum in `mlxk2/core/capabilities.py` as SSOT
+- Removed unused `"completion"` capability (base models are `["text-generation"]` without `"chat"`)
+- Added `"audio"` capability detection (ADR-019)
 
 ## Changes in 0.1.6 (Stable, 2.0.4-beta.1)
 

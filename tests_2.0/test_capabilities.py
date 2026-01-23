@@ -14,6 +14,7 @@ from mlxk2.core.capabilities import (
     PolicyDecision,
     MEMORY_THRESHOLD_PERCENT,
     VISION_MODEL_TYPES,
+    AUDIO_MODEL_TYPES,
     ModelCapabilities,
     BackendPolicy,
     probe_model_capabilities,
@@ -25,6 +26,7 @@ from mlxk2.core.capabilities import (
     _detect_vision_from_config,
     _detect_vision_from_files,
 )
+from mlxk2.operations.common import detect_audio_capability
 
 
 class TestVisionModelTypes:
@@ -38,6 +40,58 @@ class TestVisionModelTypes:
     def test_is_frozenset(self):
         """Should be immutable."""
         assert isinstance(VISION_MODEL_TYPES, frozenset)
+
+
+class TestAudioModelTypes:
+    """Tests for AUDIO_MODEL_TYPES constant (ADR-019)."""
+
+    def test_contains_gemma3n(self):
+        """Should contain Gemma-3n model types."""
+        assert "gemma3n" in AUDIO_MODEL_TYPES
+        assert "gemma3n_audio" in AUDIO_MODEL_TYPES
+
+    def test_is_frozenset(self):
+        """Should be immutable."""
+        assert isinstance(AUDIO_MODEL_TYPES, frozenset)
+
+
+class TestDetectAudioCapability:
+    """Tests for detect_audio_capability (ADR-019)."""
+
+    def test_detects_audio_config_in_config_json(self, tmp_path):
+        """Should detect audio capability via audio_config key."""
+        config = {"model_type": "gemma3n", "audio_config": {"some": "config"}}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_audio_capability(tmp_path, config) is True
+
+    def test_detects_gemma3n_model_type(self, tmp_path):
+        """Should detect audio capability via model_type."""
+        config = {"model_type": "gemma3n"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_audio_capability(tmp_path, config) is True
+
+    def test_detects_audio_seq_length_in_processor_config(self, tmp_path):
+        """Should detect audio capability via processor_config.json."""
+        config = {"model_type": "llama"}  # Not an audio type
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        processor_config = {"audio_seq_length": 188, "processor_class": "Gemma3nProcessor"}
+        (tmp_path / "processor_config.json").write_text(json.dumps(processor_config))
+        assert detect_audio_capability(tmp_path, config) is True
+
+    def test_non_audio_model(self, tmp_path):
+        """Should return False for non-audio models."""
+        config = {"model_type": "llama"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_audio_capability(tmp_path, config) is False
+
+    def test_none_config(self, tmp_path):
+        """Should return False for None config (checks processor_config.json)."""
+        assert detect_audio_capability(tmp_path, None) is False
+
+    def test_empty_config(self, tmp_path):
+        """Should return False for empty config."""
+        (tmp_path / "config.json").write_text("{}")
+        assert detect_audio_capability(tmp_path, {}) is False
 
 
 class TestHelperFunctions:

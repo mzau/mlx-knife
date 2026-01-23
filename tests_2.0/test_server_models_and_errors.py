@@ -159,3 +159,41 @@ def test_shutdown_event_maps_to_503_and_is_cleared():
         server_base._shutdown_event.clear()
 
 
+def test_validation_error_returns_adr004_envelope():
+    """RequestValidationError (422) should return ADR-004 error envelope (F-06)."""
+    client = TestClient(app)
+
+    # Send invalid payload (missing required 'model' field)
+    payload = {"prompt": "hi"}  # Missing 'model'
+
+    resp = client.post("/v1/completions", json=payload)
+
+    # Should be 400 (not 422) with ADR-004 envelope
+    assert resp.status_code == 400
+
+    data = resp.json()
+    assert data.get("status") == "error"
+    assert "error" in data
+    assert data["error"].get("type") == "validation_error"
+    assert "message" in data["error"]
+
+
+def test_http_exception_includes_not_implemented_type():
+    """HTTP 501 should map to ErrorType.NOT_IMPLEMENTED in ADR-004 envelope."""
+    from fastapi import HTTPException
+
+    client = TestClient(app)
+
+    with patch('mlxk2.core.server_base.get_or_load_model') as mock_get:
+        # Simulate 501 Not Implemented
+        mock_get.side_effect = HTTPException(status_code=501, detail="Feature not supported")
+
+        payload = {"model": "test/model", "prompt": "hi"}
+        resp = client.post("/v1/completions", json=payload)
+
+        assert resp.status_code == 501
+        data = resp.json()
+        assert data.get("status") == "error"
+        assert data["error"].get("type") == "not_implemented"
+
+

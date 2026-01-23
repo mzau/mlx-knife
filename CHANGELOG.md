@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.4-beta.8] - 2026-01-23
+
+### Highlights
+
+**Audio Input Support (Experimental):** Full audio transcription pipeline for audio-capable models. CLI `--audio` flag and OpenAI-compatible Server API (`input_audio` format). Uses mlx-vlm's native audio processing with ~30 second duration limit (model architecture constraint). Currently only Gemma-3n tested; requires `--repair-index` fix (mlx-vlm #624).
+
+### Added
+
+- **Audio Capability Detection:** `list` and `show` display `[audio]` tag for audio-capable models
+- **CLI `--audio` Parameter:** `mlxk run model "prompt" --audio file.wav` (WAV/MP3 supported)
+- **Server Audio API:** OpenAI-compatible `input_audio` content type for `/v1/chat/completions`
+  - Format: `{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "wav"}}`
+  - Supported formats: WAV, MP3
+  - Temperature default: 0.0 for audio (greedy sampling reduces hallucination)
+- **Audio E2E Tests:** Portfolio-based transcription tests with deterministic audio clips (ADR-019)
+
+### Changed
+
+- **Dependency Updates:**
+  - `mlx>=0.30.0` (was 0.29.0) - MXFP4/NVFP4 support
+  - `mlx-lm>=0.30.0` (was 0.28.4)
+  - `huggingface-hub>=1.0.0` (was <1.0) - transformers 5.x compatibility
+  - `mlx-vlm` upstream update: fc8c92e → 5812270 (audio support)
+
+- **SERVER-HANDBOOK Compliance:**
+  - Image limits enforced: max 5 images per request, max 50MB total
+  - Multi-audio blocked with clear error (mlx-vlm limitation)
+  - Audio+Vision combined: Audio silently ignored (single modality per request)
+  - `chunk=1` explicitly respected (was defaulting to env var)
+  - 422 validation errors now return ADR-004 envelope format
+  - 501 NOT_IMPLEMENTED error type added for unsupported features
+
+---
+
 ## [2.0.4-beta.7] - 2026-01-18
 
 ### Highlights

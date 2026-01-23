@@ -18,7 +18,7 @@ import importlib.util
 import sys
 
 # Import from unified capabilities module (ARCHITECTURE.md)
-from ..core.capabilities import VISION_MODEL_TYPES
+from ..core.capabilities import VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, Capability
 
 
 @dataclass
@@ -197,6 +197,8 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
             return "chat"
         if mt_lower in VISION_MODEL_TYPES:
             return "chat"
+        if mt_lower in AUDIO_MODEL_TYPES:
+            return "chat"
     ct = tok_hints.get("chat_template")
     if isinstance(ct, str) and ct.strip():
         return "chat"
@@ -275,6 +277,40 @@ def detect_vision_capability(probe: Path, config: Optional[Dict[str, Any]]) -> b
     return False
 
 
+def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bool:
+    """Detect whether the model snapshot supports audio inputs (ADR-019).
+
+    Detection signals:
+    - config.json contains "audio_config" key (primary)
+    - config.json model_type in AUDIO_MODEL_TYPES
+    - processor_config.json contains "audio_seq_length" key (secondary)
+    """
+    try:
+        if isinstance(config, dict):
+            # Check for audio_config (Gemma-3n has this)
+            if "audio_config" in config:
+                return True
+
+            # Check model_type
+            mt = config.get("model_type")
+            if isinstance(mt, str) and mt.lower() in AUDIO_MODEL_TYPES:
+                return True
+
+        # Check processor_config.json for audio_seq_length
+        processor_config_path = probe / "processor_config.json"
+        if processor_config_path.exists():
+            try:
+                with open(processor_config_path) as f:
+                    processor_data = _json.load(f)
+                if isinstance(processor_data, dict) and "audio_seq_length" in processor_data:
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
 def detect_capabilities(
     model_type: str,
     hf_name: str,
@@ -283,14 +319,16 @@ def detect_capabilities(
     probe: Path,
 ) -> list[str]:
     if model_type == "embedding":
-        return ["embeddings"]
-    caps = ["text-generation"]
+        return [Capability.EMBEDDINGS.value]
+    caps = [Capability.TEXT_GENERATION.value]
     name = hf_name.lower()
     ct = tok_hints.get("chat_template")
     if model_type == "chat" or "instruct" in name or "chat" in name or (isinstance(ct, str) and ct.strip()):
-        caps.append("chat")
+        caps.append(Capability.CHAT.value)
     if detect_vision_capability(probe, config):
-        caps.append("vision")
+        caps.append(Capability.VISION.value)
+    if detect_audio_capability(probe, config):
+        caps.append(Capability.AUDIO.value)
     return caps
 
 

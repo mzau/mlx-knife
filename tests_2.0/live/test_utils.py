@@ -61,6 +61,13 @@ KNOWN_BROKEN_MODELS = {
     # Note: Image-only processing works, video processing broken
     "mlx-community/Qwen2-VL-7B-Instruct-4bit",
 
+    # transformers 5.0 video processor bug (same as above)
+    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
+    # Details: docs/ISSUES/transformers-5.0-video-processor-bug.md
+    # Test: `mlxk run Qwen3-Omni-30B-A3B-Instruct-4bit "test" --image foo.jpg` → Error
+    # Note: Omni model (audio+video+vision) - all multimodal processing broken
+    "mlx-community/Qwen3-Omni-30B-A3B-Instruct-4bit",
+
     # mlx-vlm vision feature mismatch: Image token positions (5476) ≠ features (1369)
     # Status: Upstream mlx-vlm vision encoder/model compatibility bug (separate from #624)
     # Test: `mlxk run ./Mistral-Small-3.1-24B-Instruct-2503-FIXED-4bit "test" --image foo.jpg` → Error
@@ -290,11 +297,87 @@ def discover_vision_models() -> list[Dict[str, Any]]:
         return []
 
 
+def discover_audio_models() -> list[Dict[str, Any]]:
+    """Discover audio-capable models only.
+
+    Uses discover_mlx_models_in_user_cache() and filters to only models
+    with "audio" in their capabilities list.
+
+    Note: Audio models use vision-style RAM calculation (0.70 threshold)
+    since they typically go through VisionRunner infrastructure.
+
+    Returns:
+        List of audio-capable model dicts (same format as discover_mlx_models_in_user_cache):
+        [{"model_id": "...", "ram_needed_gb": X.X, "snapshot_path": None, "weight_count": None}, ...]
+    """
+    import json
+    import subprocess
+    import os
+
+    # Get all discovered models (already filtered: MLX + healthy + runtime_compatible + chat)
+    all_models = discover_mlx_models_in_user_cache()
+    if not all_models:
+        return []
+
+    # Get capabilities and size_bytes from mlxk list --json
+    env = os.environ.copy()
+    if not env.get("HF_HOME"):
+        return []  # Audio models need HF_HOME
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env
+        )
+
+        if result.returncode != 0:
+            return []
+
+        # Parse JSON and build audio model data
+        data = json.loads(result.stdout)
+        models_list = data.get("data", {}).get("models", [])
+
+        # Build map: model_id -> (is_audio, size_bytes)
+        model_info = {}
+        for m in models_list:
+            model_name = m["name"]
+            is_audio = "audio" in m.get("capabilities", [])
+            size_bytes = m.get("size_bytes", 0)
+            model_info[model_name] = (is_audio, size_bytes)
+
+        # Get system memory for audio RAM calculation (uses vision formula)
+        system_memory_bytes = get_system_memory_bytes()
+
+        # Filter to only audio models + recalculate RAM
+        audio_models = []
+        for model in all_models:
+            model_id = model["model_id"]
+            if model_id in model_info:
+                is_audio, size_bytes = model_info[model_id]
+                if is_audio:
+                    # Use Vision-specific formula (audio goes through VisionRunner)
+                    ram_gb = calculate_vision_model_ram_gb(size_bytes, system_memory_bytes)
+
+                    # Create new dict with updated RAM
+                    audio_model = model.copy()
+                    audio_model["ram_needed_gb"] = ram_gb
+                    audio_models.append(audio_model)
+
+        return audio_models
+
+    except Exception:
+        return []
+
+
 # Re-export for convenience
 __all__ = [
     "discover_mlx_models_in_user_cache",
     "discover_text_models",
     "discover_vision_models",
+    "discover_audio_models",
     "calculate_text_model_ram_gb",
     "calculate_vision_model_ram_gb",
     "get_system_memory_bytes",
