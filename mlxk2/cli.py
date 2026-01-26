@@ -498,9 +498,11 @@ def main():
                         print_result(result, None, True if args.json else False)
                         sys.exit(1)
                     data = aud_path.read_bytes()
-                    # 5MB limit for audio (~2-3 min at 16kHz mono; token count is the real constraint)
-                    if len(data) > 5 * 1024 * 1024:
-                        result = handle_error("CommandError", f"Audio file too large (>5MB): {audio_path}")
+                    # 50MB limit for audio (~15 min at 16kHz mono)
+                    # Note: Gemma-3n ~30s (token limit), Voxtral >10min (larger token capacity)
+                    # Token count is the real constraint, file size is just a sanity check
+                    if len(data) > 50 * 1024 * 1024:
+                        result = handle_error("CommandError", f"Audio file too large (>50MB): {audio_path}")
                         print_result(result, None, True if args.json else False)
                         sys.exit(1)
                     audio_inputs.append((aud_path.name, data))

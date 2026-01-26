@@ -80,6 +80,7 @@ VISION_MODEL_TYPES = frozenset({
 AUDIO_MODEL_TYPES = frozenset({
     "gemma3n",        # Google Gemma 3n (Vision + Audio + Text)
     "gemma3n_audio",  # Audio encoder subcomponent
+    "voxtral",        # Voxtral mini (Audio + Text) - EXPERIMENTAL (pre-mlx-vlm merge)
 })
 
 
