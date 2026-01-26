@@ -23,8 +23,10 @@ MAX_SAFE_CHUNK_SIZE = 5  # Empirically tested stable (5 images @ ~50MB total)
 SUPPORTED_MIME_TYPES = frozenset({"jpeg", "jpg", "png", "gif", "webp"})
 
 # Audio limits (ADR-019 Phase 4)
-# 5MB limit matches CLI (~2-3 min at 16kHz mono, token count is the real constraint)
-MAX_AUDIO_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB per audio file
+# 50MB limit for audio (~15 min at 16kHz mono)
+# Note: Gemma-3n ~30s (token limit), Voxtral >10min (larger token capacity)
+# Token count is the real constraint, file size is just a sanity check
+MAX_AUDIO_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB per audio file
 # mlx-vlm natively supports WAV and MP3 (verified in mlx-vlm README)
 SUPPORTED_AUDIO_FORMATS = frozenset({"wav", "mp3", "mpeg"})
 
