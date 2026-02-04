@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Memory Monitor - Standalone tool for tracking memory during subprocess execution.
+"""Memory Monitor - Standalone tool for tracking memory, CPU, and GPU during subprocess execution.
 
-Samples RAM, swap, and memory pressure while running any command.
+Samples RAM, swap, memory pressure, CPU load/usage, and GPU utilization while running any command.
 Outputs JSONL with per-sample data and final summary.
+
+Metrics tracked:
+- RAM: free GB, memory pressure (kern.memorystatus_vm_pressure_level), vm_pressure (vm.memory_pressure)
+- Swap: used MB
+- CPU: load average (1/5/15 min), user/sys/idle %
+- GPU: Device/Renderer/Tiler utilization % (via ioreg PerformanceStatistics, no sudo required)
 
 Usage:
     # Basic usage
@@ -15,13 +21,14 @@ Usage:
     python benchmarks/tools/memmon.py --duration 60 --output memory.jsonl
 
 Platform: macOS + Apple Silicon (MLX requirement)
-Dependencies: ZERO - uses native macOS tools (sysctl, vm_stat)
+Dependencies: ZERO - uses native macOS tools (sysctl, vm_stat, top, ioreg)
 
 Future: Will be part of mlxk-benchmark kit.
 """
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +50,118 @@ def parse_vm_stat_page_size(output: str) -> int:
     return 16384  # Apple Silicon default
 
 
+def get_cpu_load() -> dict:
+    """Get CPU load average and usage.
+
+    Returns load averages (1/5/15 min) and current CPU usage via top.
+    """
+    import os
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+
+    load_1 = load_5 = load_15 = 0.0
+    cpu_user = cpu_sys = cpu_idle = 0.0
+
+    # Load average via sysctl
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "vm.loadavg"],
+            capture_output=True, text=True, timeout=1, env=env
+        )
+        if result.returncode == 0:
+            # Parse: "{ 2.45 3.12 2.89 }"
+            parts = result.stdout.strip().strip("{}").split()
+            if len(parts) >= 3:
+                load_1 = float(parts[0])
+                load_5 = float(parts[1])
+                load_15 = float(parts[2])
+    except Exception:
+        pass
+
+    # CPU usage via top (single sample)
+    try:
+        result = subprocess.run(
+            ["top", "-l", "1", "-n", "0", "-s", "0"],
+            capture_output=True, text=True, timeout=2, env=env
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "CPU usage:" in line:
+                    # Parse: "CPU usage: 5.26% user, 10.52% sys, 84.21% idle"
+                    parts = line.split("CPU usage:")[1].split(",")
+                    for part in parts:
+                        part = part.strip()
+                        if "user" in part:
+                            cpu_user = float(part.split("%")[0])
+                        elif "sys" in part:
+                            cpu_sys = float(part.split("%")[0])
+                        elif "idle" in part:
+                            cpu_idle = float(part.split("%")[0])
+                    break
+    except Exception:
+        pass
+
+    return {
+        "load_1": round(load_1, 2),
+        "load_5": round(load_5, 2),
+        "load_15": round(load_15, 2),
+        "cpu_user": round(cpu_user, 1),
+        "cpu_sys": round(cpu_sys, 1),
+        "cpu_idle": round(cpu_idle, 1),
+    }
+
+
+def get_gpu_usage() -> dict:
+    """Get Apple Silicon GPU usage via ioreg PerformanceStatistics.
+
+    Parses ioreg AGXAccelerator PerformanceStatistics to extract:
+    - Device Utilization % (overall GPU busy %)
+    - Renderer Utilization % (3D rendering cores)
+    - Tiler Utilization % (geometry processing)
+
+    No sudo required. Falls back to basic detection if parsing fails.
+    """
+    gpu_active = False
+    gpu_device_util = 0.0
+    gpu_renderer_util = 0.0
+    gpu_tiler_util = 0.0
+
+    try:
+        result = subprocess.run(
+            ["ioreg", "-r", "-c", "AGXAccelerator", "-d", "2"],
+            capture_output=True, text=True, timeout=2
+        )
+        if result.returncode == 0:
+            # Parse PerformanceStatistics dictionary
+            # Format: "PerformanceStatistics" = {"Device Utilization %"=5,"Renderer Utilization %"=3,...}
+            for line in result.stdout.splitlines():
+                if "PerformanceStatistics" in line:
+                    # Extract utilization values
+                    if "Device Utilization %" in line:
+                        match = re.search(r'"Device Utilization %"=(\d+)', line)
+                        if match:
+                            gpu_device_util = float(match.group(1))
+                            gpu_active = True
+                    if "Renderer Utilization %" in line:
+                        match = re.search(r'"Renderer Utilization %"=(\d+)', line)
+                        if match:
+                            gpu_renderer_util = float(match.group(1))
+                    if "Tiler Utilization %" in line:
+                        match = re.search(r'"Tiler Utilization %"=(\d+)', line)
+                        if match:
+                            gpu_tiler_util = float(match.group(1))
+                    break
+    except Exception:
+        pass
+
+    return {
+        "gpu_active": gpu_active,
+        "gpu_device_util": gpu_device_util,  # Overall GPU utilization %
+        "gpu_renderer_util": gpu_renderer_util,  # 3D rendering cores %
+        "gpu_tiler_util": gpu_tiler_util,  # Geometry/tiler cores %
+    }
+
+
 def get_memory_sample() -> dict:
     """Get current memory state using native macOS tools.
 
@@ -57,7 +176,7 @@ def get_memory_sample() -> dict:
     env = os.environ.copy()
     env["LC_ALL"] = "C"
 
-    # Get memory pressure (1=NORMAL/green, 2=WARN/yellow, 4=CRITICAL/red)
+    # Get memory pressure (kern.memorystatus_vm_pressure_level: 1=NORMAL, 2=WARN, 4=CRITICAL)
     memory_pressure = 1  # Default to NORMAL
     try:
         result = subprocess.run(
@@ -65,6 +184,17 @@ def get_memory_sample() -> dict:
             capture_output=True, text=True, timeout=1, env=env
         )
         memory_pressure = int(result.stdout.strip())
+    except Exception:
+        pass
+
+    # Get vm.memory_pressure (0=NORMAL, 1=WARN, 4=CRITICAL) - used by Memory Gates
+    vm_pressure = 0  # Default to NORMAL
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "vm.memory_pressure"],
+            capture_output=True, text=True, timeout=1, env=env
+        )
+        vm_pressure = int(result.stdout.strip())
     except Exception:
         pass
 
@@ -107,13 +237,20 @@ def get_memory_sample() -> dict:
     except Exception:
         pass
 
+    # Get CPU and GPU metrics
+    cpu_data = get_cpu_load()
+    gpu_data = get_gpu_usage()
+
     return {
         "ram_free_gb": ram_free_gb,
         "ram_used_gb": 0,  # Not available from vm_stat alone
         "ram_percent": 0,
         "swap_used_mb": swap_mb,
         "swap_percent": 0,
-        "memory_pressure": memory_pressure,
+        "memory_pressure": memory_pressure,  # kern.memorystatus_vm_pressure_level
+        "vm_pressure": vm_pressure,  # vm.memory_pressure (used by Memory Gates)
+        **cpu_data,
+        **gpu_data,
     }
 
 
@@ -153,6 +290,11 @@ class MemoryMonitor:
 
         ram_values = [s["ram_free_gb"] for s in self.samples]
         swap_values = [s["swap_used_mb"] for s in self.samples]
+        load_values = [s.get("load_1", 0) for s in self.samples]
+        cpu_user_values = [s.get("cpu_user", 0) for s in self.samples]
+        cpu_sys_values = [s.get("cpu_sys", 0) for s in self.samples]
+        gpu_device_values = [s.get("gpu_device_util", 0) for s in self.samples]
+        gpu_renderer_values = [s.get("gpu_renderer_util", 0) for s in self.samples]
 
         return {
             "duration_s": round(time.time() - self.start_time, 2),
@@ -163,6 +305,14 @@ class MemoryMonitor:
             "ram_free_avg_gb": round(sum(ram_values) / len(ram_values), 2),
             "swap_max_mb": max(swap_values),
             "swap_avg_mb": round(sum(swap_values) / len(swap_values), 1),
+            "load_max": round(max(load_values), 2),
+            "load_avg": round(sum(load_values) / len(load_values), 2),
+            "cpu_user_max": round(max(cpu_user_values), 1),
+            "cpu_sys_max": round(max(cpu_sys_values), 1),
+            "gpu_device_max": round(max(gpu_device_values), 1),
+            "gpu_device_avg": round(sum(gpu_device_values) / len(gpu_device_values), 1) if gpu_device_values else 0,
+            "gpu_renderer_max": round(max(gpu_renderer_values), 1),
+            "gpu_renderer_avg": round(sum(gpu_renderer_values) / len(gpu_renderer_values), 1) if gpu_renderer_values else 0,
         }
 
     def get_samples(self) -> list[dict]:
@@ -225,6 +375,10 @@ def run_with_monitoring(
     print(f"  Duration:     {summary['duration_s']:.1f}s ({summary['samples']} samples)")
     print(f"  RAM free:     {summary['ram_free_min_gb']:.1f} - {summary['ram_free_max_gb']:.1f} GB")
     print(f"  Swap peak:    {summary['swap_max_mb']:.1f} MB")
+    print(f"  CPU load:     max {summary.get('load_max', 0):.1f}, avg {summary.get('load_avg', 0):.1f}")
+    print(f"  CPU user/sys: max {summary.get('cpu_user_max', 0):.0f}% / {summary.get('cpu_sys_max', 0):.0f}%")
+    print(f"  GPU device:   max {summary.get('gpu_device_max', 0):.0f}%, avg {summary.get('gpu_device_avg', 0):.0f}%")
+    print(f"  GPU renderer: max {summary.get('gpu_renderer_max', 0):.0f}%, avg {summary.get('gpu_renderer_avg', 0):.0f}%")
     print(f"  Exit code:    {exit_code}")
 
     # Write output
@@ -275,6 +429,10 @@ def monitor_only(
     print(f"  Duration:     {summary['duration_s']:.1f}s ({summary['samples']} samples)")
     print(f"  RAM free:     {summary['ram_free_min_gb']:.1f} - {summary['ram_free_max_gb']:.1f} GB")
     print(f"  Swap peak:    {summary['swap_max_mb']:.1f} MB")
+    print(f"  CPU load:     max {summary.get('load_max', 0):.1f}, avg {summary.get('load_avg', 0):.1f}")
+    print(f"  CPU user/sys: max {summary.get('cpu_user_max', 0):.0f}% / {summary.get('cpu_sys_max', 0):.0f}%")
+    print(f"  GPU device:   max {summary.get('gpu_device_max', 0):.0f}%, avg {summary.get('gpu_device_avg', 0):.0f}%")
+    print(f"  GPU renderer: max {summary.get('gpu_renderer_max', 0):.0f}%, avg {summary.get('gpu_renderer_avg', 0):.0f}%")
 
     if output_file:
         with open(output_file, "w") as f:

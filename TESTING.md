@@ -40,7 +40,7 @@ When dependencies like `transformers` or `mlx-lm` update their APIs, unit tests 
 ## Quick Start
 
 ```bash
-# Install package + development tools
+# Install package + development tools (text-only tests)
 pip install -e ".[dev,test]"
 
 # Run default test suite (isolated, no live downloads)
@@ -51,6 +51,9 @@ ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 ```
 
 **That's it!** Default tests use isolated caches and MLX stubs - no model downloads required.
+
+> **Vision + Audio Tests:** For complete development setup including Vision and Audio,
+> see **[README.md → Development Installation](README.md#development-installation)**.
 
 ## Running All Real Tests
 

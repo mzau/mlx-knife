@@ -1,10 +1,12 @@
 # mlx_knife requirements
 # Core dependencies for HuggingFace model management
 
-huggingface-hub>=0.34.0
+huggingface-hub>=1.3.0
 requests>=2.32.0
-mlx-lm>=0.28.4  # Python 3.14 support (mlx-lm 0.28.4+)
-mlx>=0.29.0     # Core MLX library
+mlx-lm>=0.30.5          # Vision/Audio extras require 0.30.5+
+mlx>=0.30.0             # Core MLX library
+# Note: transformers pinned by mlx-lm (5.0.0rc3 as of 0.30.5)
+# Known issue: trust_remote_code dialog affects some models (Klear-46B)
 
 # API Server dependencies (for 'mlxk server' command)
 fastapi>=0.116.0

@@ -93,10 +93,68 @@ This is a **hardware fact** (from `sysctl -n hw.memsize`), not a heuristic.
 
 **Phase 1+2:** ✅ Complete (2.0.4-beta.1) - See CHANGELOG.md
 
+**Phase 2b:** ✅ Complete (2.0.4-beta.9) - Model Switching Memory Gate
+
 **Phase 3 (Future):** Issue #46
 - [ ] Configurable threshold (env var or CLI flag)
 - [ ] Vision overhead estimation based on model architecture
 - [ ] KV-Cache size estimation based on context length
+
+---
+
+## Phase 2b: Model Switching Memory Gate
+
+**Problem:** Metal GPU cache is released asynchronously. During model switching, the new model may start loading before memory from the old model is actually freed → OOM / "Broken pipe" crashes.
+
+**Root Cause Analysis:**
+- `mx.metal.clear_cache()` releases the cache, but **asynchronously**
+- macOS needs time to return memory to the system
+- Pre-load check (Phase 1-2) validates `model_size / total_memory` → looks OK
+- But **available memory** is still occupied by the previous model
+
+**Solution: Active Polling for Available Memory**
+
+```python
+def _wait_for_memory_release(required_bytes, timeout_seconds=10.0):
+    """Wait for memory to be released after model unload."""
+    while time.time() - start < timeout_seconds:
+        available = _get_available_memory_bytes()  # free + speculative
+        if available >= required_bytes:
+            return True
+        time.sleep(0.5)
+    return False  # Timeout - continue with warning
+```
+
+**Thresholds:**
+
+| Context | Min Available | Timeout | Rationale |
+|---------|---------------|---------|-----------|
+| Vision Model Switch | 20 GB | 10s | Pixtral-8bit = 13.5 GB + overhead |
+| Audio Model Switch | 10 GB | 10s | Whisper ~1.5 GB, Voxtral ~10 GB |
+| Test Infrastructure | 20 GB | 15s | Between-test cleanup, larger buffer |
+
+**Implementation:**
+
+| Location | Function |
+|----------|----------|
+| `server_base.py` | `_get_available_memory_bytes()`, `_wait_for_memory_release()` |
+| `server_base.py` | `get_or_load_model()` - 20 GB gate after cleanup |
+| `server_base.py` | `get_or_load_audio_model()` - 10 GB gate after cleanup |
+| `server_context.py` | `LocalServer` cleanup - 20 GB gate between tests |
+
+**Key Difference from Phase 1-2:**
+
+| Aspect | Phase 1-2 (Pre-load) | Phase 2b (Model Switch) |
+|--------|---------------------|------------------------|
+| Measures | `total_memory` | `available_memory` |
+| Timing | Before first load | After unload, before new load |
+| Method | Static check | Active polling with timeout |
+| Failure | HTTP 507 (hard block) | Warning + continue (soft) |
+
+**Behavior on Timeout:**
+- Log warning with actual available memory
+- Continue anyway (probe/policy check will catch real OOM)
+- Prevents indefinite blocking on edge cases
 
 ## Empirical Data
 

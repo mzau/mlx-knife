@@ -24,8 +24,14 @@ All code paths follow this sequence:
 
 ### 2. No Silent Fallbacks
 
-If a model is detected as vision-capable but `mlx_vlm` is unavailable, the system **must fail explicitly**. Do not fall back to text-only mode.
+If a model requires a specific capability but the corresponding backend is unavailable, the system **must fail explicitly**. Do not degrade to a lower-capability mode.
 
+Examples:
+- Vision model + images, but `mlx_vlm` unavailable → fail (do not run text-only)
+- Audio model, but `mlx_audio` unavailable → fail (do not skip transcription)
+- Vision model + text-only, but `mlx_lm` doesn't support model_type → fail (do not attempt mlx-vlm)
+
+Error handling:
 - CLI: Print clear error to stderr with actionable guidance (e.g., "Install mlx-vlm: pip install mlx-vlm")
 - Server: Return HTTP 501 (Not Implemented) or HTTP 507 (Insufficient Storage) with error details
 - JSON API: Include error details in `error.code` and `error.message`
@@ -36,10 +42,12 @@ If a model is detected as vision-capable but `mlx_vlm` is unavailable, the syste
 
 Capability detection and configuration validation errors **must not be caught silently**.
 
-- If `preprocessor_config.json` is missing for a vision model → fail
-- If Python < 3.10 and `mlx_vlm` is required → fail
-- If memory > 70% for vision models → fail (CLI abort, Server HTTP 507)
-- If memory > 70% for text models → warning only (backwards compatible)
+Examples by modality:
+- Vision: `preprocessor_config.json` missing → fail
+- Vision: Python < 3.10 and `mlx_vlm` required → fail
+- Audio: `mlx_audio` not installed → fail
+- Audio: Unsupported audio format → fail
+- All: Memory pressure > threshold → fail (CLI abort, Server HTTP 507)
 
 **Error Channels:**
 - CLI: stderr (human-readable) + exit code
@@ -52,12 +60,14 @@ Capability detection and configuration validation errors **must not be caught si
 
 Memory checks occur **after probing, before loading**.
 
-- Vision models: Memory > 70% → **abort** (CLI) or HTTP 507 (server)
-- Text models: Memory > 70% → **warning only** (backwards compatible)
+Thresholds by modality:
+- Vision models: Memory pressure > 70% → **abort** (CLI) or HTTP 507 (server)
+- Audio models: Memory pressure > 70% → **abort** (unpredictable chunk memory)
+- Text models: Memory pressure > 70% → **warning only** (backwards compatible)
 
-Memory is checked via `sysctl -n hw.memsize` (macOS). Future: Add Linux support.
+Memory is checked via `vm_stat` free+speculative pages (macOS). Future: Add Linux support.
 
-**Rationale:** Vision models have unpredictable per-image memory overhead. Pre-load validation prevents OOM crashes.
+**Rationale:** Vision and audio models have unpredictable per-item memory overhead. Pre-load validation prevents OOM crashes.
 
 ### 5. Backend Reuse & Lifecycle Management
 
@@ -91,10 +101,19 @@ New features may be gated behind environment variables during alpha/beta:
 
 **Rationale:** Gates allow incremental rollout and protect against breaking changes in production workflows.
 
-### 8. Extensibility for Future Backends
+### 8. Extensibility for Backend Types
 
-The probe/policy architecture is designed to support future backend types (audio, embeddings) without major refactoring.
+The probe/policy architecture supports multiple backend types without major refactoring.
 
+Current backends:
+- **Text:** `mlx_lm` (chat, completion)
+- **Vision:** `mlx_vlm` (multimodal with images)
+- **Audio:** `mlx_audio` (speech-to-text transcription)
+
+Future backends:
+- **Embeddings:** Planned (ADR-015)
+
+API:
 - `probe_model_capabilities()`: Returns capability dictionary (text, vision, audio, embeddings)
 - `select_backend_policy()`: Maps capabilities to backend implementations
 - New backends: Add detection logic to probe, add backend class to policy
@@ -119,6 +138,7 @@ See module docstring for detailed API documentation.
 - **ADR-012:** Vision Support (backend selection for vision models)
 - **ADR-014:** Unix Pipe Integration (feature gates)
 - **ADR-016:** Memory-Aware Model Loading (pre-load memory checks)
+- **ADR-020:** Audio Backend Architecture (speech-to-text transcription)
 - **Code:** `mlxk2/core/capabilities.py` (implementation)
 - **Original Discussion:** `docs/vision_server_leitplanken.md` (German, historical)
 
@@ -126,4 +146,5 @@ See module docstring for detailed API documentation.
 
 ## Changelog
 
+- **2026-02-03:** Modality-agnostic update (audio backend added, examples generalized)
 - **2025-12-07:** Initial version

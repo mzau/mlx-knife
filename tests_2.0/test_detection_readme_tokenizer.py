@@ -125,7 +125,8 @@ def test_vision_capability_from_model_type(isolated_cache):
 def test_vision_capability_from_preprocessor_file(isolated_cache):
     repo = "mlx-community/pixtral-vision-12b"
     h = "2222222222222222222222222222222222222222"
-    _, snap = _mk_snapshot(isolated_cache, repo, h, config_text='{"model_type": "base"}')
+    # Use pixtral model_type (mlx-lm supported) - vision detected from preprocessor_config.json
+    _, snap = _mk_snapshot(isolated_cache, repo, h, config_text='{"model_type": "pixtral"}')
     # ADR-012 Phase 2: Vision models require preprocessor_config.json
     (snap / "preprocessor_config.json").write_text("{}", encoding="utf-8")
     (snap / "tokenizer_config.json").write_text('{"chat_template": "{{ bos_token }}"}', encoding="utf-8")

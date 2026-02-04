@@ -20,7 +20,8 @@ from mlxk2.operations.run import run_model
 from mlxk2.core.cache import hf_to_cache_dir
 
 # Opt-in marker: only run with pytest -m live_run
-pytestmark = [pytest.mark.live_run]
+# CRITICAL: Must include `live` marker so -m "not live" excludes these tests
+pytestmark = [pytest.mark.live, pytest.mark.live_run]
 
 # Skip if MLXK2_USER_HF_HOME not set (prevents running in standard pytest)
 _USER_CACHE_ROOT = os.environ.get("MLXK2_USER_HF_HOME") or os.environ.get("HF_HOME")

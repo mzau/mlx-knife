@@ -23,8 +23,11 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | ADR-013 | Community Model Quality Database | Planned | (not committed) |
 | [ADR-014](ADR-014-Unix-Pipe-Integration.md) | Unix Pipe Integration | Implemented (Phase 1) | 2025-11-16 |
 | ADR-015 | Embeddings API | Planned | (not committed) |
-| [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2) | 2025-12-05 |
-| ADR-017 | Image Metadata Extraction (EXIF) | Implemented | (not committed) |
+| [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2b) | 2026-01-29 |
+| ADR-017 | Image Metadata Extraction (EXIF) | Implemented (Phase 1) | (not committed) |
+| [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented (Phase 0-1) | 2025-12-18 |
+| [ADR-019](ADR-019-Audio-Input-Support-beta8.md) | Audio Input Support (beta.8) | Obsolete (→ ADR-020) | 2026-01-20 |
+| [ADR-020](ADR-020-Audio-Backend-Architecture.md) | Audio Backend Architecture (beta.9) | Implemented | 2026-01-31 |
 
 ## ADR Format
 

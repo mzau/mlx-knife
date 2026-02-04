@@ -14,3 +14,11 @@ This product includes software developed by:
 
 - MLX-VLM (https://github.com/Blaizzy/mlx-vlm)
   Licensed under the MIT License
+
+- MLX-Audio (https://github.com/Blaizzy/mlx-audio)
+  Licensed under the MIT License
+  Note: mlx-audio transitively depends on soundfile (BSD-3-Clause), which
+  includes an embedded build of libsndfile (LGPL-2.1-or-later) for audio I/O.
+  The embedded library is dynamically loaded via CFFI (permitted under LGPL §6).
+  MP3 codec support is provided by the embedded libsndfile without additional
+  system dependencies (no ffmpeg or Homebrew required).

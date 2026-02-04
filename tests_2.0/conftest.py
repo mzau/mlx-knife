@@ -1267,7 +1267,7 @@ def parse_vm_stat_page_size(output: str) -> int:
 
 
 def _get_macos_system_health() -> Dict[str, Any]:
-    """Collect macOS system health metrics (ADR-013 Phase 0.5 - v0.2.0).
+    """Collect macOS system health metrics (ADR-013 Phase 0.5 - Schema v0.2.0).
 
     Uses macOS-native tools (sysctl, vm_stat, ps) - ZERO new dependencies.
     Enables automatic regression quality assessment via quality_flags.
@@ -1377,8 +1377,38 @@ def _get_macos_system_health() -> Dict[str, Any]:
     return health
 
 
+def _get_current_report_schema_version() -> str:
+    """Get current report schema version from benchmarks/schemas/report-current.schema.json.
+
+    Single Source of Truth: Version is extracted from the schema file title.
+    Falls back to "0.2.1" if schema file is not found or invalid.
+
+    Returns:
+        str: Schema version (e.g., "0.2.2")
+    """
+    from pathlib import Path
+
+    schema_path = Path(__file__).parent.parent / "benchmarks" / "schemas" / "report-current.schema.json"
+
+    try:
+        if schema_path.exists():
+            import json
+            schema = json.loads(schema_path.read_text())
+            # Extract version from title: "MLX Knife Test Report v0.2.2 (Precise Test Timing)"
+            title = schema.get("title", "")
+            import re
+            match = re.search(r'v(\d+\.\d+\.\d+)', title)
+            if match:
+                return match.group(1)
+    except Exception:
+        pass
+
+    # Fallback to last known version
+    return "0.2.1"
+
+
 def _get_macos_hardware_profile() -> Dict[str, Any]:
-    """Collect macOS hardware profile (ADR-013 Phase 0.5 - v0.2.0).
+    """Collect macOS hardware profile (ADR-013 Phase 0.5 - Schema v0.2.0).
 
     Uses macOS-native sysctl - ZERO new dependencies.
     Enables hardware-specific performance analysis (M1 vs M2 vs M3 vs M4).
@@ -1444,8 +1474,14 @@ def pytest_runtest_makereport(item, call):
     Reports are written as JSONL (one JSON object per line) to allow
     streaming and easy appending across test runs.
 
-    Schema version: 0.2.1 (Inference Modality)
+    Schema version: Read from benchmarks/schemas/report-current.schema.json (Single Source of Truth)
     See: benchmarks/schemas/MIGRATIONS.md
+
+    Changelog from 0.2.1 → 0.2.2:
+        - Added: test_start_ts (Unix epoch) - precise test start time
+        - Added: test_end_ts (Unix epoch) - precise test end time
+        - Purpose: Accurate memmon correlation and effective runtime analysis
+        - Backward compatible: All 0.2.1 fields preserved
 
     Changelog from 0.2.0 → 0.2.1:
         - Added: metadata.inference_modality (vision/text/audio/video)
@@ -1472,8 +1508,9 @@ def pytest_runtest_makereport(item, call):
             __version__ = "unknown"
 
         # Build report data (required fields)
+        # Schema version is read from benchmarks/schemas/report-current.schema.json (Single Source of Truth)
         data = {
-            "schema_version": "0.2.1",
+            "schema_version": _get_current_report_schema_version(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "mlx_knife_version": __version__,
             "test": item.nodeid,
@@ -1494,14 +1531,15 @@ def pytest_runtest_makereport(item, call):
         # Extract structured data from user_properties
         # Tests can add data via: request.node.user_properties.append(("key", value))
         for key, value in item.user_properties:
-            if key in ("model", "performance", "stop_tokens", "system"):
+            if key in ("model", "performance", "stop_tokens", "system", "test_start_ts", "test_end_ts"):
                 # Structured sections (top-level keys)
+                # test_start_ts/test_end_ts: Schema v0.2.2 precise timing fields
                 data[key] = value
             else:
                 # Everything else goes to metadata
                 data.setdefault("metadata", {})[key] = value
 
-        # ADR-013 Phase 1: Automatic inference_modality detection (v0.2.1)
+        # ADR-013 Phase 1: Automatic inference_modality detection (Schema v0.2.1)
         # Differentiates Vision/Text inference for multimodal models (e.g., Pixtral)
         inference_modality = None
 
@@ -1522,12 +1560,12 @@ def pytest_runtest_makereport(item, call):
         if inference_modality:
             data.setdefault("metadata", {})["inference_modality"] = inference_modality
 
-        # ADR-013 Phase 0.5: Collect system health metrics (v0.2.0)
+        # ADR-013 Phase 0.5: Collect system health metrics (Schema v0.2.0)
         # Enables automatic regression quality assessment
         system_health = _get_macos_system_health()
         data["system_health"] = system_health
 
-        # ADR-013 Phase 0.5: Collect hardware profile (v0.2.0)
+        # ADR-013 Phase 0.5: Collect hardware profile (Schema v0.2.0)
         # Enables hardware-specific performance analysis (M1 vs M2 vs M3 vs M4)
         hardware_profile = _get_macos_hardware_profile()
 

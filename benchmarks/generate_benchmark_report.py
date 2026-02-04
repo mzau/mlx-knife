@@ -44,8 +44,34 @@ def load_schema() -> dict:
         return json.load(f)
 
 
+def is_memmon_jsonl(data: List[dict]) -> bool:
+    """Detect if JSONL is memmon output (memory samples) vs benchmark results.
+
+    memmon JSONL has: ram_free_gb, swap_used_mb, elapsed_s (no schema_version)
+    benchmark JSONL has: schema_version, outcome, timestamp
+    """
+    if not data:
+        return False
+
+    first_entry = data[0]
+    # Check for memmon-specific fields
+    has_memmon_fields = "ram_free_gb" in first_entry and "elapsed_s" in first_entry
+    # Check for benchmark-specific fields
+    has_benchmark_fields = "schema_version" in first_entry or "outcome" in first_entry
+
+    return has_memmon_fields and not has_benchmark_fields
+
+
 def validate_jsonl(data: List[dict], schema: dict, filepath: Path) -> bool:
-    """Validate JSONL data against schema."""
+    """Validate JSONL data against schema.
+
+    Skips validation for memmon JSONL files (memory monitoring data).
+    """
+    # Skip validation for memmon data
+    if is_memmon_jsonl(data):
+        print(f"ℹ️  Skipping validation for memmon data: {filepath}")
+        return True
+
     errors = []
     for i, entry in enumerate(data, 1):
         try:
@@ -91,10 +117,16 @@ def extract_version_from_filename(filepath: Path) -> Optional[str]:
 
 
 def calculate_statistics(data: List[dict]) -> Dict:
-    """Calculate all benchmark statistics from JSONL data."""
+    """Calculate all benchmark statistics from JSONL data.
+
+    Filters out memmon entries (memory samples) if mixed with benchmark data.
+    """
+    # Filter out memmon entries (memory monitoring samples)
+    benchmark_data = [e for e in data if not ("ram_free_gb" in e and "elapsed_s" in e and "outcome" not in e)]
+
     # Separate by outcome
-    passed_tests = [e for e in data if e.get("outcome") == "passed"]
-    skipped_tests = [e for e in data if e.get("outcome") == "skipped"]
+    passed_tests = [e for e in benchmark_data if e.get("outcome") == "passed"]
+    skipped_tests = [e for e in benchmark_data if e.get("outcome") == "skipped"]
     passed_with_model = [e for e in passed_tests if "model" in e]
     passed_without_model = [e for e in passed_tests if "model" not in e]
 
@@ -157,7 +189,7 @@ def calculate_statistics(data: List[dict]) -> Dict:
                 # Total stats (legacy, always populated)
                 "count": 0,
                 "total_time": 0,
-                # Per-modality breakdown (NEW in v0.2.1)
+                # Per-modality breakdown (NEW in v0.2.1, Audio in v0.2.2)
                 "vision_count": 0,
                 "vision_time": 0.0,
                 "vision_ram_min": float("inf"),
@@ -166,6 +198,10 @@ def calculate_statistics(data: List[dict]) -> Dict:
                 "text_time": 0.0,
                 "text_ram_min": float("inf"),
                 "text_ram_max": 0,
+                "audio_count": 0,
+                "audio_time": 0.0,
+                "audio_ram_min": float("inf"),
+                "audio_ram_max": 0,
                 "unknown_count": 0,
                 "unknown_time": 0.0,
                 "unknown_ram_min": float("inf"),
@@ -184,7 +220,7 @@ def calculate_statistics(data: List[dict]) -> Dict:
         stats["count"] += 1
         stats["total_time"] += duration
 
-        # Update modality-specific stats (NEW in v0.2.1)
+        # Update modality-specific stats (NEW in v0.2.1, Audio in v0.2.2)
         modality = entry.get("metadata", {}).get("inference_modality", "unknown")
         if modality == "vision":
             stats["vision_count"] += 1
@@ -192,6 +228,9 @@ def calculate_statistics(data: List[dict]) -> Dict:
         elif modality == "text":
             stats["text_count"] += 1
             stats["text_time"] += duration
+        elif modality == "audio":
+            stats["audio_count"] += 1
+            stats["audio_time"] += duration
         else:  # "unknown" or any other value (backward compat)
             stats["unknown_count"] += 1
             stats["unknown_time"] += duration
@@ -206,6 +245,9 @@ def calculate_statistics(data: List[dict]) -> Dict:
             elif modality == "text":
                 stats["text_ram_min"] = min(stats["text_ram_min"], ram_gb)
                 stats["text_ram_max"] = max(stats["text_ram_max"], ram_gb)
+            elif modality == "audio":
+                stats["audio_ram_min"] = min(stats["audio_ram_min"], ram_gb)
+                stats["audio_ram_max"] = max(stats["audio_ram_max"], ram_gb)
             else:
                 stats["unknown_ram_min"] = min(stats["unknown_ram_min"], ram_gb)
                 stats["unknown_ram_max"] = max(stats["unknown_ram_max"], ram_gb)
@@ -271,14 +313,14 @@ def calculate_statistics(data: List[dict]) -> Dict:
             break
 
     return {
-        "total_tests": len(data),
+        "total_tests": len(benchmark_data),
         "passed": len(passed_tests),
         "passed_with_model": len(passed_with_model),
         "passed_infrastructure": len(passed_without_model),
         "skipped": len(skipped_tests),
         "total_duration": sum(e["duration"] for e in passed_tests),
-        "schema_version": data[0]["schema_version"] if data else "unknown",
-        "mlx_knife_version": data[0]["mlx_knife_version"] if data else "unknown",
+        "schema_version": benchmark_data[0].get("schema_version", "unknown") if benchmark_data else "unknown",
+        "mlx_knife_version": benchmark_data[0].get("mlx_knife_version", "unknown") if benchmark_data else "unknown",
         "swap": {
             "min": min(swap_values) if swap_values else 0,
             "max": max(swap_values) if swap_values else 0,
@@ -509,6 +551,34 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                     md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Text':<6} {model['text_count']:<5} {model['text_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {t_ram_range:<12}\n"
                 rows_written += 1
 
+            # Audio modality (NEW in v0.2.2)
+            if model['audio_count'] > 0:
+                a_ram_min = model['audio_ram_min']
+                a_ram_max = model['audio_ram_max']
+                if a_ram_min == float('inf'):
+                    a_ram_range = "-"
+                elif a_ram_min == a_ram_max:
+                    a_ram_range = f"{a_ram_min:.1f}"
+                else:
+                    a_ram_range = f"{a_ram_min:.1f}-{a_ram_max:.1f}"
+
+                # Get old audio stats (if available)
+                if old_model and old_model.get('audio_count', 0) > 0:
+                    old_time = old_model['audio_time']
+                    delta = model['audio_time'] - old_time
+                    change_pct = (delta / old_time * 100) if old_time > 0 else 0
+                    if change_pct > 5:
+                        status = "⚠️"
+                    elif change_pct < -1:
+                        status = "✅"
+                    else:
+                        status = ""
+                    change_str = f"{change_pct:+.1f}% {status}"
+                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Audio':<6} {model['audio_count']:<5} {model['audio_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {a_ram_range:<12}\n"
+                else:
+                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Audio':<6} {model['audio_count']:<5} {model['audio_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {a_ram_range:<12}\n"
+                rows_written += 1
+
             # Fallback for legacy data (no modality info) - rare in comparison mode
             if rows_written == 0 and old_model:
                 old_time = old_model['total_time']
@@ -556,6 +626,19 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Text':<6} {model['text_count']:<6} {model['text_time']:>8.1f}s  {t_ram_range:<20}\n"
                 rows_written += 1
 
+            if model['audio_count'] > 0:
+                # Use modality-specific RAM range (single value if min==max)
+                a_ram_min = model['audio_ram_min']
+                a_ram_max = model['audio_ram_max']
+                if a_ram_min == float('inf'):
+                    a_ram_range = "-"
+                elif a_ram_min == a_ram_max:
+                    a_ram_range = f"{a_ram_min:.1f}"
+                else:
+                    a_ram_range = f"{a_ram_min:.1f}-{a_ram_max:.1f}"
+                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Audio':<6} {model['audio_count']:<6} {model['audio_time']:>8.1f}s  {a_ram_range:<20}\n"
+                rows_written += 1
+
             # Fallback for legacy data (no modality info)
             if rows_written == 0:
                 md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'-':<6} {model['count']:<6} {model['total_time']:>8.1f}s  {ram_range:<20}\n"
@@ -572,9 +655,10 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         if not models_list:
             return ""
 
-        # Collect Vision and Text stats
+        # Collect Vision, Text, and Audio stats (Audio NEW in v0.2.2)
         vision_models = [m for m in models_list if m.get('vision_count', 0) > 0]
         text_models = [m for m in models_list if m.get('text_count', 0) > 0]
+        audio_models = [m for m in models_list if m.get('audio_count', 0) > 0]
 
         output = f"{category_name}: {len(models_list)} models\n"
         output += f"  Avg size:               {sum(m['size_gb'] for m in models_list) / len(models_list):.1f} GB\n"
@@ -615,8 +699,26 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 all_text_ram_max = max(text_ram_maxs)
                 output += f"    RAM range:            {all_text_ram_min:.1f}-{all_text_ram_max:.1f} GB\n"
 
+        # Audio stats (NEW in v0.2.2)
+        if audio_models:
+            avg_audio_time = sum(m['audio_time']/m['audio_count'] for m in audio_models) / len(audio_models)
+
+            # Collect RAM values (filter sentinel values)
+            audio_ram_mins = [m['audio_ram_min'] for m in audio_models if m['audio_ram_min'] != float('inf')]
+            audio_ram_maxs = [m['audio_ram_max'] for m in audio_models if m['audio_ram_max'] > 0]
+
+            output += f"  Audio Tests:\n"
+            output += f"    Models tested:        {len(audio_models)}\n"
+            output += f"    Avg test time:        {avg_audio_time:.1f}s\n"
+
+            # Only output RAM range if data available
+            if audio_ram_mins and audio_ram_maxs:
+                all_audio_ram_min = min(audio_ram_mins)
+                all_audio_ram_max = max(audio_ram_maxs)
+                output += f"    RAM range:            {all_audio_ram_min:.1f}-{all_audio_ram_max:.1f} GB\n"
+
         # Fallback for legacy data (no modality info)
-        if not vision_models and not text_models:
+        if not vision_models and not text_models and not audio_models:
             avg_time = sum(m['total_time']/m['count'] for m in models_list) / len(models_list)
             avg_ram = sum(m['ram_min'] for m in models_list) / len(models_list)
             output += f"  Avg test time:          {avg_time:.1f}s\n"
@@ -669,12 +771,14 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         if len(test_short) > max_test_len:
             test_short = test_short[:max_test_len-3] + "..."
 
-        # Format modality (Vision/Text/-)
+        # Format modality (Vision/Text/Audio/- for unknown)
         modality = test.get('modality', 'unknown')
         if modality == 'vision':
             mode_str = 'Vision'
         elif modality == 'text':
             mode_str = 'Text'
+        elif modality == 'audio':
+            mode_str = 'Audio'
         else:
             mode_str = '-'
 

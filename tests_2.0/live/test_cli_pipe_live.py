@@ -20,13 +20,53 @@ pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
 
 
 @pytest.fixture(autouse=True)
-def _report_text_modality(request):
-    """Report text inference modality for benchmark reports (v0.2.1).
+def _report_text_modality(request, text_portfolio):
+    """Report text inference modality and model info for benchmark reports (v0.2.1+).
 
     All pipe tests in this file are text inference (no vision).
     Required because these tests don't use text_model_key fixture.
+
+    Also reports model metadata if model_id fixture is available (v0.2.2).
     """
+    # Import here to avoid circular import
+    from .conftest import _parse_model_family
+
+    # Always set inference_modality
     request.node.user_properties.append(("inference_modality", "text"))
+
+    # Try to get model_id fixture (class-scoped in TestPipeModeSingleModel)
+    try:
+        model_id = request.getfixturevalue("model_id")
+    except:
+        # No model_id fixture available (e.g., tests outside TestPipeModeSingleModel)
+        return
+
+    if not model_id:
+        return
+
+    # Parse family/variant from model_id
+    family, variant = _parse_model_family(model_id)
+
+    # Lookup disk size from portfolio
+    disk_size_gb = None
+    for key, info in text_portfolio.items():
+        if info["id"] == model_id:
+            # Text models: apply 1.2x overhead for memory estimation
+            ram_gb = info["ram_needed_gb"]
+            disk_size_gb = ram_gb / 1.2 if ram_gb != float('inf') else float('inf')
+            break
+
+    # If not found in portfolio, fallback to unknown size
+    if disk_size_gb is None:
+        disk_size_gb = float('inf')
+
+    # Append model metadata to user_properties
+    request.node.user_properties.append(("model", {
+        "id": model_id,
+        "size_gb": round(disk_size_gb, 2) if disk_size_gb != float('inf') else disk_size_gb,
+        "family": family,
+        "variant": variant,
+    }))
 
 
 def _pick_first_eligible_model(text_portfolio: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:

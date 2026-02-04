@@ -161,7 +161,8 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
         type_label = str(m.get("model_type", "-"))
         if "vision" in caps and type_label != "-":
             type_label = f"{type_label}+vision"
-        if "audio" in caps and type_label != "-":
+        # Only add +audio if model_type is not already "audio" (avoid "audio+audio")
+        if "audio" in caps and type_label != "-" and type_label != "audio":
             type_label = f"{type_label}+audio"
         if compact:
             row = [

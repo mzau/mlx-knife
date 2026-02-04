@@ -4,11 +4,11 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.8** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.9** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.8-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.9-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Python 3.9+](https://img.shields.io/badge/python-3.10+(3.9)-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
 
@@ -18,7 +18,7 @@
 ## Features
 
 ### What's New in 2.0.4 (Coming Soon - Currently Beta)
-- **Audio Transcription (Experimental)** - Speech-to-text via `--audio` flag (CLI + Server API)
+- **Audio Transcription (STT)** - Whisper speech-to-text (`--audio` flag, `pip install mlx-knife[audio]`)
 - **Vision Models with EXIF Metadata** - Image analysis + automatic GPS/date/camera extraction visible to the model
 - **Unix Pipe Integration** - Chain models without temp files (`vision → text` workflows)
 - **Local Development Workflow** - Clone → Repair → Test models without HuggingFace round-trips
@@ -51,7 +51,7 @@ Robust handling of SIGPIPE and early pipe termination (`| head`, `| grep -m1`).
 
 ### Requirements
 - macOS with Apple Silicon
-- Python 3.9+ (native macOS version or newer)
+- Python 3.10-3.12 (see Python Compatibility below)
 - 8GB+ RAM recommended + RAM to run LLM
 
 ## ⚖️ Model Usage and Licenses
@@ -74,52 +74,56 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 > This is not legal advice. Always refer to the original model license text and, if necessary, seek professional legal counsel.
 
 ### Python Compatibility
-MLX Knife has been comprehensively tested and verified on:
 
-✅ **Python 3.9.6 - 3.14** - Text LLMs fully supported (mlx-lm 0.28.4+)
-✅ **Python 3.10 - 3.14** - Vision models supported (mlx-vlm 0.3.9+; beta.8 uses commit 5812270 with audio + MXFP4 support)
+✅ **Python 3.10 - 3.12** - Full support (Text + Vision + Audio)
+❌ **Python 3.9** - Not supported (MLX 0.30+ requires 3.10+)
+❌ **Python 3.13+** - Not supported (miniaudio lacks pre-built wheels)
 
-**Note:** Vision features require Python 3.10+. Native macOS Python 3.9.6 users need to upgrade (e.g., via Homebrew).
+**Note:** Vision/Audio features require Python 3.10+. Recommended: **Python 3.10 or 3.11** for best compatibility.
 
 
 
 ## Installation
 
-### Via PyPI (Stable)
+### Via PyPI (Stable - v2.0.3, Text only)
 
 ```bash
-# Basic installation (Text models only, Python 3.9+)
 pip install mlx-knife
 
-# With Vision support (Python 3.10+ required)
-pip install mlx-knife[vision]
-
-# Verify installation
-mlxk --version  # → mlxk 2.0.3 (latest stable on PyPI)
+# Verify
+mlxk --version  # → mlxk 2.0.3
 ```
 
-**Python Requirements:**
-- **Text models:** Python 3.9-3.14
-- **Vision models:** Python 3.10-3.14
+**Requirements:**
+- macOS with Apple Silicon (M1/M2/M3/M4)
+- Python 3.10-3.12
 
-**Note:** Version 2.0.4 is under development. Beta releases are available on GitHub only (see below).
+> **Note:** PyPI stable (2.0.3) supports **Text models only**. For Vision + Audio, use the beta version below.
 
-### Via GitHub (Latest Beta)
+### Via GitHub (Beta - v2.0.4-beta.9, Text + Vision + Audio)
 
 ```bash
-# Install 2.0.4-beta.8 (Audio transcription + Server enhancements)
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.8"
+# Step 1: Base + Vision
+pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.9#egg=mlx-knife[vision]"
 
-# With Vision support (Python 3.10+ required)
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.8#egg=mlx-knife[vision]"
+# Step 2: Audio (optional - requires Git install due to PyPI regression)
+pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
+pip install tiktoken
 
-# Verify installation
-mlxk --version  # → mlxk 2.0.4b8
+# Verify
+mlxk --version  # → mlxk 2.0.4b9
 ```
 
-**Beta.8 note:** Uses mlx-vlm commit 5812270 (includes audio support + MXFP4 quantization). The `[vision]` extra automatically installs the correct version.
+**Beta.9 features:**
+- **Vision**: mlx-vlm 0.3.10 - Image analysis with EXIF metadata
+- **Audio**: mlx-audio (Git) - Whisper STT (WAV, MP3, M4A)
+- **Recommended models**: `whisper-large-v3-turbo-4bit`, `pixtral-12b-4bit`
 
-**For production use:** Wait for 2.0.4 stable on PyPI (requires mlx-vlm 0.3.10 release).
+> **⚠️ Audio Installation Note:** mlx-audio 0.3.1 (PyPI) has a tiktoken regression. For audio support, install manually:
+> ```bash
+> pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
+> pip install tiktoken
+> ```
 
 ### Development Installation
 
@@ -128,22 +132,21 @@ mlxk --version  # → mlxk 2.0.4b8
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 
-# Install with all development dependencies (required for testing and code quality)
-pip install -e ".[dev,test]"
+# Step 1: Base + Vision + Dev tools
+pip install -e ".[vision,dev,test]"
 
-# With Vision support (optional)
-pip install -e ".[dev,test,vision]"
+# Step 2: Audio from Git (PyPI 0.3.1 broken)
+pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
+pip install tiktoken
 
-# Verify installation
-mlxk --version  # → mlxk 2.0.4b8
+# Verify
+mlxk --version  # → mlxk 2.0.4b9
+python -c "import mlx_vlm; print('vision ok')"
+python -c "import mlx_audio; print('audio ok')"
 
-# Run tests and quality checks (before committing)
+# Run tests
 pytest -v
-ruff check mlxk2/ --fix
-mypy mlxk2/
 ```
-
-**Note:** For minimal user installation without dev tools: `pip install -e .`
 
 ### Migrating from 1.x
 
@@ -311,8 +314,7 @@ Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+.
 
 - **Python 3.10+** (mlx-vlm dependency)
 - **Installation:** `pip install mlx-knife[vision]`
-- **Backend:** mlx-vlm commit 5812270 (audio + MXFP4 support, auto-installed)
-- **Beta.8 note:** The `[vision]` extra automatically installs mlx-vlm from git with audio support. Will switch to PyPI v0.3.10 when released.
+- **Backend:** mlx-vlm 0.3.10 (auto-installed from PyPI)
 
 #### Usage
 
@@ -462,7 +464,7 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 
 | Model | Issue | Workaround |
 |-------|-------|------------|
-| `Mistral-Small-3.1-24B-Instruct-2503-4bit` | Vision feature mismatch (5476 positions ≠ 1369 features). **Note:** `--repair-index` fixes mlx-vlm #624 but NOT this bug | Use alternative models (pixtral-12b-8bit, Llama-3.2-11B) |
+| `Mistral-Small-3.1-24B-Instruct-2503-4bit` | Vision feature mismatch (5476 positions ≠ 1369 features). **Note:** This is a different bug than mlx-vlm #624 - `--repair-index` cannot fix it | Use alternative models (pixtral-12b-8bit, Llama-3.2-11B) |
 | `MiMo-VL-7B-RL-bf16` | NoneType iteration error | mlx-vlm processor bug, no workaround |
 | `DeepSeek-OCR-8bit` | Runs but hallucinates details | Quality issue, not recommended |
 
@@ -476,52 +478,91 @@ mlxk convert <model> <output> --repair-index
 
 **Reporting Issues:** If you encounter vision model failures, please report with model name and error message to help improve compatibility tracking.
 
-### Audio Model Compatibility
+### Audio Transcription (Speech-to-Text)
 
-> **🧪 Experimental:** Audio support is new in v2.0.4-beta.8. Currently only Gemma-3n tested.
+> **🎙️ New in beta.9:** Professional STT via dedicated Whisper models (mlx-audio backend). Backward compatible with Gemma-3n multimodal audio (mlx-vlm).
 
-**✅ Tested & Working Models** (mlx-knife v2.0.4-beta.8):
+**Requirements:**
+- **Python 3.10+** (mlx-audio dependency)
+- **Installation:** (mlx-audio 0.3.1 PyPI has regression - install from Git):
+  ```bash
+  pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
+  pip install tiktoken
+  ```
+- **No system dependencies:** MP3/WAV decoding via embedded libsndfile (no ffmpeg or Homebrew required)
 
-| Model | Size | Notes |
-|-------|------|-------|
-| `gemma-3n-E2B-it-4bit` | ~2.1GB | Requires workspace repair workflow (see below) |
+**✅ Recommended Models** (mlx-knife v2.0.4-beta.9):
 
-**⚠️ Setup Required:** The mlx-community model has an index mismatch (mlx-vlm #624). Prepare once:
+| Model | Backend | Size | Duration | Notes |
+|-------|---------|------|----------|-------|
+| `whisper-large-v3-turbo-4bit` | mlx-audio | ~464MB | >10 min | **Recommended** - Best accuracy/speed balance |
+| `whisper-tiny` | mlx-audio | ~74MB | >10 min | Fast, lower accuracy |
+| `gemma-3n-E2B-it-4bit` | mlx-vlm | ~2.1GB | ~30s | Multimodal (vision+audio), requires workspace repair |
+
+**🔧 Backend Architecture:**
+
+mlx-knife automatically routes audio models to the optimal backend:
+- **Whisper/Voxtral** → mlx-audio (dedicated STT, >10min duration, best accuracy)
+- **Gemma-3n** → mlx-vlm (multimodal audio, ~30s limit, backward compatible)
+
+**⚙️ Audio Defaults:**
+
+| Setting | Audio | Text/Vision | Reason |
+|---------|-------|-------------|--------|
+| Temperature | 0.0 | 0.7 | Greedy decoding (STT best practice) |
+| Default Prompt | "Transcribe this audio." | - | Minimal prompt for pure transcription |
+
+**💡 Quick Start:**
 
 ```bash
-MLXK2_ENABLE_ALPHA_FEATURES=1
-mlxk clone mlx-community/gemma-3n-E2B-it-4bit ./gemma-3n-audio
-mlxk convert ./gemma-3n-audio ./gemma-3n-audio-FIXED --repair-index
-mlxk run ./gemma-3n-audio-FIXED --audio test.wav  # Now works
+# Pull a Whisper model (one-time setup)
+mlxk pull mlx-community/whisper-large-v3-turbo-4bit
+
+# Transcribe audio (WAV, MP3, M4A - native on macOS)
+mlxk run whisper-large --audio speech.mp3
+# → Automatic greedy decoding (temp=0.0)
+
+# With language hint for better accuracy
+mlxk run whisper-large --audio speech.mp3 --language en
+
+# Longer audio (>10 minutes supported)
+mlxk run whisper-large --audio podcast.wav
 ```
-
-**⚙️ Audio-Specific Defaults:**
-
-| Setting | Audio Default | Text/Vision Default | Reason |
-|---------|---------------|---------------------|--------|
-| Temperature | 0.2 | 0.7 | Reduces multilingual drift on 4-bit models |
-| Default Prompt | "Transcribe this audio." | - | Simple prompt reduces multilingual drift |
 
 **⚠️ Known Limitations:**
 
-| Limitation | Details | Workaround |
-|------------|---------|------------|
-| **Duration limit** | ~30 seconds max (Gemma-3n model constraint: 188 tokens at 6.25 tokens/sec) | Split longer recordings |
-| File size | 5MB limit | Split larger files |
-| Multi-audio | Not supported (mlx-vlm token mismatch bug) | Process one file at a time |
-| Audio+Vision combined | Audio silently ignored when images present | Use audio-only or vision-only |
-| Phonetic errors | Mishearing observed (e.g., "A man" → "Amen") | Try `--temperature 0` for consistency |
-| Format support | WAV confirmed; other formats untested | Convert to WAV |
+| Limitation | Whisper Models | Gemma-3n (Multimodal) | Workaround |
+|------------|----------------|------------------------|------------|
+| **Duration** | >10 minutes ✅ | ~30 seconds (token limit) | Use Whisper for long audio |
+| **File size** | 50MB max | 50MB max | Split larger files |
+| **Formats** | WAV, MP3, M4A (macOS native, Linux needs ffmpeg) | WAV | M4A uses Core Audio on macOS |
+| **Legacy models** | Some use old `weights.npz` format | - | Use models with `.safetensors` |
 
-**💡 Tips for Best Results:**
+**🎯 Advanced Usage:**
 
 ```bash
-# After workspace setup (see above):
-# Explicit transcription with greedy sampling for consistency
-mlxk run ./gemma-3n-audio-FIXED --audio speech.wav --temperature 0
+# Explicit temperature control (0.0 = greedy, deterministic)
+mlxk run whisper-large --audio speech.wav --temperature 0.0
 
-# Default settings (temperature 0.2, simple prompt)
-mlxk run ./gemma-3n-audio-FIXED --audio speech.wav
+# Force specific language (improves accuracy)
+mlxk run whisper-large --audio german.mp3 --language de
+
+# Segment metadata (MLXK2_AUDIO_SEGMENTS=1 for timestamps)
+MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
+```
+
+**🔄 Gemma-3n Multimodal (Backward Compatibility):**
+
+> **Note:** Gemma-3n requires workspace repair due to mlx-vlm #624. Use Whisper for production STT.
+
+```bash
+# One-time setup (if using Gemma-3n)
+MLXK2_ENABLE_ALPHA_FEATURES=1
+mlxk clone mlx-community/gemma-3n-E2B-it-4bit ./gemma-3n-audio
+mlxk convert ./gemma-3n-audio ./gemma-3n-audio-FIXED --repair-index
+
+# Run (30s limit, multimodal audio)
+mlxk run ./gemma-3n-audio-FIXED --audio short-clip.wav
 ```
 
 
@@ -1231,7 +1272,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.8 | January 2026</i><br>
+  <i>Version 2.0.4-beta.9 | February 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

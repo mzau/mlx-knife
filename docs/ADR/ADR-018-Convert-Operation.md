@@ -2,7 +2,7 @@
 
 **Status:** Implemented (Phases 0a-0c + 1 complete in 2.0.4-beta.6)
 **Created:** 2025-12-18
-**Updated:** 2026-01-10 (Gate status: clone/push production, convert experimental)
+**Updated:** 2026-02-01 (Added: Known Model Defects & Repair Strategies survey)
 **Context:** Users need to (a) quantize MLX workspaces locally without polluting the HF cache and (b) repair MLX/HF compliance issues (notably safetensors index/shard mismatches) in a deterministic way.
 
 **Phase Status:**
@@ -458,6 +458,196 @@ mlxk health ./ws-fixed  # Should be healthy
 
 ---
 
+## Known Model Defects & Repair Strategies
+
+This section catalogs known defects in mlx-community models and upstream conversion pipelines. Understanding these patterns is essential for:
+1. Deciding which `--repair-*` flags to implement
+2. Providing actionable error messages to users
+3. Contributing upstream fixes
+
+### Defect Categories
+
+#### Category A: Repairable Without Original Model
+
+These defects can be fixed from the MLX model alone, without access to the original HuggingFace model.
+
+| ID | Defect | Affected Models | Detection | Repair | Status |
+|----|--------|-----------------|-----------|--------|--------|
+| A1 | **Index/Shard Mismatch** | mlx-vlm converted models (7+) | `health` → index mismatch | `--repair-index` | ✅ Phase 1 |
+| A2 | **Tokenizer PreTokenizer Regex** | EuroLLM, Mistral (transformers 4.39-4.57.2) | garbled output (Ġ, UTF-8 corruption) | Runtime fix in runner | ✅ Implemented |
+| A3 | **weights.npz → safetensors** | Whisper legacy | `health` → .npz detected | `--repair-weights` | ❌ Planned |
+| A4 | **eos_token_id=null** | Various | config.json check | `--repair-config` | ❌ Future |
+| A5 | **video_processor=null** | Qwen2-VL models | config.json check | `--repair-config` | ❌ Future |
+| A6 | **Missing preprocessor_config.json** | mlx-community Whisper models | mlx-audio warning | `convert --add-preprocessor-config` | ❌ Future |
+
+#### Category B: Requires Original Model or Manual Intervention
+
+These defects require access to the original HuggingFace model or manual configuration.
+
+| ID | Defect | Affected Models | Detection | Resolution |
+|----|--------|-----------------|-----------|------------|
+| B1 | **Missing model_type** | Custom/converted models | config.json check | User must add manually |
+| B2 | **Missing tokenizer.json** | Some older models | file existence | Re-convert from original |
+| B3 | **chat_template issues** | Various (see upstream) | runtime errors | Manual fix or re-convert |
+| B4 | **safetensors missing metadata** | Some converts | header inspection | Re-convert from original |
+
+### Detailed Defect Descriptions
+
+#### A1: Index/Shard Mismatch (mlx-vlm #624)
+
+**Root Cause:** mlx-vlm overwrite regression during quantization, writing same keys to multiple shards.
+
+**Symptoms:**
+- `mlxk health` reports "index mismatch"
+- Model may load with lenient loaders but fails strict validation
+
+**Affected Models:**
+- Qwen2.5-VL-7B-Instruct-4bit
+- gemma-3-27b-it-4bit
+- Mistral-Small-3.1-24B-Instruct-2503-4bit
+- DeepSeek-OCR-4bit
+- Devstral-Small-2-24B-Instruct-2512-6bit
+- (7+ models total)
+
+**Repair:** `mlxk convert ./ws ./ws-fixed --repair-index`
+
+**Upstream:** Fixed in mlx-vlm PR #638
+
+---
+
+#### A2: Tokenizer PreTokenizer Regex (transformers bug)
+
+**Root Cause:** transformers versions 4.39.0 - 4.57.2 produced broken `tokenizer.json` files with invalid PreTokenizer regex patterns.
+
+**Symptoms:**
+- `Ġ` (U+0120) BPE space markers visible in output
+- UTF-8 corruption: `ö` → `Ã¶`, `ä` → `Ã¤`
+- Words concatenated without spaces
+
+**Affected Models:**
+- EuroLLM-22B-Instruct-2512 variants
+- DeepHermes-3-Mistral-24B (transformers 4.46.3)
+- Mistral-Small-3.2-24B (transformers 4.52.4)
+- DeepSeek-R1-Distill-Llama-8B (transformers 4.43.0)
+
+**Repair:** Runtime workaround in `MLXRunner._apply_mistral_regex_fix()` - no file modification needed.
+
+**Upstream References:**
+- mlx-lm Issue #49 (Mistral tokenizer)
+- transformers issue (version range 4.39-4.57.2)
+
+---
+
+#### A3: Whisper Legacy weights.npz
+
+**Root Cause:** Original mlx-examples whisper convert.py saved weights as `weights.npz` instead of `model.safetensors`.
+
+**Symptoms:**
+- `health` reports NPZ format detected
+- Works but not compliant with modern MLX conventions
+
+**Affected Models:**
+- whisper-large-v3-turbo (early converts)
+- Other early Whisper conversions
+
+**Repair (Proposed):** `--repair-weights` to convert npz → safetensors
+
+**Upstream:** Issue #938 - Update whisper/convert.py to save as safetensors
+
+---
+
+#### A6: Missing preprocessor_config.json (Whisper models)
+
+**Root Cause:** mlx-community quantized Whisper models omit `preprocessor_config.json` during conversion, despite it being present in original OpenAI models.
+
+**Symptoms:**
+- mlx-audio emits warning: "Could not load WhisperProcessor: Can't load feature extractor..."
+- Warning pollutes JSON logs in server mode
+- Model works (mlx-audio falls back to tiktoken tokenizer)
+
+**Affected Models:**
+- All mlx-community Whisper quantized models (whisper-large-v3-turbo-4bit, etc.)
+- Does NOT affect original OpenAI whisper models (they have the file)
+
+**Current Workarounds:**
+- Server mode: Warning suppressed via `warnings.filterwarnings()` to keep JSON logs clean
+- CLI mode: Warning visible (intentional - users should be aware)
+
+**Repair (Proposed):** `mlxk convert ./ws ./ws-fixed --add-preprocessor-config`
+- **Option 1 (Preferred):** Copy from original OpenAI model (e.g., `openai/whisper-large-v3-turbo`)
+- **Option 2 (Fallback):** Use standard template (identical across all Whisper variants)
+
+**Why Category A:** Unlike other B-category defects, `preprocessor_config.json` is **identical** across all Whisper models (standard audio parameters: 16kHz sampling, 30s chunks, etc.). No model-specific content, making it safe to use a template if original is unavailable.
+
+**Upstream:** mlx-community should preserve preprocessor_config.json during Whisper conversions
+
+---
+
+### Upstream Issue Survey
+
+#### mlx-lm / mlx-examples Issues
+
+| Issue | Description | Category | Status |
+|-------|-------------|----------|--------|
+| [#683](https://github.com/ml-explore/mlx-lm/issues/683) | TokenizersBackend class error | B3 | Open |
+| [#682](https://github.com/ml-explore/mlx-lm/issues/682) | TokenizersBackend initialization | B3 | Open |
+| [#470](https://github.com/ml-explore/mlx-lm/issues/470) | qwen3_next model_type not supported | B1 | Pending |
+| [#355](https://github.com/ml-explore/mlx-examples/issues/355) | convert modifies tokenizer_config.json | A2 | Related |
+| [#737](https://github.com/ml-explore/mlx-examples/issues/737) | generate doesn't halt at `<\|eot_id\|>` | A4/B3 | Open |
+| [#1243](https://github.com/ml-explore/mlx-examples/issues/1243) | chat_template not set | B3 | Open |
+| [#1195](https://github.com/ml-explore/mlx-examples/issues/1195) | chat_template issues | B3 | Open |
+| [#832](https://github.com/ml-explore/mlx-examples/issues/832) | tokenizer issues | A2/B3 | Related |
+| [#938](https://github.com/ml-explore/mlx-examples/issues/938) | whisper saves npz not safetensors | A3 | Open |
+
+#### mlx-vlm Issues
+
+| Issue | Description | Category | Status |
+|-------|-------------|----------|--------|
+| [#624](https://github.com/Blaizzy/mlx-vlm/issues/624) | Index/shard mismatch | A1 | Fixed PR #638 |
+| [#676](https://github.com/Blaizzy/mlx-vlm/issues/676) | MP3 transcription bug | - | Fixed 0.3.10 |
+
+#### mlx Core Issues
+
+| Issue | Description | Category | Status |
+|-------|-------------|----------|--------|
+| [#743](https://github.com/ml-explore/mlx/issues/743) | safetensors missing metadata | B4 | Open |
+
+### Repair Strategy Matrix
+
+| Defect | Can Detect | Can Repair (No Original) | Repair Method | Priority |
+|--------|------------|--------------------------|---------------|----------|
+| Index Mismatch | ✅ | ✅ | `--repair-index` | ✅ Done |
+| Tokenizer Regex | ⚠️ Runtime only | ✅ | Runtime workaround | ✅ Done |
+| weights.npz | ✅ | ✅ | `--repair-weights` | Medium |
+| eos_token_id=null | ✅ | ⚠️ Needs heuristics | `--repair-config` | Low |
+| video_processor=null | ✅ | ⚠️ Model-specific | `--repair-config` | Low |
+| Missing model_type | ✅ | ❌ | User manual | N/A |
+| Missing tokenizer.json | ✅ | ❌ | Re-convert | N/A |
+| chat_template | ⚠️ Runtime | ⚠️ Complex | Manual | N/A |
+
+### Future `--repair-*` Flags (Proposed)
+
+Based on this survey, future convert modes could include:
+
+```bash
+# Phase 1 (Done)
+mlxk convert ./ws ./ws-fixed --repair-index
+
+# Phase 2 (Proposed)
+mlxk convert ./ws ./ws-fixed --repair-weights    # npz → safetensors
+mlxk convert ./ws ./ws-fixed --repair-config     # Fix known config issues
+
+# Combined (Future)
+mlxk convert ./ws ./ws-fixed --repair-all        # Apply all safe repairs
+```
+
+**Design Principle:** Only implement repairs that are:
+1. Deterministic (same input → same output)
+2. Safe (no data loss risk)
+3. Verifiable (`health` can confirm fix)
+
+---
+
 ## Status / Phases
 
 - [x] **Phase 0a (2.0.4-beta.5):** ✅ Workspace infrastructure foundation
@@ -502,3 +692,6 @@ mlxk health ./ws-fixed  # Should be healthy
 - mlx-vlm issue #624 (index overwrite regression)
 - mlx-vlm PR #638 (fix)
 - ADR-007: Clone Implementation (workspace concept)
+- mlx-lm Issue #49 (Mistral tokenizer regression)
+- mlx-examples Issue #938 (Whisper npz → safetensors)
+- transformers versions 4.39.0 - 4.57.2 (tokenizer PreTokenizer bug window)

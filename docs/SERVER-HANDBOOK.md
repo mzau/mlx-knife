@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.4-beta.8 (WIP)
+**Version:** 2.0.4-beta.9 (WIP)
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-01-20
+**Last Updated:** 2026-02-02
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -23,10 +23,10 @@ mlxk serve --host 0.0.0.0 --port 8000
 ```
 
 **Requirements:**
-- Python 3.9+ (Text models)
-- Python 3.10+ (Vision and Audio models)
-- mlx-lm 0.28.4+
-- mlx-vlm ≥0.3.10 (required for audio; currently GitHub-only, not yet on PyPI)
+- Python 3.10-3.12 (Text, Vision, Audio)
+- mlx-lm ≥0.30.5
+- mlx-vlm ≥0.3.10 (PyPI) for Vision
+- mlx-audio ≥0.3.1 (PyPI) for Audio STT (`pip install mlx-knife[audio]`)
 
 ---
 
@@ -40,18 +40,9 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 |----------|--------|-------|
 | `/v1/chat/completions` | ✅ Supported | Text, Vision (`image_url`), Audio (`input_audio`) |
 | `/v1/completions` | ✅ Supported | Legacy text completion |
+| `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
 | `/v1/models` | ✅ Supported | Extended with `context_length` field |
 | `/health` | ✅ Custom | MLX Knife extension |
-
-### Not Implemented
-
-| Endpoint | Status |
-|----------|--------|
-| `/v1/embeddings` | ❌ Planned (ADR-015) |
-| `/v1/audio/*` | ❌ Not planned (use `input_audio` in chat) |
-| `/v1/files` | ❌ Not planned |
-| `/v1/moderations` | ❌ Not planned |
-| `/v1/responses` | ❌ Not planned |
 
 ### Authentication
 
@@ -61,12 +52,31 @@ MLX Knife **ignores** authentication headers. The server accepts but does not va
 
 **Note:** For production deployments requiring authentication, use a reverse proxy (nginx, Caddy).
 
+**⚠️ Client Implementers:** When adding reverse proxy authentication, ensure your client sends authentication headers to **all** endpoints, including:
+- `/v1/chat/completions`
+- `/v1/completions`
+- `/v1/audio/transcriptions` (file upload endpoint)
+- `/v1/models`
+
+A common mistake is implementing auth for JSON endpoints but forgetting `multipart/form-data` endpoints like audio transcription.
+
 ### Request Headers
 
 ```
 Content-Type: application/json  (required)
 Authorization: Bearer ...       (optional, ignored)
 ```
+
+### Response Headers
+
+```
+X-Request-ID: <unique-id>       (all responses, MLX Knife extension)
+```
+
+**X-Request-ID** (MLX Knife extension):
+- Present on **every response** (success and error)
+- Same ID appears in error response body as `"request_id"`
+- Use for request correlation and distributed tracing (e.g., Broke-Cluster log aggregation)
 
 ### Behavioral Deviations from OpenAI
 
@@ -218,6 +228,71 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 
 ---
 
+### POST /v1/audio/transcriptions
+
+**OpenAI Whisper API compatible audio transcription (beta.9+).**
+
+Use this endpoint for **direct file upload** transcription with STT models (Whisper, Voxtral).
+
+**Request (multipart/form-data):**
+```bash
+curl -X POST http://localhost:8080/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "model=whisper-large" \
+  -F "language=en" \
+  -F "response_format=json"
+```
+
+**Form Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | File | ✅ | Audio file (WAV, MP3, M4A, FLAC, OGG) |
+| `model` | String | ✅ | Model ID (e.g., `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`) |
+| `language` | String | ❌ | Language code (e.g., `en`, `de`). Auto-detect if omitted. |
+| `prompt` | String | ❌ | Optional context to guide transcription |
+| `response_format` | String | ❌ | `json` (default), `text`, `verbose_json` |
+| `temperature` | Float | ❌ | Sampling temperature (default: 0.0 for greedy) |
+
+**Response (JSON - default):**
+```json
+{
+  "text": "A man said to the universe, Sir, I exist."
+}
+```
+
+**Response (text):**
+```
+A man said to the universe, Sir, I exist.
+```
+
+**Response (verbose_json):**
+```json
+{
+  "task": "transcribe",
+  "language": "en",
+  "duration": 0.57,
+  "text": "A man said to the universe, Sir, I exist."
+}
+```
+
+**Supported Models:**
+- Whisper: `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`
+- Voxtral: `mlx-community/Voxtral-Mini-3B-2507-bf16` (upstream tokenizer issues)
+
+**Note:** This endpoint requires `mlx-audio` (`pip install mlx-knife[audio]`).
+
+**vs. `/v1/chat/completions` with `input_audio`:**
+
+| Feature | `/v1/audio/transcriptions` | `/v1/chat/completions` |
+|---------|---------------------------|------------------------|
+| Format | Multipart file upload | Base64 in JSON |
+| Models | STT only (Whisper, Voxtral) | Multimodal (Gemma-3n) |
+| Use case | Pure transcription | Chat with audio context |
+| OpenAI API | Whisper API | Chat Completions API |
+
+---
+
 ### GET /v1/models
 
 **List available models.**
@@ -317,29 +392,62 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 
 ---
 
-### Audio Support (2.0.4-beta.8)
+### Audio Support (2.0.4-beta.9)
 
-**Native audio input** for audio-capable models (Gemma-3n).
+**Two methods** for audio transcription:
+
+#### Method 1: `/v1/audio/transcriptions` (Whisper API)
+
+**Direct file upload** for STT models (Whisper, Voxtral). Recommended for pure transcription.
+
+```bash
+curl -X POST http://localhost:8080/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "model=whisper-large"
+```
+
+**Supported:**
+- ✅ File upload (multipart/form-data)
+- ✅ Formats: WAV, MP3, M4A, FLAC, OGG
+- ✅ Response formats: `json`, `text`, `verbose_json`
+- ✅ Language detection or explicit `language` parameter
+
+**Models:** Whisper, Voxtral (requires `pip install mlx-knife[audio]`)
+
+#### Method 2: `/v1/chat/completions` with `input_audio`
+
+**Base64-encoded audio** in chat messages for multimodal models (Gemma-3n).
+
+```json
+{
+  "model": "gemma-3n-E2B-it-4bit",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "Transcribe this audio"},
+      {"type": "input_audio", "input_audio": {"data": "<base64>", "format": "wav"}}
+    ]
+  }]
+}
+```
 
 **Supported:**
 - ✅ OpenAI `input_audio` format (Base64-encoded)
 - ✅ Formats: WAV, MP3
 - ✅ Temperature 0.0 (greedy sampling for transcription consistency)
 
-**Limits:**
-- **Per-audio:** 5 MB max (~2-3 minutes at 16kHz mono)
-- **Count:** 1 audio per request (multi-audio blocked)
+**Limits (both methods):**
+- **Per-audio:** 50 MB max for transcriptions endpoint, 5 MB for chat
+- **Count:** 1 audio per request
+
+**Models:** Gemma-3n (Vision + Audio + Text)
 
 **Important Characteristics:**
 
 - **Stateless Server:** Same as Vision — no server-side state
-- **Single Audio:** Only one audio file per request (mlx-vlm limitation)
-- **Audio+Vision:** When both present, audio is silently ignored (mlx-vlm behavior)
-- **Temperature:** Fixed at 0.0 for transcription consistency (CLI default: 0.2)
-
-**Audio-Capable Models:**
-- `gemma-3n` (Google): Vision + Audio + Text
-- Qwen3-Omni: Not supported (mlx-lm architecture missing)
+- **Single Audio:** Only one audio file per request
+- **Audio+Vision:** When both present in chat, audio is silently ignored (mlx-vlm behavior)
+- **Temperature:** Fixed at 0.0 for transcription consistency
 
 **History Handling:**
 
@@ -553,13 +661,18 @@ python -m mlxk2.core.server_base
 
 **Solution:**
 ```bash
-# Upgrade Python
+# Upgrade Python (3.10-3.12 required)
 pyenv install 3.10
 pyenv local 3.10
-pip install mlx-lm mlx-vlm
 
-# Until mlx-vlm 0.3.10 on PyPI (Vision + Audio support)
-pip install mlx-lm "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@58122703b0bba7c574d23c9c751f01cf60485d4f"
+# Install with Vision support
+pip install mlx-knife[vision]
+
+# Install with Audio STT support (Whisper)
+pip install mlx-knife[audio]
+
+# Install with everything
+pip install mlx-knife[all]
 ```
 
 ### Memory Constraint Errors (HTTP 507)
@@ -635,6 +748,32 @@ mlxk list | grep +audio
 }
 ```
 
+#### Transcription Endpoint Returns Wrong Model Error
+
+**Symptom:** `Model 'xxx' is not an audio transcription model`
+
+**Cause:** `/v1/audio/transcriptions` only works with STT models (Whisper, Voxtral)
+
+**Solution:** Use the correct model type:
+```bash
+# For transcription endpoint: STT models
+curl -X POST http://localhost:8080/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "model=whisper-large"
+
+# For multimodal chat: Gemma-3n (use chat/completions instead)
+# See "Audio Messages Format" in Appendix
+```
+
+#### mlx-audio Not Installed
+
+**Symptom:** `STT models require mlx-audio`
+
+**Solution:**
+```bash
+pip install mlx-knife[audio]
+```
+
 ---
 
 ## Limits Summary
@@ -644,8 +783,9 @@ mlxk list | grep +audio
 | Images per request | 5 | Metal OOM prevention |
 | Image size | 20 MB | Metal OOM prevention |
 | Total image size | 50 MB | Metal OOM prevention |
-| **Audio per request** | **1** | **mlx-vlm limitation** |
-| **Audio size** | **5 MB** | **Token count constraint** |
+| **Audio per request (chat)** | **1** | **mlx-vlm limitation** |
+| **Audio size (chat)** | **5 MB** | **Token count constraint** |
+| **Audio size (transcriptions)** | **50 MB** | **~15 min @ 16kHz mono** |
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
 | Vision max_tokens | 2048 (default) | Stateless, slow inference |
@@ -656,36 +796,40 @@ mlxk list | grep +audio
 
 ## Migration Guide
 
-### From 2.0.4-beta.7 → 2.0.4-beta.8
+### From 2.0.3 → 2.0.4
 
 **New Features:**
-- ✅ Audio input support via OpenAI `input_audio` format
-- ✅ Supported audio formats: WAV, MP3
-- ✅ Audio history filtering: `[n audio(s) were attached]`
+
+| Feature | Endpoint | Requirements |
+|---------|----------|--------------|
+| Vision (images) | `/v1/chat/completions` | `pip install mlx-knife[vision]` |
+| Audio Chat (Gemma-3n) | `/v1/chat/completions` | `pip install mlx-knife[vision]` |
+| Audio STT (Whisper) | `/v1/audio/transcriptions` | `pip install mlx-knife[audio]` |
+| Memory pre-load checks | All endpoints | Built-in (HTTP 507) |
+| Server audio preload | `mlxk serve --model whisper-large` | Built-in |
 
 **Breaking Changes:**
-- None (audio is additive)
+
+| Change | Before | After | Impact |
+|--------|--------|-------|--------|
+| Python version | 3.9+ | 3.10-3.12 | Upgrade required |
+| Vision `max_tokens` default | 1024 | 2048 | Longer responses |
+| Memory checks (Vision) | None | 70% RAM limit | HTTP 507 possible |
+
+**New Dependencies (auto-installed):**
+- `mlx-vlm>=0.3.10` (Vision + Gemma-3n audio)
+- `mlx-audio>=0.3.1` (Whisper STT)
+- `python-multipart>=0.0.9` (file uploads)
+
+**Client Updates Required:**
+- Handle HTTP 507 (Insufficient Storage) for large Vision models
+- Update clients expecting `max_tokens: 1024` to handle 2048
+- Use `temperature: 0.0` for audio transcription consistency
 
 **Recommendations:**
-- Update mlx-vlm to ≥0.3.10 (GitHub install required, not yet on PyPI)
-- Use temperature 0.0 for audio transcription requests
-- Test with Gemma-3n or other audio-capable models
-
-### From 2.0.3 → 2.0.4-beta.1
-
-**New Features:**
-- ✅ Vision support (Python 3.10+)
-- ✅ Memory pre-load checks (HTTP 507)
-- ✅ Unix pipe integration (`MLXK2_ENABLE_PIPES=1`)
-
-**Breaking Changes:**
-- ⚠️ Vision models: `max_tokens` default changed from 1024 → 2048
-- ⚠️ Memory checks: Vision models >70% RAM now blocked (was: no check)
-
-**Recommendations:**
-- Update clients expecting vision `max_tokens: 1024` to handle 2048
-- Monitor for HTTP 507 errors (memory constraints)
-- Test vision workflows on Python 3.10+
+- Pure transcription: Use `/v1/audio/transcriptions` with Whisper
+- Multimodal chat: Use `/v1/chat/completions` with `input_audio`
+- Test Vision/Audio workflows on Python 3.10+
 
 ---
 
@@ -889,6 +1033,56 @@ Same image content = same ID (content-hash based).
 - ❌ Only 1 audio per request (multi-audio causes mlx-vlm token mismatch)
 - ❌ Audio + Vision combined: audio is silently ignored
 
+### Audio Transcriptions (File Upload)
+
+For direct STT transcription with dedicated models (Whisper, Voxtral), use the `/v1/audio/transcriptions` endpoint:
+
+**Request (multipart/form-data):**
+```bash
+curl -X POST http://localhost:8080/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "model=whisper-large" \
+  -F "language=en" \
+  -F "response_format=json"
+```
+
+**Form Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `file` | ✅ | Audio file (WAV, MP3, M4A, FLAC, OGG) |
+| `model` | ✅ | Model ID (e.g., `whisper-large`, full HF path) |
+| `language` | ❌ | Language code (`en`, `de`, etc.). Auto-detect if omitted. |
+| `response_format` | ❌ | `json` (default), `text`, `verbose_json` |
+| `temperature` | ❌ | Sampling temperature (default: 0.0) |
+
+**Response Formats:**
+
+```json
+// json (default)
+{"text": "Hello world."}
+
+// verbose_json
+{"task": "transcribe", "language": "en", "duration": 2.5, "text": "Hello world."}
+
+// text
+Hello world.
+```
+
+**When to use which endpoint:**
+
+| Use Case | Endpoint | Model Type | Format |
+|----------|----------|------------|--------|
+| Pure transcription | `/v1/audio/transcriptions` | STT (Whisper, Voxtral) | File upload |
+| Chat with audio context | `/v1/chat/completions` | Multimodal (Gemma-3n) | Base64 JSON |
+| Long audio (>30s) | `/v1/audio/transcriptions` | STT (Whisper) | File upload |
+
+**Client Implementation Notes:**
+- Use `multipart/form-data` content type (not `application/json`)
+- File field name must be `file`
+- Maximum file size: 50 MB (~15 min @ 16kHz mono)
+- Requires `mlx-audio` on server (`pip install mlx-knife[audio]`)
+
 ### Cross-Model Workflows (Vision/Audio → Text)
 
 When switching from Vision or Audio to Text model mid-conversation:
@@ -911,8 +1105,15 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ## Changelog
 
+- **2026-01-31:** 2.0.4-beta.9
+  - **NEW:** `/v1/audio/transcriptions` endpoint (OpenAI Whisper API compatible)
+  - Direct file upload for STT models (Whisper, Voxtral)
+  - Server preload support for audio models
+  - Response formats: `json`, `text`, `verbose_json`
+  - Supported audio formats: WAV, MP3, M4A, FLAC, OGG
+
 - **2026-01-20:** 2.0.4-beta.8
-  - **NEW:** Audio input support via OpenAI `input_audio` format
+  - **NEW:** Audio input support via OpenAI `input_audio` format (chat completions)
   - Supported formats: WAV, MP3
   - Audio-capable models: Gemma-3n (others as available)
   - Limits: 5 MB per audio, 1 audio per request

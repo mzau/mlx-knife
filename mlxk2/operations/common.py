@@ -18,7 +18,7 @@ import importlib.util
 import sys
 
 # Import from unified capabilities module (ARCHITECTURE.md)
-from ..core.capabilities import VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, Capability
+from ..core.capabilities import VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES, Capability, Backend
 
 
 @dataclass
@@ -197,8 +197,10 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
             return "chat"
         if mt_lower in VISION_MODEL_TYPES:
             return "chat"
-        if mt_lower in AUDIO_MODEL_TYPES:
-            return "chat"
+        # STT/Audio-only models (Whisper, Voxtral) - NOT chat models
+        # These models only transcribe audio, they don't generate text or chat
+        if mt_lower in STT_MODEL_TYPES:
+            return "audio"
     ct = tok_hints.get("chat_template")
     if isinstance(ct, str) and ct.strip():
         return "chat"
@@ -278,25 +280,38 @@ def detect_vision_capability(probe: Path, config: Optional[Dict[str, Any]]) -> b
 
 
 def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bool:
-    """Detect whether the model snapshot supports audio inputs (ADR-019).
+    """Detect whether the model snapshot supports audio inputs (ADR-019, ADR-020).
 
     Detection signals:
-    - config.json contains "audio_config" key (primary)
-    - config.json model_type in AUDIO_MODEL_TYPES
+    - config.json contains "audio_config" key (Gemma-3n, Voxtral)
+    - config.json model_type in AUDIO_MODEL_TYPES (Whisper, Voxtral, Gemma-3n)
+    - preprocessor_config.json contains WhisperFeatureExtractor (Whisper variants)
     - processor_config.json contains "audio_seq_length" key (secondary)
     """
     try:
         if isinstance(config, dict):
-            # Check for audio_config (Gemma-3n has this)
+            # Check for audio_config (Gemma-3n, Voxtral)
             if "audio_config" in config:
                 return True
 
-            # Check model_type
+            # Check model_type (Whisper, Voxtral, Gemma-3n)
             mt = config.get("model_type")
             if isinstance(mt, str) and mt.lower() in AUDIO_MODEL_TYPES:
                 return True
 
-        # Check processor_config.json for audio_seq_length
+        # Check preprocessor_config.json for WhisperFeatureExtractor (Whisper variants)
+        preprocessor_config_path = probe / "preprocessor_config.json"
+        if preprocessor_config_path.exists():
+            try:
+                proc_data = _json.loads(preprocessor_config_path.read_text(encoding="utf-8", errors="ignore"))
+                if isinstance(proc_data, dict):
+                    feature_extractor = proc_data.get("feature_extractor_type", "")
+                    if isinstance(feature_extractor, str) and "whisper" in feature_extractor.lower():
+                        return True
+            except Exception:
+                pass
+
+        # Check processor_config.json for audio_seq_length (secondary)
         processor_config_path = probe / "processor_config.json"
         if processor_config_path.exists():
             try:
@@ -311,6 +326,81 @@ def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bo
     return False
 
 
+def detect_audio_backend(probe: Path, config: Optional[Dict[str, Any]]) -> Optional[Backend]:
+    """Model-agnostic audio backend detection (MLX_AUDIO vs MLX_VLM).
+
+    ADR-020: Config-based detection routes audio models to appropriate backend:
+    - STT models (Voxtral, Whisper, VibeVoice) → Backend.MLX_AUDIO
+    - Multimodal models (Gemma-3n, Qwen3-Omni) → Backend.MLX_VLM
+
+    Detection priority:
+    1. model_type == "voxtral" → MLX_AUDIO (always STT, even with audio_config)
+    2. audio_config + populated vision_config → MLX_VLM (multimodal)
+    3. model_type contains "whisper" → MLX_AUDIO (Whisper variants)
+    4. preprocessor has WhisperFeatureExtractor → MLX_AUDIO (Whisper-based)
+    5. Name heuristics (whisper/voxtral/vibevoice) → MLX_AUDIO (fallback)
+    6. audio_config alone → MLX_VLM (legacy/unknown multimodal)
+
+    Args:
+        probe: Path to model snapshot directory
+        config: Pre-loaded config.json (optional)
+
+    Returns:
+        Backend.MLX_AUDIO for STT, Backend.MLX_VLM for multimodal, None if not audio model
+    """
+    if not config:
+        return None
+
+    model_type = config.get("model_type", "")
+    if isinstance(model_type, str):
+        model_type_lower = model_type.lower()
+    else:
+        model_type_lower = ""
+
+    # Priority 1: Voxtral = Always mlx-audio STT (even with audio_config)
+    # Works for both Original Mistral and converted models
+    if model_type_lower == "voxtral":
+        return Backend.MLX_AUDIO
+
+    # Priority 2: audio_config + populated vision_config = mlx-vlm multimodal
+    # Gemma-3n, Qwen3-Omni (Vision + Audio → Text)
+    if "audio_config" in config:
+        vision_config = config.get("vision_config")
+        # Populated = dict with content (not None, not empty dict)
+        if isinstance(vision_config, dict) and len(vision_config) > 0:
+            return Backend.MLX_VLM
+
+    # Priority 3: Whisper model_type = mlx-audio STT
+    if "whisper" in model_type_lower:
+        return Backend.MLX_AUDIO
+
+    # Priority 4: WhisperFeatureExtractor in preprocessor = mlx-audio STT
+    preprocessor_path = probe / "preprocessor_config.json"
+    if preprocessor_path.exists():
+        try:
+            proc_data = _json.loads(preprocessor_path.read_text(encoding="utf-8", errors="ignore"))
+            if isinstance(proc_data, dict):
+                feature_extractor = proc_data.get("feature_extractor_type", "")
+                if isinstance(feature_extractor, str) and "whisper" in feature_extractor.lower():
+                    return Backend.MLX_AUDIO
+        except Exception:
+            pass
+
+    # Priority 5: Name heuristics = mlx-audio STT (fallback)
+    name = probe.name.lower()
+    stt_keywords = ["whisper", "voxtral", "vibevoice"]
+    if any(kw in name for kw in stt_keywords):
+        return Backend.MLX_AUDIO
+
+    # Priority 6: audio_config alone = mlx-vlm (legacy/unknown multimodal)
+    # This is the fallback for models that have audio_config but no clear STT signal
+    if "audio_config" in config:
+        return Backend.MLX_VLM
+
+    # Not an audio model (no audio_config, no model_type match)
+    return None
+
+
 def detect_capabilities(
     model_type: str,
     hf_name: str,
@@ -320,6 +410,10 @@ def detect_capabilities(
 ) -> list[str]:
     if model_type == "embedding":
         return [Capability.EMBEDDINGS.value]
+    # STT/Audio-only models (Whisper, Voxtral) - ONLY audio capability
+    # These models transcribe audio, they don't generate text or chat
+    if model_type == "audio":
+        return [Capability.AUDIO.value]
     caps = [Capability.TEXT_GENERATION.value]
     name = hf_name.lower()
     ct = tok_hints.get("chat_template")
@@ -340,6 +434,31 @@ def vision_runtime_compatibility() -> tuple[bool, Optional[str]]:
     if spec is None:
         return False, "mlx-vlm not installed (install extras: vision)"
     return True, None
+
+
+def audio_runtime_compatibility(backend: Backend) -> tuple[bool, Optional[str]]:
+    """Audio runtime check based on backend (ADR-020).
+
+    Args:
+        backend: Backend.MLX_AUDIO (Whisper/Voxtral) or Backend.MLX_VLM (Gemma-3n)
+
+    Returns:
+        (is_compatible, reason): reason is None if compatible
+    """
+    if sys.version_info < (3, 10):
+        return False, "Audio requires Python 3.10+"
+
+    if backend == Backend.MLX_AUDIO:
+        # STT models (Whisper, Voxtral) need mlx-audio
+        spec = importlib.util.find_spec("mlx_audio")
+        if spec is None:
+            return False, "mlx-audio not installed (pip install mlx-knife[audio])"
+        return True, None
+    elif backend == Backend.MLX_VLM:
+        # Multimodal audio (Gemma-3n) needs mlx-vlm
+        return vision_runtime_compatibility()
+    else:
+        return False, "Unknown audio backend"
 
 
 def _iso8601_utc_from_mtime(p: Path) -> str:
@@ -400,6 +519,10 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     model_type = detect_model_type(hf_name, config, tok, probe)
     capabilities = detect_capabilities(model_type, hf_name, tok, config, probe)
     has_vision = "vision" in capabilities
+    has_audio = "audio" in capabilities
+
+    # Detect audio backend for runtime check (ADR-020)
+    audio_backend = detect_audio_backend(probe, config) if has_audio else None
 
     # Health: workspace-aware (ADR-018 Phase 0c)
     if is_workspace_path(hf_name):
@@ -421,8 +544,23 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         # Non-MLX frameworks not supported (PyTorch, GGUF, etc.)
         runtime_compatible = False
         runtime_reason = f"Incompatible framework: {framework}"
+    elif has_audio and audio_backend is not None:
+        # Audio models: check based on backend (ADR-020)
+        runtime_compatible, runtime_reason = audio_runtime_compatibility(audio_backend)
     elif has_vision:
-        runtime_compatible, runtime_reason = vision_runtime_compatibility()
+        # Vision models: check BOTH backends for full chat+vision support
+        # 1. mlx-vlm must be available (vision mode with images)
+        vision_ok, vision_reason = vision_runtime_compatibility()
+        # 2. mlx-lm must support model_type (text-only mode without images)
+        text_ok, text_reason = check_runtime_compatibility(probe, framework)
+
+        if vision_ok and text_ok:
+            runtime_compatible = True
+            runtime_reason = None
+        else:
+            runtime_compatible = False
+            # Prefer text_reason as it's more specific (model_type not supported)
+            runtime_reason = text_reason or vision_reason
     else:
         runtime_compatible, runtime_reason = check_runtime_compatibility(probe, framework)
 

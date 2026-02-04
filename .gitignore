@@ -2,6 +2,7 @@ venv/
 venv39/
 venv31?/
 venv_*/
+venv-*/
 test_env*/
 test_results*.log
 mypy_*.log
@@ -24,6 +25,7 @@ install_*.log
 .gitignore
 docs/ISSUES/
 docs/reviews/
+ML-workspaces/
 
 # Test artifacts (generated reports)
 *_report.json

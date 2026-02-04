@@ -8,21 +8,24 @@ import os
 import threading
 import time
 import uuid
+import warnings
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from .cache import get_current_model_cache, hf_to_cache_dir
 from .runner import MLXRunner
 from .model_resolution import resolve_model_for_operation
 from .capabilities import probe_and_select, PolicyDecision, Backend
+from ..operations.common import detect_audio_backend
+from ..tools.vision_adapter import MAX_AUDIO_SIZE_BYTES
 from .. import __version__
 from ..errors import (
     ErrorType,
@@ -44,6 +47,116 @@ _preload_model: Optional[str] = None
 
 # Global logger instance (ADR-004)
 logger = get_logger()
+
+
+def _get_available_memory_bytes() -> Optional[int]:
+    """Get available system memory in bytes (macOS).
+
+    Returns available (free + speculative) memory, not total memory.
+    This is critical for model switching - we need to know if there's
+    enough free memory after the previous model was unloaded.
+
+    Note: macOS Tahoe caches aggressively, so "free" is often minimal.
+    IMPORTANT: We do NOT count "inactive" pages because Metal/GPU cache may hold
+    them even though macOS reports them as "reclaimable". This was causing false
+    positives where Memory Gates reported sufficient memory but models failed
+    with OOM/Broken pipe due to actual memory pressure. (Session 136 fix)
+
+    Returns:
+        Available memory in bytes, or None if unavailable.
+    """
+    try:
+        import subprocess
+        # macOS: Use vm_stat to get available memory
+        result = subprocess.run(
+            ["vm_stat"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            lines = result.stdout.split("\n")
+            page_size = 16384  # Default macOS page size (Apple Silicon)
+            # Parse page size from first line if available
+            if "page size of" in lines[0]:
+                try:
+                    page_size = int(lines[0].split("page size of")[1].split()[0])
+                except (ValueError, IndexError):
+                    pass
+
+            free_pages = 0
+            speculative_pages = 0
+            for line in lines:
+                if "Pages free:" in line:
+                    free_pages = int(line.split(":")[1].strip().rstrip("."))
+                elif "Pages speculative:" in line:
+                    speculative_pages = int(line.split(":")[1].strip().rstrip("."))
+
+            # Available = free + speculative only (NOT inactive - may be held by GPU cache)
+            return (free_pages + speculative_pages) * page_size
+    except Exception:
+        pass
+    return None
+
+
+def _get_memory_pressure() -> int:
+    """Get macOS memory pressure level via sysctl.
+
+    Returns:
+        0 = NORMAL (system relaxed, safe to load models)
+        1 = WARN (system under some pressure)
+        4 = CRITICAL (system under severe pressure)
+        -1 = Unable to determine
+    """
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["sysctl", "-n", "vm.memory_pressure"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return -1
+
+
+def _wait_for_memory_release(
+    required_bytes: int,
+    timeout_seconds: float = 30.0,
+    poll_interval: float = 0.5,
+) -> bool:
+    """Wait for memory to be released after model unload.
+
+    Metal GPU cache is released asynchronously. This function waits
+    until enough memory is available before loading the next model.
+
+    Uses TWO indicators for robust detection (Session 136 finding):
+    1. vm.memory_pressure == 0 (macOS kernel says system is relaxed)
+    2. Available memory >= required_bytes (enough free+speculative pages)
+
+    Args:
+        required_bytes: Minimum available memory needed
+        timeout_seconds: Maximum wait time (default 30s for GPU cache release)
+        poll_interval: Time between memory checks (default 0.5s)
+
+    Returns:
+        True if memory threshold reached, False if timeout
+    """
+    start_time = time.time()
+
+    while time.time() - start_time < timeout_seconds:
+        # Check memory pressure first (fast sysctl call)
+        pressure = _get_memory_pressure()
+        if pressure == 0:  # NORMAL - system is relaxed
+            available = _get_available_memory_bytes()
+            if available is not None and available >= required_bytes:
+                return True
+        time.sleep(poll_interval)
+
+    return False
 
 
 class CompletionRequest(BaseModel):
@@ -101,6 +214,19 @@ class ModelInfo(BaseModel):
     context_length: Optional[int] = None
 
 
+class TranscriptionResponse(BaseModel):
+    """OpenAI-compatible transcription response."""
+    text: str
+
+
+class VerboseTranscriptionResponse(BaseModel):
+    """OpenAI-compatible verbose transcription response."""
+    task: str = "transcribe"
+    language: str
+    duration: float
+    text: str
+
+
 def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
     """Get model from cache or load it if not cached.
 
@@ -137,6 +263,27 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
                 finally:
                     _model_cache.clear()
                     _current_model_path = None
+
+                # Force Metal GPU memory release before loading new model
+                # Critical for model switching - prevents memory accumulation
+                try:
+                    import mlx.core as mx
+                    mx.clear_cache()
+                except (ImportError, AttributeError):
+                    pass  # MLX not installed or API changed
+
+                # Memory Gate: Wait for memory release (ADR-016, ARCHITECTURE.md Principle #4)
+                # Metal releases GPU memory asynchronously - wait until enough is free
+                # 8 GB threshold validated via wet-memmon (avg 10.5 GB free, Firefox running)
+                MIN_FREE_BYTES = 8 * 1024 * 1024 * 1024  # 8 GB
+                if not _wait_for_memory_release(MIN_FREE_BYTES, timeout_seconds=10.0):
+                    available = _get_available_memory_bytes()
+                    available_gb = (available / (1024**3)) if available else 0
+                    logger.warning(
+                        f"Memory release timeout: {available_gb:.1f} GB available (wanted 8 GB)",
+                        model=model_spec
+                    )
+                    # Continue anyway - the probe/policy check will catch real OOM situations
 
             # Load new model (disable signal handlers for server mode)
             try:
@@ -287,6 +434,132 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
         return _model_cache[model_spec]
 
 
+def get_or_load_audio_model(model_spec: str, verbose: bool = False) -> Any:
+    """Get audio model from cache or load it if not cached.
+
+    Thread-safe model switching with AudioRunner for STT models (ADR-020).
+    Uses the same cache as get_or_load_model() but creates AudioRunner instances.
+
+    Returns:
+        AudioRunner for STT models
+    """
+    global _model_cache, _current_model_path
+
+    # Abort early if shutdown requested
+    if _shutdown_event.is_set():
+        raise HTTPException(status_code=503, detail="Server is shutting down")
+
+    # Thread-safe model switching
+    with _model_lock:
+        if _shutdown_event.is_set():
+            raise HTTPException(status_code=503, detail="Server is shutting down")
+
+        # Check if model is already cached and is an AudioRunner
+        if _current_model_path == model_spec:
+            from .audio_runner import AudioRunner
+            cached = _model_cache.get(model_spec)
+            if isinstance(cached, AudioRunner):
+                return cached
+
+        # Clean up previous model
+        if _model_cache:
+            try:
+                for _old_runner in list(_model_cache.values()):
+                    try:
+                        if hasattr(_old_runner, 'cleanup'):
+                            _old_runner.cleanup()
+                        if hasattr(_old_runner, '_cleanup_temp_files'):
+                            _old_runner._cleanup_temp_files()
+                    except Exception as e:
+                        logger.warning(f"Warning during cleanup: {e}")
+            finally:
+                _model_cache.clear()
+                _current_model_path = None
+
+            # Force Metal GPU memory release before loading new model
+            # Critical for model switching - prevents memory accumulation
+            try:
+                import mlx.core as mx
+                mx.clear_cache()
+            except (ImportError, AttributeError):
+                pass  # MLX not installed or API changed
+
+            # Memory Gate: Wait for memory release (ADR-016, ARCHITECTURE.md Principle #4)
+            # Metal releases GPU memory asynchronously - wait until enough is free
+            # 4 GB threshold validated via wet-memmon (Whisper ~1.5 GB, plenty of headroom)
+            MIN_FREE_BYTES = 4 * 1024 * 1024 * 1024  # 4 GB
+            if not _wait_for_memory_release(MIN_FREE_BYTES, timeout_seconds=10.0):
+                available = _get_available_memory_bytes()
+                available_gb = (available / (1024**3)) if available else 0
+                logger.warning(
+                    f"Memory release timeout: {available_gb:.1f} GB available (wanted 4 GB)",
+                    model=model_spec
+                )
+                # Continue anyway - the probe/policy check will catch real OOM situations
+
+        # Load new audio model
+        try:
+            from ..operations.workspace import is_workspace_path
+            from .audio_runner import AudioRunner
+
+            resolved_name, _, _ = resolve_model_for_operation(model_spec)
+            model_path = None
+
+            # Resolve model path
+            if resolved_name and is_workspace_path(resolved_name):
+                model_path = Path(resolved_name)
+            elif resolved_name:
+                cache_root = get_current_model_cache()
+                cache_dir = cache_root / hf_to_cache_dir(resolved_name)
+                snapshots_dir = cache_dir / "snapshots"
+                if snapshots_dir.exists():
+                    snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                    if snapshots:
+                        model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+            elif is_workspace_path(model_spec):
+                model_path = Path(model_spec).resolve()
+                resolved_name = str(model_path)
+
+            if model_path is None or not model_path.exists():
+                raise HTTPException(status_code=404, detail=f"Audio model not found: {model_spec}")
+
+            # Check shutdown before expensive load
+            if _shutdown_event.is_set():
+                raise KeyboardInterrupt()
+
+            logger.info(f"Loading audio model: {model_spec}", model=model_spec, backend="mlx_audio")
+
+            # Suppress mlx-audio WhisperProcessor warnings in server mode
+            # These warnings are informational (mlx-community models lack preprocessor_config.json,
+            # mlx-audio falls back to tiktoken) and pollute JSON logs. CLI users should see them.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="Could not load WhisperProcessor")
+                runner = AudioRunner(model_path, resolved_name or model_spec, verbose=verbose)
+                runner.load_model()
+
+            if _shutdown_event.is_set():
+                raise KeyboardInterrupt()
+
+            _model_cache[model_spec] = runner
+            _current_model_path = model_spec
+
+            logger.info(f"Audio model loaded: {model_spec}", model=model_spec)
+            return runner
+
+        except HTTPException:
+            raise
+        except KeyboardInterrupt:
+            logger.warning("Audio model loading interrupted")
+            _model_cache.clear()
+            _current_model_path = None
+            raise HTTPException(status_code=503, detail="Server interrupted during model load")
+        except Exception as e:
+            logger.error(f"Audio model load failed: {model_spec}", error_key=f"audio_model_load_{model_spec}", detail=str(e))
+            _model_cache.clear()
+            _current_model_path = None
+            raise HTTPException(status_code=404, detail=f"Audio model '{model_spec}' failed to load: {str(e)}")
+
+
 async def generate_completion_stream(
     runner: MLXRunner,
     prompt: str,
@@ -359,8 +632,10 @@ async def generate_completion_stream(
             try:
                 import mlx.core as mx
                 mx.clear_cache()
-            except Exception:
-                pass
+            except (ImportError, AttributeError):
+                pass  # MLX not installed or API changed
+            except Exception as e:
+                logger.debug(f"Metal cache cleanup failed: {e}")
             # Try to send an interrupt marker if client still connected
             try:
                 interrupt_response = {
@@ -496,8 +771,10 @@ async def generate_chat_stream(
             try:
                 import mlx.core as mx
                 mx.clear_cache()
-            except Exception:
-                pass
+            except (ImportError, AttributeError):
+                pass  # MLX not installed or API changed
+            except Exception as e:
+                logger.debug(f"Metal cache cleanup failed: {e}")
             try:
                 interrupt_response = {
                     "id": completion_id,
@@ -715,6 +992,149 @@ def _messages_to_dicts(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     return [{"role": msg.role, "content": msg.content} for msg in messages]
 
 
+def _detect_audio_backend_for_model(model_spec: str) -> Optional[Backend]:
+    """Detect audio backend for a model (STT vs multimodal).
+
+    ADR-020: Routes audio models to appropriate backend:
+    - STT models (Whisper, Voxtral) → Backend.MLX_AUDIO
+    - Multimodal (Gemma-3n, Qwen3-Omni) → Backend.MLX_VLM
+
+    Args:
+        model_spec: Model name or path
+
+    Returns:
+        Backend.MLX_AUDIO for STT, Backend.MLX_VLM for multimodal, None if not audio
+    """
+    import json as _json
+    from ..operations.workspace import is_workspace_path
+
+    try:
+        resolved_name, _, _ = resolve_model_for_operation(model_spec)
+        model_path = None
+
+        # Resolve model path
+        if resolved_name and is_workspace_path(resolved_name):
+            model_path = Path(resolved_name)
+        elif resolved_name:
+            cache_root = get_current_model_cache()
+            cache_dir = cache_root / hf_to_cache_dir(resolved_name)
+            snapshots_dir = cache_dir / "snapshots"
+            if snapshots_dir.exists():
+                snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                if snapshots:
+                    model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+        elif is_workspace_path(model_spec):
+            model_path = Path(model_spec).resolve()
+
+        if model_path is None or not model_path.exists():
+            return None
+
+        # Load config.json
+        config_path = model_path / "config.json"
+        if not config_path.exists():
+            return None
+
+        config = _json.loads(config_path.read_text(encoding="utf-8", errors="ignore"))
+        if not isinstance(config, dict):
+            return None
+
+        # Use shared detection function
+        return detect_audio_backend(model_path, config)
+
+    except Exception:
+        return None
+
+
+async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatCompletionResponse:
+    """Handle audio STT chat completion with AudioRunner (ADR-020).
+
+    Uses mlx-audio backend for Whisper and Voxtral STT models.
+    """
+    import time
+    import uuid
+
+    # Parse audio from messages
+    from ..tools.vision_adapter import VisionHTTPAdapter
+
+    message_dicts = _messages_to_dicts(request.messages)
+
+    # Find the last user message only
+    last_user_msg = None
+    for msg in reversed(message_dicts):
+        if msg.get("role") == "user":
+            last_user_msg = msg
+            break
+
+    if last_user_msg is None:
+        raise HTTPException(status_code=400, detail="No user message found")
+
+    # Parse audio content from last user message
+    prompt, _, audio = VisionHTTPAdapter.parse_openai_messages([last_user_msg])
+
+    if not audio:
+        raise HTTPException(status_code=400, detail="No audio content found in request")
+
+    logger.info(
+        f"Audio STT request: {len(audio)} audio(s), model={request.model}",
+        model=request.model,
+        audio_count=len(audio)
+    )
+
+    # Load AudioRunner
+    runner = get_or_load_audio_model(request.model, verbose=False)
+
+    # Generate transcription
+    completion_id = f"chatcmpl-{uuid.uuid4()}"
+    created = int(time.time())
+
+    generated_text = runner.transcribe(
+        audio=list(audio),
+        prompt=prompt or "Transcribe this audio.",
+        max_tokens=request.max_tokens or 4096,
+        temperature=request.temperature or 0.0,
+    )
+
+    logger.info(
+        f"Audio STT complete: {len(generated_text)} chars",
+        model=request.model,
+        output_length=len(generated_text)
+    )
+
+    # Token counting
+    prompt_tokens = count_tokens(prompt or "")
+    completion_tokens = count_tokens(generated_text)
+
+    # Emulate SSE for stream=true
+    if request.stream:
+        logger.info("Audio STT: emulating SSE stream (batch response as single event)")
+        return StreamingResponse(
+            _emulate_sse_stream(completion_id, created, request.model, generated_text),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"}
+        )
+
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=created,
+        model=request.model,
+        choices=[
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": generated_text
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        usage={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens
+        }
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
@@ -731,8 +1151,16 @@ async def lifespan(app: FastAPI):
     if preload_spec:
         try:
             logger.info(f"Pre-loading model with validation: {preload_spec}")
-            # This will trigger probe/policy checks in get_or_load_model()
-            get_or_load_model(preload_spec, verbose=False)
+
+            # Detect if this is an audio-only STT model (ADR-020)
+            # Audio models (Whisper, Voxtral) need AudioRunner, not MLXRunner/VisionRunner
+            audio_backend = _detect_audio_backend_for_model(preload_spec)
+            if audio_backend == Backend.MLX_AUDIO:
+                logger.info(f"Detected audio model, using AudioRunner: {preload_spec}")
+                get_or_load_audio_model(preload_spec, verbose=False)
+            else:
+                # Text/vision model path - uses probe/policy checks
+                get_or_load_model(preload_spec, verbose=False)
 
             # Store resolved name for /v1/models sorting (e.g., "qwen" -> "mlx-community/Qwen2.5-0.5B-Instruct-4bit")
             from .model_resolution import resolve_model_for_operation
@@ -768,14 +1196,16 @@ async def lifespan(app: FastAPI):
                 pass
     finally:
         _model_cache.clear()
-        
-        # Force MLX memory cleanup
+
+        # Force MLX Metal memory cleanup
         try:
             import mlx.core as mx
             mx.clear_cache()
-            logger.info("MLX memory cleared")
-        except Exception:
-            pass
+            logger.info("MLX Metal cache cleared")
+        except (ImportError, AttributeError):
+            pass  # MLX not installed or API changed
+        except Exception as e:
+            logger.warning(f"Metal cache cleanup failed: {e}")
 
 
 # Create FastAPI app
@@ -1050,6 +1480,16 @@ async def create_chat_completion(request: ChatCompletionRequest):
         has_images = _request_has_images(request.messages)
         has_audio = _request_has_audio(request.messages)
 
+        # ADR-020: Audio-only requests need backend detection for STT vs multimodal
+        # STT models (Whisper, Voxtral) → AudioRunner
+        # Multimodal (Gemma-3n) → VisionRunner
+        if has_audio and not has_images:
+            # Check audio backend before loading model
+            audio_backend = _detect_audio_backend_for_model(request.model)
+            if audio_backend == Backend.MLX_AUDIO:
+                # === AUDIO STT PATH (ADR-020) ===
+                return await _handle_audio_chat_completion(request)
+
         # Load model to determine type (uses cache if already loaded)
         # This ensures we route based on MODEL type, not just request content
         runner = get_or_load_model(request.model, verbose=False)
@@ -1116,10 +1556,12 @@ async def _handle_text_chat_completion(request: ChatCompletionRequest, runner: A
         # Extract text prompt from messages (already filtered if needed)
         prompt = _extract_text_from_messages(messages)
 
+        # Vision model WITHOUT images: Use text-model max_tokens logic
+        # (half context for conversation history, not the 2048 vision default)
         generated_text = runner.generate(
             prompt=prompt,
             images=None,  # No images for text-only request
-            max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
+            max_tokens=get_effective_max_tokens(runner, request.max_tokens, server_mode=True),
             temperature=0.0,  # Experiment: greedy sampling to reduce hallucinations
             top_p=request.top_p or 0.9,
             repetition_penalty=request.repetition_penalty or 1.0,
@@ -1794,6 +2236,104 @@ def _filter_multimodal_history_for_text_models(messages: List[ChatMessage]) -> L
     return filtered
 
 
+@app.post("/v1/audio/transcriptions")
+async def create_transcription(
+    file: UploadFile = File(...),
+    model: str = Form(...),
+    language: Optional[str] = Form(None),
+    prompt: Optional[str] = Form(None),
+    response_format: Optional[str] = Form("json"),
+    temperature: Optional[float] = Form(0.0),
+):
+    """Create an audio transcription (OpenAI-compatible Whisper API).
+
+    Accepts audio files and returns transcribed text.
+    Supports Whisper and Voxtral STT models via mlx-audio backend.
+
+    Args:
+        file: Audio file (WAV, MP3, M4A, FLAC, OGG)
+        model: Model ID (e.g., "whisper-large" or "mlx-community/whisper-large-v3-turbo-4bit")
+        language: Optional language code (e.g., "en", "de")
+        prompt: Optional prompt to guide transcription
+        response_format: Output format (json, text, verbose_json)
+        temperature: Sampling temperature (0.0 for greedy decoding)
+    """
+    import time
+
+    # Validate model is an audio STT model
+    audio_backend = _detect_audio_backend_for_model(model)
+    if audio_backend != Backend.MLX_AUDIO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model}' is not an audio transcription model. Use Whisper or Voxtral models."
+        )
+
+    # Read uploaded file
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+
+        # Enforce audio size limit (same as VisionHTTPAdapter)
+        if len(content) > MAX_AUDIO_SIZE_BYTES:
+            limit_mb = MAX_AUDIO_SIZE_BYTES // (1024 * 1024)
+            actual_mb = len(content) / (1024 * 1024)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Audio file exceeds {limit_mb} MB limit (got {actual_mb:.1f} MB)"
+            )
+
+        filename = file.filename or "audio.wav"
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read audio file: {str(e)}")
+
+    try:
+        # Load audio model
+        runner = get_or_load_audio_model(model, verbose=False)
+
+        start_time = time.time()
+
+        # Transcribe audio - runner.transcribe() expects List[(filename, bytes)]
+        transcription = runner.transcribe(
+            audio=[(filename, content)],
+            prompt=prompt or "Transcribe this audio.",
+            max_tokens=4096,
+            temperature=temperature,
+            language=language,
+        )
+
+        duration = time.time() - start_time
+
+        logger.info(
+            f"Transcription complete: {len(transcription)} chars in {duration:.2f}s",
+            model=model,
+            output_length=len(transcription),
+            duration=duration
+        )
+
+        # Return response based on format
+        if response_format == "text":
+            return PlainTextResponse(content=transcription)
+        elif response_format == "verbose_json":
+            return VerboseTranscriptionResponse(
+                language=language or "auto",
+                duration=duration,
+                text=transcription
+            )
+        else:
+            # Default: json
+            return TranscriptionResponse(text=transcription)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Transcription failed: {str(e)}", model=model)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+
 def cleanup_server():
     """Manual cleanup function for emergency situations."""
     global _model_cache, _current_model_path
@@ -1811,11 +2351,11 @@ def cleanup_server():
             _model_cache.clear()
             _current_model_path = None
 
-            # Force MLX memory cleanup
+            # Force MLX Metal memory cleanup
             try:
                 import mlx.core as mx
                 mx.clear_cache()
-                logger.info("MLX memory cleared")
+                logger.info("MLX Metal cache cleared")
             except Exception as e:
                 logger.warning(f"Warning during MLX cleanup: {e}")
 

@@ -42,7 +42,8 @@ finally:
 #   3. Root cause is verified upstream bug (not mlx-knife bug)
 #   4. Issue is documented (session notes, upstream issue tracker)
 #
-# Format: Full HuggingFace model ID (org/name)
+# Format: Full HuggingFace model ID (org/name) - org matters for filtering!
+# Note: BrokeC/ models are FIXED versions and should NOT be in this list
 # =============================================================================
 
 KNOWN_BROKEN_MODELS = {
@@ -72,7 +73,24 @@ KNOWN_BROKEN_MODELS = {
     # Status: Upstream mlx-vlm vision encoder/model compatibility bug (separate from #624)
     # Test: `mlxk run ./Mistral-Small-3.1-24B-Instruct-2503-FIXED-4bit "test" --image foo.jpg` → Error
     # Note: --repair-index fixes #624 (index mismatch) but NOT this vision feature bug
+    # Note: BrokeC/Mistral-Small-3.1... is the FIXED version (not in this list)
     "mlx-community/Mistral-Small-3.1-24B-Instruct-2503-4bit",
+
+    # transformers 5.0.0rc3 trust_remote_code dialog blocks non-interactive tests
+    # Root Cause: Model has custom code, transformers 5.0.0rc3 prompts Y/N dialog
+    # Upstream: Needs mlx-lm issue (sharded_load sets trust_remote_code=True, load() doesn't)
+    # Test: `mlxk run Klear-46B "test"` → hangs waiting for Y/N input
+    # Strategy: Exclude until mlx-lm fixes trust_remote_code handling
+    "mlx-community/Klear-46B-A2.5B-Instruct-3bit",
+
+    # transformers 5.0 VoxtralProcessor hardcodes return_tensors="pt" (PyTorch only)
+    # Root Cause: processing_voxtral.py line 61,192,327 reject non-PyTorch tensors
+    # Error: "Unable to convert output to PyTorch tensors format, PyTorch is not installed."
+    # Impact: Voxtral STT requires PyTorch (~2GB) - conflicts with lightweight goal
+    # Test: `mlxk run Voxtral-Mini "test" --audio foo.wav` → ImportError
+    # Strategy: Deferred - use Whisper for STT (works without PyTorch, excellent quality)
+    # Watch: transformers upstream for MLX/NumPy tensor support
+    "mlx-community/Voxtral-Mini-3B-2507-bf16",
 }
 
 
@@ -165,13 +183,13 @@ def parse_vm_stat_page_size(output: str) -> int:
 
 
 def discover_text_models() -> list[Dict[str, Any]]:
-    """Discover text-only models (filter out Vision models).
+    """Discover text-only models (filter out Vision and Audio models).
 
     Uses discover_mlx_models_in_user_cache() and filters out models
-    with "vision" in their capabilities list.
+    with "vision" or "audio" in their capabilities list.
 
     This enables deterministic text-only test portfolios that won't
-    change when Vision models are added/removed from cache.
+    change when Vision or Audio models are added/removed from cache.
 
     Returns:
         List of text-only model dicts (same format as discover_mlx_models_in_user_cache):
@@ -207,13 +225,14 @@ def discover_text_models() -> list[Dict[str, Any]]:
         data = json.loads(result.stdout)
         models = data.get("data", {}).get("models", [])
 
-        vision_model_ids = {
+        # Filter out vision AND audio models (text-only portfolio)
+        non_text_model_ids = {
             m["name"] for m in models
-            if "vision" in m.get("capabilities", [])
+            if "vision" in m.get("capabilities", []) or "audio" in m.get("capabilities", [])
         }
 
-        # Filter out vision models
-        return [m for m in all_models if m["model_id"] not in vision_model_ids]
+        # Filter out vision and audio models
+        return [m for m in all_models if m["model_id"] not in non_text_model_ids]
 
     except Exception:
         return all_models  # Fall back to all models on error
@@ -280,6 +299,11 @@ def discover_vision_models() -> list[Dict[str, Any]]:
         vision_models = []
         for model in all_models:
             model_id = model["model_id"]
+
+            # Skip known broken models
+            if model_id in KNOWN_BROKEN_MODELS:
+                continue
+
             if model_id in model_info:
                 is_vision, size_bytes = model_info[model_id]
                 if is_vision:
@@ -298,31 +322,26 @@ def discover_vision_models() -> list[Dict[str, Any]]:
 
 
 def discover_audio_models() -> list[Dict[str, Any]]:
-    """Discover audio-capable models only.
+    """Discover audio-capable models only (ADR-020).
 
-    Uses discover_mlx_models_in_user_cache() and filters to only models
-    with "audio" in their capabilities list.
+    Queries mlxk list --json directly and filters for:
+    - model_type == "audio" (STT-only models: Whisper, Voxtral)
+    - framework == "MLX" and health == "healthy" and runtime_compatible
 
-    Note: Audio models use vision-style RAM calculation (0.70 threshold)
-    since they typically go through VisionRunner infrastructure.
+    Note: This does NOT use discover_mlx_models_in_user_cache() because
+    audio models have model_type="audio", not model_type="chat".
 
     Returns:
-        List of audio-capable model dicts (same format as discover_mlx_models_in_user_cache):
-        [{"model_id": "...", "ram_needed_gb": X.X, "snapshot_path": None, "weight_count": None}, ...]
+        List of audio model dicts:
+        [{"model_id": "...", "ram_needed_gb": X.X, "repo_id": "...", ...}, ...]
     """
     import json
     import subprocess
     import os
 
-    # Get all discovered models (already filtered: MLX + healthy + runtime_compatible + chat)
-    all_models = discover_mlx_models_in_user_cache()
-    if not all_models:
-        return []
-
-    # Get capabilities and size_bytes from mlxk list --json
     env = os.environ.copy()
     if not env.get("HF_HOME"):
-        return []  # Audio models need HF_HOME
+        return []
 
     try:
         result = subprocess.run(
@@ -336,35 +355,37 @@ def discover_audio_models() -> list[Dict[str, Any]]:
         if result.returncode != 0:
             return []
 
-        # Parse JSON and build audio model data
         data = json.loads(result.stdout)
         models_list = data.get("data", {}).get("models", [])
 
-        # Build map: model_id -> (is_audio, size_bytes)
-        model_info = {}
-        for m in models_list:
-            model_name = m["name"]
-            is_audio = "audio" in m.get("capabilities", [])
-            size_bytes = m.get("size_bytes", 0)
-            model_info[model_name] = (is_audio, size_bytes)
-
-        # Get system memory for audio RAM calculation (uses vision formula)
+        # Get system memory for RAM calculation
         system_memory_bytes = get_system_memory_bytes()
 
-        # Filter to only audio models + recalculate RAM
         audio_models = []
-        for model in all_models:
-            model_id = model["model_id"]
-            if model_id in model_info:
-                is_audio, size_bytes = model_info[model_id]
-                if is_audio:
-                    # Use Vision-specific formula (audio goes through VisionRunner)
-                    ram_gb = calculate_vision_model_ram_gb(size_bytes, system_memory_bytes)
+        for m in models_list:
+            # Filter: MLX + healthy + runtime_compatible + audio model_type
+            if (m.get("framework") == "MLX" and
+                m.get("health") == "healthy" and
+                m.get("runtime_compatible") is True and
+                m.get("model_type") == "audio"):
 
-                    # Create new dict with updated RAM
-                    audio_model = model.copy()
-                    audio_model["ram_needed_gb"] = ram_gb
-                    audio_models.append(audio_model)
+                model_name = m["name"]
+
+                # Skip known broken models
+                if model_name in KNOWN_BROKEN_MODELS:
+                    continue
+
+                # Calculate RAM using vision formula (conservative)
+                size_bytes = m.get("size_bytes", 0)
+                ram_gb = calculate_vision_model_ram_gb(size_bytes, system_memory_bytes)
+
+                audio_models.append({
+                    "model_id": model_name,
+                    "repo_id": model_name,
+                    "ram_needed_gb": ram_gb,
+                    "snapshot_path": None,
+                    "weight_count": None,
+                })
 
         return audio_models
 

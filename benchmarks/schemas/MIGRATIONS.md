@@ -94,6 +94,41 @@ This document tracks schema evolution for MLX Knife test reports.
 
 ---
 
+### 0.2.2 (2026-01-30) - Precise Test Timing
+
+**Status:** Stable (used in 2.0.4-beta.9+)
+
+**Added fields:**
+- `test_start_ts`: Unix epoch timestamp (seconds) when test execution started
+- `test_end_ts`: Unix epoch timestamp (seconds) when test execution ended
+
+**Design rationale:**
+- Enables **effective runtime analysis** by excluding idle periods (Memory Gates, setup, teardown)
+- Accurate correlation with memmon samples (memory monitoring tool)
+- Faster post-processing (no ISO 8601 parsing needed)
+- Example: Test with 30s wall clock duration but only 22s compute time (8s Memory Gate)
+
+**Implementation:**
+- Captured via pytest hooks: `pytest_runtest_setup`, `pytest_runtest_teardown`, `pytest_runtest_makereport`
+- Stored in `item.stash` during test execution, added to `user_properties` in report
+- Both fields are optional for backward compatibility
+
+**Use cases:**
+- Filter memmon samples by test window: `test_start_ts <= sample.ts <= test_end_ts`
+- Calculate effective duration: `effective_s = test_end_ts - test_start_ts` (excludes pytest overhead)
+- Identify idle time: `idle_s = duration - (test_end_ts - test_start_ts)`
+
+**Backward compatible:**
+- Old reports without these fields remain valid
+- Tools can fall back to: `timestamp` (ISO 8601 test end), `duration` (wall clock)
+- Legacy test_start approximation: `parse_iso(timestamp) - duration` (±5s accuracy)
+
+**Breaking changes:** None (additive only)
+
+**Migration:** N/A (automatic upgrade, optional fields)
+
+---
+
 ## Future Versions (Planned)
 
 ---

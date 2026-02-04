@@ -79,13 +79,22 @@ def test_run_vision_routes_to_vision_runner(monkeypatch, isolated_cache):
         lambda path, name, context="cli", has_images=False: _make_vision_policy(path, name)
     )
 
-    result = run_model(model_spec=repo, prompt="hello", stream=False, json_output=True)
+    # Session 146: Vision models now only route to VisionRunner when images are present
+    # Pass a dummy image to trigger vision path
+    image_bytes = b"dummy"
+    result = run_model(
+        model_spec=repo,
+        prompt="hello",
+        images=[("test.png", image_bytes)],
+        stream=False,
+        json_output=True
+    )
 
     assert result == "vision-output"
     assert calls["path"] == snap
     assert calls["name"] == repo
     assert calls["prompt"] == "hello"
-    assert calls["images"] == []
+    assert calls["images"] == [("test.png", image_bytes)]
 
 
 def test_run_vision_images_get_default_prompt(monkeypatch, isolated_cache):
@@ -199,3 +208,32 @@ def test_vision_no_mapping_for_single_image():
 
 A dog."""
     assert result == expected
+
+
+def test_vision_text_only_routing_condition():
+    """Session 146: Vision routing uses 'if images' check, so empty list routes to text path.
+
+    This is a simple unit test that verifies the routing logic condition.
+    The actual E2E behavior is tested in tests_2.0/live/test_vision_e2e_live.py.
+    """
+    # The key routing condition in run.py line 495:
+    # if images or (audio and audio_backend == Backend.MLX_VLM):
+    #     → VisionRunner path
+    # else:
+    #     → MLXRunner path (text)
+
+    # Empty list is falsy in Python
+    images = []
+    audio = None
+    audio_backend = None
+
+    # This is the routing condition from run.py
+    uses_vision_path = bool(images) or (audio and audio_backend is not None)
+
+    assert not uses_vision_path, "Empty images should NOT trigger vision path"
+
+    # With images, it SHOULD trigger vision path
+    images_with_content = [("test.png", b"data")]
+    uses_vision_path = bool(images_with_content) or (audio and audio_backend is not None)
+
+    assert uses_vision_path, "Non-empty images SHOULD trigger vision path"

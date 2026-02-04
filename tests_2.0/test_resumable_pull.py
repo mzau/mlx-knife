@@ -31,7 +31,8 @@ import pytest
 from pathlib import Path
 
 # Mark as live_pull (isolated from live_e2e module fixtures)
-pytestmark = [pytest.mark.live_pull]
+# CRITICAL: Must include `live` marker so -m "not live" excludes these tests
+pytestmark = [pytest.mark.live, pytest.mark.live_pull]
 
 
 @pytest.mark.skipif(

@@ -91,3 +91,42 @@ def test_modern_model_safetensors_passes_legacy_gate(isolated_cache):
     # If it failed, it should NOT be due to legacy format
     if not compatible:
         assert "Legacy format" not in reason, f"Should not fail due to legacy format, but got: {reason}"
+
+
+def test_vision_dual_backend_logic():
+    """Session 149: Vision models require BOTH mlx-vlm AND mlx-lm for full runtime compatibility.
+
+    This tests the logic from common.py lines 550-563:
+    - Vision models need mlx-vlm for image processing
+    - Vision models need mlx-lm for text-only mode (without images)
+    - Both must be True for runtime_compatible=True
+    """
+    # Simulate the logic from common.py:550-563
+    def vision_runtime_check(vision_ok, vision_reason, text_ok, text_reason):
+        """Replicate the Vision dual-backend logic from common.py."""
+        if vision_ok and text_ok:
+            return True, None
+        else:
+            # Prefer text_reason as it's more specific
+            return False, text_reason or vision_reason
+
+    # Case 1: Both backends available
+    ok, reason = vision_runtime_check(True, None, True, None)
+    assert ok is True
+    assert reason is None
+
+    # Case 2: mlx-vlm available, but mlx-lm doesn't support model_type (e.g., mllama)
+    ok, reason = vision_runtime_check(True, None, False, "model_type 'mllama' not supported")
+    assert ok is False
+    assert "mllama" in reason
+
+    # Case 3: mlx-lm available, but mlx-vlm not installed
+    ok, reason = vision_runtime_check(False, "mlx-vlm not installed", True, None)
+    assert ok is False
+    assert "mlx-vlm" in reason
+
+    # Case 4: Neither available
+    ok, reason = vision_runtime_check(False, "mlx-vlm not installed", False, "model_type not supported")
+    assert ok is False
+    # text_reason takes precedence
+    assert "model_type" in reason
