@@ -43,7 +43,8 @@ import importlib.util
 # Instead, we fix discover_mlx_models_in_user_cache() to exclude Vision models directly
 
 # Opt-in marker for live tests
-pytestmark = [pytest.mark.live_stop_tokens, pytest.mark.slow]
+# CRITICAL: Must include `live` marker so -m "not live" excludes these tests
+pytestmark = [pytest.mark.live, pytest.mark.live_stop_tokens, pytest.mark.slow]
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -487,10 +488,11 @@ class TestStopTokensValidation:
         - Root cause: Runner only checked singular eos_token_id
         - Fix: Use eos_token_ids Set to handle multiple EOS tokens
         """
-        # Only run when explicitly selected with -m live_stop_tokens or -m wet
+        # Only run when explicitly selected with -m live_stop_tokens
+        # NOTE: Excluded from -m wet to prevent nanobind crash (MLX re-import issue)
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected and "wet" not in selected:
-            pytest.skip("Run with -m live_stop_tokens or -m wet to enable live model tests")
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
 
         # RAM Safety Check
         should_skip, reason = should_skip_model("mxfp4")
@@ -535,10 +537,11 @@ class TestStopTokensValidation:
         - Model stops cleanly after its response
         - No chat template markers in output
         """
-        # Only run when explicitly selected with -m live_stop_tokens or -m wet
+        # Only run when explicitly selected with -m live_stop_tokens
+        # NOTE: Excluded from -m wet to prevent nanobind crash (MLX re-import issue)
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected and "wet" not in selected:
-            pytest.skip("Run with -m live_stop_tokens or -m wet to enable live model tests")
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
 
         # RAM Safety Check
         should_skip, reason = should_skip_model("qwen25")
@@ -592,10 +595,11 @@ class TestStopTokensValidation:
         - No self-conversation
         - Serves as regression baseline
         """
-        # Only run when explicitly selected with -m live_stop_tokens or -m wet
+        # Only run when explicitly selected with -m live_stop_tokens
+        # NOTE: Excluded from -m wet to prevent nanobind crash (MLX re-import issue)
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected and "wet" not in selected:
-            pytest.skip("Run with -m live_stop_tokens or -m wet to enable live model tests")
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable live model tests")
 
         # RAM Safety Check
         should_skip, reason = should_skip_model("llama32")
@@ -668,10 +672,11 @@ class TestStopTokensEmpiricalMapping:
           "workaround_needed": True/False
         }
         """
-        # Only run when explicitly selected with -m live_stop_tokens or -m wet
+        # Only run when explicitly selected with -m live_stop_tokens
+        # NOTE: Excluded from -m wet to prevent nanobind crash (MLX re-import issue)
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected and "wet" not in selected:
-            pytest.skip("Run with -m live_stop_tokens or -m wet to enable portfolio discovery")
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable portfolio discovery")
 
         from mlxk2.core.runner import MLXRunner
 
@@ -754,10 +759,11 @@ class TestStopTokensEmpiricalMapping:
         Runs AFTER all single-model tests complete.
         Reads stop_token_config_fragments.jsonl and generates stop_token_config_report.json.
         """
-        # Only run when explicitly selected
+        # Only run when explicitly selected with -m live_stop_tokens
+        # NOTE: Excluded from -m wet to prevent nanobind crash (MLX re-import issue)
         selected = request.config.getoption("-m") or ""
-        if "live_stop_tokens" not in selected and "wet" not in selected:
-            pytest.skip("Run with -m live_stop_tokens or -m wet to enable portfolio discovery")
+        if "live_stop_tokens" not in selected:
+            pytest.skip("Run with -m live_stop_tokens to enable portfolio discovery")
 
         fragments_path = Path("stop_token_config_fragments.jsonl")
         report_path = Path("stop_token_config_report.json")

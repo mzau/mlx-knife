@@ -16,8 +16,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Limits for vision requests (safety and resource management)
 # Per-image size limit prevents Metal OOM crashes (ADR-012 Phase 3)
+# Total image count is unlimited - chunking (MAX_SAFE_CHUNK_SIZE) handles batch safety
 MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB per image (Metal API limit)
-MAX_IMAGES_PER_REQUEST = 5  # Maximum images per request (Metal OOM prevention)
 MAX_TOTAL_IMAGE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB total (Metal OOM prevention)
 MAX_SAFE_CHUNK_SIZE = 5  # Empirically tested stable (5 images @ ~50MB total)
 SUPPORTED_MIME_TYPES = frozenset({"jpeg", "jpg", "png", "gif", "webp"})
@@ -176,12 +176,7 @@ class VisionHTTPAdapter:
             # Stop after processing first (most recent) user message
             break
 
-        # Validate image limits (F-01: SERVER-HANDBOOK conformity)
-        if len(images) > MAX_IMAGES_PER_REQUEST:
-            raise ValueError(
-                f"Too many images ({len(images)}). Maximum: {MAX_IMAGES_PER_REQUEST}"
-            )
-
+        # Validate image size limits (total size only - count is unlimited, chunking handles batch safety)
         if images:
             total_size = sum(len(data) for _, data in images)
             if total_size > MAX_TOTAL_IMAGE_SIZE_BYTES:

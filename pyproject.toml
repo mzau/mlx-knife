@@ -7,7 +7,7 @@ name = "mlx-knife"
 dynamic = ["version"]
 description = "HuggingFace model management for MLX on Apple Silicon"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
@@ -17,12 +17,11 @@ classifiers = [
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
+    # Python 3.9: MLX 0.30+ requires 3.10+
+    # Python 3.13+: miniaudio lacks pre-built wheels
     "Operating System :: MacOS",
     "Environment :: Console",
     "License :: OSI Approved :: Apache Software License",
@@ -30,12 +29,13 @@ classifiers = [
 dependencies = [
     "huggingface-hub>=1.0.0",
     "requests>=2.32.0",
-    "mlx-lm>=0.30.0",
+    "mlx-lm>=0.30.5",  # Vision/Audio extras require 0.30.5+
     "mlx>=0.30.0",
     "fastapi>=0.116.0",
     "uvicorn>=0.35.0",
     "pydantic>=2.11.0",
     "httpx>=0.27.0",
+    "python-multipart>=0.0.9",  # For audio file uploads
 ]
 
 [project.scripts]
@@ -66,7 +66,19 @@ dev = [
     "mypy>=1.5.0",
 ]
 vision = [
-    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@58122703b0bba7c574d23c9c751f01cf60485d4f",  # Vision + Audio support (ADR-012, ADR-019; beta.8 adds audio; will switch to PyPI when released)
+    "mlx-vlm>=0.3.10",  # Vision support (ADR-012)
+]
+audio = [
+    # mlx-audio 0.3.1 has tiktoken fallback regression - use post-0.3.1 commit
+    # See: https://github.com/Blaizzy/mlx-audio/issues/445
+    "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@9349644",
+    "tiktoken>=0.7.0",  # Required by mlx-audio Whisper (not declared as transitive dep)
+]
+all = [
+    "mlx-vlm>=0.3.10",
+    # mlx-audio 0.3.1 has tiktoken fallback regression - use post-0.3.1 commit
+    "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@9349644",
+    "tiktoken>=0.7.0",  # Required by mlx-audio Whisper (not declared as transitive dep)
 ]
 
 [tool.setuptools]

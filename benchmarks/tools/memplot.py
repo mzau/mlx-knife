@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Memory Timeline Visualization - Generate interactive HTML charts from benchmark data.
+"""Memory/CPU Timeline Visualization - Generate interactive HTML charts from benchmark data.
 
-Correlates memory samples (memmon.py) with test results to show RAM/swap usage
+Correlates memory samples (memmon.py) with test results to show RAM/swap/CPU usage
 over time with model markers.
 
 Usage:
@@ -155,16 +155,58 @@ def create_timeline_chart(
     elapsed = [s["elapsed_s"] for s in samples]
     ram_free = [s["ram_free_gb"] for s in samples]
     swap_used = [s["swap_used_mb"] for s in samples]
-    memory_pressure = [s.get("memory_pressure", 1) for s in samples]  # Default: 1=NORMAL
+
+    # CPU data (may not be present in older samples)
+    cpu_load = [s.get("load_1", 0) for s in samples]
+    cpu_user = [s.get("cpu_user", 0) for s in samples]
+    cpu_sys = [s.get("cpu_sys", 0) for s in samples]
+    has_cpu_data = any(c > 0 for c in cpu_load) or any(c > 0 for c in cpu_user)
+
+    # GPU data (new in beta.9 memmon)
+    gpu_device = [s.get("gpu_device_util", 0) for s in samples]
+    gpu_renderer = [s.get("gpu_renderer_util", 0) for s in samples]
+    gpu_tiler = [s.get("gpu_tiler_util", 0) for s in samples]
+    has_gpu_data = any(g > 0 for g in gpu_device) or any(g > 0 for g in gpu_renderer)
+
+    # Memory pressure data (kern.memorystatus_vm_pressure_level - official macOS levels)
+    # Discrete levels: 1=NORMAL, 2=WARN, 4=CRITICAL
+    memory_pressure = [s.get("memory_pressure", 1) for s in samples]
 
     # Convert elapsed to minutes for readability
     elapsed_min = [e / 60 for e in elapsed]
 
-    # Create figure with secondary y-axis for swap
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Create figure with subplots: Memory (top), CPU (middle), GPU (bottom)
+    subplot_count = 1 + (1 if has_cpu_data else 0) + (1 if has_gpu_data else 0)
+
+    if subplot_count == 3:
+        # Memory + CPU + GPU
+        fig = make_subplots(
+            rows=3, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.06,
+            row_heights=[0.45, 0.30, 0.25],
+            specs=[[{"secondary_y": True}], [{"secondary_y": False}], [{"secondary_y": False}]],
+            subplot_titles=("Memory", "CPU", "GPU")
+        )
+    elif subplot_count == 2:
+        # Memory + CPU (legacy behavior)
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.08,
+            row_heights=[0.6, 0.4],
+            specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+            subplot_titles=("Memory", "CPU")
+        )
+    else:
+        # Memory only
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # Calculate max elapsed time for later use
+    max_elapsed_min = max(elapsed_min) if elapsed_min else 20
 
     # RAM trace - use marker color based on threshold
-    # Color each point based on RAM level
+    # Color each point based on RAM level (green >32 GB, orange 16-32 GB, red <16 GB)
     colors = [get_ram_color(ram) for ram in ram_free]
 
     fig.add_trace(
@@ -181,34 +223,7 @@ def create_timeline_chart(
             ),
             hovertemplate="Time: %{x:.1f} min<br>RAM Free: %{y:.1f} GB<extra></extra>",
         ),
-        secondary_y=False,
-    )
-
-    # Threshold lines (assuming 64 GB total RAM)
-    max_elapsed_min = max(elapsed_min) if elapsed_min else 20
-    total_ram = 64  # GB - could be made configurable later
-
-    fig.add_trace(
-        go.Scatter(
-            x=[0, max_elapsed_min],
-            y=[32, 32],
-            mode="lines",
-            name=f"32 GB (50% of {total_ram} GB - healthy)",
-            line=dict(color="green", width=1, dash="dash"),
-            hoverinfo="skip",
-        ),
-        secondary_y=False,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=[0, max_elapsed_min],
-            y=[16, 16],
-            mode="lines",
-            name=f"16 GB (25% of {total_ram} GB - warning)",
-            line=dict(color="orange", width=1, dash="dash"),
-            hoverinfo="skip",
-        ),
+        row=1, col=1,
         secondary_y=False,
     )
 
@@ -223,15 +238,114 @@ def create_timeline_chart(
                 line=dict(color="red", width=2),
                 hovertemplate="Time: %{x:.1f} min<br>Swap: %{y:.0f} MB<extra></extra>",
             ),
+            row=1, col=1,
             secondary_y=True,
         )
+
+    # CPU traces (row 2) - only if CPU data available
+    if has_cpu_data:
+        # CPU Load (1-min average)
+        fig.add_trace(
+            go.Scatter(
+                x=elapsed_min,
+                y=cpu_load,
+                mode="lines",
+                name="CPU Load (1m)",
+                line=dict(color="rgb(142, 68, 173)", width=2),  # Purple
+                hovertemplate="Time: %{x:.1f} min<br>Load: %{y:.2f}<extra></extra>",
+            ),
+            row=2, col=1,
+        )
+
+        # CPU User % (filled area)
+        fig.add_trace(
+            go.Scatter(
+                x=elapsed_min,
+                y=cpu_user,
+                mode="lines",
+                name="CPU User %",
+                fill="tozeroy",
+                line=dict(color="rgb(46, 204, 113)", width=1),  # Green
+                fillcolor="rgba(46, 204, 113, 0.3)",
+                hovertemplate="Time: %{x:.1f} min<br>User: %{y:.1f}%<extra></extra>",
+            ),
+            row=2, col=1,
+        )
+
+        # CPU Sys % (stacked on top of user)
+        cpu_total = [u + s for u, s in zip(cpu_user, cpu_sys)]
+        fig.add_trace(
+            go.Scatter(
+                x=elapsed_min,
+                y=cpu_total,
+                mode="lines",
+                name="CPU Sys %",
+                fill="tonexty",
+                line=dict(color="rgb(231, 76, 60)", width=1),  # Red
+                fillcolor="rgba(231, 76, 60, 0.3)",
+                hovertemplate="Time: %{x:.1f} min<br>Sys: %{y:.1f}%<extra></extra>",
+            ),
+            row=2, col=1,
+        )
+
+    # GPU traces (row 3) - only if GPU data available
+    if has_gpu_data:
+        gpu_row = 2 if not has_cpu_data else 3
+
+        # GPU Device Utilization % (overall GPU busy)
+        fig.add_trace(
+            go.Scatter(
+                x=elapsed_min,
+                y=gpu_device,
+                mode="lines",
+                name="GPU Device %",
+                line=dict(color="rgb(255, 127, 14)", width=2),  # Orange
+                hovertemplate="Time: %{x:.1f} min<br>GPU Device: %{y:.0f}%<extra></extra>",
+            ),
+            row=gpu_row, col=1,
+        )
+
+        # GPU Renderer Utilization % (3D cores)
+        fig.add_trace(
+            go.Scatter(
+                x=elapsed_min,
+                y=gpu_renderer,
+                mode="lines",
+                name="GPU Renderer %",
+                fill="tozeroy",
+                line=dict(color="rgb(44, 160, 44)", width=1),  # Green
+                fillcolor="rgba(44, 160, 44, 0.3)",
+                hovertemplate="Time: %{x:.1f} min<br>GPU Renderer: %{y:.0f}%<extra></extra>",
+            ),
+            row=gpu_row, col=1,
+        )
+
+        # GPU Tiler Utilization % (geometry processing) - only show if different from Renderer
+        # On Apple Silicon, Tiler and Renderer are often identical for compute workloads
+        tiler_differs = False
+        for t, r in zip(gpu_tiler, gpu_renderer):
+            if abs(t - r) > 1.0:  # Allow 1% tolerance for floating point
+                tiler_differs = True
+                break
+
+        if tiler_differs and any(t > 0 for t in gpu_tiler):
+            fig.add_trace(
+                go.Scatter(
+                    x=elapsed_min,
+                    y=gpu_tiler,
+                    mode="lines",
+                    name="GPU Tiler %",
+                    line=dict(color="rgb(148, 103, 189)", width=1, dash="dash"),  # Purple dashed
+                    hovertemplate="Time: %{x:.1f} min<br>GPU Tiler: %{y:.0f}%<extra></extra>",
+                ),
+                row=gpu_row, col=1,
+            )
 
     # Model test regions (gray background for each test with model)
     # Sort markers by time
     model_markers_sorted = sorted(model_markers, key=lambda m: m["start_elapsed"])
 
     test_shapes = []
-    prev_model_id = None  # Track previous model for switch detection
 
     for i, marker in enumerate(model_markers_sorted):
         start_min = marker["start_elapsed"] / 60
@@ -251,23 +365,6 @@ def create_timeline_chart(
             layer="below",
             line=dict(width=0),
         ))
-
-        # Add model label when model CHANGES (not just first occurrence)
-        model_id = marker["model_id"]
-        if model_id != prev_model_id:
-            fig.add_annotation(
-                x=start_min,
-                y=1.0,
-                xref="x", yref="paper",
-                text=marker["model_short"],
-                textangle=-90,
-                font=dict(size=9, color="rgba(0, 0, 0, 0.7)"),
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                xshift=2,
-            )
-            prev_model_id = model_id
 
     # Infrastructure test regions (light blue background)
     infra_markers_sorted = sorted(infra_markers, key=lambda m: m["start_elapsed"])
@@ -293,65 +390,119 @@ def create_timeline_chart(
 
     region_shapes = test_shapes
 
-    # Add test markers (small vertical lines) and labels at bottom for both marker types
-    all_markers = model_markers_sorted + infra_markers_sorted
-    all_markers_sorted = sorted(all_markers, key=lambda m: m["start_elapsed"])
-
-    for marker in all_markers_sorted:
+    # Add test markers (vertical lines) and combined labels (test + model)
+    # Process model tests and infrastructure tests separately to create combined labels
+    for marker in model_markers_sorted:
         start_min = marker["start_elapsed"] / 60
 
         if start_min < 0 or start_min > max_elapsed_min:
             continue
 
-        # Extract test name (shorten if needed)
+        # Extract test name (remove test_ prefix, shorten if needed)
         test_name = marker["test"].split("::")[-1].split("[")[0]
-        if len(test_name) > 25:
-            test_name = test_name[:22] + "..."
+        if test_name.startswith("test_"):
+            test_name = test_name[5:]  # Remove "test_" prefix
+        if len(test_name) > 30:
+            test_name = test_name[:27] + "..."
+
+        # Combine test name (left) and model name (right) with spacing
+        # When rotated -90°, left becomes top and right becomes bottom
+        model_short = marker.get("model_short", "")
+        if model_short:
+            # Calculate padding to align model name to the right (when vertical)
+            # Use fixed width for consistent alignment
+            total_width = 35  # characters
+            padding = max(0, total_width - len(test_name))
+            label = f"{test_name}{' ' * padding}{model_short}"
+        else:
+            label = test_name
 
         fig.add_vline(
             x=start_min,
             line=dict(color="rgba(128, 128, 128, 0.2)", width=0.5),
         )
 
-        # Add test label at bottom (aligned with start time like model labels)
+        # Add combined label at top
         fig.add_annotation(
             x=start_min,
-            y=0.0,
+            y=1.0,
+            xref="x", yref="paper",
+            text=label,
+            textangle=-90,
+            font=dict(size=9, color="rgba(0, 0, 0, 0.7)", family="monospace"),  # Monospace for alignment
+            showarrow=False,
+            xanchor="left",
+            yanchor="top",
+            xshift=2,
+        )
+
+    # Add infrastructure test markers (no model name)
+    for marker in infra_markers_sorted:
+        start_min = marker["start_elapsed"] / 60
+
+        if start_min < 0 or start_min > max_elapsed_min:
+            continue
+
+        # Extract test name (remove test_ prefix, shorten if needed)
+        test_name = marker["test"].split("::")[-1].split("[")[0]
+        if test_name.startswith("test_"):
+            test_name = test_name[5:]  # Remove "test_" prefix
+        if len(test_name) > 30:
+            test_name = test_name[:27] + "..."
+
+        fig.add_vline(
+            x=start_min,
+            line=dict(color="rgba(128, 128, 128, 0.2)", width=0.5),
+        )
+
+        # Add test label (no model)
+        fig.add_annotation(
+            x=start_min,
+            y=1.0,
             xref="x", yref="paper",
             text=test_name,
             textangle=-90,
-            font=dict(size=9, color="rgba(0, 0, 0, 0.6)"),  # Same size as model labels
+            font=dict(size=9, color="rgba(0, 0, 0, 0.7)", family="monospace"),
             showarrow=False,
-            xanchor="left",  # Same as model labels (aligned at start)
-            yanchor="bottom",
-            xshift=2,  # Same offset as model labels
+            xanchor="left",
+            yanchor="top",
+            xshift=2,
         )
 
-    # Add memory pressure backgrounds (1=normal/white, 2=warn/yellow, 4=critical/red)
+    # Add memory pressure background zones based on official macOS levels
+    # kern.memorystatus_vm_pressure_level: 1=NORMAL, 2=WARN, 4=CRITICAL
     pressure_shapes = []
     i = 0
     while i < len(memory_pressure):
-        pressure = memory_pressure[i]
+        level_value = memory_pressure[i]
 
-        if pressure > 1:  # 2=WARN or 4=CRITICAL
-            # Find end of this pressure region
+        # Map to level name
+        if level_value == 4:
+            level = "CRITICAL"
+        elif level_value == 2:
+            level = "WARN"
+        else:  # 1 or other
+            level = "NORMAL"
+
+        if level != "NORMAL":  # Only show overlay for WARN/CRITICAL
+            # Find end of this pressure region (same level)
             start_min = elapsed_min[i]
             j = i
-            while j < len(memory_pressure) and memory_pressure[j] == pressure:
+            while j < len(memory_pressure) and memory_pressure[j] == level_value:
                 j += 1
             end_min = elapsed_min[j - 1] if j > i else start_min
 
             # Color based on pressure level
-            if pressure == 2:
-                color = "rgba(255, 204, 0, 0.15)"  # Yellow (WARN)
-            else:  # pressure == 4
-                color = "rgba(255, 59, 48, 0.15)"  # Red (CRITICAL)
+            if level == "WARN":
+                color = "rgba(255, 204, 0, 0.15)"  # Yellow
+            else:  # CRITICAL
+                color = "rgba(255, 59, 48, 0.15)"  # Red
 
             pressure_shapes.append(dict(
                 type="rect",
-                xref="x", yref="y",  # Changed from "paper" to "y" for rangeslider compatibility
+                xref="x", yref="y",
                 x0=start_min, x1=end_min,
-                y0=0, y1=70,  # Use actual y-axis values
+                y0=0, y1=70,
                 fillcolor=color,
                 layer="below",
                 line=dict(width=0),
@@ -363,35 +514,13 @@ def create_timeline_chart(
     # Combine all shapes (regions first, then pressure on top)
     shapes = region_shapes + pressure_shapes
 
-    # Debug output
-    print(f"  Test shapes (gray): {len(region_shapes)}")
-    print(f"  Pressure shapes (yellow/red): {len(pressure_shapes)}")
-    print(f"  Total shapes: {len(shapes)}")
-    if region_shapes:
-        print(f"  Sample test shape: {region_shapes[0]}")
-
     # Layout (without shapes - we'll add them individually)
+    chart_height = 500 + (200 if has_cpu_data else 0) + (150 if has_gpu_data else 0)
+
     fig.update_layout(
         title=dict(
             text=title,
             font=dict(size=16),
-        ),
-        xaxis=dict(
-            title="Time (minutes)",
-            showgrid=True,
-            gridcolor="rgba(128,128,128,0.2)",
-            rangeslider=dict(visible=True, yaxis=dict(rangemode="match")),
-        ),
-        yaxis=dict(
-            title="RAM Free (GB)",
-            showgrid=True,
-            gridcolor="rgba(128,128,128,0.2)",
-            range=[0, 70],  # Typical max for 64GB system
-        ),
-        yaxis2=dict(
-            title="Swap Used (MB)",
-            showgrid=False,
-            range=[0, max(swap_used) * 1.2] if any(s > 0 for s in swap_used) else [0, 100],
         ),
         legend=dict(
             orientation="h",
@@ -403,17 +532,83 @@ def create_timeline_chart(
         hovermode="x unified",
         template="plotly_white",
         plot_bgcolor="rgba(0,0,0,0)",  # Transparent plot background so shapes show through
-        height=500,
+        height=chart_height,
         margin=dict(t=80, b=60, l=60, r=60),
     )
+
+    # Memory subplot (row 1) y-axis
+    fig.update_yaxes(
+        title_text="RAM Free (GB)",
+        showgrid=True,
+        gridcolor="rgba(128,128,128,0.2)",
+        range=[0, 70],
+        row=1, col=1,
+        secondary_y=False,
+    )
+
+    # Secondary y-axis: Swap (if present)
+    if any(s > 0 for s in swap_used):
+        fig.update_yaxes(
+            title_text="Swap (MB)",
+            showgrid=False,
+            range=[0, max(swap_used) * 1.2],
+            row=1, col=1,
+            secondary_y=True,
+        )
+
+    # CPU subplot (row 2) y-axis - only if CPU data available
+    if has_cpu_data:
+        fig.update_yaxes(
+            title_text="CPU %",
+            showgrid=True,
+            gridcolor="rgba(128,128,128,0.2)",
+            range=[0, 100],
+            row=2, col=1,
+        )
+
+    # GPU subplot (row 3 or 2) y-axis - only if GPU data available
+    if has_gpu_data:
+        gpu_row = 2 if not has_cpu_data else 3
+        fig.update_yaxes(
+            title_text="GPU %",
+            showgrid=True,
+            gridcolor="rgba(128,128,128,0.2)",
+            range=[0, 100],
+            row=gpu_row, col=1,
+        )
+
+    # X-axis (on bottom subplot only)
+    if has_gpu_data:
+        bottom_row = 2 if not has_cpu_data else 3
+    elif has_cpu_data:
+        bottom_row = 2
+    else:
+        bottom_row = 1
+
+    fig.update_xaxes(
+        title_text="Time (minutes)",
+        showgrid=True,
+        gridcolor="rgba(128,128,128,0.2)",
+        row=bottom_row, col=1,
+    )
+
+    # Add rangeslider for zoom navigation on all layouts (horizontal-only zoom)
+    # The rangeslider shows a miniature overview and allows horizontal panning/zooming
+    fig.update_xaxes(
+        rangeslider=dict(
+            visible=True,
+            thickness=0.05,  # Compact rangeslider (5% of plot height)
+        ),
+        row=bottom_row, col=1,
+    )
+
+    # Disable vertical zoom on all subplots (horizontal zoom only)
+    fig.update_yaxes(fixedrange=True)
 
     # Add shapes individually using fig.add_shape() method
     # This is more explicit than passing shapes array to update_layout
     for shape in shapes:
         fig.add_shape(**shape)
-
-    # Debug: Check shapes after adding individually
-    print(f"  Shapes in fig.layout after add_shape: {len(fig.layout.shapes)}")
 
     # Add summary annotation
     if summary:
@@ -423,10 +618,27 @@ def create_timeline_chart(
             f"RAM: {summary.get('ram_free_min_gb', 0):.1f}-{summary.get('ram_free_max_gb', 0):.1f} GB | "
             f"Swap peak: {summary.get('swap_max_mb', 0):.0f} MB"
         )
+        # Add CPU summary if available
+        if summary.get('load_max', 0) > 0:
+            summary_text += (
+                f" | CPU load: max {summary.get('load_max', 0):.1f} | "
+                f"CPU: max {summary.get('cpu_user_max', 0):.0f}%/{summary.get('cpu_sys_max', 0):.0f}%"
+            )
+        # Add GPU summary if available
+        if summary.get('gpu_device_max', 0) > 0:
+            summary_text += (
+                f" | GPU: max {summary.get('gpu_device_max', 0):.0f}% (device), "
+                f"{summary.get('gpu_renderer_max', 0):.0f}% (renderer)"
+            )
+
+        # Calculate y position based on subplot count
+        subplot_count = 1 + (1 if has_cpu_data else 0) + (1 if has_gpu_data else 0)
+        y_offset = {1: -0.12, 2: -0.08, 3: -0.06}[subplot_count]
+
         fig.add_annotation(
             text=summary_text,
             xref="paper", yref="paper",
-            x=0, y=-0.12,
+            x=0, y=y_offset,
             showarrow=False,
             font=dict(size=10, color="gray"),
             align="left",

@@ -231,7 +231,12 @@ def main():
         nargs='+',
         action="append",
         metavar="FILE",
-        help="Attach audio file(s) for audio-capable models (e.g., Gemma-3n). Accepts WAV format.",
+        help="Attach audio file(s) for audio-capable models (e.g., Whisper, Voxtral). Accepts WAV format.",
+    )
+    run_parser.add_argument(
+        "--language",
+        type=str,
+        help="Audio language code (e.g., 'en', 'de'). Auto-detect if omitted.",
     )
     run_parser.add_argument(
         "--chunk",
@@ -241,7 +246,7 @@ def main():
         help="Process images in batches of N (default: 1 for maximum safety)",
     )
     run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate")
-    run_parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature (default: 0.7, audio: 0.2)")
+    run_parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature (default: 0.7, audio: 0.0)")
     run_parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
     run_parser.add_argument("--repetition-penalty", type=float, default=1.1, help="Repetition penalty (default: 1.1)")
     run_parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
@@ -521,9 +526,9 @@ def main():
             elif not sys.stdout.isatty() and not args.json:
                 stream_mode = False
 
-            # Context-aware temperature default (audio: 0.2 for stability, else: 0.7)
+            # Context-aware temperature default (audio: 0.0 greedy for STT, else: 0.7)
             if args.temperature is None:
-                temperature = 0.2 if audio_inputs else 0.7
+                temperature = 0.0 if audio_inputs else 0.7
             else:
                 temperature = args.temperature
 
@@ -543,7 +548,8 @@ def main():
                 json_output=args.json,
                 verbose=getattr(args, "verbose", False),
                 system_prompt=None,  # Not yet implemented
-                hide_reasoning=getattr(args, "no_reasoning", False)
+                hide_reasoning=getattr(args, "no_reasoning", False),
+                language=getattr(args, "language", None),
             )
 
             # Detect errors from run_model_enhanced (returns "Error: ..." string on failure)

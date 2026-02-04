@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="800" height="750" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 750">
+  <defs>
+    <style>
+      .box { fill: #fff; stroke: #333; stroke-width: 2; }
+      .box-blue { fill: #e1f5ff; stroke: #0066cc; stroke-width: 2; }
+      .box-yellow { fill: #fff4e1; stroke: #ff9800; stroke-width: 2; }
+      .box-green { fill: #d4f4dd; stroke: #4caf50; stroke-width: 2; }
+      .box-pink { fill: #ffd4e5; stroke: #e91e63; stroke-width: 2; }
+      .box-info { fill: #f5f5f5; stroke: #999; stroke-width: 1; stroke-dasharray: 5,3; }
+      .diamond { fill: #fff4e1; stroke: #ff9800; stroke-width: 2; }
+      .text { font-family: Arial, sans-serif; font-size: 14px; text-anchor: middle; }
+      .text-small { font-family: Arial, sans-serif; font-size: 12px; text-anchor: middle; }
+      .text-tiny { font-family: Arial, sans-serif; font-size: 11px; text-anchor: middle; fill: #666; }
+      .text-bold { font-weight: bold; }
+      .arrow { fill: none; stroke: #333; stroke-width: 2; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="400" y="30" class="text text-bold" font-size="18">Audio Backend Architecture (Config-Based Detection)</text>
+
+  <!-- Audio Request -->
+  <rect x="250" y="60" width="300" height="60" rx="5" class="box-blue"/>
+  <text x="400" y="85" class="text text-bold">Audio Request</text>
+  <text x="400" y="105" class="text-small">mlxk run MODEL --audio file.wav</text>
+
+  <!-- Arrow down -->
+  <path d="M 400 120 L 400 160" class="arrow"/>
+
+  <!-- Model Detection -->
+  <rect x="280" y="160" width="240" height="60" rx="5" class="box-yellow"/>
+  <text x="400" y="185" class="text text-bold">Config Inspection</text>
+  <text x="400" y="205" class="text-small">(model-agnostic detection)</text>
+
+  <!-- Arrow down -->
+  <path d="M 400 220 L 400 270" class="arrow"/>
+
+  <!-- Decision Diamond (smaller, more compact) -->
+  <path d="M 400 270 L 470 315 L 400 360 L 330 315 Z" class="diamond"/>
+  <text x="400" y="310" class="text text-bold">Config</text>
+  <text x="400" y="327" class="text text-bold">Signals?</text>
+
+  <!-- Left branch: STT Signals (text moved LEFT and DOWN) -->
+  <path d="M 330 315 L 220 315 L 220 420" class="arrow"/>
+  <text x="180" y="340" class="text-small text-bold">STT Signals:</text>
+  <text x="180" y="356" class="text-tiny">model_type: voxtral/whisper</text>
+  <text x="180" y="370" class="text-tiny">WhisperFeatureExtractor</text>
+
+  <!-- STT Info Box (Examples) -->
+  <rect x="70" y="420" width="300" height="50" rx="5" class="box-info"/>
+  <text x="220" y="440" class="text-small text-bold">Examples:</text>
+  <text x="220" y="458" class="text-tiny">Voxtral, Whisper-*, VibeVoice-ASR</text>
+
+  <!-- Arrow down -->
+  <path d="M 220 470 L 220 510" class="arrow"/>
+
+  <!-- Backend.MLX_AUDIO -->
+  <rect x="70" y="510" width="300" height="60" rx="5" class="box-green"/>
+  <text x="220" y="535" class="text text-bold">Backend.MLX_AUDIO</text>
+  <text x="220" y="555" class="text">→ AudioRunner</text>
+
+  <!-- Arrow down -->
+  <path d="M 220 570 L 220 600" class="arrow"/>
+
+  <!-- STT Features -->
+  <rect x="70" y="600" width="300" height="130" rx="5" class="box-green"/>
+  <text x="220" y="622" class="text text-bold">STT Features:</text>
+  <text x="220" y="640" class="text-small">✓ Whisper API (mlx-audio)</text>
+  <text x="220" y="656" class="text-small">✓ Voxtral STT</text>
+  <text x="220" y="672" class="text-small">✓ Segment timestamps</text>
+  <text x="220" y="688" class="text-small">✓ No duration limit</text>
+  <text x="220" y="704" class="text-small">✓ Language hints</text>
+  <text x="220" y="720" class="text-small">✓ Model-agnostic (future-proof)</text>
+
+  <!-- Right branch: Multimodal Signals (text moved RIGHT and DOWN) -->
+  <path d="M 470 315 L 580 315 L 580 420" class="arrow"/>
+  <text x="620" y="340" class="text-small text-bold">Multimodal Signals:</text>
+  <text x="620" y="356" class="text-tiny">audio_config + vision_config</text>
+  <text x="620" y="370" class="text-tiny">(both populated)</text>
+
+  <!-- Multimodal Info Box (Examples) -->
+  <rect x="430" y="420" width="300" height="50" rx="5" class="box-info"/>
+  <text x="580" y="440" class="text-small text-bold">Examples:</text>
+  <text x="580" y="458" class="text-tiny">Gemma-3n, Qwen3-Omni</text>
+
+  <!-- Arrow down -->
+  <path d="M 580 470 L 580 510" class="arrow"/>
+
+  <!-- Backend.MLX_VLM -->
+  <rect x="430" y="510" width="300" height="60" rx="5" class="box-pink"/>
+  <text x="580" y="535" class="text text-bold">Backend.MLX_VLM</text>
+  <text x="580" y="555" class="text">→ VisionRunner (with audio)</text>
+
+  <!-- Arrow down -->
+  <path d="M 580 570 L 580 600" class="arrow"/>
+
+  <!-- Multimodal Features -->
+  <rect x="430" y="600" width="300" height="130" rx="5" class="box-pink"/>
+  <text x="580" y="622" class="text text-bold">Multimodal Features:</text>
+  <text x="580" y="640" class="text-small">✓ Vision+Audio context</text>
+  <text x="580" y="656" class="text-small">✓ Gemma-3n support (mlx-vlm)</text>
+  <text x="580" y="672" class="text-small">⚠ ~30s audio limit</text>
+  <text x="580" y="688" class="text-small">✓ Backward compatible</text>
+  <text x="580" y="704" class="text-small">✓ Beta.8 workflows unchanged</text>
+  <text x="580" y="720" class="text-small">✓ Context-aware transcription</text>
+</svg>

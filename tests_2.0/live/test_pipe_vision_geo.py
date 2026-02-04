@@ -93,12 +93,17 @@ class TestVisionGeoPipeline:
     """Integration test for Vision→Geo pipeline (Sessions 72-75)."""
 
     @pytest.fixture(scope="class")
-    def vision_model_id(self):
-        """Get vision model (hardcoded for now - pixtral only viable model)."""
+    def vision_model_id(self, vision_portfolio):
+        """Get vision model from portfolio (pixtral preferred)."""
         # TODO: Use vision_portfolio when more vision models are viable
         # Currently only pixtral works reliably (blacklist filters others)
-        # Use full ID for consistency in benchmark reports (not "pixtral" shorthand)
-        return "mlx-community/pixtral-12b-8bit"
+        # Session 133: Support any available pixtral variant (4bit, 8bit, etc.)
+        for key, info in vision_portfolio.items():
+            model_id = info.get("id", "")
+            if "pixtral" in model_id.lower():
+                return model_id
+        # Fallback if no pixtral found
+        pytest.skip("No pixtral model found in vision portfolio")
 
     @pytest.fixture(scope="class")
     def text_model_id(self, text_portfolio):
@@ -187,8 +192,11 @@ class TestVisionGeoPipeline:
 
         # Log Vision phase as sub-test
         if request.config.report_file:
+            # Import schema version helper
+            from conftest import _get_current_report_schema_version
+
             vision_entry = {
-                "schema_version": "0.2.1",
+                "schema_version": _get_current_report_schema_version(),
                 "timestamp": datetime.fromtimestamp(vision_end, timezone.utc).isoformat(),
                 "mlx_knife_version": __import__("mlxk2").__version__,
                 "test": f"{request.node.nodeid}[vision_phase]",
@@ -227,7 +235,7 @@ class TestVisionGeoPipeline:
             text_size_gb = 24.5 if "mixtral" in text_model_id.lower() else 0
 
             text_entry = {
-                "schema_version": "0.2.1",
+                "schema_version": _get_current_report_schema_version(),
                 "timestamp": datetime.fromtimestamp(text_end, timezone.utc).isoformat(),
                 "mlx_knife_version": __import__("mlxk2").__version__,
                 "test": f"{request.node.nodeid}[text_phase]",

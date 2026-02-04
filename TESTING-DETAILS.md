@@ -4,30 +4,24 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.4-beta.7** — Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.1** (Vision/Text inference modality differentiation).
+✅ **2.0.4-beta.9** — Audio transcription (Whisper via mlx-audio); Server `/v1/audio/transcriptions` endpoint; Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.2** (Precise test timing).
 
 ### Test Results (Official Reference)
 
-**Standard Unit Tests:**
+**Standard Unit Tests (Multi-Python):**
 ```
 Platform: macOS 26.2 (Tahoe), M2 Max, 64GB RAM
-Python: 3.9-3.14 (Multi-Python verified)
-Results: 553 passed, 56 skipped (includes 4 vision chunk streaming tests)
+Python 3.10: 647 passed, 11 skipped in 19.78s
+Python 3.11: 647 passed, 11 skipped in 19.91s
+Python 3.12: 647 passed, 11 skipped in 20.94s
 Note: Default suite works on 16GB. Wet-umbrella: 64GB recommended (M1 Max 32GB untested)
-```
-
-**Live E2E Tests:**
-```
-Results: 144+ passed, 21 skipped
 ```
 
 **Wet Umbrella (4-Phase Integration):**
 ```
-Phase 1 (wet marker):        161 passed, 72 skipped, 579 deselected (Schema v0.2.1)
-Phase 2 (live_pull):           3 passed, 630 deselected
-Phase 3 (live_clone):          3 passed, 630 deselected
-Phase 4 (live_vision_pipe):    3 passed (requires vision+text models, skips if unavailable)
-Total:                       170 passed across all phases
+Phase 1 (wet marker):        168 passed, 73 skipped, 680 deselected (Schema v0.2.2)
+Phase 2-4 (live_pull/clone/pipe): 3 passed, 742 deselected
+Total:                       171 passed across all phases
 ```
 
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
@@ -36,12 +30,12 @@ Total:                       170 passed across all phases
 ✅ **3-category test strategy** - optimized for performance and safety
 ✅ **Portfolio Separation** - Text and Vision models tested independently with separate RAM formulas
 
-### Skipped Tests Breakdown (64 total Python 3.10+, 73 total Python 3.9, standard run without HF_HOME)
+### Skipped Tests Breakdown (65 deselected, standard run without HF_HOME)
 - **38 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011 + Portfolio Separation)
   - **23 Text model tests** - Parametrized across text_portfolio (chat completions batch/streaming)
   - **3 Vision model tests** - Parametrized across vision_portfolio (multimodal, SSE, text-on-vision)
   - **5 Vision CLI E2E tests** - Deterministic vision queries (requires vision model in cache, ADR-012)
-  - **4 Audio CLI E2E tests** - Audio transcription tests parametrized across audio_portfolio (ADR-019)
+  - **11 Audio E2E tests** - Audio transcription (CLI + Server `/v1/audio/transcriptions`) with Whisper models (ADR-020)
   - **3 Non-parametrized tests** - Health, models list, vision→text switching
 - **4 Live Stop Tokens tests** - Stop token validation with real models (requires `pytest -m live_stop_tokens`, ADR-009)
 - **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
@@ -54,6 +48,8 @@ Total:                       170 passed across all phases
 - **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
 **Portfolio Discovery** (ADR-009) auto-discovers MLX models in user cache using `mlxk list --json`. Validates fixes across the full model portfolio with RAM-aware skipping.
+
+**Note:** Portfolio Discovery only includes **cache models** (HuggingFace cache). Workspace paths (e.g., `./my-workspace`) are not discovered. Models requiring workspace repair (e.g., Gemma-3n for audio) must be tested manually.
 
 ---
 
@@ -76,7 +72,7 @@ Total:                       170 passed across all phases
 | Live E2E (ADR-011) | `HF_HOME=/path/to/cache pytest -m live_e2e -v` | `live_e2e` (required) + Env: `HF_HOME` (optional, enables Portfolio Discovery); Requires: `httpx` installed | **✅ Working:** Server/HTTP/CLI validation with real models. Portfolio Discovery auto-discovers all MLX chat models via `mlxk list --json` (filter: MLX+healthy+runtime+chat), parametrized tests (one server per model), RAM-aware skip. | No (uses local cache) |
 | Vision CLI E2E (ADR-012) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache, e.g., pixtral-12b-8bit or Llama-3.2-Vision); Requires: `mlx-vlm` installed (Python 3.10+) | **✅ Working:** Deterministic vision queries validate actual image understanding (not hallucination). Tests: chess position reading (e6=black king), OCR text extraction (contract name), color recognition (blue mug), chart label reading (Y-axis), large image support (2.7MB). | No (uses local cache) |
 | Vision Server E2E (ADR-012 Phase 3) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_server_e2e.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache); Requires: `mlx-vlm` installed (Python 3.10+), `httpx` | **✅ Working:** Vision API over HTTP. Tests: Base64 image chat completion, streaming graceful degradation (SSE emulation), text request on vision model server. | No (uses local cache) |
-| Audio CLI E2E (ADR-019) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_audio_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (audio model in cache, e.g., gemma-3n); Requires: `mlx-vlm` installed (Python 3.10+) | **✅ Working:** Audio transcription with real models. Portfolio Discovery auto-discovers audio-capable models. Tests: WAV transcription (short/long), MP3 format support, output validation. Known limitation: ~30s audio duration (Gemma-3n architecture). | No (uses local cache) |
+| Audio CLI E2E (ADR-020) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_audio_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (audio model in cache, e.g., whisper-large-v3-turbo-4bit); Requires: `mlx-audio` installed (Python 3.10+) | **✅ Working:** Audio transcription with Whisper models (mlx-audio backend). Portfolio Discovery auto-discovers audio-capable models (`model_type: audio`). Tests: WAV/MP3 transcription, Server `/v1/audio/transcriptions` endpoint. **Note:** Gemma-3n requires workspace repair (not in portfolio). | No (uses local cache) |
 | Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v` | `live_pull` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
 | Show E2E portfolios | `HF_HOME=/path/to/cache python tests_2.0/show_portfolios.py` OR `pytest -m show_model_portfolio -s` | Env: `HF_HOME` | Displays TEXT and VISION portfolios separately. Shows model keys (text_XX, vision_XX), RAM requirements, and test/skip status. Diagnostic tool for understanding portfolio separation. Use script for detailed output, or pytest marker for quick check. | No (uses local cache) |
 | Manual debug mode | `mlxk run <model> "test prompt" --verbose` | Manual CLI usage with `--verbose` flag | Shows token generation details including multiple EOS token warnings. Use this for manual debugging of model quality issues. Output includes `[DEBUG] Token generation analysis` and `⚠️ WARNING: Multiple EOS tokens detected` for broken models. | No (uses local cache) |
@@ -415,6 +411,166 @@ def _report_text_modality(request):
 ```
 
 See `tests_2.0/live/test_cli_pipe_live.py` for an example.
+
+### Schema Field Development (Developer Guide)
+
+**CRITICAL:** When adding new fields to the benchmark report schema, follow these steps carefully. Missing any step will result in silent failures (fields missing from JSONL output).
+
+#### Case Study: Schema v0.2.2 Bug (test_start_ts / test_end_ts)
+
+**What went wrong:**
+- Added `test_start_ts`/`test_end_ts` to schema JSON ✅
+- Wrote pytest hooks to capture timestamps ✅
+- **FORGOT** `@pytest.hookimpl` decorator ❌ → hooks never executed
+- **FORGOT** to add fields to whitelist (conftest.py:1534) ❌
+- Result: 120 tests ran, **0 had timestamps** in JSONL → schema validation failed
+
+This bug was discovered during beta.9 benchmark run and cost a full re-run.
+
+#### Step-by-Step: Adding New Schema Fields
+
+**1. Update Schema JSON**
+
+```bash
+# Create new schema version
+cp benchmarks/schemas/report-v0.2.1.schema.json \
+   benchmarks/schemas/report-v0.2.2.schema.json
+
+# Edit schema: Add new fields with descriptions
+# Update: "title": "MLX Knife Benchmark Report Schema v0.2.2"
+```
+
+**2. Register pytest Hooks (CRITICAL)**
+
+If capturing data during test execution, hooks MUST have `@pytest.hookimpl`:
+
+```python
+# tests_2.0/live/conftest.py
+
+import pytest
+import time
+
+# Define StashKeys for data storage (pytest 7.0+ API)
+my_field_key = pytest.StashKey[float]()
+
+@pytest.hookimpl(tryfirst=True)  # ← REQUIRED! Without this, hook is IGNORED
+def pytest_runtest_setup(item):
+    """Capture data at test start."""
+    item.stash[my_field_key] = time.time()
+
+@pytest.hookimpl(tryfirst=True)  # ← REQUIRED!
+def pytest_runtest_makereport(item, call):
+    """Add data to benchmark report via user_properties.
+
+    CRITICAL: Uses tryfirst=True to run BEFORE conftest.py's
+    hookwrapper=True that writes JSONL.
+    """
+    if call.when == "call":
+        my_value = item.stash.get(my_field_key, None)
+        if my_value:
+            item.user_properties.append(("my_field", my_value))
+```
+
+**Without `@pytest.hookimpl`:** Hook is silently ignored, no error, no data.
+
+**3. Update Whitelist in conftest.py**
+
+```python
+# tests_2.0/conftest.py (around line 1534)
+
+for key, value in item.user_properties:
+    if key in ("model", "performance", "stop_tokens", "system",
+               "test_start_ts", "test_end_ts", "my_field"):  # ← Add new field here
+        # Top-level keys
+        data[key] = value
+    else:
+        # Everything else → metadata
+        data.setdefault("metadata", {})[key] = value
+```
+
+**Without whitelist entry:** Field goes to `metadata` instead of top-level.
+
+**4. Document Migration**
+
+```markdown
+# benchmarks/schemas/MIGRATIONS.md
+
+### 0.2.3 (YYYY-MM-DD) - My Feature
+
+Added fields:
+- `my_field`: Description of what this captures
+
+Purpose: Why we added this field
+
+Breaking changes: None (backward compatible)
+```
+
+**5. Update Schema Symlink**
+
+```bash
+cd benchmarks/schemas/
+rm report-current.schema.json
+ln -s report-v0.2.3.schema.json report-current.schema.json
+```
+
+**6. Verify in Test Run**
+
+```bash
+# Run single test with report output
+pytest tests_2.0/live/test_cli_e2e.py::test_run_command -v \
+  --report-output /tmp/test.jsonl
+
+# Check if field appears
+head -1 /tmp/test.jsonl | python3 -m json.tool | grep my_field
+```
+
+**Expected:** `"my_field": 1738328572.96` (or your value)
+**If missing:** Check `@pytest.hookimpl` decorator and whitelist!
+
+#### Hook Execution Order
+
+pytest hooks run in specific order. For benchmark fields:
+
+```python
+# Early hooks (data capture)
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Runs FIRST - capture start state."""
+    pass
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item):
+    """Runs LAST - capture end state."""
+    pass
+
+# Report hook (data serialization)
+@pytest.hookimpl(tryfirst=True)  # ← CRITICAL for makereport
+def pytest_runtest_makereport(item, call):
+    """Runs BEFORE conftest.py's hookwrapper=True.
+
+    Must add to user_properties BEFORE JSONL is written.
+    """
+    pass
+```
+
+**Why `tryfirst=True` for makereport?**
+- conftest.py's `pytest_runtest_makereport` has `hookwrapper=True`
+- Hookwrappers run around normal hooks
+- `tryfirst=True` ensures data is in user_properties BEFORE JSONL write
+
+#### Testing Checklist
+
+Before committing new schema fields:
+
+- [ ] Schema JSON created with version bump
+- [ ] pytest hooks have `@pytest.hookimpl` decorator
+- [ ] Fields added to conftest.py whitelist (line ~1534)
+- [ ] MIGRATIONS.md updated
+- [ ] report-current.schema.json symlink updated
+- [ ] Test run confirms fields appear in JSONL
+- [ ] Schema validation passes: `python benchmarks/validate_reports.py`
+
+**Pro tip:** Test with a SINGLE test first before running full benchmark suite!
 
 ### Compatibility Rule (Technical Background)
 
@@ -1245,7 +1401,7 @@ pytest -m live_e2e --collect-only  # Should work without errors
 
 ### Audio Portfolio E2E Tests
 
-**Status:** ✅ Complete (ADR-019, Portfolio Separation)
+**Status:** ✅ Complete (ADR-020, Portfolio Separation)
 
 **Location:** `tests_2.0/live/test_audio_e2e_live.py`
 **Fixture:** `audio_portfolio` (provides audio-capable models)
@@ -1273,20 +1429,57 @@ pytest -m live_e2e --collect-only  # Should work without errors
    - Validates: Output length > 10 characters
    - **N tests** (one per audio model in portfolio)
 
-**RAM Gating:**
-- Uses `calculate_vision_model_ram_gb()` (0.70 threshold, no multiplier)
-- Audio models go through VisionRunner infrastructure
-- Same conservative gate as Vision models
+**Test Class: TestAudioSegments**
 
-**Known Limitations (ADR-019):**
-- Audio duration limit: ~30 seconds (Gemma-3n architecture constraint)
-- Phonetic errors on 4-bit models: "A man" → "Amen" (expected)
-- Complex prompts + MP3: Can cause multilingual drift (fixed: simple prompt default)
+5. **test_segment_metadata_optional[audio_XX]** (parametrized)
+   - Validates: No segment metadata without `MLXK2_AUDIO_SEGMENTS=1`
+   - **N tests** (one per audio model in portfolio)
+
+**Test Class: TestAudioTranscriptionsServer** (Server `/v1/audio/transcriptions` endpoint)
+
+6. **test_transcription_endpoint_json[audio_XX]** (parametrized)
+   - JSON response format validation
+   - **N tests** (one per audio model in portfolio)
+
+7. **test_transcription_endpoint_text_format[audio_XX]** (parametrized)
+   - Plain text response format validation
+   - **N tests** (one per audio model in portfolio)
+
+8. **test_transcription_endpoint_verbose_json[audio_XX]** (parametrized)
+   - Verbose JSON with task/duration fields
+   - **N tests** (one per audio model in portfolio)
+
+9. **test_transcription_endpoint_mp3[audio_XX]** (parametrized)
+   - MP3 format support via server endpoint
+   - **N tests** (one per audio model in portfolio)
+
+10. **test_transcription_endpoint_with_language[audio_XX]** (parametrized)
+    - Explicit language parameter (`language: "en"`)
+    - **N tests** (one per audio model in portfolio)
+
+11. **test_transcription_endpoint_rejects_oversized_audio[audio_XX]** (parametrized)
+    - Validates: HTTP 413 for files > 50 MB (MAX_AUDIO_SIZE_BYTES)
+    - Prevents resource exhaustion from large uploads
+    - **N tests** (one per audio model in portfolio)
+
+**RAM Gating:**
+- Uses AudioRunner with Memory Gate (4 GB threshold)
+- Whisper models: ~0.4 GB model + ~17 GB runtime (Audio-Decoder, Mel-Spectrogram, librosa)
+
+**Server Security:**
+- `/v1/audio/transcriptions` enforces 50 MB upload limit (`MAX_AUDIO_SIZE_BYTES`)
+- Returns HTTP 413 for oversized files
+
+**Known Limitations (ADR-020):**
+- Upload limit: 50 MB (server endpoint)
+- CLI `run`: No file size limit (local files)
+- MP3/M4A recommended for long audio (10:1 compression vs WAV)
+- **Gemma-3n (mlx-vlm):** ~30 seconds max (multimodal architecture constraint, ADR-019/beta.8)
 
 **Example:**
 ```python
-# 64GB system → 44.8GB threshold (70%)
-# audio_00: gemma-3n-E2B-it-4bit (4.2GB, 6.5%) → ✅ RUN
+# 64GB system with whisper-large-v3-turbo-4bit
+# Model: 0.4 GB, Runtime: ~17 GB → ✅ RUN
 ```
 
 ---
@@ -1421,7 +1614,7 @@ MLXK2_LIVE_PUSH=1 \
 
 ---
 
-### A5. Complete Test File Structure (2.0.4-beta.7)
+### A5. Complete Test File Structure (2.0.4-beta.9)
 
 ```
 scripts/
@@ -1432,13 +1625,15 @@ tests_2.0/
 ├── conftest.py                        # Isolated test cache (HF_HOME override), safety sentinel, core fixtures, wet marker hook, memory cleanup (live_e2e+wet), pytest_addoption (--report-output)
 ├── conftest_runner.py                 # Runner-specific fixtures/mocks
 ├── show_portfolios.py                 # Diagnostic tool: Display text/vision portfolios with RAM estimates
-├── stubs/                             # Minimal mlx/mlx_lm stubs for unit/spec tests
+├── stubs/                             # Minimal mlx/mlx_lm/mlx_vlm stubs for unit/spec tests
 │   ├── mlx/
 │   │   └── core.py
-│   └── mlx_lm/
-│       ├── __init__.py
-│       ├── generate.py
-│       └── sample_utils.py
+│   ├── mlx_lm/
+│   │   ├── __init__.py
+│   │   ├── generate.py
+│   │   └── sample_utils.py
+│   └── mlx_vlm/
+│       └── __init__.py               # Vision stub (load, generate)
 ├── spec/                              # JSON API spec/contract validation
 │   ├── test_cli_commands_json_flag.py         # CLI JSON flag behavior
 │   ├── test_cli_version_output.py             # Version command JSON shape
@@ -1453,13 +1648,13 @@ tests_2.0/
 │   ├── server_context.py                       # LocalServer context manager for E2E testing (45s timeout for MLX cleanup)
 │   ├── sse_parser.py                           # SSE parsing utilities for streaming validation
 │   ├── test_utils.py                           # Portfolio Discovery (text/vision/audio separation), RAM calculation modularization, RAM gating utilities
-│   ├── test_audio_e2e_live.py                  # Audio CLI E2E tests with real models (ADR-019, 4 transcription tests, parametrized: audio_XX)
+│   ├── test_audio_e2e_live.py                  # Audio E2E tests with Whisper models (ADR-020: CLI + Server transcriptions + size limit, parametrized: audio_XX)
 │   ├── test_cli_e2e.py                         # CLI integration E2E tests (ADR-011, parametrized)
 │   ├── test_cli_pipe_live.py                   # Pipe-mode E2E (stdin '-', JSON interactive error, list→run pipe) using first eligible model
 │   ├── test_clone_live.py                      # Live clone flow (requires MLXK2_LIVE_CLONE, HF_TOKEN)
 │   ├── test_list_human_live.py                 # Live list/health against user cache (requires HF_HOME)
-│   ├── test_pipe_vision_geo.py                 # Vision→Geo pipe integration tests (marker: live_vision_pipe, 3 smoke tests: batch processing, complete pipe, chunk isolation)
-│   ├── test_portfolio_fixtures.py              # Portfolio separation validation tests (7 tests: fixture behavior, disjoint check)
+│   ├── test_pipe_vision_geo.py                 # Vision→Geo pipe integration tests (marker: live_vision_pipe: batch processing, complete pipe, chunk isolation)
+│   ├── test_portfolio_fixtures.py              # Portfolio separation validation tests (fixture behavior, disjoint check)
 │   ├── test_push_live.py                       # Live push flow (requires MLXK2_LIVE_PUSH, HF_TOKEN)
 │   ├── test_server_e2e.py                      # Server E2E tests with TEXT models (ADR-011 + Portfolio Separation, parametrized: text_XX)
 │   ├── test_show_portfolio.py                  # Portfolio display (marker: show_model_portfolio, requires HF_HOME)
@@ -1468,8 +1663,8 @@ tests_2.0/
 │   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
 │   └── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
 ├── test_adr004_error_logging.py       # ADR-004 error logging and redaction (tokens, paths)
-├── test_audio_cli.py                  # Audio CLI argument tests (ADR-019 Phase 2, 8 tests: --audio parsing, file validation, capability checks)
-├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016, 45 tests)
+├── test_audio_cli.py                  # Audio CLI argument tests (ADR-020 Phase 2: --audio parsing, file validation, capability checks, backend detection)
+├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016)
 ├── test_cli_log_json_flag.py          # CLI --log-json flag behavior and JSON log format
 ├── test_cli_push_args.py              # Push CLI args and JSON error/output handling (offline)
 ├── test_cli_run_exit_codes.py         # CLI exit codes + pipe/JSON regressions, stdin '-', non-TTY batch, interactive JSON error, SIGPIPE, BrokenPipeError
@@ -1493,12 +1688,12 @@ tests_2.0/
 ├── test_model_naming.py               # Conversion rules, bijection, parsing
 ├── test_model_resolution_workspace.py # Workspace path resolution tests (ADR-018, explicit path detection, prefix matching)
 ├── test_multimodal_filtering.py       # Multimodal history filtering (Vision→Text model switching)
-├── test_portfolio_discovery.py        # Portfolio separation discovery tests (10 tests: text/vision filtering, RAM formulas)
+├── test_portfolio_discovery.py        # Portfolio separation discovery tests (text/vision filtering, RAM formulas)
 ├── test_push_dry_run.py               # Push dry-run diff planning (added/modified/deleted)
 ├── test_push_extended.py              # Extended push: no-op vs commit, branch/retry, .hfignore
 ├── test_push_minimal.py               # Minimal push scenarios (offline)
 ├── test_push_workspace_check.py       # Push check-only: workspace validation without network
-├── test_ram_calculation.py            # RAM calculation unit tests (11 tests: text 1.2x, vision 0.70 threshold, system memory)
+├── test_ram_calculation.py            # RAM calculation unit tests (text 1.2x, vision 0.70 threshold, system memory)
 ├── test_resumable_pull.py             # Resumable download tests (real network download with controlled interruption)
 ├── test_robustness.py                 # Robustness for rm/pull/disk/timeout/concurrency
 ├── test_run_complete.py               # End-to-end run command (stream/batch/params)
@@ -1507,18 +1702,18 @@ tests_2.0/
 ├── test_runtime_compatibility_reason_chain.py  # Runtime compatibility reason field decision chain (Issue #36)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
-├── test_server_audio.py               # Audio server unit tests (ADR-019 Phase 4, 23 tests: request detection, Base64 decoding, format validation)
+├── test_server_audio.py               # Audio server unit tests (ADR-020 Phase 4: request detection, Base64 decoding, format validation)
 ├── test_server_models_and_errors.py   # Server model loading and error handling
 ├── test_server_streaming_minimal.py   # Server SSE streaming functionality
 ├── test_server_token_limits_api.py    # Server token limit enforcement
-├── test_server_vision.py              # Vision server unit tests (ADR-012 Phase 3, 17 tests: ChatMessage, image detection, helpers)
+├── test_server_vision.py              # Vision server unit tests (ADR-012 Phase 3: ChatMessage, image detection, helpers)
 ├── test_stop_tokens_live.py           # Stop token validation with real models (marker: live_stop_tokens, ADR-009)
 ├── test_token_limits.py               # Dynamic token calculation; server vs run policies
-├── test_vision_adapter.py             # Vision HTTP adapter unit tests (46 tests: Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
-├── test_vision_chunk_streaming.py     # Vision chunk streaming tests (4 tests: SSE format, multi-chunk streaming, single-chunk routing, generator integration)
-├── test_vision_exif.py                # EXIF extraction tests (8 tests: GPS, DateTime, Camera, collapsible table, privacy controls)
-├── test_workspace_sentinel.py         # Workspace infrastructure tests (ADR-018 Phase 0a, 20 tests: sentinel primitives, atomic write, managed/unmanaged detection, health checks, CLI integration)
-└── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1, 11 tests: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
+├── test_vision_adapter.py             # Vision HTTP adapter unit tests (Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
+├── test_vision_chunk_streaming.py     # Vision chunk streaming tests (SSE format, multi-chunk streaming, single-chunk routing, generator integration)
+├── test_vision_exif.py                # EXIF extraction tests (GPS, DateTime, Camera, collapsible table, privacy controls)
+├── test_workspace_sentinel.py         # Workspace infrastructure tests (ADR-018 Phase 0a: sentinel primitives, atomic write, managed/unmanaged detection, health checks, CLI integration)
+└── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
 ```
 
 ---

@@ -35,33 +35,34 @@ benchmarks/
 |------|---------|
 | `generate_benchmark_report.py` | JSONL → Markdown report (Template v1.0) |
 | `validate_reports.py` | Schema validation of JSONL files |
-| `tools/memmon.py` | Memory monitoring during test runs |
-| `tools/memplot.py` | Interactive memory timeline visualization (HTML) |
+| `tools/memmon.py` | Memory + CPU + GPU monitoring (200ms sampling) |
+| `tools/memplot.py` | Interactive 3-row timeline (Memory/CPU/GPU, HTML) |
 
 ## Schema
 
-**Current:** v0.2.0 (Phase 0 - Test Infrastructure)
+**Current:** v0.2.2 (Phase 0 - Test Infrastructure)
 
 | Version | Release | Content |
 |---------|---------|---------|
 | v0.1.0 | 2.0.3 | Minimal: test, outcome, duration, model |
-| v0.2.0 | 2.0.4 | + hardware_profile, system_health, quality_flags |
+| v0.2.0 | 2.0.4-beta.3 | + hardware_profile, system_health, quality_flags |
+| v0.2.1 | 2.0.4-beta.7 | + inference_modality (vision/text/audio) |
+| v0.2.2 | 2.0.4-beta.9 | + test_start_ts, test_end_ts (precise timing) |
 | v1.0.0 | Future | Model benchmarks (mlxk-benchmark package) |
 
-**Schema Strategy:** No v0.3.x planned. v0.2.0 → v1.0.0 directly.
+**Schema Strategy:** No v0.3.x planned. v0.2.x → v1.0.0 directly.
 - v0.x = Test infrastructure ("Was the test run clean?")
 - v1.x = Model benchmarks ("How good is the model?")
 
 See `schemas/LEARNINGS-FOR-v1.0.md` for details.
 
-## Current Baseline
+## Recent Reports
 
-**Report:** `reports/BENCHMARK-v1.0-2.0.4b3-2025-12-20.md`
-
-- Version: 2.0.4-beta.3
+Latest baseline reports are in `reports/` directory:
+- Pattern: `BENCHMARK-v1.0-<version>-<date>-*.md`
 - Hardware: Mac14,13 (M2 Max, 64 GB)
-- Tests: 141/162 passed, 19.5 min
-- Quality: 100% clean (0 MB swap, 0 zombies)
+- Test suite: ~167 tests (Vision + Text + Audio E2E)
+- Quality target: 100% clean (0 MB swap, 0 zombies)
 
 ## Phase 0 Goals
 
@@ -72,7 +73,7 @@ See `schemas/LEARNINGS-FOR-v1.0.md` for details.
 
 ## Memory Timeline Visualization
 
-**Tool:** `tools/memplot.py`
+**Tool:** `tools/memplot.py` - 3-row interactive plot (Memory / CPU / GPU)
 
 ### Quick Start
 
@@ -81,24 +82,46 @@ See `schemas/LEARNINGS-FOR-v1.0.md` for details.
 python benchmarks/tools/memmon.py --output memory.jsonl -- \
   pytest -m live_e2e tests_2.0/live/ --report-output benchmark.jsonl
 
-# Generate interactive HTML
+# Generate interactive HTML with test + model markers
 python benchmarks/tools/memplot.py memory.jsonl benchmark.jsonl -o timeline.html
 ```
 
+**Note:** `benchmark.jsonl` adds test markers showing test name + model name - essential for plot navigation!
+
 ### Visual Legend
 
-#### Main Graph: RAM Free (GB)
+#### Row 1: Memory (RAM Free GB)
 
-**Blue line with colored markers:**
-- 🟢 **Green markers:** Healthy (≥32 GB free, ≥50% of 64 GB)
-- 🟠 **Orange markers:** Warning (16-32 GB free, 25-50%)
-- 🔴 **Red markers:** Critical (<16 GB free, <25%)
+**Blue line:** RAM free over time (GB)
+
+**Diamond markers (vm_pressure):**
+- 🟢 **Green (0):** Normal - no memory pressure
+- 🟡 **Yellow (1-2):** Warning - system preparing to swap
+- 🔴 **Red (4):** Critical - system actively swapping
 
 **Dashed threshold lines:**
-- **Green line (32 GB):** 50% threshold - system healthy
-- **Orange line (16 GB):** 25% threshold - warning level
+- **Green line (32 GB):** 50% threshold (64 GB system)
+- **Orange line (16 GB):** 25% threshold
 
-#### Background Rectangles: Test Regions
+**Red line (right axis):** Swap Used (MB) - only visible when > 0
+
+#### Row 2: CPU Load
+
+**User (cyan):** User space CPU %
+**System (orange):** Kernel CPU %
+**Idle (green fill):** Idle CPU %
+
+**Load Average (purple dashed):** 1-minute load (right axis)
+
+#### Row 3: GPU Utilization (Apple Silicon)
+
+**Device (orange solid):** Overall GPU busy %
+**Renderer (green fill):** 3D rendering cores %
+**Tiler (purple dashed):** Geometry processing %
+
+**Source:** `ioreg` PerformanceStatistics (no sudo required)
+
+#### Background Rectangles: Test Regions (All Rows)
 
 **Gray (rgba(200, 200, 200, 0.3)):**
 - Model tests that load an LLM model
@@ -110,23 +133,9 @@ python benchmarks/tools/memplot.py memory.jsonl benchmark.jsonl -o timeline.html
 - Example: `test_portfolio_discovery`, `test_health_check`
 - **Meaning:** No model loaded, only test infrastructure active
 
-⚠️ **Known limitation (v0.2.0):** Server tests appear as "light blue" even when loading models (LocalServer fixture doesn't record model metadata). Recognizable by: high RAM usage + long duration in blue region. Example: `test_text_request_still_works_on_vision_model` (57 GB used, 16s duration).
+⚠️ **Known limitation (v0.2.2):** Server tests appear as "light blue" even when loading models (LocalServer fixture doesn't record model metadata). Recognizable by: high RAM usage + long duration in blue region. Example: `test_text_request_still_works_on_vision_model` (57 GB used, 16s duration).
 
-#### Memory Pressure Overlay
-
-**Yellow (rgba(255, 204, 0, 0.15)):**
-- macOS Memory Pressure: WARN
-- Source: `sysctl kern.memorystatus_vm_pressure_level = 2`
-
-**Red (rgba(255, 59, 48, 0.15)):**
-- macOS Memory Pressure: CRITICAL
-- Source: `sysctl kern.memorystatus_vm_pressure_level = 4`
-- **Meaning:** System begins swapping, performance degradation
-
-**White/Transparent:**
-- macOS Memory Pressure: NORMAL (level = 1)
-
-#### Labels
+#### Labels (All Rows)
 
 **Top (90° rotated, black):**
 - Model names at each model switch

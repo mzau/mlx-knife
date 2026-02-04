@@ -1,8 +1,14 @@
-# ADR-019 — Audio Input Support (via mlx-vlm)
+# ADR-019 — Audio Input Support (via mlx-vlm) [BETA.8 ARCHIVED]
 
-**Status:** In Progress (Phase 1-3 done, Phase 4 pending)
-**Target:** 2.0.4-beta.8
+**Status:** Replaced by ADR-020 (2026-01-27)
+**Target:** 2.0.4-beta.8 (historical, implemented)
 **Depends on:** mlx-vlm ≥0.3.10 (GitHub only, not yet on PyPI)
+**Replaced by:** ADR-020 — Audio Backend Architecture
+
+---
+
+**NOTE:** This ADR documents the Beta.8 mlx-vlm-only audio implementation (Gemma-3n).
+For current architecture with mlx-audio support and auto-routing (Beta.9+), see **ADR-020**.
 
 ---
 
@@ -28,7 +34,7 @@ mlx-knife can add audio support with minimal effort.
 
 ## Decision
 
-Implement audio input via mlx-vlm (Option A from Session 101 discussion).
+Implement audio input via mlx-vlm's native audio processing (Gemma-3n multimodal support).
 
 ### Scope: CLI-first
 
@@ -170,7 +176,7 @@ is silently dropped during encoding.
 **Sources:**
 - `Gemma3nProcessor.audio_seq_length = 188` (transformers 5.0+)
 - [HuggingFace Gemma3n Docs](https://huggingface.co/docs/transformers/en/model_doc/gemma3n)
-- Empirical testing (Session 116)
+- Empirical testing with Gemma-3n
 
 ### Phase 4: Server API (Pending)
 
@@ -251,6 +257,3 @@ Workflow: Record → Convert to WAV (JS library) → Base64 → JSON `input_audi
 - mlx-lm Issue #497: Qwen3-Omni Support Request (open since Sep 2025)
 - mlx-lm PR #574: qwen3_omni_moe Text-only (Audio-Tower removed)
 - Gemma-3n: mlx-community/gemma-3n-E2B-it-4bit
-- Session 101: Audio discussion, Option A decision
-- Session 102: Research — Qwen3-Omni blocked, Gemma-3n verified
-- Session 111: Phase 3 evaluation, temperature findings, limitation documentation

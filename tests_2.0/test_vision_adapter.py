@@ -12,7 +12,6 @@ from mlxk2.tools.vision_adapter import (
     VisionHTTPAdapter,
     MAX_SAFE_CHUNK_SIZE,
     MAX_IMAGE_SIZE_BYTES,
-    MAX_IMAGES_PER_REQUEST,
     MAX_TOTAL_IMAGE_SIZE_BYTES,
     MAX_AUDIO_SIZE_BYTES,
 )
@@ -303,42 +302,9 @@ class TestParseOpenAIMessages:
 
         assert "url cannot be empty" in str(exc.value).lower()
 
-    def test_too_many_images_raises_error(self):
-        """Test that more than 5 images raises validation error (F-01)."""
-        # Create 6 images (exceeds MAX_IMAGES_PER_REQUEST=5)
-        image_items = [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{VALID_JPEG_B64}"}}
-            for _ in range(6)
-        ]
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": "describe"}] + image_items
-            }
-        ]
-
-        with pytest.raises(ValueError) as exc:
-            VisionHTTPAdapter.parse_openai_messages(messages)
-
-        assert "too many images" in str(exc.value).lower()
-        assert "5" in str(exc.value)  # Should mention the limit
-
-    def test_exactly_5_images_allowed(self):
-        """Test that exactly 5 images (the limit) is allowed."""
-        image_items = [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{VALID_JPEG_B64}"}}
-            for _ in range(5)
-        ]
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": "describe"}] + image_items
-            }
-        ]
-
-        # Should not raise
-        prompt, images, _audio = VisionHTTPAdapter.parse_openai_messages(messages)
-        assert len(images) == 5
+    # NOTE: MAX_IMAGES_PER_REQUEST limit removed (beta.9)
+    # Image count is unlimited - chunking (MAX_SAFE_CHUNK_SIZE) handles batch safety
+    # See: git log for beta.6 rationale
 
     def test_total_image_size_limit_raises_error(self):
         """Test that total image size > 50MB raises validation error (F-01)."""

@@ -1,5 +1,142 @@
 # Changelog
 
+## [2.0.4-beta.9] - 2026-02-04
+
+### Highlights
+
+**Dedicated STT Backend via mlx-audio:** Beta.9 migrates audio transcription from mlx-vlm multimodal (beta.8) to mlx-audio dedicated STT backend. Architecture pivot enables Whisper model support with >10 minute duration (vs ~30s Gemma-3n limit), better transcription accuracy, and cleaner backend separation. Gemma-3n multimodal audio remains backward-compatible via automatic backend routing.
+
+**OpenAI Whisper API Endpoint:** New `/v1/audio/transcriptions` endpoint provides OpenAI-compatible audio transcription via multipart/form-data file uploads. Supports `json`, `text`, and `verbose_json` response formats. WebUI clients can route audio uploads directly to this endpoint based on MIME type detection.
+
+**Memory Gate System (ADR-016 Phase 2b):** Aggressive memory management prevents swap pressure during model transitions. Vision models wait for 8 GB free RAM, audio models wait for 4 GB. Orphan process bug fixed - server processes now properly terminate without leaving Metal cache residue. Swap peak reduced from 48+ GB to <2 GB in benchmark runs.
+
+**Zero System Dependencies:** Audio transcription works with `pip install mlx-knife[audio]` only - no ffmpeg, no Homebrew, no system libraries. MP3/WAV decoding via embedded libsndfile (LGPL-2.1, CFFI dynamic loading). M4A/AAC supported natively on macOS via Core Audio.
+
+**Config-Based Backend Routing (ADR-020):** Automatic model routing to optimal backend based on config signals. Whisper/Voxtral → mlx-audio (STT), Gemma-3n → mlx-vlm (multimodal). No hardcoded model names, future-proof architecture.
+
+### Added
+
+- **mlx-audio Backend Integration (ADR-020):**
+  - `AudioRunner` class for STT transcription (context manager pattern, similar to VisionRunner)
+  - Support for Whisper (all variants), Voxtral, VibeVoice-ASR models
+  - >10 minute audio duration support (vs ~30s Gemma-3n architectural limit)
+  - Segment metadata with `MLXK2_AUDIO_SEGMENTS=1` (timestamps in collapsible table)
+
+- **Server `/v1/audio/transcriptions` Endpoint (OpenAI Whisper API):**
+  - Multipart/form-data file uploads (no Base64 encoding needed)
+  - Response formats: `json` (default), `text`, `verbose_json`
+  - Parameters: `model`, `language`, `prompt`, `temperature`
+  - Server preload support for audio-only models (`mlxk serve whisper-large`)
+  - Dependency: `python-multipart>=0.0.9` for file uploads
+
+- **Backend Detection System:**
+  - Config-based 6-priority detection (no hardcoded model names, future-proof)
+  - Priority 1: `model_type == "voxtral"` → mlx-audio (always STT)
+  - Priority 2: `audio_config + vision_config` → mlx-vlm (multimodal)
+  - Priority 3-6: Whisper detection via model_type, preprocessor, name heuristics
+  - `audio_runtime_compatibility()` for backend-specific runtime checks (mlx-audio vs mlx-vlm)
+  - Whisper models show `Runtime: yes` in `mlxk list --health` when mlx-audio installed
+
+- **Memory Gate System (ADR-016 Phase 2b):**
+  - Vision models: Wait for 8 GB free RAM before loading
+  - Audio models: Wait for 4 GB free RAM before loading
+  - Test context: Wait for 8 GB free after server cleanup
+  - Timeout: 10s with active polling (prevents indefinite waits)
+
+- **CLI Enhancements:**
+  - `--language` parameter for Whisper language hints (e.g., `--language en`, `--language de`)
+  - Supports Whisper's native language token forcing for improved accuracy
+
+- **Benchmark Toolchain (Schema v0.2.2):**
+  - `memmon.py`: Memory monitoring with GPU metrics via ioreg (no sudo)
+  - `memplot.py`: Interactive HTML visualization (Memory/CPU/GPU 3-row layout)
+  - Precise test timestamps (`test_start_ts`, `test_end_ts`) for effective runtime analysis
+  - Memory pressure visualization (macOS levels: NORMAL/WARN/CRITICAL)
+
+- **Dependencies:**
+  - `mlx-audio>=0.3.0` in `[audio]` extra (MIT license)
+  - `python-multipart>=0.0.9` for audio file uploads
+  - `[all]` extra combines `[vision]` + `[audio]` for multimodal workflows
+  - Updated `NOTICE` file with LGPL embedded libsndfile disclosure (CFFI dynamic linking)
+
+- **Testing:**
+  - 19 audio CLI unit tests total (8 backend detection, 2 runtime compatibility, 9 existing)
+  - 10 E2E tests for Whisper models (5 CLI + 5 server endpoint tests)
+  - All tests pass with zero system dependencies (no ffmpeg/Homebrew required)
+
+### Changed
+
+- **Audio Defaults (STT Best Practices):**
+  - Temperature: 0.2 → **0.0** (greedy decoding for deterministic transcription)
+  - File size limit: 5MB → **50MB** (supports ~15 minutes @ 16kHz mono)
+
+- **Backend Architecture:**
+  - Audio models route via `detect_audio_backend()` with backend-specific runtime checks
+  - `build_model_object()` uses `audio_runtime_compatibility()` for Whisper/Gemma-3n
+  - `run.py` routes audio models through backend-aware compatibility check
+  - Gemma-3n multimodal audio remains backward-compatible (automatic mlx-vlm routing)
+
+- **Recommended Models:**
+  - `whisper-large-v3-turbo-4bit` primary recommendation (464MB, >10min, best accuracy/speed)
+  - `whisper-tiny` for fast transcription (74MB, lower accuracy)
+  - Gemma-3n multimodal audio still supported (~30s limit, backward compatibility)
+
+- **Documentation:**
+  - README.md Audio section rewritten: Whisper-first approach, backend routing explanation
+  - SERVER-HANDBOOK.md: `/v1/audio/transcriptions` endpoint documentation, migration guide
+  - Installation instructions include `[audio]` extra with zero-dependency MP3/WAV support
+  - Removed ffmpeg/Homebrew requirements (embedded libsndfile via soundfile)
+  - E2E test comments updated: MP3 works without ffmpeg (embedded codec)
+
+- **Audio Parameter Forwarding:**
+  - `temperature=0.0` now properly forwarded to mlx-audio (was using fallback tuple)
+  - `initial_prompt` forwarded for domain-specific context
+  - `chunk_duration=30.0` for batch STT (was 1.0 for streaming)
+
+### Fixed
+
+- **EuroLLM Tokenizer Decoding:** EuroLLM-22B-Instruct models now decode properly with spaces and correct UTF-8 (ö, ä, ü). Fixed Metaspace→ByteLevel replacement that broke decoder compatibility. Mistral regex fix now preserves original PreTokenizer type (Metaspace/ByteLevel).
+
+- **Vision-Model Text-Only Routing (Regression):** Vision-capable models (Mistral-Small-3.1-24B, Pixtral-12B, etc.) without images/audio now correctly route to MLXRunner (CLI) or use text-model max_tokens logic (server). CLI: Full context for single-shot generation. Server: Half context (e.g., 65536 for 131k models) for conversation history buffer. Previously all routed to VisionRunner with incorrect defaults. ADR-020 updated with complete routing hierarchy documentation.
+
+- **Multimodal Model Context Length Detection:** Multimodal models (Mistral3, Pixtral) now correctly detect text context length from nested `text_config.max_position_embeddings` (e.g., 131072 for Mistral-Small-3.1-24B). Previously only searched top-level config, falling back to 4096 tokens for all multimodal models. Enables full 128k context (CLI) or 65k context (server) utilization for vision-capable models in text-only mode.
+
+- **Memory Cleanup Bug (Critical):** `mx.clear_cache()` doesn't exist - code silently failed in try/except. Fixed 8 locations to use `mx.metal.clear_cache()` (correct MLX API). Metal cache now properly cleared between model loads.
+
+- **Orphan Process Bug:** Double `start_new_session=True` in server_context.py + server_base.py caused orphan processes holding Metal/GPU cache. Test context now starts server_base directly without CLI wrapper.
+
+- **Memory Calculation:** macOS `inactive` pages are NOT free when Metal holds them. Memory gates now use only `free + speculative` pages (vm_stat).
+
+- **Server Preload for Audio Models:** `mlxk serve --model whisper-large` failed with "Model type whisper not supported". Fixed: Audio backend detection before preload, routes to `get_or_load_audio_model()`.
+
+- **Python 3.9 Dropped:** MLX 0.30+ requires Python 3.10+. Updated pyproject.toml and test matrix.
+
+### Technical Notes
+
+- **License Compliance:** LGPL-2.1 libsndfile embedded in soundfile PyPI wheel, dynamically loaded via CFFI (explicitly permitted under LGPL §6). No GPL contamination - mlx-knife remains Apache 2.0.
+
+- **MP3 Support:** Works without ffmpeg via soundfile's embedded libsndfile with MP3 codec. Verified on macOS with Homebrew libsndfile unlinked (pure pip install workflow).
+
+- **Legacy Model Warning:** Some Whisper models in mlx-community use old `weights.npz` format (e.g., whisper-tiny, whisper-turbo). Health check correctly flags these as unhealthy. Use models with `.safetensors` weights (e.g., whisper-large-v3-turbo-4bit).
+
+- **ADR-020 Reference:** Audio Backend Architecture document describes config-based routing rationale and detection logic. See `docs/ADR/ADR-020-Audio-Backend-Architecture.md`.
+
+### Known Issues
+
+**Installation:**
+- **mlx-audio 0.3.1 PyPI Regression:** `pip install mlx-knife[audio]` fails for Whisper models when `preprocessor_config.json` is missing from mlx-community models. Workaround: Install mlx-audio from Git (`pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"`). See README.md "Via GitHub (Beta)" for full instructions.
+
+**Upstream Blockers:**
+- **Voxtral Tokenizer Bugs (mlx-audio#450):** Voxtral models produce garbled output due to tokenizer incompatibility. PR submitted upstream, awaiting merge. Whisper models unaffected.
+- **transformers 5.x Dialog Blocking:** Some models require `trust_remote_code=True` which mlx-lm doesn't pass through. Affects models with custom chat templates.
+
+**Deferred Features:**
+- **`--no-reasoning` Flag (#40):** Partial implementation, requires System Prompts (#33) for full functionality.
+- **Vision Memory Estimation (#46):** ADR-016 Phase 3 deferred - vision models don't yet estimate memory requirements.
+- **Memory Gate Timeout Behavior:** Server terminates on memory gate timeout instead of rejecting request and continuing. Fix planned for beta.10: Catch `MemoryPressureError` → return HTTP 503 with `Retry-After` header (~10 LOC).
+
+---
+
 ## [2.0.4-beta.8] - 2026-01-23
 
 ### Highlights

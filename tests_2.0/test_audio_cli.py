@@ -42,6 +42,19 @@ class TestAudioCLIArgument:
         captured = capsys.readouterr()
         assert "WAV" in captured.out or "audio" in captured.out.lower()
 
+    def test_language_argument_in_help(self, capsys):
+        """CLI help should show --language argument for audio."""
+        from mlxk2.cli import main
+        import sys
+
+        with pytest.raises(SystemExit) as exc_info:
+            with patch.object(sys, 'argv', ['mlxk', 'run', '--help']):
+                main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "--language" in captured.out
+
 
 class TestAudioFileValidation:
     """Tests for audio file validation in CLI."""
@@ -60,17 +73,18 @@ class TestAudioFileValidation:
         assert "Audio file not found" in captured.out or "Audio file not found" in captured.err
 
     def test_audio_file_too_large(self, tmp_path, capsys):
-        """Should error if audio file >5MB."""
+        """Should error if audio file >50MB (ADR-020: limit raised for Whisper/Voxtral)."""
         from mlxk2.cli import main
         import sys
 
-        # Create a file that's too large (just over 5MB to trigger check)
+        # Create a file that's too large (just over 50MB to trigger check)
         large_file = tmp_path / "large.wav"
-        # Write 6MB of zeros
-        large_file.write_bytes(b'\x00' * (6 * 1024 * 1024))
+        # Write 51MB of zeros
+        large_file.write_bytes(b'\x00' * (51 * 1024 * 1024))
 
         with pytest.raises(SystemExit) as exc_info:
-            with patch.object(sys, 'argv', ['mlxk', 'run', 'test-model', '--audio', str(large_file), 'prompt']):
+            # Use --prompt flag to avoid argparse ambiguity with positional prompt
+            with patch.object(sys, 'argv', ['mlxk', 'run', 'test-model', '--audio', str(large_file), '--prompt', 'test']):
                 main()
 
         assert exc_info.value.code == 1
@@ -118,3 +132,153 @@ class TestAudioTestAssets:
         content = sources_file.read_text()
         assert "CC BY 4.0" in content, "License attribution missing"
         assert "LibriSpeech" in content, "Source attribution missing"
+
+
+class TestAudioBackendDetection:
+    """Tests for config-based audio backend detection (ADR-020).
+
+    Detection routes audio models to appropriate backend:
+    - STT models (Voxtral, Whisper) → Backend.MLX_AUDIO
+    - Multimodal models (Gemma-3n) → Backend.MLX_VLM
+    """
+
+    def test_voxtral_routes_to_mlx_audio(self, tmp_path):
+        """Voxtral model_type should route to MLX_AUDIO backend."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+
+        # Voxtral config (STT-focused, even with audio_config)
+        config = {
+            "model_type": "voxtral",
+            "audio_config": {"num_mel_bins": 128},
+            "vision_config": {},  # Empty (no vision)
+        }
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend == Backend.MLX_AUDIO, "Voxtral should route to MLX_AUDIO"
+
+    def test_whisper_routes_to_mlx_audio(self, tmp_path):
+        """Whisper model_type should route to MLX_AUDIO backend."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+
+        config = {"model_type": "whisper"}
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend == Backend.MLX_AUDIO, "Whisper should route to MLX_AUDIO"
+
+    def test_gemma3n_routes_to_mlx_vlm(self, tmp_path):
+        """Gemma-3n (audio + vision) should route to MLX_VLM backend."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+
+        # Gemma-3n config (multimodal: vision + audio)
+        config = {
+            "model_type": "gemma3n",
+            "audio_config": {"num_mel_bins": 80},
+            "vision_config": {"image_size": 896, "patch_size": 14},  # Populated
+        }
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend == Backend.MLX_VLM, "Gemma-3n should route to MLX_VLM"
+
+    def test_whisper_feature_extractor_routes_to_mlx_audio(self, tmp_path):
+        """Models with WhisperFeatureExtractor should route to MLX_AUDIO."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+        import json
+
+        # Create preprocessor_config.json with WhisperFeatureExtractor
+        preprocessor_config = {"feature_extractor_type": "WhisperFeatureExtractor"}
+        (tmp_path / "preprocessor_config.json").write_text(json.dumps(preprocessor_config))
+
+        # Config without explicit model_type
+        config = {"hidden_size": 768}
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend == Backend.MLX_AUDIO, "WhisperFeatureExtractor should route to MLX_AUDIO"
+
+    def test_audio_config_only_routes_to_mlx_vlm(self, tmp_path):
+        """Models with audio_config but no STT signals route to MLX_VLM (fallback)."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+
+        # Unknown audio model with just audio_config
+        config = {
+            "model_type": "unknown_audio_model",
+            "audio_config": {"sample_rate": 16000},
+        }
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend == Backend.MLX_VLM, "audio_config alone should fallback to MLX_VLM"
+
+    def test_no_audio_config_returns_none(self, tmp_path):
+        """Models without audio_config should return None."""
+        from mlxk2.operations.common import detect_audio_backend
+
+        # Pure text model
+        config = {"model_type": "llama", "hidden_size": 4096}
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend is None, "Non-audio model should return None"
+
+    def test_name_heuristic_whisper(self, tmp_path):
+        """Fallback name heuristic: 'whisper' in name routes to MLX_AUDIO."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+
+        # Create probe path with "whisper" in name
+        whisper_path = tmp_path / "whisper-large-v3-turbo-4bit"
+        whisper_path.mkdir()
+
+        config = {"hidden_size": 768}  # No model_type, no audio_config
+
+        backend = detect_audio_backend(whisper_path, config)
+        assert backend == Backend.MLX_AUDIO, "Name heuristic should detect whisper"
+
+    def test_original_voxtral_no_vision_config(self, tmp_path):
+        """Original Mistral Voxtral (no vision_config key) routes to MLX_AUDIO."""
+        from mlxk2.operations.common import detect_audio_backend
+        from mlxk2.core.capabilities import Backend
+
+        # Original Mistral format (no vision_config key at all)
+        config = {
+            "model_type": "voxtral",
+            "audio_config": {"encoder_config": {"num_mel_bins": 128}},
+        }
+
+        backend = detect_audio_backend(tmp_path, config)
+        assert backend == Backend.MLX_AUDIO, "Original Voxtral should route to MLX_AUDIO"
+
+
+class TestAudioRuntimeCompatibility:
+    """Tests for audio runtime compatibility check (ADR-020)."""
+
+    def test_mlx_audio_backend_checks_mlx_audio(self):
+        """MLX_AUDIO backend should check for mlx-audio package."""
+        from mlxk2.operations.common import audio_runtime_compatibility
+        from mlxk2.core.capabilities import Backend
+        import importlib.util
+
+        # Skip if mlx-audio not installed (PyPI #442: [audio] extra is empty)
+        if importlib.util.find_spec("mlx_audio") is None:
+            pytest.skip("mlx-audio not installed (requires manual editable install)")
+
+        # MLX_AUDIO backend (Whisper, Voxtral)
+        compatible, reason = audio_runtime_compatibility(Backend.MLX_AUDIO)
+
+        # Should be compatible when mlx-audio is installed
+        assert compatible is True, f"Expected mlx-audio to be available: {reason}"
+        assert reason is None
+
+    def test_mlx_vlm_backend_checks_mlx_vlm(self):
+        """MLX_VLM backend should check for mlx-vlm package."""
+        from mlxk2.operations.common import audio_runtime_compatibility
+        from mlxk2.core.capabilities import Backend
+
+        # MLX_VLM backend (Gemma-3n multimodal)
+        compatible, reason = audio_runtime_compatibility(Backend.MLX_VLM)
+
+        # Should be compatible if mlx-vlm is installed
+        assert compatible is True, f"Expected mlx-vlm to be available: {reason}"
+        assert reason is None

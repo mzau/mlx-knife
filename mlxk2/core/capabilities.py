@@ -48,6 +48,7 @@ class Backend(Enum):
     """Available model backends."""
     MLX_LM = "mlx_lm"      # Text models via mlx-lm
     MLX_VLM = "mlx_vlm"    # Vision models via mlx-vlm
+    MLX_AUDIO = "mlx_audio"  # Audio STT models via mlx-audio (ADR-020)
     UNSUPPORTED = "unsupported"  # Model cannot be loaded
 
 
@@ -75,12 +76,20 @@ VISION_MODEL_TYPES = frozenset({
     "smolvlm",
 })
 
-# Audio model types (ADR-019)
-# Note: Only models verified to work with mlx-vlm audio support
+# STT (Speech-to-Text) model types - Audio ONLY models (no text generation/chat)
+# These models transcribe audio to text, they cannot generate text or have conversations
+STT_MODEL_TYPES = frozenset({
+    "voxtral",        # Voxtral (Audio → Text) - mlx-audio backend
+    "whisper",        # OpenAI Whisper variants - mlx-audio backend
+})
+
+# Audio model types (ADR-019, ADR-020) - All audio-capable models
+# Includes both STT models AND multimodal chat models with audio
 AUDIO_MODEL_TYPES = frozenset({
-    "gemma3n",        # Google Gemma 3n (Vision + Audio + Text)
+    "gemma3n",        # Google Gemma 3n (Vision + Audio + Text) - mlx-vlm backend
     "gemma3n_audio",  # Audio encoder subcomponent
-    "voxtral",        # Voxtral mini (Audio + Text) - EXPERIMENTAL (pre-mlx-vlm merge)
+    "voxtral",        # Voxtral (Audio → Text) - mlx-audio backend
+    "whisper",        # OpenAI Whisper variants - mlx-audio backend
 })
 
 
@@ -100,6 +109,10 @@ class ModelCapabilities:
     is_embedding: bool = False
     is_audio: bool = False
 
+    # Audio backend routing (ADR-020)
+    # MLX_AUDIO for STT (Whisper, Voxtral), MLX_VLM for multimodal (Gemma-3n)
+    audio_backend: Optional["Backend"] = None
+
     # File integrity
     config_valid: bool = False
     config: Optional[Dict[str, Any]] = None
@@ -109,6 +122,7 @@ class ModelCapabilities:
     python_version: Tuple[int, int, int] = field(default_factory=lambda: sys.version_info[:3])
     mlx_vlm_available: bool = False
     mlx_lm_available: bool = False
+    mlx_audio_available: bool = False  # ADR-020
 
     # Framework and runtime compatibility (for text models)
     framework: str = "Unknown"
@@ -274,6 +288,11 @@ def _check_mlx_lm_available() -> bool:
     return importlib.util.find_spec("mlx_lm") is not None
 
 
+def _check_mlx_audio_available() -> bool:
+    """Check if mlx-audio package is available (ADR-020)."""
+    return importlib.util.find_spec("mlx_audio") is not None
+
+
 def _check_text_runtime_compatibility(model_path: Path, model_name: str, config: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
     """Check if text model is compatible with mlx-lm runtime.
 
@@ -379,12 +398,15 @@ def probe_model_capabilities(
     if "embed" in name_lower:
         caps.is_embedding = True
 
-    # Detect audio capability (ADR-019)
+    # Detect audio capability and backend (ADR-019, ADR-020)
     try:
-        from ..operations.common import detect_audio_capability
+        from ..operations.common import detect_audio_capability, detect_audio_backend
         caps.is_audio = detect_audio_capability(model_path, caps.config)
+        if caps.is_audio:
+            caps.audio_backend = detect_audio_backend(model_path, caps.config)
     except Exception:
         caps.is_audio = False
+        caps.audio_backend = None
 
     # Build capabilities list (for JSON API compatibility)
     if caps.is_embedding:
@@ -402,6 +424,7 @@ def probe_model_capabilities(
     caps.python_version = sys.version_info[:3]
     caps.mlx_vlm_available = _check_mlx_vlm_available()
     caps.mlx_lm_available = _check_mlx_lm_available()
+    caps.mlx_audio_available = _check_mlx_audio_available()
 
     # Check text model runtime compatibility (framework + model_type)
     # Vision models use mlx-vlm which has its own checks
@@ -434,6 +457,7 @@ def select_backend_policy(
     caps: ModelCapabilities,
     context: str = "cli",
     has_images: bool = False,
+    has_audio: bool = False,
 ) -> BackendPolicy:
     """Select backend and determine policy based on probed capabilities.
 
@@ -444,12 +468,60 @@ def select_backend_policy(
         caps: Probed model capabilities
         context: Execution context ("cli" or "server")
         has_images: Whether images are being passed to the model
+        has_audio: Whether audio is being passed to the model (ADR-020)
 
     Returns:
         BackendPolicy indicating backend choice and any warnings/blocks
     """
+    # Gate 0: Audio requests - Route based on model backend (ADR-020)
+    # Audio-only requests (no images) get routed to appropriate audio backend
+    if has_audio and not has_images:
+        # Audio requested but model doesn't support it
+        if not caps.is_audio:
+            return BackendPolicy(
+                backend=Backend.UNSUPPORTED,
+                decision=PolicyDecision.BLOCK,
+                message=f"Model '{caps.model_name}' does not support audio inputs (no audio capability detected)",
+                http_status=400,
+                error_type="capability_mismatch",
+            )
+
+        # Determine audio backend (STT vs multimodal)
+        audio_backend = caps.audio_backend
+
+        if audio_backend == Backend.MLX_AUDIO:
+            # STT models: Voxtral, Whisper, VibeVoice → mlx-audio
+            if not caps.mlx_audio_available:
+                return BackendPolicy(
+                    backend=Backend.UNSUPPORTED,
+                    decision=PolicyDecision.BLOCK,
+                    message="STT models require mlx-audio (pip install mlx-knife[audio])",
+                    http_status=501,
+                    error_type="missing_dependency",
+                )
+            return BackendPolicy(
+                backend=Backend.MLX_AUDIO,
+                decision=PolicyDecision.ALLOW,
+            )
+
+        elif audio_backend == Backend.MLX_VLM:
+            # Multimodal audio: Gemma-3n, Qwen3-Omni → mlx-vlm
+            # Fall through to vision path (shares mlx-vlm backend)
+            pass  # Will be handled by Gate 1 below
+
+        else:
+            # Unknown audio backend (detection failed)
+            return BackendPolicy(
+                backend=Backend.UNSUPPORTED,
+                decision=PolicyDecision.BLOCK,
+                message=f"Unknown audio model type for '{caps.model_name}'",
+                http_status=501,
+                error_type="unknown_audio_backend",
+            )
+
     # Gate 1: Vision model detection and backend selection
-    if caps.is_vision or has_images:
+    # Also handles multimodal audio (Gemma-3n) which uses mlx-vlm
+    if caps.is_vision or has_images or (has_audio and caps.audio_backend == Backend.MLX_VLM):
         # Vision path requires mlx-vlm backend
 
         # Gate 1a: Images provided but model not vision-capable
@@ -556,6 +628,7 @@ def probe_and_select(
     config: Optional[Dict[str, Any]] = None,
     context: str = "cli",
     has_images: bool = False,
+    has_audio: bool = False,
 ) -> Tuple[ModelCapabilities, BackendPolicy]:
     """Convenience function to probe capabilities and select policy in one call.
 
@@ -565,10 +638,11 @@ def probe_and_select(
         config: Pre-loaded config.json (optional)
         context: Execution context ("cli" or "server")
         has_images: Whether images are being passed to the model
+        has_audio: Whether audio is being passed to the model (ADR-020)
 
     Returns:
         Tuple of (ModelCapabilities, BackendPolicy)
     """
     caps = probe_model_capabilities(model_path, model_name, config)
-    policy = select_backend_policy(caps, context, has_images)
+    policy = select_backend_policy(caps, context, has_images, has_audio)
     return caps, policy

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import pytest
 
 # Prevent tokenizer fork warnings and potential deadlocks
@@ -312,20 +313,21 @@ def vision_portfolio():
 
 @pytest.fixture(scope="module")
 def audio_portfolio():
-    """Audio-only model portfolio (NEW - Portfolio Separation).
+    """Audio-only model portfolio (ADR-020 - Portfolio Separation).
 
     Discovers audio models using discover_audio_models() which filters to
-    only models with audio capabilities. Uses Vision-specific RAM calculation
-    (audio goes through VisionRunner infrastructure).
+    only models with audio capabilities. Includes both:
+    - STT models (Whisper, Voxtral) → mlx-audio backend
+    - Multimodal audio (Gemma-3n) → mlx-vlm backend
 
     Returns:
         Dict[str, Dict[str, Any]]: Audio model portfolio keyed by audio_model_key
             {
                 "audio_00": {
-                    "id": "mlx-community/gemma-3n-E2B-it-4bit",
-                    "ram_needed_gb": 3.2,
+                    "id": "mlx-community/whisper-large-v3-turbo-4bit",
+                    "ram_needed_gb": 1.5,
                     "expected_issue": None,
-                    "description": "Audio: gemma-3n-E2B-it-4bit"
+                    "description": "Audio: whisper-large-v3-turbo-4bit"
                 },
                 ...
             }
@@ -427,7 +429,7 @@ def vision_model_info(vision_portfolio, vision_model_key):
 
 @pytest.fixture
 def audio_model_info(audio_portfolio, audio_model_key):
-    """Get model info for the current parametrized audio_model_key (NEW).
+    """Get model info for the current parametrized audio_model_key (ADR-020).
 
     This fixture provides convenient access to audio model metadata in
     parametrized tests. It automatically looks up the audio_model_key
@@ -441,8 +443,8 @@ def audio_model_info(audio_portfolio, audio_model_key):
 
     Returns:
         Dict[str, Any]: Audio model metadata with keys:
-            - id: Model ID (e.g., "mlx-community/gemma-3n-E2B-it-4bit")
-            - ram_needed_gb: Estimated RAM requirement (0.70 threshold vision formula)
+            - id: Model ID (e.g., "mlx-community/whisper-large-v3-turbo-4bit")
+            - ram_needed_gb: Estimated RAM requirement
             - expected_issue: Known issue or None
             - description: Human-readable description
 
@@ -495,18 +497,64 @@ def _auto_report_vision_model(request):
         return
 
     # Type 2: CLI vision tests (test_vision_e2e_live.py)
-    # These tests use subprocess.run(["mlxk", "run", "pixtral", ...])
+    # These tests use subprocess.run(["mlxk", "run", VISION_MODEL, ...])
+    # VISION_MODEL is explicitly set to "pixtral-12b-8bit" to avoid ambiguity
     if 'test_vision_e2e_live.py' in request.node.nodeid:
-        # All CLI vision tests use pixtral (hardcoded in subprocess calls)
+        # All CLI vision tests use explicit pixtral-12b-8bit
         request.node.user_properties.append(("model", {
-            "id": "mlx-community/pixtral-12b-8bit",
-            "size_gb": 14.0,  # Approximate (12B 8-bit ≈ 14GB)
+            "id": "pixtral-12b-8bit",  # Explicit model (not shorthand)
+            "size_gb": 13.5,   # Actual disk size of 8bit variant
             "family": "pixtral",
             "variant": "12b-8bit",
         }))
         # Explicit inference_modality for CLI vision tests (v0.2.1)
         # Required because these tests don't use vision_model_key fixture
         request.node.user_properties.append(("inference_modality", "vision"))
+
+
+@pytest.fixture(autouse=True)
+def _auto_report_audio_model(request):
+    """Auto-report audio model info to benchmark log (autouse, ADR-020).
+
+    This fixture automatically adds audio model metadata to benchmark reports
+    for parametrized audio tests, without requiring explicit report_benchmark() calls.
+
+    This ensures audio models appear with proper annotations in memplot.py timeline charts.
+
+    Handles audio API tests with audio_model_key parameter (audio_portfolio).
+    """
+    # Only for parametrized audio tests (audio_model_key)
+    if "audio_model_key" not in request.fixturenames:
+        return
+
+    # Get audio model info from fixture
+    try:
+        audio_model_info = request.getfixturevalue("audio_model_info")
+    except:
+        return
+
+    if not audio_model_info:
+        return
+
+    # Extract model metadata
+    model_id = audio_model_info["id"]
+    family, variant = _parse_model_family(model_id)
+
+    # Audio models: ram_needed_gb is disk size (no overhead)
+    ram_gb = audio_model_info["ram_needed_gb"]
+    disk_size_gb = ram_gb if ram_gb != float('inf') else float('inf')
+
+    # Append to user_properties for benchmark reporting (schema v0.2.2)
+    request.node.user_properties.append(("model", {
+        "id": model_id,
+        "size_gb": round(disk_size_gb, 2) if disk_size_gb != float('inf') else disk_size_gb,
+        "family": family,
+        "variant": variant,
+    }))
+
+    # Explicit inference_modality for audio tests (v0.2.1+)
+    # Required because audio_model_key fixture doesn't set this automatically
+    request.node.user_properties.append(("inference_modality", "audio"))
 
 
 def _parse_model_family(model_id: str) -> tuple[str, str]:
@@ -568,6 +616,18 @@ def _parse_model_family(model_id: str) -> tuple[str, str]:
     if "mistral" in model_name or "mixtral" in model_name:
         family = "mistral" if "mistral" in model_name else "mixtral"
         variant = model_name.replace(f"{family}-", "")
+        variant = variant.replace("-4bit", "").replace("-8bit", "")
+        return family, variant
+
+    if "whisper" in model_name:
+        family = "whisper"
+        variant = model_name.replace("whisper-", "")
+        variant = variant.replace("-4bit", "").replace("-8bit", "").replace("-fp16", "")
+        return family, variant
+
+    if "pixtral" in model_name:
+        family = "pixtral"
+        variant = model_name.replace("pixtral-", "")
         variant = variant.replace("-4bit", "").replace("-8bit", "")
         return family, variant
 
@@ -664,3 +724,57 @@ def report_benchmark(request):
             request.node.user_properties.append((key, value))
 
     return _report
+
+
+# ============================================================================
+# Precise Test Timing - For Effective Runtime Analysis
+# ============================================================================
+
+# StashKeys for test timing (pytest 7.0+ API)
+test_start_key = pytest.StashKey[float]()
+test_end_key = pytest.StashKey[float]()
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Hook: Capture precise test start timestamp (Unix epoch).
+
+    Enables accurate correlation with memmon samples and effective runtime
+    calculation by excluding idle periods (Memory Gates, setup overhead).
+
+    Stored in node stash for later retrieval in makereport hook.
+    """
+    item.stash[test_start_key] = time.time()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item):
+    """Hook: Capture precise test end timestamp (Unix epoch).
+
+    Paired with test_start_ts for precise test duration measurement
+    independent of pytest's duration calculation.
+    """
+    item.stash[test_end_key] = time.time()
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    """Hook: Add precise timestamps to benchmark report (Schema v0.2.2).
+
+    Retrieves test_start_ts and test_end_ts from stash (captured in
+    setup/teardown hooks) and adds them to user_properties for
+    inclusion in benchmark JSONL output.
+
+    This enables post-processing tools to correlate test execution
+    with memmon samples and calculate effective runtime.
+
+    CRITICAL: Uses tryfirst=True to ensure this hook runs BEFORE the
+    conftest.py hook that writes JSONL (which has hookwrapper=True).
+    """
+    if call.when == "call":  # Only for actual test execution, not setup/teardown
+        test_start_ts = item.stash.get(test_start_key, None)
+        test_end_ts = item.stash.get(test_end_key, None)
+
+        if test_start_ts and test_end_ts:
+            item.user_properties.append(("test_start_ts", test_start_ts))
+            item.user_properties.append(("test_end_ts", test_end_ts))

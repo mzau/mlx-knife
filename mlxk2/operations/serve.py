@@ -131,6 +131,8 @@ def start_server(
     # Set environment variables for server configuration
     # These apply to both supervised and non-supervised modes
     os.environ["MLXK2_LOG_LEVEL"] = log_level
+    # Suppress tqdm progress bars in server mode (must be set before tqdm import)
+    os.environ["TQDM_DISABLE"] = "1"
     if model:
         os.environ["MLXK2_PRELOAD_MODEL"] = model
     if max_tokens is not None:

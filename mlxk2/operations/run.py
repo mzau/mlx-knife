@@ -16,13 +16,17 @@ from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from ..operations.health import check_runtime_compatibility
 from ..operations.common import (
+    _load_config_json,
     _total_size_bytes,
+    audio_runtime_compatibility,
+    detect_audio_backend,
     detect_audio_capability,
     detect_framework,
     detect_vision_capability,
     read_front_matter,
     vision_runtime_compatibility,
 )
+from ..core.capabilities import Backend
 
 
 # Memory threshold for pre-load checks (ADR-016)
@@ -254,7 +258,8 @@ def run_model(
     use_chat_template: bool = True,
     json_output: bool = False,
     verbose: bool = False,
-    hide_reasoning: bool = False
+    hide_reasoning: bool = False,
+    language: Optional[str] = None,
 ) -> Optional[str]:
     """Execute model with prompt - supports both single-shot and interactive modes.
 
@@ -305,6 +310,7 @@ def run_model(
         # Only perform compatibility check if model is actually in cache
         is_vision_model = False
         is_audio_model = False
+        audio_backend = None  # ADR-020: Backend.MLX_AUDIO or Backend.MLX_VLM
         model_path = None
         model_cache_dir = None
         cfg = None
@@ -327,6 +333,8 @@ def run_model(
 
                 is_vision_model = detect_vision_capability(model_path, cfg)
                 is_audio_model = detect_audio_capability(model_path, cfg)
+                if is_audio_model:
+                    audio_backend = detect_audio_backend(model_path, cfg)
             else:
                 # Cache model - existing logic
                 model_cache = get_current_model_cache()
@@ -354,6 +362,8 @@ def run_model(
                         if model_path is not None:
                             is_vision_model = detect_vision_capability(model_path, cfg)
                             is_audio_model = detect_audio_capability(model_path, cfg)
+                            if is_audio_model:
+                                audio_backend = detect_audio_backend(model_path, cfg)
 
                     # If images are provided but model is not vision-capable, fail fast
                     if images and not is_vision_model:
@@ -390,12 +400,30 @@ def run_model(
                                     print(error_result, file=sys.stderr)
                                 return error_result
                     else:
-                        # Check runtime compatibility for both pinned and unpinned models (text/LLM path)
+                        # Check runtime compatibility for both pinned and unpinned models (text/LLM/audio path)
                         if model_path and model_path.exists():
                             # Read README front-matter for framework hints (e.g., private MLX models)
                             fm = read_front_matter(model_path)
                             framework = detect_framework(resolved_name, model_cache_dir, selected_path=model_path, fm=fm)
-                            compatible, reason = check_runtime_compatibility(model_path, framework)
+
+                            # Load config for audio detection (ADR-020)
+                            config = _load_config_json(model_path)
+
+                            # Check if model has audio capability
+                            has_audio = detect_audio_capability(model_path, config)
+
+                            # Route to appropriate runtime check
+                            if has_audio:
+                                # Audio models: check based on backend (ADR-020)
+                                audio_backend = detect_audio_backend(model_path, config)
+                                if audio_backend:
+                                    compatible, reason = audio_runtime_compatibility(audio_backend)
+                                else:
+                                    # Fallback: unknown audio model
+                                    compatible, reason = False, "Unknown audio backend"
+                            else:
+                                # Text/LLM models: use standard mlx-lm check
+                                compatible, reason = check_runtime_compatibility(model_path, framework)
 
                             if not compatible:
                                 error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
@@ -423,10 +451,50 @@ def run_model(
 
     # Runtime compatibility verified, proceed with model loading
     try:
-        # Vision/Audio path uses mlx-vlm backend (non-streaming)
-        if is_vision_model or is_audio_model:
+        # ADR-020: Audio STT path uses mlx-audio backend (Whisper, Voxtral)
+        # Routes audio-only requests to AudioRunner when backend is MLX_AUDIO
+        if audio and not images and audio_backend == Backend.MLX_AUDIO:
             if model_path is None or not model_path.exists():
-                error_result = "Error: Vision/Audio model not found in cache"
+                error_result = "Error: Audio model not found in cache"
+                if not json_output:
+                    print(error_result, file=sys.stderr)
+                return error_result
+
+            if prompt is None:
+                prompt = "Transcribe this audio."
+
+            try:
+                from ..core.audio_runner import AudioRunner
+
+                with AudioRunner(model_path, resolved_name or model_spec, verbose=verbose) as runner:
+                    result = runner.transcribe(
+                        audio=list(audio),
+                        prompt=prompt,
+                        max_tokens=max_tokens or 4096,
+                        temperature=temperature,
+                        language=language,
+                    )
+
+            except Exception as e:
+                error_result = f"Error: {e}"
+                if not json_output:
+                    print(error_result, file=sys.stderr)
+                return error_result
+
+            if json_output:
+                return result
+            try:
+                print(result)
+            except BrokenPipeError:
+                sys.stderr.close()
+            return None
+
+        # Vision/Multimodal path uses mlx-vlm backend (non-streaming)
+        # Handles: Vision models WITH images, Multimodal audio (Gemma-3n with audio_backend=MLX_VLM)
+        # Vision-capable models WITHOUT media input fall through to Text LLM path below
+        if images or (audio and audio_backend == Backend.MLX_VLM):
+            if model_path is None or not model_path.exists():
+                error_result = "Error: Vision/Multimodal model not found in cache"
                 if not json_output:
                     print(error_result, file=sys.stderr)
                 return error_result
@@ -436,11 +504,8 @@ def run_model(
                     prompt = "Describe the image."
                 elif audio:
                     prompt = "What do you hear in this audio?"
-                else:
-                    error_result = "Error: Vision/Audio run requires a prompt"
-                    if not json_output:
-                        print(error_result, file=sys.stderr)
-                    return error_result
+                # Note: This else block is unreachable due to routing condition above
+                # (only enters this path if images or audio present)
 
             # Vision support requires Python 3.10+ (mlx-vlm requirement)
             if sys.version_info < (3, 10):
@@ -733,7 +798,8 @@ def run_model_enhanced(
     json_output: bool = False,
     verbose: bool = False,
     system_prompt: Optional[str] = None,
-    hide_reasoning: bool = False
+    hide_reasoning: bool = False,
+    language: Optional[str] = None,
 ) -> Optional[str]:
     """Enhanced run with additional parameters for future features.
     
@@ -777,5 +843,6 @@ def run_model_enhanced(
         use_chat_template=use_chat_template,
         json_output=json_output,
         verbose=verbose,
-        hide_reasoning=hide_reasoning
+        hide_reasoning=hide_reasoning,
+        language=language,
     )

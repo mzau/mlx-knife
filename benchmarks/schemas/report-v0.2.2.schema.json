@@ -1,19 +1,29 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "MLX Knife Test Report v0.2.1 (Inference Modality)",
-  "description": "Schema v0.2.1: Adds inference_modality field for Vision/Text differentiation. Backward compatible with v0.2.0.",
+  "title": "MLX Knife Test Report v0.2.2 (Precise Test Timing)",
+  "description": "Schema v0.2.2: Adds test_start_ts and test_end_ts for accurate memmon correlation and effective runtime analysis. Backward compatible with v0.2.1.",
   "type": "object",
   "required": ["schema_version", "timestamp", "mlx_knife_version", "test", "outcome"],
   "properties": {
     "schema_version": {
       "type": "string",
-      "enum": ["0.2.1", "0.2.0", "0.1.0"],
-      "description": "Schema version. 0.2.1 adds inference_modality. 0.2.0 and 0.1.0 reports remain valid."
+      "enum": ["0.2.2", "0.2.1", "0.2.0", "0.1.0"],
+      "description": "Schema version. 0.2.2 adds precise timing. 0.2.1/0.2.0/0.1.0 reports remain valid."
     },
     "timestamp": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 timestamp of test execution (UTC recommended)"
+      "description": "ISO 8601 timestamp of test execution end (UTC recommended)"
+    },
+    "test_start_ts": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Unix epoch timestamp (seconds) when test execution started. New in v0.2.2. Enables accurate correlation with memmon samples and effective runtime calculation."
+    },
+    "test_end_ts": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Unix epoch timestamp (seconds) when test execution ended. New in v0.2.2. Redundant with 'timestamp' but faster for post-processing (no ISO parsing)."
     },
     "mlx_knife_version": {
       "type": "string",
@@ -32,7 +42,7 @@
     "duration": {
       "type": "number",
       "minimum": 0,
-      "description": "Test duration in seconds"
+      "description": "Test wall clock duration in seconds (includes setup, Memory Gates, cleanup)"
     },
     "model": {
       "type": "object",

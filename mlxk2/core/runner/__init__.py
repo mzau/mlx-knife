@@ -205,8 +205,11 @@ class MLXRunner:
         # Capture baseline memory before loading
         try:
             _mx.clear_cache()
-        except Exception:
-            pass
+        except (ImportError, AttributeError):
+            pass  # MLX Metal API not available
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Metal cache clear failed: {e}")
         self._memory_baseline = _mx.get_active_memory() / 1024**3
 
         try:
@@ -246,8 +249,11 @@ class MLXRunner:
             self._model_loaded = False
             try:
                 _mx.clear_cache()
-            except Exception:
-                pass
+            except (ImportError, AttributeError):
+                pass  # MLX Metal API not available
+            except Exception as cleanup_err:
+                if self.verbose:
+                    print(f"Warning: Metal cache clear failed: {cleanup_err}")
             # Preserve FileNotFoundError (used by tests) and propagate
             if isinstance(e, FileNotFoundError):
                 raise e
@@ -268,20 +274,23 @@ class MLXRunner:
             print("Reasoning model detected - special handling enabled")
 
     def _apply_mistral_regex_fix(self, model_path):
-        """Apply Mistral tokenizer regex fix for models with broken tokenizers.
+        """Apply tokenizer regex fix for models with broken tokenizers.
 
         Problem: Some mlx-community models were converted with transformers 4.39-4.57.2,
-        which had an incorrect regex pattern for Mistral tokenizers. This causes:
+        which had an incorrect regex pattern for tokenizers. This causes:
         1. Incorrect encoding (user prompts tokenized incorrectly, merged words)
-        2. Incorrect decoding (BPE space markers Ġ (U+0120) not converted to spaces)
+        2. Incorrect decoding (BPE space markers not converted to spaces)
         3. Context window waste (broken tokenizer uses ~15% more tokens)
 
         Affected models:
         - mlx-community/DeepHermes-3-Mistral-24B-Preview-8bit (transformers 4.46.3)
         - mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit (transformers 4.52.4)
         - mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit (transformers 4.43.0)
+        - mlx-community/EuroLLM-22B-Instruct-2512 variants (transformers 4.51.3)
 
         Solution: Apply the same regex pattern fix that transformers 4.57.3+ uses.
+        Preserves original PreTokenizer type (Metaspace/ByteLevel) to maintain
+        correct decoder compatibility.
 
         See: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84
         """
@@ -336,10 +345,9 @@ class MLXRunner:
                     backend_tokenizer.pre_tokenizer[0] = split_pretokenizer
                 else:
                     # Not a Sequence, create one with Split + current pretokenizer
-                    if isinstance(current_pretokenizer, tokenizers.pre_tokenizers.Metaspace):
-                        current_pretokenizer = tokenizers.pre_tokenizers.ByteLevel(
-                            add_prefix_space=False, use_regex=False
-                        )
+                    # Keep Metaspace as-is (don't replace with ByteLevel)
+                    # Metaspace-based tokenizers (e.g., EuroLLM) need to preserve their
+                    # original decoder configuration (▁ → space, not Ġ → space)
                     backend_tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Sequence(
                         [split_pretokenizer, current_pretokenizer]
                     )
@@ -381,9 +389,13 @@ class MLXRunner:
         import gc
         gc.collect()
         try:
-            mx.clear_cache()
-        except Exception:
-            pass
+            if mx_core is not None:
+                mx_core.clear_cache()  # MLX 0.30+: use mx.clear_cache()
+        except (ImportError, AttributeError):
+            pass  # MLX cache API not available
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Cache clear failed: {e}")
 
         if self.verbose and mx_core is not None:
             memory_after = mx_core.get_active_memory() / 1024**3
