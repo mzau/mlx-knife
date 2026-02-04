@@ -69,20 +69,25 @@ vision = [
     "mlx-vlm>=0.3.10",  # Vision support (ADR-012)
 ]
 audio = [
-    # mlx-audio 0.3.1 has tiktoken fallback regression - use post-0.3.1 commit
-    # See: https://github.com/Blaizzy/mlx-audio/issues/445
-    "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@9349644",
-    "tiktoken>=0.7.0",  # Required by mlx-audio Whisper (not declared as transitive dep)
+    # mlx-audio 0.3.1+ (tiktoken assets workaround bundled in mlxk2/assets/whisper/)
+    # See Issue #479: https://github.com/Blaizzy/mlx-audio/issues/479
+    "mlx-audio>=0.3.1",
+    "tiktoken>=0.7.0",  # Required by bundled tiktoken assets
 ]
 all = [
     "mlx-vlm>=0.3.10",
-    # mlx-audio 0.3.1 has tiktoken fallback regression - use post-0.3.1 commit
-    "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@9349644",
-    "tiktoken>=0.7.0",  # Required by mlx-audio Whisper (not declared as transitive dep)
+    # mlx-audio 0.3.1+ (tiktoken assets workaround bundled in mlxk2/assets/whisper/)
+    "mlx-audio>=0.3.1",
+    "tiktoken>=0.7.0",  # Required by bundled tiktoken assets
 ]
 
 [tool.setuptools]
 license-files = [
   "LICENSE",
   "mlxk2/NOTICE",
+]
+
+[tool.setuptools.package-data]
+mlxk2 = [
+  "assets/whisper/*.tiktoken",
 ]

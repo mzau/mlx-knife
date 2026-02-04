@@ -85,68 +85,37 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ## Installation
 
-### Via PyPI (Stable - v2.0.3, Text only)
+### 1. PyPI Stable (2.0.3 - Text models only)
 
 ```bash
 pip install mlx-knife
-
-# Verify
 mlxk --version  # → mlxk 2.0.3
 ```
 
-**Requirements:**
-- macOS with Apple Silicon (M1/M2/M3/M4)
-- Python 3.10-3.12
+**Requirements:** macOS Apple Silicon, Python 3.9-3.12
 
-> **Note:** PyPI stable (2.0.3) supports **Text models only**. For Vision + Audio, use the beta version below.
-
-### Via GitHub (Beta - v2.0.4-beta.9, Text + Vision + Audio)
+### 2. PyPI Beta (2.0.4-beta.9 - Text + Vision + Audio)
 
 ```bash
-# Step 1: Base + Vision
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.9#egg=mlx-knife[vision]"
-
-# Step 2: Audio (optional - requires Git install due to PyPI regression)
-pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-pip install tiktoken
-
-# Verify
+pip install mlx-knife[all]==2.0.4b9
 mlxk --version  # → mlxk 2.0.4b9
 ```
 
-**Beta.9 features:**
-- **Vision**: mlx-vlm 0.3.10 - Image analysis with EXIF metadata
-- **Audio**: mlx-audio (Git) - Whisper STT (WAV, MP3, M4A)
-- **Recommended models**: `whisper-large-v3-turbo-4bit`, `pixtral-12b-4bit`
+**Requirements:** macOS Apple Silicon, Python 3.10-3.12
+**Features:** Audio STT (Whisper), Vision with EXIF metadata, tiktoken workaround bundled
 
-> **⚠️ Audio Installation Note:** mlx-audio 0.3.1 (PyPI) has a tiktoken regression. For audio support, install manually:
-> ```bash
-> pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-> pip install tiktoken
-> ```
-
-### Development Installation
+### 3. Developer Installation
 
 ```bash
-# Clone and install from source
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
+pip install -e ".[all,dev,test]"
 
-# Step 1: Base + Vision + Dev tools
-pip install -e ".[vision,dev,test]"
-
-# Step 2: Audio from Git (PyPI 0.3.1 broken)
-pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-pip install tiktoken
-
-# Verify
 mlxk --version  # → mlxk 2.0.4b9
-python -c "import mlx_vlm; print('vision ok')"
-python -c "import mlx_audio; print('audio ok')"
-
-# Run tests
 pytest -v
 ```
+
+**Requirements:** macOS Apple Silicon, Python 3.10-3.12
 
 ### Migrating from 1.x
 

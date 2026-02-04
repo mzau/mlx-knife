@@ -17,6 +17,94 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from ..operations.workspace import is_workspace_path
 
 
+# ============================================================================
+# CRITICAL: Monkey-patch mlx-audio tokenizer BEFORE any imports
+# ============================================================================
+# Workaround for mlx-audio Issue #479: tiktoken assets were removed in commit
+# f7328a4 (Jan 29, 2026), but code still tries to load them.
+#
+# We bundle the assets from commit 9349644 in mlxk2/assets/whisper/ and patch
+# get_encoding() to use them instead.
+#
+# This MUST happen at module import time, before any mlx-audio code runs!
+# ============================================================================
+
+def _apply_tiktoken_patch():
+    """Apply tiktoken asset patch globally at module import time."""
+    try:
+        import base64
+        import tiktoken
+        from functools import lru_cache
+
+        # Import tokenizer module first (but don't trigger get_encoding yet)
+        import mlx_audio.stt.models.whisper.tokenizer as whisper_tokenizer
+
+        # Get path to our bundled tiktoken assets
+        assets_dir = Path(__file__).parent.parent / "assets" / "whisper"
+        if not assets_dir.exists():
+            # Assets not found - skip patching (will fall back to HF WhisperProcessor)
+            return
+
+        @lru_cache(maxsize=None)
+        def patched_get_encoding(name: str = "gpt2", num_languages: int = 99):
+            """Patched get_encoding using mlxk2's bundled tiktoken files."""
+            vocab_path = assets_dir / f"{name}.tiktoken"
+
+            if not vocab_path.exists():
+                raise FileNotFoundError(
+                    f"Tiktoken vocabulary file not found: {vocab_path}\n"
+                    f"mlx-audio Issue #479: assets were removed in f7328a4"
+                )
+
+            with open(vocab_path) as fid:
+                ranks = {
+                    base64.b64decode(token): int(rank)
+                    for token, rank in (line.split() for line in fid if line)
+                }
+
+            n_vocab = len(ranks)
+            special_tokens = {}
+
+            # Build special tokens (from mlx-audio tokenizer.py:343-358)
+            from mlx_audio.stt.models.whisper.tokenizer import LANGUAGES
+
+            specials = [
+                "<|endoftext|>",
+                "<|startoftranscript|>",
+                *[f"<|{lang}|>" for lang in list(LANGUAGES.keys())[:num_languages]],
+                "<|translate|>",
+                "<|transcribe|>",
+                "<|startoflm|>",
+                "<|startofprev|>",
+                "<|nospeech|>",
+                "<|notimestamps|>",
+                *[f"<|{i * 0.02:.2f}|>" for i in range(1501)],
+            ]
+
+            for token in specials:
+                special_tokens[token] = n_vocab
+                n_vocab += 1
+
+            return tiktoken.Encoding(
+                name=vocab_path.name,
+                explicit_n_vocab=n_vocab,
+                pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
+                mergeable_ranks=ranks,
+                special_tokens=special_tokens,
+            )
+
+        # Patch the module globally
+        whisper_tokenizer.get_encoding = patched_get_encoding
+
+    except ImportError:
+        # mlx-audio not installed - skip patching
+        pass
+
+
+# Apply patch immediately at module import
+_apply_tiktoken_patch()
+
+
 class AudioRunner:
     """Wrapper around mlx-audio STT API for dedicated transcription models.
 
@@ -79,6 +167,7 @@ class AudioRunner:
         """Internal model loading - called with progress bars suppressed."""
         try:
             # Import mlx-audio STT module (0.3.0 API)
+            # Note: tiktoken patch was already applied at module import time
             from mlx_audio.stt import load_model
             from mlx_audio.stt.generate import generate_transcription
         except ImportError as e:
