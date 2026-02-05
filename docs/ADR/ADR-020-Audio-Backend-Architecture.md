@@ -235,9 +235,39 @@ def detect_audio_backend(probe: Path, config: Optional[Dict]) -> Optional[Backen
 | Whisper-* | `model_type: whisper*` | - | WhisperFeatureExtractor | MLX_AUDIO |
 | VibeVoice-ASR | Name heuristic | - | WhisperFeatureExtractor | MLX_AUDIO |
 | Gemma-3n | audio_config | vision_config (populated) | - | MLX_VLM |
-| Qwen3-Omni | audio_config | vision_config (populated) | - | MLX_VLM |
 
 **Note on Voxtral:** Config has `audio_config` but empty `vision_config: {}`. Priority 1 ensures it routes to mlx-audio (not mlx-vlm) per blaizzy's guidance. Works for both Original Mistral and mlx-knife converted variants.
+
+#### Qwen3-Omni Model Family: Special Considerations
+
+**Model Config Reality (mlx-community/Qwen3-Omni-30B-A3B-Instruct-4bit):**
+
+```json
+{
+  "model_type": "qwen3_omni_moe",
+  "audio_config": /* NOT PRESENT */,
+  "vision_config": {}  /* EMPTY dict */
+}
+```
+
+Plus `preprocessor_config.json` contains `"feature_extractor_type": "WhisperFeatureExtractor"`.
+
+**Current Detection Result:**
+- Priority 2 (audio_config + vision_config): **Skipped** (no audio_config)
+- Priority 4 (WhisperFeatureExtractor): **Matched** → `Backend.MLX_AUDIO`
+
+**Runtime Compatibility Issue:**
+- `model_type: "qwen3_omni_moe"` is NOT supported by mlx-lm
+- Therefore `runtime_compatible: False` with reason: "Model type qwen3_omni_moe not supported."
+
+**Status:** Qwen3-Omni is currently **not runnable** via mlx-knife because:
+1. mlx-audio doesn't support `qwen3_omni_moe` model architecture
+2. mlx-vlm doesn't support `qwen3_omni_moe` model architecture
+3. The model lacks `audio_config` so it doesn't route to MLX_VLM anyway
+
+**Future:** When mlx-vlm or mlx-audio adds Qwen3-Omni support, the detection logic may need adjustment to:
+- Add Priority 1.5: `model_type == "qwen3_omni*"` → appropriate backend
+- Or: Model converter creates `audio_config` during conversion
 
 ### Complete Routing Hierarchy
 
