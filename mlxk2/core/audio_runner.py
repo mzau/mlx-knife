@@ -105,6 +105,67 @@ def _apply_tiktoken_patch():
 _apply_tiktoken_patch()
 
 
+# ============================================================================
+# CRITICAL: Patch Model.get_tokenizer() to use our tiktoken tokenizer
+# ============================================================================
+# mlx-audio 0.3.1 (PyPI) removed the get_tokenizer() function that creates
+# tiktoken-based tokenizers. The Model.get_tokenizer() method now throws
+# ValueError if no HuggingFace processor is available.
+#
+# We patch Model.get_tokenizer() to fall back to our bundled tokenizer
+# (mlxk2.audio.whisper_tokenizer) when no processor is available.
+#
+# This MUST happen at module import time, before any Whisper model is loaded!
+# ============================================================================
+
+def _apply_whisper_tokenizer_patch():
+    """Patch Model.get_tokenizer to fall back to our tiktoken tokenizer."""
+    try:
+        from mlx_audio.stt.models.whisper.whisper import Model as WhisperModel
+        from mlxk2.audio.whisper_tokenizer import get_tokenizer
+
+        # Store original method (if it exists and isn't already patched)
+        if hasattr(WhisperModel, "_mlxk_original_get_tokenizer"):
+            # Already patched
+            return
+
+        original_get_tokenizer = WhisperModel.get_tokenizer
+
+        def patched_get_tokenizer(self, language=None, task="transcribe"):
+            """Patched get_tokenizer with tiktoken fallback.
+
+            First tries the original method (uses HF Processor if available).
+            Falls back to our bundled tiktoken-based tokenizer on failure.
+            """
+            # Try original first (uses HF Processor if available)
+            if hasattr(self, "_processor") and self._processor is not None:
+                try:
+                    return original_get_tokenizer(self, language, task)
+                except Exception:
+                    # HF Processor failed, fall through to tiktoken
+                    pass
+
+            # Fallback to our tiktoken-based tokenizer
+            return get_tokenizer(
+                self.is_multilingual,
+                num_languages=getattr(self, "num_languages", 99),
+                language=language,
+                task=task,
+            )
+
+        # Apply patch
+        WhisperModel.get_tokenizer = patched_get_tokenizer
+        WhisperModel._mlxk_original_get_tokenizer = original_get_tokenizer
+
+    except ImportError:
+        # mlx-audio not installed - skip patching
+        pass
+
+
+# Apply Whisper tokenizer patch immediately at module import
+_apply_whisper_tokenizer_patch()
+
+
 class AudioRunner:
     """Wrapper around mlx-audio STT API for dedicated transcription models.
 

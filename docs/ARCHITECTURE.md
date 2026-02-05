@@ -22,6 +22,130 @@ All code paths follow this sequence:
 
 **Rationale:** Consistent probing and policy enforcement prevents silent fallbacks and ensures errors are visible at the earliest possible stage.
 
+#### The Probe Concept
+
+**User Perspective (UX):**
+
+"Probe" is the step where mlx-knife reads a model's metadata files to understand:
+- What the model can do (text, vision, audio, embeddings)
+- Whether it's healthy (files present, formats correct)
+- Whether it can run on this system (backend availability, memory)
+
+This happens automatically during `mlxk list`, `mlxk show`, `mlxk run`, and server model loading.
+
+**Implementation:**
+
+A "probe" is a `Path` object pointing to the model's snapshot directory containing:
+
+```
+probe/
+├── config.json              # Model architecture (model_type, vision_config, audio_config)
+├── tokenizer_config.json    # Chat template, tokenizer settings
+├── tokenizer.json           # Vocabulary (optional, may be sentencepiece)
+├── preprocessor_config.json # Vision/audio processor info (optional)
+└── *.safetensors            # Weight files (checked for naming convention)
+```
+
+**Key Probe Functions:**
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `detect_framework()` | `common.py` | MLX vs PyTorch vs GGUF |
+| `detect_model_type()` | `common.py` | chat, base, audio, embedding |
+| `detect_capabilities()` | `common.py` | text-generation, vision, audio, embeddings |
+| `detect_vision_capability()` | `common.py` | vision_config, preprocessor_config |
+| `detect_audio_capability()` | `common.py` | audio_config, WhisperFeatureExtractor |
+| `detect_audio_backend()` | `common.py` | MLX_AUDIO (STT) vs MLX_VLM (multimodal) |
+| `check_runtime_compatibility()` | `health.py` | Backend supports model_type |
+
+**Probe vs Config:**
+
+- `probe`: The `Path` to the snapshot directory (filesystem location)
+- `config`: The parsed `dict` from `config.json` (model metadata)
+
+Both are passed to detection functions because some signals come from config fields, others from file presence.
+
+#### Runtime Compatibility Decision Tree
+
+The `runtime_compatible` field in `mlxk list --json` follows this decision tree:
+
+```
+runtime_compatible?
+│
+├─[1] healthy == False?
+│     └─→ False (reason from health check)
+│
+├─[2] framework != "MLX"?
+│     └─→ False ("Incompatible framework: {framework}")
+│
+├─[3] has_audio AND audio_backend != None?
+│     │
+│     ├─[3a] audio_backend == MLX_AUDIO?
+│     │      │
+│     │      ├─ mlx-audio not installed?
+│     │      │  └─→ False ("mlx-audio not installed")
+│     │      │
+│     │      ├─ model_type NOT in [whisper*, voxtral]?
+│     │      │  └─→ False ("Model type '{x}' not supported by mlx-audio")
+│     │      │
+│     │      └─ tekken.json exists WITHOUT tokenizer.json?
+│     │         └─→ False ("Voxtral tekken.json tokenizer not supported")
+│     │
+│     └─[3b] audio_backend == MLX_VLM?
+│            │
+│            ├─ vision_runtime_compatibility(probe) fails?
+│            │  └─→ False (vision reason)
+│            │
+│            └─ check_runtime_compatibility(probe) fails?
+│               └─→ False ("Model type '{x}' not supported")
+│
+├─[4] has_vision?
+│     │
+│     ├─[4a] vision_runtime_compatibility(probe):
+│     │      │
+│     │      ├─ Python < 3.10?
+│     │      │  └─→ False ("Vision requires Python 3.10+")
+│     │      │
+│     │      ├─ mlx-vlm not installed?
+│     │      │  └─→ False ("mlx-vlm not installed")
+│     │      │
+│     │      └─ transformers 5.x + temporal_patch_size?
+│     │         └─→ False ("Video processor bug in transformers 5.x")
+│     │
+│     └─[4b] check_runtime_compatibility(probe):
+│            │
+│            └─ mlx-lm doesn't support model_type?
+│               └─→ False ("Model type '{x}' not supported")
+│
+├─[5] "embeddings" in capabilities?
+│     └─→ False ("Embedding models not supported by mlxk run")
+│
+└─[6] else (text-only models):
+      │
+      └─ check_runtime_compatibility(probe):
+         │
+         ├─ Legacy weight format (weights.*.safetensors)?
+         │  └─→ False ("Legacy format not supported by mlx-lm")
+         │
+         └─ mlx-lm doesn't support model_type?
+            └─→ False ("Model type '{x}' not supported")
+
+If all gates pass → True (runtime_compatible)
+```
+
+**Gate Priority:**
+
+| Priority | Gate | Checked For |
+|----------|------|-------------|
+| 1 | Health | All models |
+| 2 | Framework | All models |
+| 3 | Audio Backend | Audio-capable models |
+| 4 | Vision Backend | Vision-capable models (non-audio) |
+| 5 | Embeddings | Embedding models |
+| 6 | Text/LLM | Text-only models |
+
+**Implementation:** `build_model_object()` in `common.py:599-634`
+
 ### 2. No Silent Fallbacks
 
 If a model requires a specific capability but the corresponding backend is unavailable, the system **must fail explicitly**. Do not degrade to a lower-capability mode.

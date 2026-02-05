@@ -66,19 +66,18 @@ dev = [
     "mypy>=1.5.0",
 ]
 vision = [
-    "mlx-vlm>=0.3.10",  # Vision support (ADR-012)
+    "mlx-vlm==0.3.10",  # Pinned: stable, tested version (ADR-012)
 ]
 audio = [
-    # mlx-audio 0.3.1+ (tiktoken assets workaround bundled in mlxk2/assets/whisper/)
-    # See Issue #479: https://github.com/Blaizzy/mlx-audio/issues/479
-    "mlx-audio>=0.3.1",
-    "tiktoken>=0.7.0",  # Required by bundled tiktoken assets
+    # mlx-audio pinned: 0.3.1 has tiktoken regression (Issue #479)
+    # We bundle complete tiktoken workaround in mlxk2/audio/whisper_tokenizer.py
+    "mlx-audio==0.3.1",
+    "tiktoken>=0.7.0",  # Required for Whisper tiktoken fallback
 ]
 all = [
-    "mlx-vlm>=0.3.10",
-    # mlx-audio 0.3.1+ (tiktoken assets workaround bundled in mlxk2/assets/whisper/)
-    "mlx-audio>=0.3.1",
-    "tiktoken>=0.7.0",  # Required by bundled tiktoken assets
+    "mlx-vlm==0.3.10",  # Pinned: stable, tested version
+    "mlx-audio==0.3.1",  # Pinned: tiktoken regression patched by mlxk2
+    "tiktoken>=0.7.0",
 ]
 
 [tool.setuptools]

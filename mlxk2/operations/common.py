@@ -426,25 +426,59 @@ def detect_capabilities(
     return caps
 
 
-def vision_runtime_compatibility() -> tuple[bool, Optional[str]]:
-    """Vision uses mlx-vlm backend; mark compatible only if available."""
+def vision_runtime_compatibility(probe: Optional[Path] = None) -> tuple[bool, Optional[str]]:
+    """Vision uses mlx-vlm backend; mark compatible only if available.
+
+    Args:
+        probe: Optional path to model snapshot for video processor detection
+
+    Returns:
+        (is_compatible, reason): reason is None if compatible
+    """
     if sys.version_info < (3, 10):
         return False, "Vision requires Python 3.10+ (mlx-vlm dependency)"
     spec = importlib.util.find_spec("mlx_vlm")
     if spec is None:
         return False, "mlx-vlm not installed (install extras: vision)"
+
+    # Gate 3: Check for transformers 5.x video_processor bug
+    # transformers 5.0.x RC has a bug where video_processor_class_from_name()
+    # fails with "argument of type 'NoneType' is not iterable" for models
+    # with temporal_patch_size (video-capable models like Qwen2-VL)
+    if probe is not None:
+        try:
+            import transformers
+            tf_version = getattr(transformers, "__version__", "0.0.0")
+            # Check if transformers 5.x (RC or early release with potential bugs)
+            if tf_version.startswith("5."):
+                preprocessor_path = probe / "preprocessor_config.json"
+                if preprocessor_path.exists():
+                    preproc_data = _json.loads(preprocessor_path.read_text(encoding="utf-8", errors="ignore"))
+                    if isinstance(preproc_data, dict) and "temporal_patch_size" in preproc_data:
+                        return False, f"Video processor bug in transformers {tf_version} (use transformers<5.0 or wait for fix)"
+        except Exception:
+            pass  # If check fails, proceed (may still work)
+
     return True, None
 
 
-def audio_runtime_compatibility(backend: Backend) -> tuple[bool, Optional[str]]:
+def audio_runtime_compatibility(
+    backend: Backend,
+    probe: Optional[Path] = None,
+    framework: str = "MLX"
+) -> tuple[bool, Optional[str]]:
     """Audio runtime check based on backend (ADR-020).
 
     Args:
-        backend: Backend.MLX_AUDIO (Whisper/Voxtral) or Backend.MLX_VLM (Gemma-3n)
+        backend: Backend.MLX_AUDIO (Whisper/Voxtral) or Backend.MLX_VLM (Gemma-3n, Qwen3-Omni)
+        probe: Path to model snapshot (required for MLX_VLM model_type check)
+        framework: Framework string (default "MLX")
 
     Returns:
         (is_compatible, reason): reason is None if compatible
     """
+    from .health import check_runtime_compatibility
+
     if sys.version_info < (3, 10):
         return False, "Audio requires Python 3.10+"
 
@@ -453,10 +487,47 @@ def audio_runtime_compatibility(backend: Backend) -> tuple[bool, Optional[str]]:
         spec = importlib.util.find_spec("mlx_audio")
         if spec is None:
             return False, "mlx-audio not installed (pip install mlx-knife[audio])"
+
+        # Gate 2: model_type must be supported by mlx-audio (Whisper, Voxtral only)
+        # This catches mis-routed models like Qwen3-Omni that have WhisperFeatureExtractor
+        # but are NOT STT models (they're multimodal with unsupported architecture)
+        if probe is not None:
+            config_path = probe / "config.json"
+            if config_path.exists():
+                try:
+                    config = _json.loads(config_path.read_text(encoding="utf-8", errors="ignore"))
+                    model_type = config.get("model_type", "")
+                    if isinstance(model_type, str):
+                        model_type_lower = model_type.lower()
+                        # Check if model_type is a known STT type
+                        if not any(stt in model_type_lower for stt in ["whisper", "voxtral"]):
+                            return False, f"Model type '{model_type}' not supported by mlx-audio (only Whisper/Voxtral)"
+                except Exception:
+                    pass  # If config can't be read, proceed (health check will catch it)
+
+            # Gate 3: Check for Voxtral tekken.json tokenizer bug (mlx-audio#450)
+            # Voxtral uses tekken.json (Mistral tokenizer format) which mlx-audio can't convert properly
+            tekken_path = probe / "tekken.json"
+            tokenizer_path = probe / "tokenizer.json"
+            if tekken_path.exists() and not tokenizer_path.exists():
+                return False, "Voxtral tekken.json tokenizer not supported (mlx-audio#450, upstream fix pending)"
+
         return True, None
     elif backend == Backend.MLX_VLM:
-        # Multimodal audio (Gemma-3n) needs mlx-vlm
-        return vision_runtime_compatibility()
+        # Multimodal audio (Gemma-3n, Qwen3-Omni) needs mlx-vlm
+        # Gate 1: mlx-vlm must be available (pass probe for video_processor bug check)
+        vlm_ok, vlm_reason = vision_runtime_compatibility(probe)
+        if not vlm_ok:
+            return vlm_ok, vlm_reason
+
+        # Gate 2: mlx-lm must support model_type (text-only fallback mode)
+        # This catches unsupported model_types like "qwen3_omni_moe"
+        if probe is not None:
+            text_ok, text_reason = check_runtime_compatibility(probe, framework)
+            if not text_ok:
+                return text_ok, text_reason
+
+        return True, None
     else:
         return False, "Unknown audio backend"
 
@@ -546,11 +617,12 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         runtime_reason = f"Incompatible framework: {framework}"
     elif has_audio and audio_backend is not None:
         # Audio models: check based on backend (ADR-020)
-        runtime_compatible, runtime_reason = audio_runtime_compatibility(audio_backend)
+        runtime_compatible, runtime_reason = audio_runtime_compatibility(audio_backend, probe, framework)
     elif has_vision:
         # Vision models: check BOTH backends for full chat+vision support
         # 1. mlx-vlm must be available (vision mode with images)
-        vision_ok, vision_reason = vision_runtime_compatibility()
+        # Pass probe for transformers 5.x video_processor bug detection
+        vision_ok, vision_reason = vision_runtime_compatibility(probe)
         # 2. mlx-lm must support model_type (text-only mode without images)
         text_ok, text_reason = check_runtime_compatibility(probe, framework)
 
@@ -561,6 +633,10 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
             runtime_compatible = False
             # Prefer text_reason as it's more specific (model_type not supported)
             runtime_reason = text_reason or vision_reason
+    elif Capability.EMBEDDINGS.value in capabilities:
+        # Embedding models: mlxk run doesn't support embeddings (future: mlxk embed)
+        runtime_compatible = False
+        runtime_reason = "Embedding models not supported by mlxk run (use mlxk embed)"
     else:
         runtime_compatible, runtime_reason = check_runtime_compatibility(probe, framework)
 

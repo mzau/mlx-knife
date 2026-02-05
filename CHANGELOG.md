@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.0.4-beta.10] - 2026-02-05
+
+> **⚠️ Upgrade Notice:** If you installed beta.9 from PyPI, audio transcription does not work due to an incomplete tiktoken patch. Please upgrade to beta.10: `pip install mlx-knife[all]==2.0.4b10`
+
+### Highlights
+
+**Audio Works Out-of-the-Box:** Complete tiktoken workaround for mlx-audio Issue #479. PyPI installation (`pip install mlx-knife[audio]`) now works without any manual Git installs. We bundle the full Whisper tokenizer (~340 LOC) from mlx-audio commit 9349644 and patch `Model.get_tokenizer()` at runtime to fallback to tiktoken when HuggingFace processor is unavailable.
+
+**Beta.9 Audio Bug:** The beta.9 release on PyPI had an incomplete tiktoken patch - it bundled the assets but didn't patch `Model.get_tokenizer()` (the class was incorrectly named `Whisper` instead of `Model`). This caused "Processor not found" errors with Whisper models.
+
+**Runtime Compatibility Accuracy:** Fixed `runtime_compatible` field in `mlxk list --health` showing incorrect values. Now properly gates embedding models, mis-routed audio models (Qwen3-Omni), transformers 5.x video_processor bugs, and unsupported tokenizers (Voxtral tekken.json).
+
+### Added
+
+- **Whisper Tokenizer Patch (mlx-audio Issue #479):**
+  - New `mlxk2/audio/` module with `whisper_tokenizer.py` (~340 LOC)
+  - Complete `Tokenizer` class and `get_tokenizer()` from mlx-audio commit 9349644
+  - `audio_runner.py`: `_apply_whisper_tokenizer_patch()` patches `Model.get_tokenizer()`
+  - tiktoken>=0.7.0 dependency (OpenAI core library, stable API)
+  - Bundled tiktoken assets: `gpt2.tiktoken`, `multilingual.tiktoken`
+
+### Fixed
+
+- **Audio/Whisper with PyPI mlx-audio:** `pip install mlx-knife[audio]` now works without Git install workaround. The tiktoken regression in mlx-audio 0.3.1 (Issue #479) is fully patched.
+
+- **`runtime_compatible` Accuracy:**
+  - Embedding models (Qwen3-Embedding) → Gate 5: "not supported by mlxk run"
+  - Mis-routed audio models (Qwen3-Omni) → Gate 3a: "model_type not supported by mlx-audio"
+  - transformers 5.x bugs (Qwen2-VL, MiMo-VL) → Gate 4a: "Video processor bug"
+  - Voxtral tekken.json → Gate 3a: "tekken.json tokenizer not supported"
+
+### Changed
+
+- **Documentation:**
+  - README.md: Audio installation simplified (no more Git install instructions)
+  - ARCHITECTURE.md: Added "Runtime Compatibility Decision Tree" and Probe concept
+  - ADR-020: Qwen3-Omni clarification (routes to mlx-vlm, not mlx-audio)
+
+---
+
 ## [2.0.4-beta.9] - 2026-02-04
 
 ### Highlights
