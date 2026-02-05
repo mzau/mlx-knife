@@ -4,7 +4,7 @@ venv31?/
 venv_*/
 venv-*/
 test_env*/
-test_results*.log
+test-install-venv/
 mypy_*.log
 ruff_*.log
 */__pycache__/*
@@ -29,6 +29,7 @@ ML-workspaces/
 
 # Test artifacts (generated reports)
 *_report.json
+test_results_3_*.log
 test-img-collection/
 small-img-collection
 benchmarks/reports/*.html

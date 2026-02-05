@@ -4,7 +4,7 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.4-beta.9** — Audio transcription (Whisper via mlx-audio); Server `/v1/audio/transcriptions` endpoint; Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.2** (Precise test timing).
+✅ **2.0.4-beta.10** — **Audio PyPI Fix** (tiktoken workaround complete); Runtime compatibility accuracy; Audio transcription (Whisper via mlx-audio); Server `/v1/audio/transcriptions` endpoint; Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.2** (Precise test timing).
 
 ### Test Results (Official Reference)
 
@@ -1614,7 +1614,7 @@ MLXK2_LIVE_PUSH=1 \
 
 ---
 
-### A5. Complete Test File Structure (2.0.4-beta.9)
+### A5. Complete Test File Structure (2.0.4-beta.10)
 
 ```
 scripts/

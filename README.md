@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4-beta.9** (Stable: 2.0.3)
+**Current Version: 2.0.4-beta.10** (Stable: 2.0.3)
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.9-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/version-2.0.4--beta.10-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -16,6 +16,8 @@
 
 
 ## Features
+
+> **⚠️ Beta.9 Audio Bug:** If you installed `mlx-knife[audio]==2.0.4b9` from PyPI, audio transcription fails with "Processor not found". Upgrade to beta.10: `pip install mlx-knife[all]==2.0.4b10`
 
 ### What's New in 2.0.4 (Coming Soon - Currently Beta)
 - **Audio Transcription (STT)** - Whisper speech-to-text (`--audio` flag, `pip install mlx-knife[audio]`)
@@ -85,68 +87,37 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ## Installation
 
-### Via PyPI (Stable - v2.0.3, Text only)
+### 1. PyPI Stable (2.0.3 - Text models only)
 
 ```bash
 pip install mlx-knife
-
-# Verify
 mlxk --version  # → mlxk 2.0.3
 ```
 
-**Requirements:**
-- macOS with Apple Silicon (M1/M2/M3/M4)
-- Python 3.10-3.12
+**Requirements:** macOS Apple Silicon, Python 3.9-3.12
 
-> **Note:** PyPI stable (2.0.3) supports **Text models only**. For Vision + Audio, use the beta version below.
-
-### Via GitHub (Beta - v2.0.4-beta.9, Text + Vision + Audio)
+### 2. PyPI Beta (2.0.4-beta.10 - Text + Vision + Audio)
 
 ```bash
-# Step 1: Base + Vision
-pip install "git+https://github.com/mzau/mlx-knife.git@v2.0.4-beta.9#egg=mlx-knife[vision]"
-
-# Step 2: Audio (optional - requires Git install due to PyPI regression)
-pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-pip install tiktoken
-
-# Verify
-mlxk --version  # → mlxk 2.0.4b9
+pip install mlx-knife[all]==2.0.4b10
+mlxk --version  # → mlxk 2.0.4b10
 ```
 
-**Beta.9 features:**
-- **Vision**: mlx-vlm 0.3.10 - Image analysis with EXIF metadata
-- **Audio**: mlx-audio (Git) - Whisper STT (WAV, MP3, M4A)
-- **Recommended models**: `whisper-large-v3-turbo-4bit`, `pixtral-12b-4bit`
+**Requirements:** macOS Apple Silicon, Python 3.10-3.12
+**Features:** Audio STT (Whisper), Vision with EXIF metadata, full tiktoken workaround
 
-> **⚠️ Audio Installation Note:** mlx-audio 0.3.1 (PyPI) has a tiktoken regression. For audio support, install manually:
-> ```bash
-> pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-> pip install tiktoken
-> ```
-
-### Development Installation
+### 3. Developer Installation
 
 ```bash
-# Clone and install from source
 git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
+pip install -e ".[all,dev,test]"
 
-# Step 1: Base + Vision + Dev tools
-pip install -e ".[vision,dev,test]"
-
-# Step 2: Audio from Git (PyPI 0.3.1 broken)
-pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-pip install tiktoken
-
-# Verify
-mlxk --version  # → mlxk 2.0.4b9
-python -c "import mlx_vlm; print('vision ok')"
-python -c "import mlx_audio; print('audio ok')"
-
-# Run tests
+mlxk --version  # → mlxk 2.0.4b10
 pytest -v
 ```
+
+**Requirements:** macOS Apple Silicon, Python 3.10-3.12
 
 ### Migrating from 1.x
 
@@ -480,18 +451,14 @@ mlxk convert <model> <output> --repair-index
 
 ### Audio Transcription (Speech-to-Text)
 
-> **🎙️ New in beta.9:** Professional STT via dedicated Whisper models (mlx-audio backend). Backward compatible with Gemma-3n multimodal audio (mlx-vlm).
+> **🎙️ New in beta.9/10:** Professional STT via dedicated Whisper models (mlx-audio backend). Beta.10 fixes PyPI install (no Git workaround needed). Backward compatible with Gemma-3n multimodal audio (mlx-vlm).
 
 **Requirements:**
 - **Python 3.10+** (mlx-audio dependency)
-- **Installation:** (mlx-audio 0.3.1 PyPI has regression - install from Git):
-  ```bash
-  pip install -e "git+https://github.com/Blaizzy/mlx-audio.git@9349644#egg=mlx-audio"
-  pip install tiktoken
-  ```
+- **Installation:** `pip install mlx-knife[audio]` (tiktoken workaround bundled)
 - **No system dependencies:** MP3/WAV decoding via embedded libsndfile (no ffmpeg or Homebrew required)
 
-**✅ Recommended Models** (mlx-knife v2.0.4-beta.9):
+**✅ Recommended Models** (mlx-knife v2.0.4-beta.10):
 
 | Model | Backend | Size | Duration | Notes |
 |-------|---------|------|----------|-------|
@@ -1272,7 +1239,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4-beta.9 | February 2026</i><br>
+  <i>Version 2.0.4-beta.10 | February 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

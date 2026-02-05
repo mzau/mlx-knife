@@ -22,3 +22,9 @@ This product includes software developed by:
   The embedded library is dynamically loaded via CFFI (permitted under LGPL §6).
   MP3 codec support is provided by the embedded libsndfile without additional
   system dependencies (no ffmpeg or Homebrew required).
+
+  mlx-knife bundles tiktoken vocabulary files (gpt2.tiktoken, multilingual.tiktoken)
+  in mlxk2/assets/whisper/ from mlx-audio commit 9349644. These files are used as
+  a workaround for mlx-audio Issue #479 (assets removed in f7328a4 but code still
+  requires them). Original files are from the OpenAI Whisper model, distributed by
+  mlx-audio under the MIT License.
