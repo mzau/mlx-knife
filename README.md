@@ -28,6 +28,7 @@
 - **Resumable Downloads** - Interrupted clone/pull operations continue automatically
 - **Safe Vision Batch Processing** - Automatic chunking prevents Metal OOM crashes
 - **Workspace Path Support** - Run/show/server/list commands work with local directories
+- **Updated [SECURITY.md](SECURITY.md)** - Clarifies mlx-knife vs. upstream library behavior; important for offline/air-gapped use
 
 ### Core Functionality
 - **List & Manage Models**: Browse your HuggingFace cache with MLX-specific filtering

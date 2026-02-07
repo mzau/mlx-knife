@@ -30,71 +30,23 @@ from ..operations.workspace import is_workspace_path
 # ============================================================================
 
 def _apply_tiktoken_patch():
-    """Apply tiktoken asset patch globally at module import time."""
+    """Apply tiktoken asset patch globally at module import time.
+
+    Patches mlx-audio's get_encoding() to use our bundled tiktoken files
+    from mlxk2/assets/whisper/ instead of the removed upstream assets.
+
+    The actual implementation lives in mlxk2.audio.whisper_tokenizer to avoid
+    code duplication. This function just wires it up as a monkey-patch.
+    """
     try:
-        import base64
-        import tiktoken
-        from functools import lru_cache
+        # Import mlx-audio's tokenizer module (target of the patch)
+        import mlx_audio.stt.models.whisper.tokenizer as mlx_whisper_tokenizer
 
-        # Import tokenizer module first (but don't trigger get_encoding yet)
-        import mlx_audio.stt.models.whisper.tokenizer as whisper_tokenizer
-
-        # Get path to our bundled tiktoken assets
-        assets_dir = Path(__file__).parent.parent / "assets" / "whisper"
-        if not assets_dir.exists():
-            # Assets not found - skip patching (will fall back to HF WhisperProcessor)
-            return
-
-        @lru_cache(maxsize=None)
-        def patched_get_encoding(name: str = "gpt2", num_languages: int = 99):
-            """Patched get_encoding using mlxk2's bundled tiktoken files."""
-            vocab_path = assets_dir / f"{name}.tiktoken"
-
-            if not vocab_path.exists():
-                raise FileNotFoundError(
-                    f"Tiktoken vocabulary file not found: {vocab_path}\n"
-                    f"mlx-audio Issue #479: assets were removed in f7328a4"
-                )
-
-            with open(vocab_path) as fid:
-                ranks = {
-                    base64.b64decode(token): int(rank)
-                    for token, rank in (line.split() for line in fid if line)
-                }
-
-            n_vocab = len(ranks)
-            special_tokens = {}
-
-            # Build special tokens (from mlx-audio tokenizer.py:343-358)
-            from mlx_audio.stt.models.whisper.tokenizer import LANGUAGES
-
-            specials = [
-                "<|endoftext|>",
-                "<|startoftranscript|>",
-                *[f"<|{lang}|>" for lang in list(LANGUAGES.keys())[:num_languages]],
-                "<|translate|>",
-                "<|transcribe|>",
-                "<|startoflm|>",
-                "<|startofprev|>",
-                "<|nospeech|>",
-                "<|notimestamps|>",
-                *[f"<|{i * 0.02:.2f}|>" for i in range(1501)],
-            ]
-
-            for token in specials:
-                special_tokens[token] = n_vocab
-                n_vocab += 1
-
-            return tiktoken.Encoding(
-                name=vocab_path.name,
-                explicit_n_vocab=n_vocab,
-                pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-                mergeable_ranks=ranks,
-                special_tokens=special_tokens,
-            )
+        # Import our bundled implementation
+        from mlxk2.audio.whisper_tokenizer import get_encoding
 
         # Patch the module globally
-        whisper_tokenizer.get_encoding = patched_get_encoding
+        mlx_whisper_tokenizer.get_encoding = get_encoding
 
     except ImportError:
         # mlx-audio not installed - skip patching

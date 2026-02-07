@@ -575,3 +575,66 @@ class TestMemoryThreshold:
 
         # Allow small rounding difference
         assert abs(threshold - expected) < 1024**2  # Within 1MB
+
+
+class TestEmbeddingGate:
+    """Tests for embedding model runtime compatibility gate (common.py:636-639).
+
+    Embedding models should be detected but blocked from `mlxk run` with a
+    helpful message pointing to `mlxk embed`.
+    """
+
+    def test_detect_capabilities_embedding_model_type(self, tmp_path):
+        """model_type='embedding' should return only EMBEDDINGS capability."""
+        from mlxk2.operations.common import detect_capabilities
+
+        caps = detect_capabilities(
+            model_type="embedding",
+            hf_name="test/embedding-model",
+            tok_hints={},
+            config={},
+            probe=tmp_path,
+        )
+
+        assert caps == ["embeddings"]
+        assert "text-generation" not in caps
+
+    def test_embedding_model_runtime_incompatible(self, tmp_path):
+        """Embedding models should have runtime_compatible=False with helpful reason."""
+        from mlxk2.operations.common import build_model_object
+
+        # Create minimal embedding model structure with workspace sentinel
+        config = {"model_type": "embedding"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        (tmp_path / "model.safetensors").write_bytes(b"x" * 100)
+        # Add workspace sentinel so it's treated as workspace path (ADR-018)
+        sentinel = {"managed_by": "mlxk", "source": "test"}
+        (tmp_path / ".mlxk-workspace.json").write_text(json.dumps(sentinel))
+        # Add README with MLX library tag so framework is detected as MLX
+        readme = """---
+library_name: mlx
+---
+# Test Embedding Model
+"""
+        (tmp_path / "README.md").write_text(readme)
+
+        # Use absolute path so it's treated as workspace path
+        result = build_model_object(
+            hf_name=str(tmp_path),  # Absolute path = workspace
+            model_root=tmp_path,
+            selected_path=tmp_path,
+        )
+
+        assert result["runtime_compatible"] is False
+        assert "mlxk embed" in result["reason"]
+        assert "embeddings" in result["capabilities"]
+
+    def test_embedding_model_detected_by_name_heuristic(self, tmp_path):
+        """Models with 'embedding' in name should be detected as embedding models."""
+        config = {"model_type": "bert"}  # Not explicitly "embedding" type
+        (tmp_path / "config.json").write_text(json.dumps(config))
+
+        caps = probe_model_capabilities(tmp_path, "test/text-embedding-3-small")
+
+        assert caps.is_embedding is True
+        assert "embeddings" in caps.capabilities_list

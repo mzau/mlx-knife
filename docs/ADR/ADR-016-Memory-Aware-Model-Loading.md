@@ -96,9 +96,53 @@ This is a **hardware fact** (from `sysctl -n hw.memsize`), not a heuristic.
 **Phase 2b:** ✅ Complete (2.0.4-beta.9) - Model Switching Memory Gate
 
 **Phase 3 (Future):** Issue #46
-- [ ] Configurable threshold (env var or CLI flag)
-- [ ] Vision overhead estimation based on model architecture
-- [ ] KV-Cache size estimation based on context length
+
+### Phase 3a: User-Configurable Limits
+- [ ] `MLXK_MAX_IMAGES` env var
+- [ ] `--max-images N` CLI flag
+- [ ] `MLXK_MEMORY_THRESHOLD` env var (override 70%)
+
+### Phase 3b: Benchmark-Based Heuristics
+
+**Approach:** Empirische Daten statt theoretischer Berechnung.
+
+**Daten sammeln:**
+```
+Für jedes Vision-Modell:
+  - Config: image_size, patch_size, hidden_size, vision_config
+  - Test: 1, 2, 4, 8, 16 Images (verschiedene Größen)
+  - Messen: Peak Memory (memmon.py), OOM-Punkt
+  - Hardware: M1/M2/M3, 16/32/64/96 GB
+```
+
+**Korrelation finden:**
+```
+Peak_Memory ≈ f(image_size², patch_size, num_images, model_size)
+```
+
+**Heuristik-Formel ableiten:**
+```python
+def estimate_vision_memory(config, num_images):
+    base = model_size_bytes
+    image_size = config.get("vision_config", {}).get("image_size", 384)
+    patch_size = config.get("vision_config", {}).get("patch_size", 14)
+    hidden_size = config.get("hidden_size", 4096)
+
+    # Empirisch kalibrierte Konstanten aus Benchmarks
+    patches_per_image = (image_size / patch_size) ** 2
+    per_image_overhead = patches_per_image * hidden_size * BYTES_PER_ACTIVATION
+
+    return base + (per_image_overhead * num_images * SAFETY_FACTOR)
+```
+
+**Infrastruktur:** `memmon.py`, `memplot.py` aus beta.9 existieren bereits.
+
+**Komplexität bei Multimodal:**
+- Dynamic Tiling (Qwen2-VL, MiMo-VL) → variable patches pro Bild
+- Audio + Vision (Gemma-3n) → zusätzlicher Audio Encoder
+- Mixed Input → Kombinations-Overhead
+
+**Pragmatischer Fallback:** Wenn Heuristik unsicher → User-Limit (Phase 3a) verwenden.
 
 ---
 

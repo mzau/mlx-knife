@@ -12,6 +12,17 @@ Usage:
 
     # With comparison
     python benchmarks/generate_benchmark_report.py new.jsonl --compare old.jsonl
+
+    # With GPU/memory correlation (v1.1)
+    python benchmarks/generate_benchmark_report.py benchmark.jsonl --memory memory.jsonl
+
+    # Full comparison with GPU analysis
+    python benchmarks/generate_benchmark_report.py new-benchmark.jsonl \\
+        --memory new-memory.jsonl \\
+        --compare old-benchmark.jsonl
+
+    Note: When using --compare, the memory file for the comparison run is
+    auto-detected if it follows the naming convention (benchmark → memory).
 """
 
 import argparse
@@ -29,9 +40,142 @@ except ImportError:
 
 
 # Template version
-TEMPLATE_VERSION = "1.0"
+TEMPLATE_VERSION = "1.1"
 REPORTS_DIR = Path("benchmarks/reports")
 SCHEMA_PATH = Path("benchmarks/schemas/report-current.schema.json")
+
+
+def correlate_memory_to_tests(
+    benchmark_data: List[dict],
+    memory_data: List[dict]
+) -> Dict[str, Dict]:
+    """Correlate memory samples to individual tests by timestamp.
+
+    For each test, finds all memory samples that fall within [test_start, test_end]
+    and aggregates GPU/memory statistics.
+
+    Args:
+        benchmark_data: List of benchmark test results (with timestamp, duration)
+        memory_data: List of memory samples (with ts Unix timestamp)
+
+    Returns:
+        Dict mapping test identifier to aggregated GPU/memory stats
+    """
+    # Filter out non-test entries (e.g., summary lines)
+    tests = [e for e in benchmark_data if "timestamp" in e and "duration" in e]
+
+    # Sort memory samples by timestamp
+    sorted_memory = sorted(memory_data, key=lambda m: m.get("ts", 0))
+
+    correlations = {}
+
+    for test in tests:
+        # Parse test timestamp to Unix
+        try:
+            test_dt = datetime.fromisoformat(test["timestamp"])
+            test_start = test_dt.timestamp()
+            test_end = test_start + test["duration"]
+        except (ValueError, KeyError):
+            continue
+
+        # Find memory samples within test window
+        # Using binary search would be faster, but linear is fine for ~3000 samples
+        samples_in_window = [
+            m for m in sorted_memory
+            if test_start <= m.get("ts", 0) <= test_end
+        ]
+
+        if not samples_in_window:
+            continue
+
+        # Aggregate GPU stats
+        gpu_device = [m.get("gpu_device_util", 0) for m in samples_in_window]
+        gpu_renderer = [m.get("gpu_renderer_util", 0) for m in samples_in_window]
+        gpu_tiler = [m.get("gpu_tiler_util", 0) for m in samples_in_window]
+        cpu_user = [m.get("cpu_user", 0) for m in samples_in_window]
+        cpu_sys = [m.get("cpu_sys", 0) for m in samples_in_window]
+        mem_pressure = [m.get("memory_pressure", 1) for m in samples_in_window]
+
+        # Create unique test identifier
+        test_id = test.get("test", "unknown")
+
+        correlations[test_id] = {
+            "sample_count": len(samples_in_window),
+            "gpu_device_avg": round(sum(gpu_device) / len(gpu_device), 1) if gpu_device else 0,
+            "gpu_device_max": max(gpu_device) if gpu_device else 0,
+            "gpu_renderer_avg": round(sum(gpu_renderer) / len(gpu_renderer), 1) if gpu_renderer else 0,
+            "gpu_renderer_max": max(gpu_renderer) if gpu_renderer else 0,
+            "gpu_tiler_avg": round(sum(gpu_tiler) / len(gpu_tiler), 1) if gpu_tiler else 0,
+            "cpu_user_avg": round(sum(cpu_user) / len(cpu_user), 1) if cpu_user else 0,
+            "cpu_sys_avg": round(sum(cpu_sys) / len(cpu_sys), 1) if cpu_sys else 0,
+            "memory_pressure_max": max(mem_pressure) if mem_pressure else 1,
+        }
+
+    return correlations
+
+
+def find_memory_file_for_benchmark(benchmark_file: Path) -> Optional[Path]:
+    """Auto-detect memory JSONL file for a benchmark file.
+
+    Convention: benchmark file "2026-02-06-wet-benchmark-1.jsonl"
+                → memory file "2026-02-06-wet-memory-1.jsonl"
+
+    Args:
+        benchmark_file: Path to benchmark JSONL file
+
+    Returns:
+        Path to memory file if found, None otherwise
+    """
+    # Replace "benchmark" with "memory" in filename
+    memory_name = benchmark_file.name.replace("benchmark", "memory")
+    memory_path = benchmark_file.parent / memory_name
+
+    if memory_path.exists():
+        return memory_path
+    return None
+
+
+def detect_cold_starts(benchmark_data: List[dict]) -> Dict[str, bool]:
+    """Detect which tests are cold starts (first test for a given model).
+
+    Cold starts typically have higher latency due to model loading,
+    cache warming, and JIT compilation.
+
+    A cold start is the FIRST test for a specific model, regardless of
+    test name or parametrization. Subsequent tests on the same model
+    benefit from cached weights and warm GPU state.
+
+    Args:
+        benchmark_data: List of benchmark test results
+
+    Returns:
+        Dict mapping test identifier to is_cold_start boolean
+    """
+    # Track first occurrence of each model
+    seen_models = set()
+    cold_starts = {}
+
+    # Sort by timestamp to ensure correct ordering
+    sorted_tests = sorted(
+        [e for e in benchmark_data if "timestamp" in e and "model" in e],
+        key=lambda e: e.get("timestamp", "")
+    )
+
+    for test in sorted_tests:
+        test_id = test.get("test", "unknown")
+        model_id = test.get("model", {}).get("id", "unknown")
+
+        # Normalize model_id: some tests report "mlx-community/foo", others just "foo"
+        # This is a data inconsistency in test fixtures, not different models
+        normalized_model_id = model_id.replace("mlx-community/", "")
+
+        if normalized_model_id not in seen_models:
+            cold_starts[test_id] = True
+            seen_models.add(normalized_model_id)
+        else:
+            cold_starts[test_id] = False
+
+    return cold_starts
 
 
 def load_schema() -> dict:
@@ -811,10 +955,132 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
 
     md += "```\n\n"
 
+    # GPU Analysis Section (v1.1 - only if memory data provided)
+    gpu_correlations = stats.get("gpu_correlations", {})
+    cold_starts = stats.get("cold_starts", {})
+
+    if gpu_correlations:
+        md += "\n---\n\n"
+        md += "## GPU Analysis (v1.1)\n\n"
+        md += "Per-test GPU utilization correlated from memory monitoring data.\n\n"
+
+        # Aggregate GPU stats by model
+        model_gpu_stats = {}
+        for test_id, gpu_stats in gpu_correlations.items():
+            # Find the corresponding test entry to get model info
+            test_entry = next((t for t in stats.get("tests", {}).values()
+                             if any(r["model"] in test_id for r in t.get("runs", []))), None)
+            if not test_entry:
+                continue
+
+            for run in test_entry.get("runs", []):
+                model_id = run["model"]
+                if model_id not in model_gpu_stats:
+                    model_gpu_stats[model_id] = {
+                        "gpu_device_samples": [],
+                        "gpu_renderer_samples": [],
+                        "cold_start_count": 0,
+                        "total_count": 0,
+                    }
+                model_gpu_stats[model_id]["gpu_device_samples"].append(gpu_stats["gpu_device_avg"])
+                model_gpu_stats[model_id]["gpu_renderer_samples"].append(gpu_stats["gpu_renderer_avg"])
+                model_gpu_stats[model_id]["total_count"] += 1
+                if cold_starts.get(test_id, False):
+                    model_gpu_stats[model_id]["cold_start_count"] += 1
+
+        # Cold-start analysis
+        cold_start_tests = [(tid, gpu_correlations.get(tid, {}))
+                           for tid, is_cold in cold_starts.items() if is_cold]
+
+        if cold_start_tests:
+            md += "### Cold-Start Tests\n\n"
+            md += "First test per model (includes model loading overhead).\n\n"
+            md += f"```\n"
+            md += f"{'Test':<60} {'GPU Dev':<8} {'GPU Rnd':<8} {'Samples':<8}\n"
+            md += f"{'='*60} {'='*8} {'='*8} {'='*8}\n"
+
+            for test_id, gpu_stats in cold_start_tests[:15]:  # Limit to 15
+                test_short = test_id.split("::")[-1][:58]
+                if gpu_stats:
+                    md += f"{test_short:<60} {gpu_stats['gpu_device_avg']:>6.1f}% {gpu_stats['gpu_renderer_avg']:>6.1f}% {gpu_stats['sample_count']:>8}\n"
+                else:
+                    md += f"{test_short:<60} {'N/A':>8} {'N/A':>8} {'N/A':>8}\n"
+
+            if len(cold_start_tests) > 15:
+                md += f"... and {len(cold_start_tests) - 15} more cold-start tests\n"
+            md += f"```\n\n"
+
+        # High GPU utilization tests
+        high_gpu_tests = [(tid, gs) for tid, gs in gpu_correlations.items()
+                         if gs.get("gpu_device_avg", 0) > 50]
+        high_gpu_tests.sort(key=lambda x: x[1]["gpu_device_avg"], reverse=True)
+
+        if high_gpu_tests:
+            md += "### High GPU Utilization Tests\n\n"
+            md += "Tests with >50% average GPU device utilization.\n\n"
+            md += f"```\n"
+            md += f"{'Test':<55} {'GPU Dev':<10} {'GPU Rnd':<10} {'Pressure':<10}\n"
+            md += f"{'='*55} {'='*10} {'='*10} {'='*10}\n"
+
+            for test_id, gpu_stats in high_gpu_tests[:10]:
+                test_short = test_id.split("::")[-1][:53]
+                pressure = gpu_stats.get("memory_pressure_max", 1)
+                pressure_str = "WARN" if pressure > 1 else "OK"
+                md += f"{test_short:<55} {gpu_stats['gpu_device_avg']:>8.1f}% {gpu_stats['gpu_renderer_avg']:>8.1f}% {pressure_str:>10}\n"
+
+            md += f"```\n\n"
+
+        # GPU utilization summary
+        all_gpu_device = [gs["gpu_device_avg"] for gs in gpu_correlations.values()]
+        all_gpu_renderer = [gs["gpu_renderer_avg"] for gs in gpu_correlations.values()]
+
+        # Get comparison GPU data if available
+        compare_gpu = compare_stats.get("gpu_correlations", {}) if compare_stats else {}
+        compare_gpu_device = [gs["gpu_device_avg"] for gs in compare_gpu.values()] if compare_gpu else []
+        compare_gpu_renderer = [gs["gpu_renderer_avg"] for gs in compare_gpu.values()] if compare_gpu else []
+
+        if all_gpu_device:
+            md += "### GPU Utilization Summary\n\n"
+            md += f"```\n"
+            sample_interval = stats.get("sample_interval_ms", 200)
+            md += f"Sample interval:      {sample_interval}ms\n"
+            md += f"Correlated tests:     {len(gpu_correlations)}\n"
+            md += f"Cold-start tests:     {len(cold_start_tests)}\n"
+
+            gpu_dev_avg = sum(all_gpu_device)/len(all_gpu_device)
+            gpu_dev_max = max(all_gpu_device)
+            gpu_rnd_avg = sum(all_gpu_renderer)/len(all_gpu_renderer)
+            gpu_rnd_max = max(all_gpu_renderer)
+
+            if compare_gpu_device:
+                old_dev_avg = sum(compare_gpu_device)/len(compare_gpu_device)
+                old_dev_max = max(compare_gpu_device)
+                old_rnd_avg = sum(compare_gpu_renderer)/len(compare_gpu_renderer)
+                old_rnd_max = max(compare_gpu_renderer)
+
+                dev_avg_delta = gpu_dev_avg - old_dev_avg
+                dev_max_delta = gpu_dev_max - old_dev_max
+                rnd_avg_delta = gpu_rnd_avg - old_rnd_avg
+                rnd_max_delta = gpu_rnd_max - old_rnd_max
+
+                md += f"GPU Device avg:       {gpu_dev_avg:>5.1f}%  (was {old_dev_avg:>5.1f}%, Δ {dev_avg_delta:+.1f}%)\n"
+                md += f"GPU Device max:       {gpu_dev_max:>5.1f}%  (was {old_dev_max:>5.1f}%, Δ {dev_max_delta:+.1f}%)\n"
+                md += f"GPU Renderer avg:     {gpu_rnd_avg:>5.1f}%  (was {old_rnd_avg:>5.1f}%, Δ {rnd_avg_delta:+.1f}%)\n"
+                md += f"GPU Renderer max:     {gpu_rnd_max:>5.1f}%  (was {old_rnd_max:>5.1f}%, Δ {rnd_max_delta:+.1f}%)\n"
+            else:
+                md += f"GPU Device avg:       {gpu_dev_avg:.1f}%\n"
+                md += f"GPU Device max:       {gpu_dev_max:.1f}%\n"
+                md += f"GPU Renderer avg:     {gpu_rnd_avg:.1f}%\n"
+                md += f"GPU Renderer max:     {gpu_rnd_max:.1f}%\n"
+
+            md += f"```\n\n"
+
     md += "\n---\n\n"
     md += "## Files\n\n"
     md += f"- **Benchmark report:** `{input_file}`\n"
     md += f"- **Schema:** `benchmarks/schemas/report-v{stats['schema_version']}.schema.json`\n"
+    if gpu_correlations:
+        md += f"- **Memory data:** correlated\n"
 
     return md
 
@@ -840,6 +1106,11 @@ def main():
         '--output',
         type=Path,
         help='Output markdown file (default: auto-generated in benchmarks/reports/)'
+    )
+    parser.add_argument(
+        '--memory',
+        type=Path,
+        help='Memory monitoring JSONL file for GPU/memory correlation (v1.1 feature)'
     )
 
     args = parser.parse_args()
@@ -874,6 +1145,36 @@ def main():
     # Calculate statistics
     stats = calculate_statistics(data)
 
+    # Load memory data and correlate (v1.1 feature)
+    gpu_correlations = {}
+    cold_starts = {}
+    if args.memory:
+        if not args.memory.exists():
+            print(f"❌ Memory file not found: {args.memory}")
+            sys.exit(1)
+        print(f"🔬 Loading memory data: {args.memory}")
+        memory_data = load_jsonl(args.memory)
+        # Extract summary entry (contains interval_ms, duration, etc.)
+        memory_summary = next((m["summary"] for m in memory_data if "summary" in m), {})
+        # Filter out summary entry for sample processing
+        memory_samples = [m for m in memory_data if "summary" not in m]
+        sample_interval_ms = memory_summary.get("interval_ms", 200)
+        print(f"✓ Loaded {len(memory_samples)} memory samples (interval: {sample_interval_ms}ms)")
+
+        # Correlate memory samples to tests
+        gpu_correlations = correlate_memory_to_tests(data, memory_samples)
+        print(f"✓ Correlated GPU data for {len(gpu_correlations)} tests")
+
+        # Detect cold starts
+        cold_starts = detect_cold_starts(data)
+        cold_count = sum(1 for v in cold_starts.values() if v)
+        print(f"✓ Detected {cold_count} cold-start tests")
+
+        # Store in stats for report generation
+        stats["gpu_correlations"] = gpu_correlations
+        stats["cold_starts"] = cold_starts
+        stats["sample_interval_ms"] = sample_interval_ms
+
     # Load and calculate comparison statistics if requested
     compare_stats = None
     if args.compare:
@@ -886,6 +1187,16 @@ def main():
             sys.exit(1)
         compare_stats = calculate_statistics(compare_data)
         print(f"✓ Loaded {len(compare_data)} comparison entries")
+
+        # Auto-detect memory file for comparison run (v1.1)
+        compare_memory_file = find_memory_file_for_benchmark(args.compare)
+        if compare_memory_file:
+            print(f"🔬 Auto-detected comparison memory: {compare_memory_file.name}")
+            compare_memory_data = load_jsonl(compare_memory_file)
+            compare_memory_samples = [m for m in compare_memory_data if "summary" not in m]
+            compare_gpu_correlations = correlate_memory_to_tests(compare_data, compare_memory_samples)
+            print(f"✓ Correlated GPU data for {len(compare_gpu_correlations)} comparison tests")
+            compare_stats["gpu_correlations"] = compare_gpu_correlations
 
     # Generate report
     markdown = generate_markdown(stats, input_file, args.compare, compare_stats)

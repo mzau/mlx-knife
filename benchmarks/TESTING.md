@@ -152,12 +152,12 @@ python benchmarks/validate_reports.py benchmarks/reports/2025-12-20-v2.0.4b3.jso
 
 ## Schema Reference
 
-### Current Schema: v0.2.0
+### Current Schema: v0.2.2
 
 Required fields:
 ```json
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.2.2",
   "timestamp": "2025-12-20T02:26:10.722510+00:00",
   "mlx_knife_version": "2.0.4-beta.3",
   "test": "tests_2.0/live/test_cli_e2e.py::test_run_command[discovered_00]",
@@ -246,6 +246,62 @@ print('OK')
 Model not found in comparison file. Check:
 - Same models tested in both runs?
 - Model ID spelling matches exactly?
+
+---
+
+## Planned: Canonical Paths (v0.3.0)
+
+**Status:** Planned for Schema v0.3.0
+
+### Directory Structure
+
+```
+benchmarks/
+├── runs/              # Raw JSONL data (new)
+│   ├── 2026-02-06_wet-benchmark.jsonl
+│   └── 2026-02-06_wet-memory.jsonl
+├── reports/           # Generated Markdown only
+│   └── BENCHMARK-*.md
+├── schemas/
+└── tools/
+```
+
+### Naming Convention
+
+```
+runs/<YYYY-MM-DD>_<tool-name>.jsonl
+```
+
+Examples:
+- `runs/2026-02-06_wet-benchmark.jsonl`
+- `runs/2026-02-06_wet-memory.jsonl`
+
+### Tool Defaults
+
+| Tool | Input Default | Output Default |
+|------|---------------|----------------|
+| `generate_report.py` | `runs/*_benchmark.jsonl` (latest) | `reports/BENCHMARK-*.md` |
+| `memmon.py` | — | `runs/<today>_<name>-memory.jsonl` |
+| `memplot.py` | `runs/*_memory.jsonl` (latest) | `reports/*-timeline.html` |
+
+### New Flags
+
+```bash
+# Compare with previous run (auto-detected)
+python benchmarks/tools/generate_report.py --compare-with-previous wet-benchmark
+
+# Explicit paths (unchanged)
+python benchmarks/tools/generate_report.py \
+  runs/2026-02-06_wet-benchmark.jsonl \
+  --compare runs/2026-02-05_wet-benchmark.jsonl
+```
+
+### Migration
+
+1. Create `runs/` directory
+2. Move existing `reports/*.jsonl` → `runs/`
+3. Rename to canonical format
+4. Update tool defaults
 
 ---
 
