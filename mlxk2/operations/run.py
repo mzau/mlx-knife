@@ -418,7 +418,8 @@ def run_model(
                                 # Audio models: check based on backend (ADR-020)
                                 audio_backend = detect_audio_backend(model_path, config)
                                 if audio_backend:
-                                    compatible, reason = audio_runtime_compatibility(audio_backend)
+                                    # Pass probe and framework for model_type/tekken.json gates
+                                    compatible, reason = audio_runtime_compatibility(audio_backend, model_path, framework)
                                 else:
                                     # Fallback: unknown audio model
                                     compatible, reason = False, "Unknown audio backend"

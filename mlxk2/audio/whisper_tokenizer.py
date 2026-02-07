@@ -24,9 +24,11 @@ import tiktoken
 
 # Try to import LANGUAGES from mlx-audio (still present in 0.3.1)
 # Fall back to our own definition if import fails
+# Note: Catch Exception (not just ImportError) because mlx-audio imports MLX
+# which may fail with AttributeError on incompatible systems
 try:
     from mlx_audio.stt.models.whisper.tokenizer import LANGUAGES, TO_LANGUAGE_CODE
-except ImportError:
+except Exception:
     # Fallback: Full LANGUAGES dict from mlx-audio
     LANGUAGES = {
         "en": "english",

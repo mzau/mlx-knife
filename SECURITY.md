@@ -2,25 +2,36 @@
 
 ## Overview
 
-MLX Knife is designed to run locally on your Apple Silicon Mac. It prioritizes user privacy and security by keeping all model execution local. Network activity is limited to explicit interactions with Hugging Face: downloading models (pull) and, in 2.0 alpha, an opt‑in alpha upload (push) when you run it explicitly. No background network traffic.
+MLX Knife is designed to run locally on your Apple Silicon Mac. It prioritizes user privacy and security by keeping all model execution local.
+
+**Important distinction:** MLX Knife integrates upstream libraries (mlx-lm, mlx-vlm, mlx-audio, transformers) whose behavior is outside our direct control. This document describes what **mlx-knife itself** does; upstream libraries may behave differently.
 
 ## Security Model
 
-### What MLX Knife Does
+### What MLX Knife Itself Does
 - ✅ Runs models locally on your device
-- ✅ Downloads models only from HuggingFace (trusted repository)
+- ✅ Downloads models only from HuggingFace (via `pull`, `clone`)
+- ✅ Uploads only when you explicitly run `push` (opt-in, requires credentials)
 - ✅ API server binds to localhost by default
 - ✅ No telemetry or usage tracking
-- ✅ No external API calls (except explicit Hugging Face interactions: downloads via pull; optional upload via experimental push)
-- ✅ Can upload a local workspace to Hugging Face only when you explicitly run `mlxk2 push` (alpha feature, opt‑in)
+- ✅ No automatic updates or phone-home features
 
-### What MLX Knife Doesn't Do
-- ❌ No data is sent to external servers automatically or in the background
+### What MLX Knife Itself Doesn't Do
 - ❌ No model outputs are logged or transmitted
 - ❌ No user tracking or analytics
-- ❌ No automatic updates or phone-home features
-  
-  Note: The alpha `push` command will upload files from a user‑selected local folder to Hugging Face only when you run it explicitly and provide credentials. It never runs implicitly.
+- ❌ mlx-knife code does not initiate network requests during `run`, `server`, or `show`
+
+### Third-Party Libraries
+
+MLX Knife uses external libraries to load and run models. These libraries may download additional files when a model is first used - this is outside mlx-knife's control.
+
+**What this means:**
+- Downloading a model with `pull` does not guarantee fully offline use
+- Some models may need additional downloads when first run
+- We recommend models from `mlx-community/*` but cannot guarantee third-party behavior
+
+**For offline environments:**
+Test each model while online before relying on offline use. Use `mlxk clone` to create a local workspace for better isolation.
 
 ## Reporting Security Vulnerabilities
 
@@ -142,11 +153,9 @@ We provide security updates for these versions:
 
 | Version | Security Support   |
 | ------- | ------------------ |
-| 2.0.3   | :white_check_mark: Current stable |
-| 2.0.2   | :white_check_mark: Supported |
-| 2.0.1   | :white_check_mark: Supported |
-| 2.0.0   | :white_check_mark: Supported |
-| < 2.0.0 | :x: Upgrade recommended |
+| 2.0.4   | :white_check_mark: Current stable |
+| 2.0.3   | :white_check_mark: Supported |
+| < 2.0.3 | :x: Upgrade recommended |
 
 ## Additional Resources
 

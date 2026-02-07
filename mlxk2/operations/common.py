@@ -294,10 +294,13 @@ def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bo
             if "audio_config" in config:
                 return True
 
-            # Check model_type (Whisper, Voxtral, Gemma-3n)
+            # Check model_type (Whisper, Voxtral, VibeVoice, Gemma-3n)
+            # Uses substring matching for flexibility (e.g., "vibevoice_asr" matches "vibevoice")
             mt = config.get("model_type")
-            if isinstance(mt, str) and mt.lower() in AUDIO_MODEL_TYPES:
-                return True
+            if isinstance(mt, str):
+                mt_lower = mt.lower()
+                if any(audio_type in mt_lower for audio_type in AUDIO_MODEL_TYPES):
+                    return True
 
         # Check preprocessor_config.json for WhisperFeatureExtractor (Whisper variants)
         preprocessor_config_path = probe / "preprocessor_config.json"
@@ -370,8 +373,11 @@ def detect_audio_backend(probe: Path, config: Optional[Dict[str, Any]]) -> Optio
         if isinstance(vision_config, dict) and len(vision_config) > 0:
             return Backend.MLX_VLM
 
-    # Priority 3: Whisper model_type = mlx-audio STT
-    if "whisper" in model_type_lower:
+    # Priority 3: STT model_type = mlx-audio STT (Whisper only for 2.0.4 stable)
+    # Uses substring matching for flexibility
+    # Note: Voxtral/VibeVoice/Qwen3-ASR excluded - see docs/ISSUES/
+    stt_model_types = ["whisper"]
+    if any(stt in model_type_lower for stt in stt_model_types):
         return Backend.MLX_AUDIO
 
     # Priority 4: WhisperFeatureExtractor in preprocessor = mlx-audio STT
@@ -488,9 +494,11 @@ def audio_runtime_compatibility(
         if spec is None:
             return False, "mlx-audio not installed (pip install mlx-knife[audio])"
 
-        # Gate 2: model_type must be supported by mlx-audio (Whisper, Voxtral only)
+        # Gate 2: model_type must be supported by mlx-audio
         # This catches mis-routed models like Qwen3-Omni that have WhisperFeatureExtractor
         # but are NOT STT models (they're multimodal with unsupported architecture)
+        # Known STT types: whisper, voxtral, vibevoice, audio (generic)
+        # Note: Must stay in sync with stt_keywords in detect_audio_backend()
         if probe is not None:
             config_path = probe / "config.json"
             if config_path.exists():
@@ -499,9 +507,11 @@ def audio_runtime_compatibility(
                     model_type = config.get("model_type", "")
                     if isinstance(model_type, str):
                         model_type_lower = model_type.lower()
-                        # Check if model_type is a known STT type
-                        if not any(stt in model_type_lower for stt in ["whisper", "voxtral"]):
-                            return False, f"Model type '{model_type}' not supported by mlx-audio (only Whisper/Voxtral)"
+                        # Check if model_type is a known STT type (substring match)
+                        # For 2.0.4 stable: Only Whisper is production-ready
+                        stt_model_types = ["whisper"]
+                        if not any(stt in model_type_lower for stt in stt_model_types):
+                            return False, f"Model type '{model_type}' not supported (only Whisper is production-ready in 2.0.4)"
                 except Exception:
                     pass  # If config can't be read, proceed (health check will catch it)
 

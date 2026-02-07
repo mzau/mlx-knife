@@ -17,8 +17,8 @@ benchmarks/
 │   ├── 2025-12-20-v2.0.4b3.jsonl   # Raw data (one file per test run)
 │   └── BENCHMARK-v1.0-*.md         # Generated analysis reports
 ├── schemas/                    # JSON Schema definitions
-│   ├── report-v0.1.0.schema.json   # lecacy schema
-│   ├── report-v0.2.0.schema.json   # Current schema
+│   ├── report-v0.1.schema.json      # legacy schema
+│   ├── report-v0.2.2.schema.json    # Current schema
 │   └── report-current.schema.json  # Symlink → current schema
 ├── tools/                      # Standalone tools
 │   ├── memmon.py                   # Memory monitor (background sampling)
@@ -94,24 +94,22 @@ python benchmarks/tools/memplot.py memory.jsonl benchmark.jsonl -o timeline.html
 
 **Blue line:** RAM free over time (GB)
 
-**Diamond markers (vm_pressure):**
-- 🟢 **Green (0):** Normal - no memory pressure
-- 🟡 **Yellow (1-2):** Warning - system preparing to swap
-- 🔴 **Red (4):** Critical - system actively swapping
+**RAM line marker colors** (per-point coloring based on available RAM):
+- 🟢 **Green:** ≥32 GB free - healthy
+- 🟠 **Orange:** 16-32 GB free - warning zone
+- 🔴 **Red:** <16 GB free - critical
 
-**Dashed threshold lines:**
-- **Green line (32 GB):** 50% threshold (64 GB system)
-- **Orange line (16 GB):** 25% threshold
+**Memory pressure background** (semi-transparent overlays):
+- 🟡 **Yellow `rgba(255, 204, 0, 0.15)`:** WARN level - system preparing to swap
+- 🔴 **Red `rgba(255, 59, 48, 0.15)`:** CRITICAL level - system actively swapping
 
 **Red line (right axis):** Swap Used (MB) - only visible when > 0
 
 #### Row 2: CPU Load
 
-**User (cyan):** User space CPU %
-**System (orange):** Kernel CPU %
-**Idle (green fill):** Idle CPU %
-
-**Load Average (purple dashed):** 1-minute load (right axis)
+**Load Average (purple):** 1-minute load average
+**User (green fill):** User space CPU %
+**System (red fill):** Kernel CPU % (stacked on User)
 
 #### Row 3: GPU Utilization (Apple Silicon)
 
@@ -212,17 +210,17 @@ Example: 57 GB used in test_text_request_still_works_on_vision_model
 **RAM Free:**
 - Source: `vm_stat` (macOS native)
 - Calculation: `(free + inactive + purgeable + speculative) * page_size / 1e9`
-- Sample rate: 500ms (2 samples/second)
+- Sample rate: 200ms (5 samples/second)
 
 **Memory Pressure:**
 - Source: `sysctl kern.memorystatus_vm_pressure_level`
 - Values: 1=NORMAL, 2=WARN, 4=CRITICAL
-- Sample rate: 500ms (synchronized with RAM)
+- Sample rate: 200ms (synchronized with RAM)
 
 **Swap Used:**
 - Source: `sysctl vm.swapusage`
 - Unit: MB
-- Sample rate: 500ms
+- Sample rate: 200ms
 
 **Test Metadata:**
 - Source: Benchmark JSONL (pytest-json-report format)
@@ -244,7 +242,7 @@ Example: 57 GB used in test_text_request_still_works_on_vision_model
    - **Fix planned:** Log parsing in v0.3.0/v1.0
 
 3. **Dense test sequences**
-   - Tests shorter than 500ms sample rate → no coloring
+   - Tests shorter than 200ms sample rate → no coloring
    - Typical: Fast infrastructure tests (<100ms)
    - **Workaround:** Test labels show all tests
 

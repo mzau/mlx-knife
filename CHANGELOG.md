@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.0.4] - 2026-XX-XX (WIP)
+
+> **First stable release with Audio/STT support.** This release consolidates beta.9 and beta.10 improvements into a production-ready package.
+
+### Highlights
+
+**Audio Transcription Production-Ready:** Complete Whisper support via mlx-audio backend. Works out-of-the-box with `pip install mlx-knife[audio]` - no ffmpeg, no system dependencies. Supports >10 minute audio files with excellent accuracy.
+
+**All Runtime Gates Working:** `mlxk run` preflight checks now match `mlxk list --health` output. Embedding models, unsupported STT types, and Voxtral tekken.json are properly blocked with helpful error messages.
+
+**Comprehensive Test Coverage:** 697 unit tests covering whisper tokenizer, embedding gates, audio CLI, and runtime compatibility.
+
+### Added (since beta.10)
+
+- **Unit Tests:**
+  - `test_whisper_tokenizer.py`: 47 tests for tiktoken workaround (get_encoding, get_tokenizer, Tokenizer class)
+  - `TestEmbeddingGate`: 3 tests for embedding model runtime blocking
+
+### Fixed (since beta.10)
+
+- **Run Preflight Consistency:** `run.py` now passes `probe` and `framework` to `audio_runtime_compatibility()`. STT model_type and tekken.json gates now work in CLI (previously only in list/health).
+
+- **STT model_type Gate:** Extended to accept `vibevoice` and `audio` model types (was only `whisper`/`voxtral`). VibeVoice-ASR and future STT models no longer blocked incorrectly.
+
+- **MLX 0.30.x Compatibility:** `whisper_tokenizer.py` now catches all exceptions (not just ImportError) when importing from mlx-audio. LANGUAGES fallback works when MLX API is incompatible.
+
+### Changed (since beta.10)
+
+- **Code Cleanup:**
+  - Removed ~45 LOC duplication in `audio_runner.py` (get_encoding now imported from whisper_tokenizer)
+  - `STT_MODEL_TYPES` in capabilities.py synchronized with runtime gate
+
+### Upgrade from beta.10
+
+```bash
+pip install --upgrade mlx-knife[all]
+```
+
+No breaking changes. All beta.10 functionality preserved.
+
+---
+
 ## [2.0.4-beta.10] - 2026-02-05
 
 > **⚠️ Upgrade Notice:** If you installed beta.9 from PyPI, audio transcription does not work due to an incomplete tiktoken patch. Please upgrade to beta.10: `pip install mlx-knife[all]==2.0.4b10`
