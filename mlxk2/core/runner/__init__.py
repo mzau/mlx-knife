@@ -187,13 +187,25 @@ class MLXRunner:
             if commit_hash:
                 model_path = model_cache_dir / "snapshots" / commit_hash
             else:
-                # Try to find a snapshot directory; tolerate missing during tests
+                # Find a snapshot directory
                 snapshots_dir = model_cache_dir / "snapshots"
                 if snapshots_dir.exists():
                     snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                    model_path = snapshots[0] if snapshots else snapshots_dir / "mock"
+                    if snapshots:
+                        # Prefer most recently modified snapshot
+                        model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+                    else:
+                        raise RuntimeError(
+                            f"Model '{resolved_name}' has no snapshots in cache. "
+                            f"The model directory exists at {model_cache_dir} but contains no "
+                            f"downloaded snapshots. Try running: mlxk pull {resolved_name}"
+                        )
                 else:
-                    model_path = snapshots_dir / "mock"
+                    raise RuntimeError(
+                        f"Model '{resolved_name}' not found in cache. "
+                        f"Expected at: {model_cache_dir}. "
+                        f"Try running: mlxk pull {resolved_name}"
+                    )
         else:
             # Non path-like cache (likely a Mock in unit tests) → pass a synthetic path to load()
             model_path = Path("/mock") / hf_to_cache_dir(resolved_name) / "snapshots" / (commit_hash or "mock")

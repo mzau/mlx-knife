@@ -453,8 +453,8 @@ def vision_runtime_compatibility(probe: Optional[Path] = None) -> tuple[bool, Op
     # with temporal_patch_size (video-capable models like Qwen2-VL)
     if probe is not None:
         try:
-            import transformers
-            tf_version = getattr(transformers, "__version__", "0.0.0")
+            from importlib.metadata import version
+            tf_version = version("transformers")
             # Check if transformers 5.x (RC or early release with potential bugs)
             if tf_version.startswith("5."):
                 preprocessor_path = probe / "preprocessor_config.json"

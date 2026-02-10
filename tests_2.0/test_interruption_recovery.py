@@ -48,7 +48,7 @@ class TestInterruptionRecovery:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     def test_interruption_flag_reset_streaming(self, mock_cache, mock_resolve, mock_load):
         """Test that interruption flag is reset for new streaming generation"""
         mock_resolve.return_value = ("test-model", None, None)
@@ -94,7 +94,7 @@ class TestInterruptionRecovery:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     def test_interruption_flag_reset_batch(self, mock_cache, mock_resolve, mock_load):
         """Test that interruption flag is reset for new batch generation"""
         mock_resolve.return_value = ("test-model", None, None)

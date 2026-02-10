@@ -271,12 +271,9 @@ HF_HOME=/path/to/cache pytest -m live_e2e -v
 
 **Stop token validation** (ADR-009):
 ```bash
-# Option A: Portfolio Discovery (recommended)
-export HF_HOME=/path/to/cache
 pytest -m live_stop_tokens -v
-
-# Option B: Hardcoded models (requires 3 specific models in cache)
-# See TESTING-DETAILS.md for model list
+# Uses Portfolio Discovery if models found, else fallback models
+# See TESTING-DETAILS.md "Required Models for Live Tests"
 ```
 
 **Push/Clone tests** (alpha features):

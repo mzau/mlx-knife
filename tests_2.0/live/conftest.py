@@ -25,6 +25,8 @@ from .test_utils import (
     discover_audio_models,
     parse_vm_stat_page_size,
     TEST_MODELS,
+    VISION_TEST_MODELS,
+    AUDIO_TEST_MODELS,
 )
 
 # Import the real MLX modules fixture from parent test module
@@ -132,10 +134,10 @@ def pytest_generate_tests(metafunc):
         if vision_models:
             model_keys = [f"vision_{i:02d}" for i in range(len(vision_models))]
         else:
-            # No fallback for vision (needs real models)
-            model_keys = []
+            # Fallback to hardcoded VISION_TEST_MODELS (pixtral)
+            model_keys = list(VISION_TEST_MODELS.keys())
 
-        # If no vision models, parametrize with skip marker
+        # If still no vision models, parametrize with skip marker
         if not model_keys:
             model_keys = ["_no_vision_models"]
 
@@ -153,10 +155,10 @@ def pytest_generate_tests(metafunc):
         if audio_models:
             model_keys = [f"audio_{i:02d}" for i in range(len(audio_models))]
         else:
-            # No fallback for audio (needs real models)
-            model_keys = []
+            # Fallback to hardcoded AUDIO_TEST_MODELS (whisper)
+            model_keys = list(AUDIO_TEST_MODELS.keys())
 
-        # If no audio models, parametrize with skip marker
+        # If still no audio models, parametrize with skip marker
         if not model_keys:
             model_keys = ["_no_audio_models"]
 
@@ -306,9 +308,9 @@ def vision_portfolio():
         print(f"\n👁️  Vision Portfolio: Found {len(result)} vision-capable models")
         return result
     else:
-        # No fallback for vision - requires real models
-        print(f"\n⚠️  Vision Portfolio: No vision models found in cache")
-        return {}
+        # Fallback to hardcoded vision test model (pixtral)
+        print(f"\n📋 Vision Portfolio: Using fallback VISION_TEST_MODELS (1 model)")
+        return VISION_TEST_MODELS
 
 
 @pytest.fixture(scope="module")
@@ -348,9 +350,9 @@ def audio_portfolio():
         print(f"\n🔊 Audio Portfolio: Found {len(result)} audio-capable models")
         return result
     else:
-        # No fallback for audio - requires real models
-        print(f"\n⚠️  Audio Portfolio: No audio models found in cache")
-        return {}
+        # Fallback to hardcoded audio test model (whisper)
+        print(f"\n📋 Audio Portfolio: Using fallback AUDIO_TEST_MODELS (1 model)")
+        return AUDIO_TEST_MODELS
 
 
 @pytest.fixture
@@ -399,7 +401,11 @@ def text_model_info(text_portfolio, text_model_key):
             - ram_needed_gb: Estimated RAM requirement (1.2x text formula)
             - expected_issue: Known issue or None
             - description: Human-readable description
+
+        Returns None for skip markers (_skipped, _no_text_models).
     """
+    if text_model_key.startswith("_"):
+        return None
     return text_portfolio[text_model_key]
 
 
@@ -423,7 +429,11 @@ def vision_model_info(vision_portfolio, vision_model_key):
             - ram_needed_gb: Estimated RAM requirement (0.70 threshold vision formula)
             - expected_issue: Known issue or None
             - description: Human-readable description
+
+        Returns None for skip markers (_skipped, _no_vision_models).
     """
+    if vision_model_key.startswith("_"):
+        return None
     return vision_portfolio[vision_model_key]
 
 
@@ -498,14 +508,14 @@ def _auto_report_vision_model(request):
 
     # Type 2: CLI vision tests (test_vision_e2e_live.py)
     # These tests use subprocess.run(["mlxk", "run", VISION_MODEL, ...])
-    # VISION_MODEL is explicitly set to "pixtral-12b-8bit" to avoid ambiguity
+    # VISION_MODEL is "pixtral-12b-4bit" (matches VISION_TEST_MODELS fallback)
     if 'test_vision_e2e_live.py' in request.node.nodeid:
-        # All CLI vision tests use explicit pixtral-12b-8bit
+        # All CLI vision tests use pixtral-12b-4bit
         request.node.user_properties.append(("model", {
-            "id": "pixtral-12b-8bit",  # Explicit model (not shorthand)
-            "size_gb": 13.5,   # Actual disk size of 8bit variant
+            "id": "mlx-community/pixtral-12b-4bit",
+            "size_gb": 7.0,   # 12B 4-bit (~7GB empirical)
             "family": "pixtral",
-            "variant": "12b-8bit",
+            "variant": "12b-4bit",
         }))
         # Explicit inference_modality for CLI vision tests (v0.2.1)
         # Required because these tests don't use vision_model_key fixture

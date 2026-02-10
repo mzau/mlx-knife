@@ -63,22 +63,23 @@ class TestTextModelsDiscovery:
                 assert "mlx-community/Phi-3-mini-4k-instruct-4bit" in model_ids
                 assert "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" not in model_ids
 
-    def test_discover_text_models_returns_all_when_no_hf_home(self, monkeypatch):
-        """Verify fallback behavior when HF_HOME not set."""
-        mock_all_models = [
-            {"model_id": "mlx-community/Qwen2.5-0.5B-Instruct-4bit", "ram_needed_gb": 1.0, "snapshot_path": None, "weight_count": None},
-        ]
+    def test_discover_text_models_returns_empty_when_no_hf_home(self, monkeypatch):
+        """Verify fallback behavior when HF_HOME not set.
 
-        with patch("live.test_utils.discover_mlx_models_in_user_cache", return_value=mock_all_models):
+        Without HF_HOME, discover_mlx_models_in_user_cache returns [] (by design).
+        This ensures tests fall back to TEST_MODELS hardcoded models.
+        See TESTING.md for Portfolio Discovery requirements.
+        """
+        # Mock discover_mlx_models_in_user_cache to return [] (simulates no HF_HOME)
+        with patch("live.test_utils.discover_mlx_models_in_user_cache", return_value=[]):
             # Unset HF_HOME
             monkeypatch.delenv("HF_HOME", raising=False)
 
             from live.test_utils import discover_text_models
             result = discover_text_models()
 
-            # Should return all models (fallback)
-            assert len(result) == 1
-            assert result == mock_all_models
+            # Should return empty (triggers fallback to TEST_MODELS in portfolio fixture)
+            assert result == []
 
     def test_discover_text_models_handles_empty_portfolio(self):
         """Verify behavior when no models discovered."""
@@ -149,20 +150,39 @@ class TestVisionModelsDiscovery:
                 assert "mlx-community/pixtral-12b-8bit" in model_ids
                 assert "mlx-community/Qwen2.5-0.5B-Instruct-4bit" not in model_ids
 
-    def test_discover_vision_models_returns_empty_when_no_hf_home(self, monkeypatch):
-        """Verify that vision models require HF_HOME."""
+    def test_discover_vision_models_uses_default_cache_when_no_hf_home(self, monkeypatch):
+        """Verify that vision models use default cache when HF_HOME not set."""
         mock_all_models = [
             {"model_id": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit", "ram_needed_gb": 24.0, "snapshot_path": None, "weight_count": None},
         ]
 
+        mock_list_output = {
+            "status": "success",
+            "command": "list",
+            "data": {
+                "models": [
+                    {"name": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit", "capabilities": ["text-generation", "chat", "vision"], "size_bytes": 12000000000},
+                ],
+                "count": 1
+            },
+            "error": None
+        }
+
         with patch("live.test_utils.discover_mlx_models_in_user_cache", return_value=mock_all_models):
-            monkeypatch.delenv("HF_HOME", raising=False)
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(mock_list_output)
+                )
+                # No HF_HOME set - should still work with default cache
+                monkeypatch.delenv("HF_HOME", raising=False)
 
-            from live.test_utils import discover_vision_models
-            result = discover_vision_models()
+                from live.test_utils import discover_vision_models
+                result = discover_vision_models()
 
-            # Should return empty (vision needs HF_HOME)
-            assert result == []
+                # Should return vision models (using default cache)
+                assert len(result) == 1
+                assert result[0]["model_id"] == "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit"
 
     def test_discover_vision_models_handles_empty_portfolio(self):
         """Verify behavior when no models discovered."""

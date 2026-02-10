@@ -206,8 +206,6 @@ def discover_text_models() -> list[Dict[str, Any]]:
 
     # Get capabilities from mlxk list --json
     env = os.environ.copy()
-    if not env.get("HF_HOME"):
-        return all_models  # Fall back to all models if HF_HOME not set
 
     try:
         result = subprocess.run(
@@ -265,8 +263,6 @@ def discover_vision_models() -> list[Dict[str, Any]]:
 
     # Get capabilities and size_bytes from mlxk list --json
     env = os.environ.copy()
-    if not env.get("HF_HOME"):
-        return []  # Vision models need HF_HOME
 
     try:
         result = subprocess.run(
@@ -341,7 +337,7 @@ def discover_audio_models() -> list[Dict[str, Any]]:
 
     env = os.environ.copy()
     if not env.get("HF_HOME"):
-        return []
+        return []  # Audio discovery requires HF_HOME (see TESTING.md)
 
     try:
         result = subprocess.run(
@@ -393,6 +389,42 @@ def discover_audio_models() -> list[Dict[str, Any]]:
         return []
 
 
+# =============================================================================
+# FALLBACK TEST MODELS - Minimum Required Models for Testing Without HF_HOME
+# =============================================================================
+# When HF_HOME is not set, Portfolio Discovery returns []. These fallback models
+# provide a baseline for testing when the user has these specific models in
+# their default cache (~/.cache/huggingface).
+#
+# These models must be downloaded manually if testing without HF_HOME:
+#   mlxk pull mlx-community/gpt-oss-20b-MXFP4-Q8
+#   mlxk pull mlx-community/Qwen2.5-0.5B-Instruct-4bit
+#   mlxk pull mlx-community/Llama-3.2-3B-Instruct-4bit
+#   mlxk pull mlx-community/pixtral-12b-4bit
+#   mlxk pull mlx-community/whisper-large-v3-turbo-4bit
+# =============================================================================
+
+# Vision fallback model (for tests without HF_HOME)
+VISION_TEST_MODELS = {
+    "pixtral": {
+        "id": "mlx-community/pixtral-12b-4bit",
+        "expected_issue": None,
+        "description": "Pixtral 12B - general-purpose vision model",
+        "ram_needed_gb": 7.0  # 12B 4-bit (~7GB empirical)
+    }
+}
+
+# Audio fallback model (for tests without HF_HOME)
+AUDIO_TEST_MODELS = {
+    "whisper": {
+        "id": "mlx-community/whisper-large-v3-turbo-4bit",
+        "expected_issue": None,
+        "description": "Whisper large-v3-turbo - STT baseline",
+        "ram_needed_gb": 1.5  # Large-v3 4-bit (~1.5GB)
+    }
+}
+
+
 # Re-export for convenience
 __all__ = [
     "discover_mlx_models_in_user_cache",
@@ -406,6 +438,8 @@ __all__ = [
     "get_system_ram_gb",
     "should_skip_model",
     "TEST_MODELS",
+    "VISION_TEST_MODELS",
+    "AUDIO_TEST_MODELS",
     "TEST_PROMPT",
     "MAX_TOKENS",
     "TEST_TEMPERATURE",

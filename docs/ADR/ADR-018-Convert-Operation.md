@@ -1,8 +1,8 @@
 # ADR-018: Convert Operation
 
-**Status:** Implemented (Phases 0a-0c + 1 complete in 2.0.4-beta.6)
+**Status:** Implemented (Phases 0a-0c + 1 complete in 2.0.4-beta.6), Phase 2 planned for 2.0.5
 **Created:** 2025-12-18
-**Updated:** 2026-02-01 (Added: Known Model Defects & Repair Strategies survey)
+**Updated:** 2026-02-08 (Added: Phase 2 details for 2.0.5)
 **Context:** Users need to (a) quantize MLX workspaces locally without polluting the HF cache and (b) repair MLX/HF compliance issues (notably safetensors index/shard mismatches) in a deterministic way.
 
 **Phase Status:**
@@ -10,11 +10,12 @@
 - **Phase 0b:** Resumable clone — ✅ Implemented (2.0.4-beta.6)
 - **Phase 0c:** Workspace run/show/server support — ✅ Implemented (2.0.4-beta.6)
 - **Phase 1:** `--repair-index` — ✅ Implemented (2.0.4-beta.5)
+- **Phase 2:** `--quantize` + content_hash — 🚧 Planned (2.0.5)
 
-**Feature Gates (2.0.4-beta.7+):**
+**Feature Gates:**
 - `clone`, `push`: **Production** (no gate required)
-- `convert`: **Experimental** (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`)
-  - Rationale: `--quantize` not yet implemented, only `--repair-index` available
+- `convert`: **Experimental** until 2.0.5 (requires `MLXK2_ENABLE_ALPHA_FEATURES=1`)
+  - Gate removed in 2.0.5 when `--quantize` ships
 
 **Note:** Complete workspace infrastructure shipped in 2.0.4-beta.6. Full `clone → convert → run/show/server` workflow with resume support, no HF push requirement.
 
@@ -681,9 +682,138 @@ mlxk convert ./ws ./ws-fixed --repair-all        # Apply all safe repairs
   - **Files:** `mlxk2/operations/convert.py` (NEW), `cli.py` (convert subparser), `output/human.py` (render_convert)
   - **Tests:** 11 new tests, all passing
 
-- [ ] **Phase 2 (future):** `--quantize <bits>` for text models (mlx-lm)
+- [ ] **Phase 2 (2.0.5):** `--quantize <bits>` for text models + content_hash
 - [ ] **Phase 3 (future):** Mixed recipes / advanced quant options
-- [ ] **Phase 4 (future):** Vision model support (mlx-vlm) once stable and dependency policy allows
+- [ ] **Phase 4 (2.0.5 or 2.0.6):** Vision quantize (mlx-vlm) — timing depends on upstream stability and 2.0.6 focus
+
+---
+
+### Phase 2: Quantize & Content Hash (2.0.5)
+
+**Goal:** Production-ready convert with quantization and workspace integrity tracking.
+
+#### 2a: Remove ALPHA Gate
+
+**Current:** `convert` requires `MLXK2_ENABLE_ALPHA_FEATURES=1`
+
+**Change:** Remove gate — `--repair-index` has proven stable since 2.0.4-beta.5
+
+**Files:**
+- `mlxk2/operations/convert.py` — Remove alpha check
+- `mlxk2/cli.py` — Remove gate from convert subparser help
+
+#### 2b: Quantize Implementation
+
+**CLI:**
+```bash
+mlxk convert ./ws-bf16 ./ws-4bit --quantize 4
+mlxk convert ./ws-bf16 ./ws-4bit --quantize 4 --q-group-size 128
+```
+
+**Implementation:**
+```python
+# mlxk2/operations/convert.py
+
+def _quantize_text_model(source: Path, target: Path, bits: int, group_size: int = 64):
+    """Quantize text model using mlx-lm."""
+    from mlx_lm import convert as mlx_lm_convert
+
+    # mlx-lm expects these parameters
+    mlx_lm_convert(
+        hf_path=str(source),
+        mlx_path=str(target),
+        quantize=True,
+        q_bits=bits,
+        q_group_size=group_size,
+    )
+
+    # Always rebuild index for consistency (safety measure)
+    rebuild_safetensors_index(target)
+```
+
+**Supported bit depths:** 2, 3, 4, 6, 8 (same as mlx-lm)
+
+**Files:**
+- `mlxk2/operations/convert.py` — `_quantize_text_model()`, CLI integration
+- Tests: 5-8 new tests
+
+#### 2c: Content Hash
+
+**Purpose:** Detect modifications after clone/convert for integrity tracking.
+
+**Algorithm:** (from ADR-022)
+```python
+HASH_EXCLUDE = [
+    ".mlxk_workspace.json",  # contains the hash itself
+    ".hf_cache/",            # runtime artifacts
+    ".DS_Store",
+    ".git/",
+    "__pycache__/",
+    "*.log",
+    "*.tmp",
+]
+
+def compute_workspace_hash(workspace_path: Path) -> str:
+    hasher = hashlib.sha256()
+    for file in sorted(workspace_path.rglob("*")):
+        if should_exclude(file):
+            continue
+        if file.is_file():
+            hasher.update(file.relative_to(workspace_path).encode())
+            hasher.update(file.read_bytes())
+    return f"sha256:{hasher.hexdigest()}"
+```
+
+**When computed:**
+- After `clone` (before declaring success)
+- After `convert` (before declaring success)
+
+**Stored in:** `.mlxk_workspace.json`
+
+#### 2d: Extended Sentinel Schema
+
+```json
+{
+  "mlxk_version": "2.0.5",
+  "created_at": "2026-02-08T10:30:00Z",
+  "source_repo": "mlx-community/whisper-large-v3-mlx",
+  "source_revision": "abc123def456",
+  "managed": true,
+  "operation": "convert",
+  "content_hash": "sha256:a1b2c3d4e5f6...",
+  "hash_computed_at": "2026-02-08T10:30:05Z",
+  "hash_excludes": [".mlxk_workspace.json", ".hf_cache/"],
+  "convert_options": {
+    "mode": "quantize",
+    "bits": 4,
+    "group_size": 64
+  }
+}
+```
+
+**New fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `content_hash` | `string` | SHA256 of workspace content |
+| `hash_computed_at` | `string` | ISO timestamp |
+| `hash_excludes` | `string[]` | Patterns excluded from hash |
+| `convert_options` | `object` | Quantization parameters (if convert) |
+
+**Files:**
+- `mlxk2/operations/workspace.py` — `compute_workspace_hash()`, extended sentinel
+- `mlxk2/operations/clone.py` — Hash after clone
+- `mlxk2/operations/convert.py` — Hash after convert
+- Tests: 5-8 new tests
+
+#### Phase 2 Effort
+
+| Component | LOC | Tests |
+|-----------|-----|-------|
+| ALPHA gate removal | ~10 | 1 |
+| Quantize | ~80 | 5-8 |
+| Content hash | ~50 | 5-8 |
+| Sentinel extension | ~30 | 3-5 |
+| **Total** | ~170 | 14-22 |
 
 ---
 

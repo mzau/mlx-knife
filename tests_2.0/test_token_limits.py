@@ -64,7 +64,7 @@ class TestDynamicTokenLimits:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     # Create runner and test calculation
@@ -86,7 +86,7 @@ class TestDynamicTokenLimits:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     # Create runner and test calculation
@@ -105,7 +105,7 @@ class TestDynamicTokenLimits:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     # Create runner with no context length
@@ -125,7 +125,7 @@ class TestTokenLimitApplication:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     @patch('mlxk2.core.runner.get_model_context_length')
     def test_generate_streaming_uses_dynamic_limits(self, mock_context, mock_cache, mock_resolve, mock_load):
         """Test that generate_streaming uses dynamic limits when max_tokens=None"""
@@ -158,7 +158,7 @@ class TestTokenLimitApplication:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     @patch('mlxk2.core.runner.get_model_context_length')
     def test_generate_streaming_respects_explicit_limits(self, mock_context, mock_cache, mock_resolve, mock_load):
         """Test that explicit max_tokens is respected"""
@@ -191,7 +191,7 @@ class TestTokenLimitApplication:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     @patch('mlxk2.core.runner.get_model_context_length')
     def test_generate_batch_uses_dynamic_limits(self, mock_context, mock_cache, mock_resolve, mock_load):
         """Test that generate_batch also uses dynamic limits"""
@@ -238,7 +238,7 @@ class TestLargeContextModels:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("large-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     runner = MLXRunner("large-model")
@@ -263,7 +263,7 @@ class TestLargeContextModels:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("huge-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     runner = MLXRunner("huge-model")
@@ -288,7 +288,7 @@ class TestTokenLimitEdgeCases:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     runner = MLXRunner("test-model")
@@ -315,7 +315,7 @@ class TestTokenLimitEdgeCases:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     runner = MLXRunner("test-model")
@@ -337,7 +337,7 @@ class TestServerVsRunDifferences:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     runner = MLXRunner("test-model")
@@ -376,7 +376,7 @@ class TestServerVsRunDifferences:
             with patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve:
                 mock_resolve.return_value = ("test-model", None, None)
                 
-                with patch('mlxk2.core.cache.get_current_model_cache') as mock_cache:
+                with patch('mlxk2.core.runner.get_current_model_cache') as mock_cache:
                     mock_cache.return_value = Mock()
                     
                     runner = MLXRunner("test-model")
