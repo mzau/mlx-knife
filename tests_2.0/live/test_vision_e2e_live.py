@@ -6,9 +6,9 @@ to validate actual image understanding (not just hallucination).
 
 Requires:
 - Python 3.10+ (mlx-vlm requirement)
-- Vision model in cache (e.g., pixtral-12b-4bit or pixtral-12b-8bit)
+- Vision model in cache (default: pixtral-12b-4bit, see VISION_TEST_MODELS)
 - Test assets in tests_2.0/assets/
-- HF_HOME set to model cache location
+- HF_HOME optional (uses default cache if not set)
 
 Run with:
     HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_e2e_live.py
@@ -19,8 +19,8 @@ import pytest
 import subprocess
 from pathlib import Path
 
-# Explicit model name to avoid ambiguity when multiple pixtral variants in cache
-VISION_MODEL = "pixtral-12b-8bit"
+# Must match VISION_TEST_MODELS fallback (see tests_2.0/live/test_utils.py)
+VISION_MODEL = "pixtral-12b-4bit"
 
 # Vision support requires Python 3.10+ (mlx-vlm requirement)
 pytestmark = [

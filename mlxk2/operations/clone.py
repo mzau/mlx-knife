@@ -95,17 +95,9 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
             result["data"]["clone_status"] = "filesystem_error"
             return result
 
-        # Phase 1b: Validate same-volume requirement (ADR-007)
-        try:
-            _validate_same_volume(target_path.parent)
-        except FilesystemError as e:
-            result["status"] = "error"
-            result["error"] = {
-                "type": "FilesystemError",
-                "message": str(e)
-            }
-            result["data"]["clone_status"] = "filesystem_error"
-            return result
+        # Phase 1b: Removed - same-volume validation obsolete (ADR-022)
+        # Temp cache is always created on workspace volume (line ~440), so cross-volume
+        # HF_HOME doesn't matter. Removed _validate_same_volume check.
 
         # Phase 2: Create or resume temp cache on same volume as workspace (ADR-018 Phase 0b)
         result["data"]["clone_status"] = "preparing"
@@ -323,24 +315,6 @@ def _validate_apfs_filesystem(path: Path) -> None:
             f"APFS required for clone operations. "
             f"Path: {path}\n"
             f"Solution: Use APFS volume or external APFS SSD."
-        )
-
-
-def _validate_same_volume(workspace_path: Path) -> None:
-    """Validate that workspace and HF_HOME cache are on same volume (ADR-007 Phase 1)."""
-    cache_root = get_current_cache_root()
-
-    # Get volume mount points for both paths
-    workspace_volume = _get_volume_mount_point(workspace_path)
-    cache_volume = _get_volume_mount_point(cache_root)
-
-    if workspace_volume != cache_volume:
-        raise FilesystemError(
-            f"Phase 1 requires workspace and cache on same volume.\n"
-            f"Workspace volume: {workspace_volume}\n"
-            f"Cache volume (HF_HOME): {cache_volume}\n"
-            f"Solution: Set HF_HOME to same volume as workspace:\n"
-            f"  export HF_HOME={workspace_volume}/huggingface/cache"
         )
 
 

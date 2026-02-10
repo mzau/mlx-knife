@@ -597,20 +597,13 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
 
 """
 
-    # Sort models by total time (descending), or by change if comparing
-    sorted_models = sorted(stats['models'].values(), key=lambda m: m['total_time'], reverse=True)
+    # Sort models alphabetically (stable ordering across reports)
+    sorted_models = sorted(stats['models'].values(), key=lambda m: m['id'].lower())
 
     # Build comparison lookup if available
     compare_models = {}
     if compare_stats:
         compare_models = {m['id']: m for m in compare_stats['models'].values()}
-        # Re-sort by change percentage (biggest regression first)
-        def get_change_pct(model):
-            old = compare_models.get(model['id'])
-            if old and old['total_time'] > 0:
-                return (model['total_time'] - old['total_time']) / old['total_time'] * 100
-            return 0
-        sorted_models = sorted(stats['models'].values(), key=get_change_pct, reverse=True)
 
     if compare_stats:
         md += f"""```
@@ -889,8 +882,8 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
     md += "## Per-Test Statistics\n\n"
     md += "Shows performance range across models for each test.\n\n"
 
-    # Sort tests by model count (descending) - most representative tests first
-    sorted_tests = sorted(stats['tests'].values(), key=lambda t: t['model_count'], reverse=True)
+    # Sort tests alphabetically (stable ordering across reports)
+    sorted_tests = sorted(stats['tests'].values(), key=lambda t: t['name'].lower())
 
     # Build comparison lookup for tests (key: (name, modality))
     compare_tests = {}

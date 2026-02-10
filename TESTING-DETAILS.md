@@ -67,67 +67,27 @@ Total:                       171 passed across all phases
 | Live list | `pytest -m live_list -v` | `live_list` (subset of `wet`) + Env: `HF_HOME` (user cache with models) | Tests list/health against user cache models | No (uses local cache) |
 | Clone offline | `pytest -k clone -v` | — | Clone offline tests (APFS validation, temp cache, CoW workflow); no network needed | No |
 | Live clone (ADR-007) | `pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK2_LIVE_CLONE_WORKSPACE` | Real clone workflow: pull→temp cache→APFS same-volume clone→workspace (ADR-007 Phase 1 constraints: same volume + APFS required) | Yes |
-| Live stop tokens (ADR-009) | `pytest -m live_stop_tokens -v` | `live_stop_tokens` (required); Optional: `HF_HOME` (enables portfolio discovery) | Issue #32: Validates stop token behavior with real models. **With HF_HOME:** Portfolio Discovery auto-discovers all MLX chat models (filter: MLX+healthy+runtime+chat), RAM-aware skip, empirical report. **Without HF_HOME:** Uses 3 predefined models (see "Optional Setup" section for model requirements). | No (uses local cache) |
-| Live run | `pytest -m live_run -v` | `live_run` + Env: `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache with `mlx-community/Phi-3-mini-4k-instruct-4bit`) | Regression tests for Issue #37: Validates private/org MLX model framework detection in run command (renames Phi-3 to simulate private-org model) | No (uses local cache) |
-| Live E2E (ADR-011) | `HF_HOME=/path/to/cache pytest -m live_e2e -v` | `live_e2e` (required) + Env: `HF_HOME` (optional, enables Portfolio Discovery); Requires: `httpx` installed | **✅ Working:** Server/HTTP/CLI validation with real models. Portfolio Discovery auto-discovers all MLX chat models via `mlxk list --json` (filter: MLX+healthy+runtime+chat), parametrized tests (one server per model), RAM-aware skip. | No (uses local cache) |
-| Vision CLI E2E (ADR-012) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache, e.g., pixtral-12b-8bit or Llama-3.2-Vision); Requires: `mlx-vlm` installed (Python 3.10+) | **✅ Working:** Deterministic vision queries validate actual image understanding (not hallucination). Tests: chess position reading (e6=black king), OCR text extraction (contract name), color recognition (blue mug), chart label reading (Y-axis), large image support (2.7MB). | No (uses local cache) |
-| Vision Server E2E (ADR-012 Phase 3) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_vision_server_e2e.py -v` | `live_e2e` (required) + Env: `HF_HOME` (vision model in cache); Requires: `mlx-vlm` installed (Python 3.10+), `httpx` | **✅ Working:** Vision API over HTTP. Tests: Base64 image chat completion, streaming graceful degradation (SSE emulation), text request on vision model server. | No (uses local cache) |
-| Audio CLI E2E (ADR-020) | `HF_HOME=/path/to/cache pytest -m live_e2e tests_2.0/live/test_audio_e2e_live.py -v` | `live_e2e` (required) + Env: `HF_HOME` (audio model in cache, e.g., whisper-large-v3-turbo-4bit); Requires: `mlx-audio` installed (Python 3.10+) | **✅ Working:** Audio transcription with Whisper models (mlx-audio backend). Portfolio Discovery auto-discovers audio-capable models (`model_type: audio`). Tests: WAV/MP3 transcription, Server `/v1/audio/transcriptions` endpoint. **Note:** Gemma-3n requires workspace repair (not in portfolio). | No (uses local cache) |
+| Live stop tokens (ADR-009) | `pytest -m live_stop_tokens -v` | `live_stop_tokens`; Optional: `HF_HOME` | Issue #32: Stop token behavior. Uses Portfolio Discovery or fallback models (see below). | No |
+| Live run | `pytest -m live_run -v` | `live_run` + `HF_HOME` (needs Phi-3-mini) | Issue #37: Private/org MLX model framework detection. | No |
+| Live E2E (ADR-011) | `pytest -m live_e2e -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `httpx` | Server/HTTP/CLI validation. Uses Portfolio Discovery or fallback models. | No |
+| Vision E2E (ADR-012) | `pytest -m live_e2e tests_2.0/live/test_vision*.py -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `mlx-vlm` | Vision CLI + Server. Uses Portfolio Discovery or `pixtral-12b-4bit` fallback. | No |
+| Audio E2E (ADR-020) | `pytest -m live_e2e tests_2.0/live/test_audio*.py -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `mlx-audio` | Audio transcription + Server. Uses Portfolio Discovery or `whisper` fallback. | No |
 | Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v` | `live_pull` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
 | Show E2E portfolios | `HF_HOME=/path/to/cache python tests_2.0/show_portfolios.py` OR `pytest -m show_model_portfolio -s` | Env: `HF_HOME` | Displays TEXT and VISION portfolios separately. Shows model keys (text_XX, vision_XX), RAM requirements, and test/skip status. Diagnostic tool for understanding portfolio separation. Use script for detailed output, or pytest marker for quick check. | No (uses local cache) |
 | Manual debug mode | `mlxk run <model> "test prompt" --verbose` | Manual CLI usage with `--verbose` flag | Shows token generation details including multiple EOS token warnings. Use this for manual debugging of model quality issues. Output includes `[DEBUG] Token generation analysis` and `⚠️ WARNING: Multiple EOS tokens detected` for broken models. | No (uses local cache) |
 | Issue #27 real-model | `pytest -m issue27 tests_2.0/test_issue_27.py -v` | Marker: `issue27`; Env (required): `MLXK2_USER_HF_HOME` or `HF_HOME` (user cache, read-only). Env (optional): `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL`, `MLXK2_SUBSET_COUNT=0`. | Copies real models from user cache into isolated test cache; validates strict health policy on index-based models (no network) | No (uses local cache) |
 | Server tests | `pytest -k server -v` | — | Basic server API tests (minimal, uses MLX stubs) | No |
 
-**Useful commands:**
+**Quick reference (not in table above):**
 ```bash
-# Only Spec
-pytest -m spec -v
+# All live tests (umbrella marker)
+pytest -m wet -v
 
-# Push tests (offline)
-pytest -k "push and not live" -v
+# Show which models will be tested
+pytest -m live_e2e --collect-only -q
 
-# Clone tests (offline)
-pytest -k "clone and not live" -v
-
-# Exclude Spec
-pytest -m "not spec" -v
-
-# Live Push only
-MLXK2_LIVE_PUSH=1 HF_TOKEN=... MLXK2_LIVE_REPO=... MLXK2_LIVE_WORKSPACE=... pytest -m live_push -v
-
-# Live Clone only
-MLXK2_LIVE_CLONE=1 HF_TOKEN=... MLXK2_LIVE_CLONE_MODEL=... MLXK2_LIVE_CLONE_WORKSPACE=... pytest -m live_clone -v
-
-# Live List only
-HF_HOME=/path/to/user/cache pytest -m live_list -v
-
-# Live Stop Tokens only (ADR-009)
-pytest -m live_stop_tokens -v  # Optional: HF_HOME=/path/to/cache for portfolio discovery
-
-# Live Run only
-HF_HOME=/path/to/user/cache pytest -m live_run -v
-
-# Live E2E only (ADR-011)
-HF_HOME=/path/to/user/cache pytest -m live_e2e -v  # See model list: pytest tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch --collect-only -q
-
-# Resumable Pull only (separate run - uses isolated cache)
-MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v
-
-# Empirical Mapping only (model benchmarking - excluded from wet due to RAM)
+# Empirical Mapping (heavy, excluded from wet)
 pytest -m live_stop_tokens tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping -v
-
-# Issue #27 only
-MLXK2_USER_HF_HOME=/path/to/user/cache pytest -m issue27 tests_2.0/test_issue_27.py -v
-
-# All live tests (umbrella)
-MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m wet -v
-
-# Vision→Geo pipe only (ADR-012 Phase 1c + Pipe integration)
-MLXK2_ENABLE_PIPES=1 pytest -m live_vision_pipe -v
-
-# With custom batch size (optional)
-MLXK2_ENABLE_PIPES=1 MLXK2_VISION_BATCH_SIZE=3 pytest -m live_vision_pipe -v
 ```
 
 ---
@@ -1175,14 +1135,37 @@ pytest -m live_stop_tokens -v  # → Runs if models present, else fails
 - ✅ **Portfolio Discovery:** Uses `mlxk list --json` to discover all qualifying models (refactored: production command, ~70 LOC eliminated)
 - ✅ **RAM-Aware:** Progressive budgets prevent OOM (40%-70% of system RAM)
 - ✅ **Empirical Report:** Generates `stop_token_config_report.json` with findings
-- ✅ **Fallback:** Uses 3 predefined models (MXFP4, Qwen, Llama) if HF_HOME not set - models must exist in HF cache
+- ✅ **Fallback:** Uses predefined models when no qualifying models discovered (regardless of HF_HOME setting)
 
-**Required models for fallback (without HF_HOME):**
+**Required Models for Live Tests:**
+
+Live tests use **either** Portfolio Discovery **or** these fallback models:
+
+| Scenario | Models tested |
+|----------|---------------|
+| Portfolio Discovery finds models | Only discovered models (dynamic) |
+| Portfolio Discovery finds nothing | Only fallback models (this list) |
+
+**Fallback models** (only needed when Discovery finds nothing — any qualifying MLX model in cache replaces these):
+
+| Type | Model | RAM | Fallback for |
+|------|-------|-----|--------------|
+| Text | `mlx-community/gpt-oss-20b-MXFP4-Q8` | ~12 GB | Text tests |
+| Text | `mlx-community/Qwen2.5-0.5B-Instruct-4bit` | ~1 GB | Text tests |
+| Text | `mlx-community/Llama-3.2-3B-Instruct-4bit` | ~4 GB | Text tests |
+| Vision | `mlx-community/pixtral-12b-4bit` | ~7 GB | Vision tests (or any vision model) |
+| Audio | `mlx-community/whisper-large-v3-turbo-4bit` | ~1.5 GB | Audio tests (or any audio model) |
+
 ```bash
-mlxk pull mlx-community/gpt-oss-20b-MXFP4-Q8         # ~12GB RAM
-mlxk pull mlx-community/Qwen2.5-0.5B-Instruct-4bit   # ~1GB RAM
-mlxk pull mlx-community/Llama-3.2-3B-Instruct-4bit   # ~4GB RAM
+# Pull all minimum required models (~25 GB total)
+mlxk pull mlx-community/gpt-oss-20b-MXFP4-Q8
+mlxk pull mlx-community/Qwen2.5-0.5B-Instruct-4bit
+mlxk pull mlx-community/Llama-3.2-3B-Instruct-4bit
+mlxk pull mlx-community/pixtral-12b-4bit
+mlxk pull mlx-community/whisper-large-v3-turbo-4bit
 ```
+
+**Note:** These models are defined in `tests_2.0/live/test_utils.py` (`TEST_MODELS`, `VISION_TEST_MODELS`, `AUDIO_TEST_MODELS`) and `tests_2.0/test_stop_tokens_live.py` (`TEST_MODELS`).
 
 ### E2E Tests with Portfolio Separation (ADR-011 + Portfolio Separation)
 

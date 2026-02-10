@@ -48,10 +48,13 @@ class MockDetokenizer:
 @contextmanager
 def mock_runner_environment(temp_cache_dir, model_name="test-model"):
     """Mock the environment needed for MLXRunner tests."""
+    # IMPORTANT: Patch in the runner module where the functions are imported,
+    # not in the cache module where they're defined. This ensures the patched
+    # references are used by MLXRunner.
     with patch('mlxk2.core.runner.load') as mock_load, \
          patch('mlxk2.core.runner.resolve_model_for_operation') as mock_resolve, \
-         patch('mlxk2.core.cache.get_current_model_cache') as mock_cache, \
-         patch('mlxk2.core.cache.hf_to_cache_dir') as mock_hf_to_cache, \
+         patch('mlxk2.core.runner.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.core.runner.hf_to_cache_dir') as mock_hf_to_cache, \
          patch('mlxk2.core.runner.get_model_context_length') as mock_context:
         
         # Mock successful model resolution
@@ -296,128 +299,99 @@ class TestMLXRunnerStopTokens:
 
 class TestMLXRunnerMemorySafety:
     """Test memory management and cleanup"""
-    
+
     def test_model_cleanup_on_context_exit(self, temp_cache_dir):
         """Test that model is properly cleaned up"""
         model_name = "test-model"
-        
-        with patch('mlxk2.core.runner.load') as mock_load:
-            mock_model = Mock()
-            mock_tokenizer = Mock()
-            mock_load.return_value = (mock_model, mock_tokenizer)
-            
+
+        with mock_runner_environment(temp_cache_dir, model_name) as mocks:
             runner = None
             with MLXRunner(model_name) as r:
                 runner = r
                 assert runner.model is not None
                 assert runner.tokenizer is not None
-            
+
             # After context exit, model should be cleaned up
             assert runner.model is None
             assert runner.tokenizer is None
-    
+
     def test_multiple_context_managers(self, temp_cache_dir):
         """Test that multiple runners can be used sequentially"""
         model_name = "test-model"
-        
-        with patch('mlxk2.core.runner.load') as mock_load:
-            mock_model = Mock()
-            mock_tokenizer = Mock()
-            mock_tokenizer.encode.return_value = [1]
-            mock_tokenizer.decode.return_value = "ok"
-            mock_tokenizer.eos_token_id = 2
-            mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
-            mock_tokenizer.additional_special_tokens = []
-            mock_tokenizer.added_tokens_decoder = {}
-            mock_load.return_value = (mock_model, mock_tokenizer)
-            
+
+        with mock_runner_environment(temp_cache_dir, model_name) as mocks:
             # First runner
             with MLXRunner(model_name) as runner1:
                 assert runner1 is not None
-            
+
             # Second runner should work independently
             with MLXRunner(model_name) as runner2:
                 assert runner2 is not None
-            
+
             # Should have loaded model twice
-            assert mock_load.call_count == 2
+            assert mocks['mock_load'].call_count == 2
 
 
 class TestMLXRunnerDynamicTokens:
     """Test dynamic token limit functionality"""
-    
+
     def test_no_max_tokens_uses_dynamic(self, temp_cache_dir):
         """Test that None max_tokens uses dynamic limit based on model context"""
         model_name = "test-model"
-        
-        with patch('mlxk2.core.runner.load') as mock_load:
-            mock_load.return_value = (Mock(), Mock())
-            
-            # Mock config reading for context length
-            with patch('mlxk2.core.runner.get_model_context_length', return_value=8192):
-                with MLXRunner(model_name) as runner:
-                    # Should calculate dynamic limit from context length
-                    dynamic_limit = runner._calculate_dynamic_max_tokens()
-                    
-                    # Should be a reasonable fraction of context (server-mode default)
-                    # Accept half-context on 8K models as reasonable
-                    assert 1000 <= dynamic_limit <= 4096
-    
+
+        with mock_runner_environment(temp_cache_dir, model_name) as mocks:
+            with MLXRunner(model_name) as runner:
+                # Should calculate dynamic limit from context length (8192 from mock)
+                dynamic_limit = runner._calculate_dynamic_max_tokens()
+
+                # Should be a reasonable fraction of context (server-mode default)
+                # Accept half-context on 8K models as reasonable
+                assert 1000 <= dynamic_limit <= 4096
+
     def test_respects_explicit_max_tokens(self, temp_cache_dir):
         """Test that explicit max_tokens is respected"""
         model_name = "test-model"
-        
-        with patch('mlxk2.core.runner.load') as mock_load:
-            mock_model = Mock()
-            mock_tokenizer = Mock()
-            mock_tokenizer.encode.return_value = [1]
-            mock_tokenizer.decode.return_value = "ok"
-            mock_tokenizer.eos_token_id = 2
-            mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
-            mock_tokenizer.additional_special_tokens = []
-            mock_tokenizer.added_tokens_decoder = {}
-            mock_load.return_value = (mock_model, mock_tokenizer)
-            
+
+        with mock_runner_environment(temp_cache_dir, model_name) as mocks:
+            # Update mock tokenizer with extra methods needed for generation
+            mocks['mock_tokenizer'].encode.return_value = [1]
+            mocks['mock_tokenizer'].decode.return_value = "ok"
+
             with MLXRunner(model_name) as runner:
                 # When max_tokens is explicitly set, should respect it
                 with patch('mlxk2.core.runner.generate_step') as mock_gen:
                     mock_gen.return_value = iter([(mx.array([1]), mx.zeros(1))])
-                    
+
                     # Mock to check that max_tokens is passed through
                     result = runner.generate_batch("test", max_tokens=100)
-                    
+
                     # Should have respected the explicit limit
                     # (Details depend on implementation)
 
 
 class TestMLXRunnerErrorHandling:
     """Test error handling and edge cases"""
-    
+
     def test_model_loading_failure(self, temp_cache_dir):
         """Test handling of model loading failures"""
-        model_path = "nonexistent-model"
-        
-        with patch('mlxk2.core.runner.load') as mock_load:
-            mock_load.side_effect = FileNotFoundError("Model not found")
-            
+        model_name = "test-model"
+
+        # Create the mock environment but configure load to raise an error
+        with mock_runner_environment(temp_cache_dir, model_name) as mocks:
+            mocks['mock_load'].side_effect = FileNotFoundError("Model not found")
+
             with pytest.raises(FileNotFoundError):
-                with MLXRunner(model_path):
+                with MLXRunner(model_name):
                     pass
-    
+
     def test_generation_interruption(self, temp_cache_dir):
         """Test Ctrl-C interruption handling"""
         model_name = "test-model"
-        
-        with patch('mlxk2.core.runner.load') as mock_load:
-            mock_model, mock_tokenizer = Mock(), Mock()
-            # Minimal tokenizer stubs to satisfy runner
-            mock_tokenizer.encode.return_value = [1]
-            mock_tokenizer.decode.return_value = "ok"
-            mock_tokenizer.eos_token_id = 2
-            mock_tokenizer.eos_token_ids = {mock_tokenizer.eos_token_id}
-            mock_tokenizer.additional_special_tokens = []
-            mock_tokenizer.added_tokens_decoder = {}
-            mock_load.return_value = (mock_model, mock_tokenizer)
+
+        with mock_runner_environment(temp_cache_dir, model_name) as mocks:
+            # Update mock tokenizer with extra methods needed for generation
+            mocks['mock_tokenizer'].encode.return_value = [1]
+            mocks['mock_tokenizer'].decode.return_value = "ok"
 
             # With new recovery semantics, a pre-existing interruption flag
             # is cleared at the start of a new generation.

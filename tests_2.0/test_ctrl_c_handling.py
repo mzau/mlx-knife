@@ -74,7 +74,7 @@ class TestMLXRunnerInterruption:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     def test_signal_handler_setup(self, mock_cache, mock_resolve, mock_load):
         """Test that signal handler is properly set up"""
         mock_resolve.return_value = ("test-model", None, None)
@@ -88,7 +88,7 @@ class TestMLXRunnerInterruption:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     def test_interrupt_flag_setting(self, mock_cache, mock_resolve, mock_load):
         """Test that interrupt handler sets the flag correctly"""
         mock_resolve.return_value = ("test-model", None, None)
@@ -107,7 +107,7 @@ class TestMLXRunnerInterruption:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     @patch('mlxk2.core.runner.generate_step')
     def test_streaming_interruption_detection(self, mock_gen, mock_cache, mock_resolve, mock_load):
         """Test that streaming generation checks for interruption"""
@@ -159,7 +159,7 @@ class TestMLXRunnerInterruption:
     
     @patch('mlxk2.core.runner.load')
     @patch('mlxk2.core.runner.resolve_model_for_operation')
-    @patch('mlxk2.core.cache.get_current_model_cache')
+    @patch('mlxk2.core.runner.get_current_model_cache')
     @patch('mlxk2.core.runner.generate_step')
     def test_batch_interruption_detection(self, mock_gen, mock_cache, mock_resolve, mock_load):
         """Test that batch generation also checks for interruption"""

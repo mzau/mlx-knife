@@ -471,7 +471,6 @@ class TestCloneOperationIntegration:
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -544,7 +543,6 @@ class TestCloneOperationIntegration:
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull:
 
@@ -579,7 +577,6 @@ class TestCloneOperationIntegration:
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -649,7 +646,6 @@ class TestCloneOperationIntegration:
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -695,7 +691,6 @@ class TestCloneJSONAPICompliance:
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -804,7 +799,6 @@ class TestCloneCoreFeatures:
         model_spec = "org/model"
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -865,7 +859,6 @@ class TestCloneCoreFeatures:
         user_cache.mkdir()
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -911,7 +904,6 @@ class TestCloneEdgeCases:
         temp_cache.mkdir()
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -949,7 +941,6 @@ class TestCloneEdgeCases:
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve:
@@ -979,7 +970,6 @@ class TestCloneEdgeCases:
         temp_cache.mkdir()
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
-             patch('mlxk2.operations.clone._validate_same_volume'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -1029,7 +1019,6 @@ class TestUnhealthyModelClone:
     """
 
     @patch('mlxk2.operations.clone._validate_apfs_filesystem')
-    @patch('mlxk2.operations.clone._validate_same_volume')
     @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
     @patch('mlxk2.operations.clone.pull_to_cache')
     @patch('mlxk2.operations.clone._resolve_latest_snapshot')
@@ -1039,7 +1028,7 @@ class TestUnhealthyModelClone:
     @patch('mlxk2.operations.clone.write_workspace_sentinel')
     def test_unhealthy_model_clone_succeeds(
         self, mock_sentinel, mock_cleanup, mock_clone, mock_health,
-        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_vol, mock_validate_apfs,
+        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_apfs,
         tmp_path
     ):
         """Test that unhealthy models are still cloned successfully."""
@@ -1083,7 +1072,6 @@ class TestUnhealthyModelClone:
         mock_sentinel.assert_called_once()
 
     @patch('mlxk2.operations.clone._validate_apfs_filesystem')
-    @patch('mlxk2.operations.clone._validate_same_volume')
     @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
     @patch('mlxk2.operations.clone.pull_to_cache')
     @patch('mlxk2.operations.clone._resolve_latest_snapshot')
@@ -1093,7 +1081,7 @@ class TestUnhealthyModelClone:
     @patch('mlxk2.operations.clone.write_workspace_sentinel')
     def test_healthy_model_clone_records_status(
         self, mock_sentinel, mock_cleanup, mock_clone, mock_health,
-        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_vol, mock_validate_apfs,
+        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_apfs,
         tmp_path
     ):
         """Test that healthy models record health status correctly."""
@@ -1131,7 +1119,6 @@ class TestUnhealthyModelClone:
         assert result["data"]["health_reason"] == "Multi-file model complete"
 
     @patch('mlxk2.operations.clone._validate_apfs_filesystem')
-    @patch('mlxk2.operations.clone._validate_same_volume')
     @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
     @patch('mlxk2.operations.clone.pull_to_cache')
     @patch('mlxk2.operations.clone._resolve_latest_snapshot')
@@ -1140,7 +1127,7 @@ class TestUnhealthyModelClone:
     @patch('mlxk2.operations.clone.write_workspace_sentinel')
     def test_no_health_check_skips_health_status(
         self, mock_sentinel, mock_cleanup, mock_clone,
-        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_vol, mock_validate_apfs,
+        mock_snapshot, mock_pull, mock_temp_cache, mock_validate_apfs,
         tmp_path
     ):
         """Test that --no-health-check skips health status entirely."""
@@ -1355,9 +1342,8 @@ class TestResumableClone:
         model_spec = "test/model"
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'):
-            with patch('mlxk2.operations.clone._validate_same_volume'):
-                with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
-                    # Mock pull_to_cache to raise KeyboardInterrupt
+            with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
+                # Mock pull_to_cache to raise KeyboardInterrupt
                     with patch('mlxk2.operations.clone.pull_to_cache', side_effect=KeyboardInterrupt()):
                         result = clone_operation(model_spec, str(target))
 
@@ -1384,9 +1370,8 @@ class TestResumableClone:
         model_spec = "test/model"
 
         with patch('mlxk2.operations.clone._validate_apfs_filesystem'):
-            with patch('mlxk2.operations.clone._validate_same_volume'):
-                # Raise KeyboardInterrupt during volume mount check
-                with patch('mlxk2.operations.clone._get_volume_mount_point', side_effect=KeyboardInterrupt()):
+            # Raise KeyboardInterrupt during volume mount check
+            with patch('mlxk2.operations.clone._get_volume_mount_point', side_effect=KeyboardInterrupt()):
                     result = clone_operation(model_spec, str(target))
 
         # Should handle gracefully even without temp cache

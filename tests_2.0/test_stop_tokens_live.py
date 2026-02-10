@@ -224,7 +224,8 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     except ImportError:
         KNOWN_BROKEN_MODELS = set()  # Fallback if import fails
 
-    # Check HF_HOME is set (required for mlxk list)
+    # Check HF_HOME is set (required for Portfolio Discovery - see TESTING.md)
+    # Without HF_HOME: tests fall back to TEST_MODELS/VISION_TEST_MODELS/AUDIO_TEST_MODELS
     env = os.environ.copy()
     if not env.get("HF_HOME"):
         return []

@@ -2,14 +2,42 @@
 
 import os
 from pathlib import Path
+from typing import Optional
 
 # Cache path constants - copied from mlx_knife/cache_utils.py
 DEFAULT_CACHE_ROOT = Path.home() / ".cache/huggingface"
 
 
+def get_workspace_home() -> Optional[Path]:
+    """Get workspace home directory from MLXK_WORKSPACE_HOME env var.
+
+    Returns:
+        Path to workspace home if set and valid, None otherwise.
+
+    Example:
+        export MLXK_WORKSPACE_HOME=~/mlx-models
+        → Path("/Users/me/mlx-models")
+    """
+    workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
+    if not workspace_home:
+        return None
+    path = Path(workspace_home).expanduser()
+    # Only return if directory exists (don't auto-create)
+    if path.is_dir():
+        return path
+    return None
+
+
 def get_current_cache_root() -> Path:
-    """Get current cache root (respects runtime HF_HOME changes)."""
-    return Path(os.environ.get("HF_HOME", DEFAULT_CACHE_ROOT))
+    """Get current cache root (respects runtime HF_HOME changes).
+
+    Note: Returns DEFAULT_CACHE_ROOT if HF_HOME is unset OR empty string.
+    This handles `export HF_HOME=""` edge case gracefully.
+    """
+    hf_home = os.environ.get("HF_HOME")
+    if not hf_home:  # None or ""
+        return DEFAULT_CACHE_ROOT
+    return Path(hf_home)
 
 
 def get_current_model_cache() -> Path:
