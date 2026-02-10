@@ -23,7 +23,7 @@ from typing import Optional, Dict, Any, Tuple
 
 from .pull import pull_to_cache
 from .workspace import write_workspace_sentinel
-from ..core.cache import hf_to_cache_dir, get_current_cache_root
+from ..core.cache import hf_to_cache_dir
 from mlxk2 import __version__
 
 logger = logging.getLogger(__name__)

@@ -285,6 +285,59 @@ mlxk run whisper-large-v3
 
 ---
 
+## Name Resolution Semantics
+
+### Fuzzy Matching by Context
+
+| Resolution Type | Example | Fuzzy? | Rationale |
+|-----------------|---------|--------|-----------|
+| **Name** in namespace | `mlxk run whisper` | ✅ Yes | Namespace search (MLXK_WORKSPACE_HOME, then HF cache) |
+| **Explicit path** | `mlxk run /path/whisper` | ❌ No | User points to concrete location |
+| **Query** (list) | `mlxk list /path/pix` | ✅ Yes | Search/discovery, not execution |
+
+**Security rationale:** Explicit paths (`/`, `./`, `../`) have exact semantics, analogous to `exec()` vs shell globbing. User intent is explicit → resolution is exact.
+
+```bash
+MLXK_WORKSPACE_HOME=~/mlx-models
+
+# Name → Fuzzy in MLXK_WORKSPACE_HOME (then HF cache)
+mlxk run whisper        # → ~/mlx-models/whisper-large-v3-mlx ✅
+mlxk run pixtral        # → Error: Ambiguous (pixtral-12b-8bit, pixtral-12b-4bit)
+
+# Explicit path → Exact match required
+mlxk run ~/mlx-models/whisper          # → Error: not found
+mlxk run ~/mlx-models/whisper-large-v3-mlx  # → OK ✅
+
+# Query → Fuzzy (discovery)
+mlxk list ~/mlx-models/whisper         # → shows whisper-large-v3-mlx
+```
+
+---
+
+## Command Scope
+
+### Which commands work with workspaces?
+
+| Command | Cache | Workspace | Notes |
+|---------|-------|-----------|-------|
+| `list` | ✅ | ✅ | Shows both with `source` column |
+| `show` | ✅ | ✅ | Includes workspace metadata |
+| `health` | ✅ | ✅ | Workspace-specific checks |
+| `run` | ✅ | ✅ | Primary use case |
+| `serve` | ✅ | ✅ | Via `--model ./path` |
+| `pull` | ✅ | ❌ | Cache only (by design) |
+| `clone` | ❌ | ✅ | HF Hub → workspace (direct download) |
+| `push` | ❌ | ✅ | Workspace → HF Hub |
+| `rm` | ✅ | ❌ | **Cache only** — use `rm -rf ./workspace` |
+
+**Why no `mlxk rm` for workspaces?**
+- Workspaces are user-managed directories (like any project folder)
+- User has full filesystem control — standard `rm -rf` is appropriate
+- Avoids accidental deletion of user data vs. cache (which is regenerable)
+- Principle: mlx-knife manages cache, user manages workspaces
+
+---
+
 ## UX Details
 
 ### list: Source Column

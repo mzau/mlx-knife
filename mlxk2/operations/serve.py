@@ -134,6 +134,20 @@ def start_server(
     # Suppress tqdm progress bars in server mode (must be set before tqdm import)
     os.environ["TQDM_DISABLE"] = "1"
     if model:
+        # Pre-validate model specification before starting server (consistency with run.py)
+        from ..core.model_resolution import resolve_model_for_operation
+        from .workspace import is_explicit_path
+        resolved_name, _, ambiguous = resolve_model_for_operation(model)
+        if ambiguous:
+            raise ValueError(
+                f"Ambiguous model specification '{model}'. Could be: {ambiguous}"
+            )
+        if not resolved_name:
+            # Model not found - give appropriate error message
+            if is_explicit_path(model):
+                raise ValueError(f"Workspace not found: {model}")
+            else:
+                raise ValueError(f"Model not found in cache: {model}")
         os.environ["MLXK2_PRELOAD_MODEL"] = model
     if max_tokens is not None:
         os.environ["MLXK2_MAX_TOKENS"] = str(max_tokens)
