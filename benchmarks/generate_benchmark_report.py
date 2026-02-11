@@ -456,6 +456,20 @@ def calculate_statistics(data: List[dict]) -> Dict:
             hw_profile = entry["system"]["hardware_profile"]
             break
 
+    # Build test_id → model_id lookup for GPU analysis (v1.1)
+    # Maps full pytest test ID to model short name
+    test_model_map = {}
+    for entry in benchmark_data:
+        if "test" in entry and "model" in entry:
+            test_id = entry["test"]
+            model_id = entry["model"]["id"]
+            # Short name: remove org/ prefix (mlx-community/, BrokeC/, etc.)
+            if "/" in model_id:
+                model_short = model_id.split("/", 1)[1]
+            else:
+                model_short = model_id
+            test_model_map[test_id] = model_short
+
     return {
         "total_tests": len(benchmark_data),
         "passed": len(passed_tests),
@@ -488,6 +502,7 @@ def calculate_statistics(data: List[dict]) -> Dict:
         "hardware": hw_profile,
         "models": model_stats,
         "tests": test_stats,
+        "test_model_map": test_model_map,
     }
 
 
@@ -606,30 +621,26 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         compare_models = {m['id']: m for m in compare_stats['models'].values()}
 
     if compare_stats:
-        md += f"""```
-{'Model':<40} {'Size':<7} {'Mode':<6} {'Tests':<5} {'Time':<8} {'Old':<8} {'Δ':<8} {'Change':<10} {'RAM (GB)':<12}
-{'='*40} {'='*7} {'='*6} {'='*5} {'='*8} {'='*8} {'='*8} {'='*10} {'='*12}
-"""
+        md += "| Model | Size | Mode | Tests | Time | Old | Δ | Change | RAM (GB) |\n"
+        md += "|-------|-----:|:----:|------:|-----:|----:|--:|-------:|---------:|\n"
     else:
-        md += f"""```
-{'Model':<50} {'Size':<8} {'Mode':<6} {'Tests':<6} {'Time':<10} {'RAM (GB)':<20}
-{'='*50} {'='*8} {'='*6} {'='*6} {'='*10} {'='*20}
-"""
+        md += "| Model | Size | Mode | Tests | Time | RAM (GB) |\n"
+        md += "|-------|-----:|:----:|------:|-----:|---------:|\n"
+
+    def format_model_short(model_id):
+        """Remove org prefix from model ID."""
+        if "/" in model_id:
+            return model_id.split("/", 1)[1]
+        return model_id
 
     for model in sorted_models:
-        # Shorten model ID (remove mlx-community/ prefix)
-        model_short = model['id'].replace('mlx-community/', '')
-        max_len = 38 if compare_stats else 48
-        if len(model_short) > max_len:
-            model_short = model_short[:max_len-3] + "..."
+        model_short = format_model_short(model['id'])
 
         # Global RAM range (for backward compat / fallback)
         ram_range = f"{model['ram_min']:.1f}-{model['ram_max']:.1f}"
 
         if compare_stats:
             old_model = compare_models.get(model['id'])
-
-            # Separate rows per modality (same as non-comparison mode)
             rows_written = 0
 
             # Vision modality
@@ -643,21 +654,14 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 else:
                     v_ram_range = f"{v_ram_min:.1f}-{v_ram_max:.1f}"
 
-                # Get old vision stats (if available)
                 if old_model and old_model.get('vision_count', 0) > 0:
                     old_time = old_model['vision_time']
                     delta = model['vision_time'] - old_time
                     change_pct = (delta / old_time * 100) if old_time > 0 else 0
-                    if change_pct > 5:
-                        status = "⚠️"
-                    elif change_pct < -1:
-                        status = "✅"
-                    else:
-                        status = ""
-                    change_str = f"{change_pct:+.1f}% {status}"
-                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Vision':<6} {model['vision_count']:<5} {model['vision_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {v_ram_range:<12}\n"
+                    status = "⚠️" if change_pct > 5 else ("✅" if change_pct < -1 else "")
+                    md += f"| {model_short} | {model['size_gb']:.1f} GB | Vision | {model['vision_count']} | {model['vision_time']:.1f}s | {old_time:.1f}s | {delta:+.1f}s | {change_pct:+.1f}% {status} | {v_ram_range} |\n"
                 else:
-                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Vision':<6} {model['vision_count']:<5} {model['vision_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {v_ram_range:<12}\n"
+                    md += f"| {model_short} | {model['size_gb']:.1f} GB | Vision | {model['vision_count']} | {model['vision_time']:.1f}s | N/A | N/A | NEW | {v_ram_range} |\n"
                 rows_written += 1
 
             # Text modality
@@ -671,24 +675,17 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 else:
                     t_ram_range = f"{t_ram_min:.1f}-{t_ram_max:.1f}"
 
-                # Get old text stats (if available)
                 if old_model and old_model.get('text_count', 0) > 0:
                     old_time = old_model['text_time']
                     delta = model['text_time'] - old_time
                     change_pct = (delta / old_time * 100) if old_time > 0 else 0
-                    if change_pct > 5:
-                        status = "⚠️"
-                    elif change_pct < -1:
-                        status = "✅"
-                    else:
-                        status = ""
-                    change_str = f"{change_pct:+.1f}% {status}"
-                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Text':<6} {model['text_count']:<5} {model['text_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {t_ram_range:<12}\n"
+                    status = "⚠️" if change_pct > 5 else ("✅" if change_pct < -1 else "")
+                    md += f"| {model_short} | {model['size_gb']:.1f} GB | Text | {model['text_count']} | {model['text_time']:.1f}s | {old_time:.1f}s | {delta:+.1f}s | {change_pct:+.1f}% {status} | {t_ram_range} |\n"
                 else:
-                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Text':<6} {model['text_count']:<5} {model['text_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {t_ram_range:<12}\n"
+                    md += f"| {model_short} | {model['size_gb']:.1f} GB | Text | {model['text_count']} | {model['text_time']:.1f}s | N/A | N/A | NEW | {t_ram_range} |\n"
                 rows_written += 1
 
-            # Audio modality (NEW in v0.2.2)
+            # Audio modality
             if model['audio_count'] > 0:
                 a_ram_min = model['audio_ram_min']
                 a_ram_max = model['audio_ram_max']
@@ -699,46 +696,30 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 else:
                     a_ram_range = f"{a_ram_min:.1f}-{a_ram_max:.1f}"
 
-                # Get old audio stats (if available)
                 if old_model and old_model.get('audio_count', 0) > 0:
                     old_time = old_model['audio_time']
                     delta = model['audio_time'] - old_time
                     change_pct = (delta / old_time * 100) if old_time > 0 else 0
-                    if change_pct > 5:
-                        status = "⚠️"
-                    elif change_pct < -1:
-                        status = "✅"
-                    else:
-                        status = ""
-                    change_str = f"{change_pct:+.1f}% {status}"
-                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Audio':<6} {model['audio_count']:<5} {model['audio_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {a_ram_range:<12}\n"
+                    status = "⚠️" if change_pct > 5 else ("✅" if change_pct < -1 else "")
+                    md += f"| {model_short} | {model['size_gb']:.1f} GB | Audio | {model['audio_count']} | {model['audio_time']:.1f}s | {old_time:.1f}s | {delta:+.1f}s | {change_pct:+.1f}% {status} | {a_ram_range} |\n"
                 else:
-                    md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'Audio':<6} {model['audio_count']:<5} {model['audio_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {a_ram_range:<12}\n"
+                    md += f"| {model_short} | {model['size_gb']:.1f} GB | Audio | {model['audio_count']} | {model['audio_time']:.1f}s | N/A | N/A | NEW | {a_ram_range} |\n"
                 rows_written += 1
 
-            # Fallback for legacy data (no modality info) - rare in comparison mode
+            # Fallback for legacy data
             if rows_written == 0 and old_model:
                 old_time = old_model['total_time']
                 delta = model['total_time'] - old_time
                 change_pct = (delta / old_time * 100) if old_time > 0 else 0
-                if change_pct > 5:
-                    status = "⚠️"
-                elif change_pct < -1:
-                    status = "✅"
-                else:
-                    status = ""
-                change_str = f"{change_pct:+.1f}% {status}"
-                md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'-':<6} {model['count']:<5} {model['total_time']:>6.1f}s {old_time:>6.1f}s {delta:>+6.1f}s {change_str:<10} {ram_range:<12}\n"
+                status = "⚠️" if change_pct > 5 else ("✅" if change_pct < -1 else "")
+                md += f"| {model_short} | {model['size_gb']:.1f} GB | - | {model['count']} | {model['total_time']:.1f}s | {old_time:.1f}s | {delta:+.1f}s | {change_pct:+.1f}% {status} | {ram_range} |\n"
             elif rows_written == 0:
-                # New model with no modality info
-                md += f"{model_short:<40} {model['size_gb']:>5.1f}GB {'-':<6} {model['count']:<5} {model['total_time']:>6.1f}s {'N/A':<8} {'N/A':<8} {'NEW':<10} {ram_range:<12}\n"
+                md += f"| {model_short} | {model['size_gb']:.1f} GB | - | {model['count']} | {model['total_time']:.1f}s | N/A | N/A | NEW | {ram_range} |\n"
         else:
-            # Separate rows per modality (no "Mixed" ambiguity)
-            # Each modality gets its own line with specific stats + RAM
+            # Without comparison
             rows_written = 0
 
             if model['vision_count'] > 0:
-                # Use modality-specific RAM range (single value if min==max)
                 v_ram_min = model['vision_ram_min']
                 v_ram_max = model['vision_ram_max']
                 if v_ram_min == float('inf'):
@@ -747,11 +728,10 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                     v_ram_range = f"{v_ram_min:.1f}"
                 else:
                     v_ram_range = f"{v_ram_min:.1f}-{v_ram_max:.1f}"
-                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Vision':<6} {model['vision_count']:<6} {model['vision_time']:>8.1f}s  {v_ram_range:<20}\n"
+                md += f"| {model_short} | {model['size_gb']:.1f} GB | Vision | {model['vision_count']} | {model['vision_time']:.1f}s | {v_ram_range} |\n"
                 rows_written += 1
 
             if model['text_count'] > 0:
-                # Use modality-specific RAM range (single value if min==max)
                 t_ram_min = model['text_ram_min']
                 t_ram_max = model['text_ram_max']
                 if t_ram_min == float('inf'):
@@ -760,11 +740,10 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                     t_ram_range = f"{t_ram_min:.1f}"
                 else:
                     t_ram_range = f"{t_ram_min:.1f}-{t_ram_max:.1f}"
-                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Text':<6} {model['text_count']:<6} {model['text_time']:>8.1f}s  {t_ram_range:<20}\n"
+                md += f"| {model_short} | {model['size_gb']:.1f} GB | Text | {model['text_count']} | {model['text_time']:.1f}s | {t_ram_range} |\n"
                 rows_written += 1
 
             if model['audio_count'] > 0:
-                # Use modality-specific RAM range (single value if min==max)
                 a_ram_min = model['audio_ram_min']
                 a_ram_max = model['audio_ram_max']
                 if a_ram_min == float('inf'):
@@ -773,14 +752,14 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                     a_ram_range = f"{a_ram_min:.1f}"
                 else:
                     a_ram_range = f"{a_ram_min:.1f}-{a_ram_max:.1f}"
-                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'Audio':<6} {model['audio_count']:<6} {model['audio_time']:>8.1f}s  {a_ram_range:<20}\n"
+                md += f"| {model_short} | {model['size_gb']:.1f} GB | Audio | {model['audio_count']} | {model['audio_time']:.1f}s | {a_ram_range} |\n"
                 rows_written += 1
 
-            # Fallback for legacy data (no modality info)
+            # Fallback for legacy data
             if rows_written == 0:
-                md += f"{model_short:<50} {model['size_gb']:>6.1f}GB {'-':<6} {model['count']:<6} {model['total_time']:>8.1f}s  {ram_range:<20}\n"
+                md += f"| {model_short} | {model['size_gb']:.1f} GB | - | {model['count']} | {model['total_time']:.1f}s | {ram_range} |\n"
 
-    md += "```\n\n"
+    md += "\n"
 
     # Model Categories (with modality differentiation)
     large_models = [m for m in sorted_models if m['size_gb'] >= 20]
@@ -891,22 +870,14 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         compare_tests = {(t['name'], t.get('modality', 'unknown')): t for t in compare_stats['tests'].values()}
 
     if compare_stats:
-        md += f"""```
-{'Test Name':<38} {'Mode':<6} {'Models':<7} {'Fastest':<18} {'Slowest':<18} {'Med':<6} {'Old':<6} {'Δ Med':<8}
-{'='*38} {'='*6} {'='*7} {'='*18} {'='*18} {'='*6} {'='*6} {'='*8}
-"""
+        md += "| Test Name | Mode | Models | Fastest | Slowest | Med | Old | Δ Med |\n"
+        md += "|-----------|:----:|-------:|---------|---------|----:|----:|------:|\n"
     else:
-        md += f"""```
-{'Test Name':<44} {'Mode':<6} {'Models':<7} {'Fastest':<22} {'Slowest':<22} {'Med Time'}
-{'='*44} {'='*6} {'='*7} {'='*22} {'='*22} {'='*8}
-"""
+        md += "| Test Name | Mode | Models | Fastest | Slowest | Med Time |\n"
+        md += "|-----------|:----:|-------:|---------|---------|--------:|\n"
 
     for test in sorted_tests:
-        # Shorten test name if needed
-        max_test_len = 36 if compare_stats else 42
-        test_short = test['name']
-        if len(test_short) > max_test_len:
-            test_short = test_short[:max_test_len-3] + "..."
+        test_name = test['name']
 
         # Format modality (Vision/Text/Audio/- for unknown)
         modality = test.get('modality', 'unknown')
@@ -924,14 +895,8 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         slowest = test['slowest']
 
         if fastest and slowest:
-            max_model_len = 16 if compare_stats else 20
             fastest_str = f"{fastest['model_short']} ({fastest['duration']:.1f}s)"
             slowest_str = f"{slowest['model_short']} ({slowest['duration']:.1f}s)"
-            if len(fastest_str) > max_model_len:
-                fastest_str = fastest_str[:max_model_len-3] + "..."
-            if len(slowest_str) > max_model_len:
-                slowest_str = slowest_str[:max_model_len-3] + "..."
-
             med_time = test['median_time']
 
             if compare_stats:
@@ -939,18 +904,18 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
                 if old_test:
                     old_med = old_test['median_time']
                     delta_pct = ((med_time - old_med) / old_med * 100) if old_med > 0 else 0
-                    delta_str = f"{delta_pct:+.1f}%"
-                    md += f"{test_short:<38} {mode_str:<6} {test['model_count']:<7} {fastest_str:<18} {slowest_str:<18} {med_time:<5.1f}s {old_med:<5.1f}s {delta_str:<8}\n"
+                    md += f"| {test_name} | {mode_str} | {test['model_count']} | {fastest_str} | {slowest_str} | {med_time:.1f}s | {old_med:.1f}s | {delta_pct:+.1f}% |\n"
                 else:
-                    md += f"{test_short:<38} {mode_str:<6} {test['model_count']:<7} {fastest_str:<18} {slowest_str:<18} {med_time:<5.1f}s {'N/A':<6} {'NEW':<8}\n"
+                    md += f"| {test_name} | {mode_str} | {test['model_count']} | {fastest_str} | {slowest_str} | {med_time:.1f}s | N/A | NEW |\n"
             else:
-                md += f"{test_short:<44} {mode_str:<6} {test['model_count']:<7} {fastest_str:<22} {slowest_str:<22} {med_time:.1f}s\n"
+                md += f"| {test_name} | {mode_str} | {test['model_count']} | {fastest_str} | {slowest_str} | {med_time:.1f}s |\n"
 
-    md += "```\n\n"
+    md += "\n"
 
     # GPU Analysis Section (v1.1 - only if memory data provided)
     gpu_correlations = stats.get("gpu_correlations", {})
     cold_starts = stats.get("cold_starts", {})
+    test_model_map = stats.get("test_model_map", {})
 
     if gpu_correlations:
         md += "\n---\n\n"
@@ -988,20 +953,23 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         if cold_start_tests:
             md += "### Cold-Start Tests\n\n"
             md += "First test per model (includes model loading overhead).\n\n"
-            md += f"```\n"
-            md += f"{'Test':<60} {'GPU Dev':<8} {'GPU Rnd':<8} {'Samples':<8}\n"
-            md += f"{'='*60} {'='*8} {'='*8} {'='*8}\n"
+            md += "| Test | Model | GPU Dev | GPU Rnd | Samples |\n"
+            md += "|------|-------|--------:|--------:|--------:|\n"
 
             for test_id, gpu_stats in cold_start_tests[:15]:  # Limit to 15
-                test_short = test_id.split("::")[-1][:58]
+                # Extract test name (without parametrization)
+                test_full = test_id.split("::")[-1]
+                test_name = test_full.split("[")[0]
+                # Look up model name
+                model_name = test_model_map.get(test_id, "unknown")
                 if gpu_stats:
-                    md += f"{test_short:<60} {gpu_stats['gpu_device_avg']:>6.1f}% {gpu_stats['gpu_renderer_avg']:>6.1f}% {gpu_stats['sample_count']:>8}\n"
+                    md += f"| {test_name} | {model_name} | {gpu_stats['gpu_device_avg']:.1f}% | {gpu_stats['gpu_renderer_avg']:.1f}% | {gpu_stats['sample_count']} |\n"
                 else:
-                    md += f"{test_short:<60} {'N/A':>8} {'N/A':>8} {'N/A':>8}\n"
+                    md += f"| {test_name} | {model_name} | N/A | N/A | N/A |\n"
 
             if len(cold_start_tests) > 15:
-                md += f"... and {len(cold_start_tests) - 15} more cold-start tests\n"
-            md += f"```\n\n"
+                md += f"\n*... and {len(cold_start_tests) - 15} more cold-start tests*\n"
+            md += "\n"
 
         # High GPU utilization tests
         high_gpu_tests = [(tid, gs) for tid, gs in gpu_correlations.items()
@@ -1011,17 +979,20 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         if high_gpu_tests:
             md += "### High GPU Utilization Tests\n\n"
             md += "Tests with >50% average GPU device utilization.\n\n"
-            md += f"```\n"
-            md += f"{'Test':<55} {'GPU Dev':<10} {'GPU Rnd':<10} {'Pressure':<10}\n"
-            md += f"{'='*55} {'='*10} {'='*10} {'='*10}\n"
+            md += "| Test | Model | GPU Dev | GPU Rnd | Pressure |\n"
+            md += "|------|-------|--------:|--------:|:--------:|\n"
 
             for test_id, gpu_stats in high_gpu_tests[:10]:
-                test_short = test_id.split("::")[-1][:53]
+                # Extract test name (without parametrization)
+                test_full = test_id.split("::")[-1]
+                test_name = test_full.split("[")[0]
+                # Look up model name
+                model_name = test_model_map.get(test_id, "unknown")
                 pressure = gpu_stats.get("memory_pressure_max", 1)
-                pressure_str = "WARN" if pressure > 1 else "OK"
-                md += f"{test_short:<55} {gpu_stats['gpu_device_avg']:>8.1f}% {gpu_stats['gpu_renderer_avg']:>8.1f}% {pressure_str:>10}\n"
+                pressure_str = "⚠️ WARN" if pressure > 1 else "OK"
+                md += f"| {test_name} | {model_name} | {gpu_stats['gpu_device_avg']:.1f}% | {gpu_stats['gpu_renderer_avg']:.1f}% | {pressure_str} |\n"
 
-            md += f"```\n\n"
+            md += "\n"
 
         # GPU utilization summary
         all_gpu_device = [gs["gpu_device_avg"] for gs in gpu_correlations.values()]

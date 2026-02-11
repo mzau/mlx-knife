@@ -13,29 +13,32 @@ authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    # Python 3.9: MLX 0.30+ requires 3.10+
-    # Python 3.13+: miniaudio lacks pre-built wheels
     "Operating System :: MacOS",
     "Environment :: Console",
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
+    # Core
     "huggingface-hub>=1.0.0",
     "requests>=2.32.0",
-    "mlx-lm>=0.30.5",  # Vision/Audio extras require 0.30.5+
-    "mlx>=0.30.0",
     "fastapi>=0.116.0",
     "uvicorn>=0.35.0",
     "pydantic>=2.11.0",
     "httpx>=0.27.0",
-    "python-multipart>=0.0.9",  # For audio file uploads
+    "python-multipart>=0.0.9",
+    # MLX stack (Text + Vision + Audio)
+    "mlx>=0.30.0",
+    "mlx-lm>=0.30.5",
+    "mlx-vlm==0.3.10",
+    "mlx-audio==0.3.1",
+    "tiktoken>=0.7.0",
 ]
 
 [project.scripts]
@@ -64,20 +67,6 @@ test = [
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.5.0",
-]
-vision = [
-    "mlx-vlm==0.3.10",  # Pinned: stable, tested version (ADR-012)
-]
-audio = [
-    # mlx-audio pinned: 0.3.1 has tiktoken regression (Issue #479)
-    # We bundle complete tiktoken workaround in mlxk2/audio/whisper_tokenizer.py
-    "mlx-audio==0.3.1",
-    "tiktoken>=0.7.0",  # Required for Whisper tiktoken fallback
-]
-all = [
-    "mlx-vlm==0.3.10",  # Pinned: stable, tested version
-    "mlx-audio==0.3.1",  # Pinned: tiktoken regression patched by mlxk2
-    "tiktoken>=0.7.0",
 ]
 
 [tool.setuptools]
