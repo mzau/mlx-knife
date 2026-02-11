@@ -13,7 +13,7 @@ pytest -m live_e2e tests_2.0/live/ \
 python benchmarks/generate_benchmark_report.py
 
 # 3. View results
-cat benchmarks/reports/BENCHMARK-v1.0-2.0.4b3-*.md
+cat benchmarks/reports/BENCHMARK-*.md
 ```
 
 ---
@@ -55,7 +55,7 @@ python benchmarks/tools/memmon.py \
 ```bash
 python benchmarks/generate_benchmark_report.py
 # → Finds most recent .jsonl in benchmarks/reports/
-# → Outputs: BENCHMARK-v1.0-<version>-<date>.md
+# → Outputs: BENCHMARK-<template>-<version>-<date>.md
 ```
 
 ### Explicit Input File

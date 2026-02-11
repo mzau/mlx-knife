@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.4] - 2026-XX-XX (WIP)
+## [2.0.4] - 2026-02-11
 
 > **First stable release with Audio/STT support.** This release consolidates beta.9 and beta.10 improvements into a production-ready package.
 
@@ -18,7 +18,11 @@
   - `test_whisper_tokenizer.py`: 47 tests for tiktoken workaround (get_encoding, get_tokenizer, Tokenizer class)
   - `TestEmbeddingGate`: 3 tests for embedding model runtime blocking
 
+- **Test Infrastructure:** Test suite now runs consistently with `unset HF_HOME` (uses fallback models)
+
 ### Fixed (since beta.10)
+
+- **`serve --model` Pre-Validation:** Model ambiguity and not-found errors now detected before server starts. Previously showed stacktrace; now shows clean error message with suggestions.
 
 - **Run Preflight Consistency:** `run.py` now passes `probe` and `framework` to `audio_runtime_compatibility()`. STT model_type and tekken.json gates now work in CLI (previously only in list/health).
 

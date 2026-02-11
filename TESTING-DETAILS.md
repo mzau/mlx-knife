@@ -4,24 +4,24 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.4-beta.10** — **Audio PyPI Fix** (tiktoken workaround complete); Runtime compatibility accuracy; Audio transcription (Whisper via mlx-audio); Server `/v1/audio/transcriptions` endpoint; Probe/Policy architecture complete; Vision support Phase 1-3 (CLI + Server); Pipes/Memory-Aware; EXIF metadata; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.2** (Precise test timing).
+✅ **2.0.4** — **First stable release with Vision + Audio.** Vision support (CLI + Server, EXIF metadata); Audio transcription (Whisper via mlx-audio); Runtime compatibility accuracy; Server `/v1/audio/transcriptions` endpoint; Probe/Policy architecture; Pipes/Memory-Aware; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.2**.
 
 ### Test Results (Official Reference)
 
 **Standard Unit Tests (Multi-Python):**
 ```
 Platform: macOS 26.2 (Tahoe), M2 Max, 64GB RAM
-Python 3.10: 647 passed, 11 skipped in 19.78s
-Python 3.11: 647 passed, 11 skipped in 19.91s
-Python 3.12: 647 passed, 11 skipped in 20.94s
-Note: Default suite works on 16GB. Wet-umbrella: 64GB recommended (M1 Max 32GB untested)
+Python 3.10: 697 passed, 13 skipped
+Python 3.11: 697 passed, 13 skipped
+Python 3.12: 697 passed, 13 skipped
+Note: Default suite works on 16GB. Full integration tests: 64GB recommended
 ```
 
-**Wet Umbrella (4-Phase Integration):**
+**Full Integration Tests (`./scripts/test-wet-umbrella.sh`):**
 ```
-Phase 1 (wet marker):        168 passed, 73 skipped, 680 deselected (Schema v0.2.2)
-Phase 2-4 (live_pull/clone/pipe): 3 passed, 742 deselected
-Total:                       171 passed across all phases
+Phase 1 (portfolio tests):   179 passed, 73 skipped, 732 deselected
+Phase 2-4 (live operations): 3 passed
+Total:                       182 passed across all phases
 ```
 
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use

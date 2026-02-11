@@ -15,7 +15,7 @@ This directory contains benchmark infrastructure for mlx-knife:
 benchmarks/
 ├── reports/                    # JSONL test reports + Markdown analyses
 │   ├── 2025-12-20-v2.0.4b3.jsonl   # Raw data (one file per test run)
-│   └── BENCHMARK-v1.0-*.md         # Generated analysis reports
+│   └── BENCHMARK-*.md               # Generated analysis reports
 ├── schemas/                    # JSON Schema definitions
 │   ├── report-v0.1.schema.json      # legacy schema
 │   ├── report-v0.2.2.schema.json    # Current schema
@@ -23,7 +23,7 @@ benchmarks/
 ├── tools/                      # Standalone tools
 │   ├── memmon.py                   # Memory monitor (background sampling)
 │   └── memplot.py                  # Memory timeline visualizer
-├── generate_benchmark_report.py    # Report generator (Template v1.0)
+├── generate_benchmark_report.py    # Report generator (Template v1.1)
 ├── validate_reports.py             # Schema validation
 ├── README.md                       # ← You are here
 └── TESTING.md                      # Benchmark handbook (How-To)
@@ -33,7 +33,7 @@ benchmarks/
 
 | Tool | Purpose |
 |------|---------|
-| `generate_benchmark_report.py` | JSONL → Markdown report (Template v1.0) |
+| `generate_benchmark_report.py` | JSONL → Markdown report (Template v1.1) |
 | `validate_reports.py` | Schema validation of JSONL files |
 | `tools/memmon.py` | Memory + CPU + GPU monitoring (200ms sampling) |
 | `tools/memplot.py` | Interactive 3-row timeline (Memory/CPU/GPU, HTML) |
@@ -59,7 +59,7 @@ See `schemas/LEARNINGS-FOR-v1.0.md` for details.
 ## Recent Reports
 
 Latest baseline reports are in `reports/` directory:
-- Pattern: `BENCHMARK-v1.0-<version>-<date>-*.md`
+- Pattern: `BENCHMARK-<template>-<version>-<date>-*.md`
 - Hardware: Mac14,13 (M2 Max, 64 GB)
 - Test suite: ~167 tests (Vision + Text + Audio E2E)
 - Quality target: 100% clean (0 MB swap, 0 zombies)
