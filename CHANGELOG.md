@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.5-beta.0] - 2026-02-11
+
+> **Server Refactoring.** Major internal restructuring of server_base.py (2524 → 1241 LOC, -51%) with zero API changes. Functionally identical to 2.0.4 — merge-safe to main for bugfixes.
+
+### Added
+
+- **`get_workspace_home()` Helper:** Prep for `MLXK_WORKSPACE_HOME` environment variable.
+
+### Changed
+
+- **Server Architecture Refactoring (Phase 1+2):**
+  - `server_base.py`: 2524 → 1241 LOC (-51%, -1283 lines)
+  - New `mlxk2/core/server/` module structure:
+    - `streaming.py` (571 LOC): SSE generators for text, chat, vision streaming
+    - `model_manager.py` (531 LOC): Thread-safe ModelManager with memory gates
+    - `handlers/chat.py` (485 LOC): Text + Vision chat completion handlers
+    - `handlers/audio.py` (223 LOC): Audio STT handlers
+    - `handlers/models.py` (124 LOC): `/v1/models` endpoint
+  - `ChatHandlerContext` for dependency injection (testability)
+  - ModelManager as explicit singleton with FSM documentation
+  - All backwards-compatible (thin wrappers preserve existing imports)
+  - **Validation:** 697 unit tests + 179 E2E tests green, benchmark shows no regression
+
+### Fixed
+
+- **Vision Model Server Without Images:** Fixed `AttributeError: 'VisionRunner' object has no attribute '_calculate_dynamic_max_tokens'` when sending text-only requests to a vision model via the server API. Bug existed in 2.0.4 but was rarely hit (edge case: vision model loaded, but request contains no images).
+
+- **Lifespan Not Initialized → HTTP 503:** `get_or_load_model()` and `get_or_load_audio_model()` now return HTTP 503 (Service Unavailable) instead of HTTP 500 when ModelManager is not initialized. Improves diagnostics in edge cases (TestClient without context manager, `--lifespan off`).
+
+### Documentation
+
+- **ADR-022:** Workspace-First Paradigm. See `docs/ADR/ADR-022-Workspace-First-Paradigm.md`
+
+---
+
 ## [2.0.4] - 2026-02-11
 
 > **First stable release with Audio/STT support.** This release consolidates beta.9 and beta.10 improvements into a production-ready package.

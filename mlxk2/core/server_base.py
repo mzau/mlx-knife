@@ -8,7 +8,6 @@ import os
 import threading
 import time
 import uuid
-import warnings
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,128 +34,38 @@ from ..errors import (
 from ..logging import get_logger, set_log_level
 from ..context import generate_request_id
 
-# Global model cache and configuration
-_model_cache: Dict[str, MLXRunner] = {}
-_current_model_path: Optional[str] = None
+# Import extracted modules (Phase 1 refactoring)
+from .server.streaming import (
+    generate_completion_stream as _generate_completion_stream_impl,
+    generate_chat_stream as _generate_chat_stream_impl,
+    stream_vision_chunks as _stream_vision_chunks_impl,
+    emulate_sse_stream as _emulate_sse_stream_impl,
+)
+from .server.handlers.models import handle_list_models as _handle_list_models_impl
+from .server.handlers.audio import (
+    handle_audio_chat_completion as _handle_audio_chat_completion_impl,
+    handle_transcription as _handle_transcription_impl,
+)
+from .server.handlers.chat import (
+    ChatHandlerContext,
+    handle_text_chat_completion as _handle_text_chat_completion_impl,
+    handle_vision_chat_completion as _handle_vision_chat_completion_impl,
+    process_vision_chunks_server as _process_vision_chunks_server_impl,
+)
+# Import ModelManager (Phase 2 refactoring)
+from .server.model_manager import ModelManager
+
+# Global configuration
 _default_max_tokens: Optional[int] = None  # Use dynamic model-aware limits by default
-_model_lock = threading.Lock()  # Thread-safe model switching
 # Global shutdown flag to interrupt in-flight generations promptly
 _shutdown_event = threading.Event()
 # Pre-load model specification (set via environment MLXK2_PRELOAD_MODEL)
 _preload_model: Optional[str] = None
+# ModelManager singleton (Phase 2 refactoring)
+_model_manager: Optional[ModelManager] = None
 
 # Global logger instance (ADR-004)
 logger = get_logger()
-
-
-def _get_available_memory_bytes() -> Optional[int]:
-    """Get available system memory in bytes (macOS).
-
-    Returns available (free + speculative) memory, not total memory.
-    This is critical for model switching - we need to know if there's
-    enough free memory after the previous model was unloaded.
-
-    Note: macOS Tahoe caches aggressively, so "free" is often minimal.
-    IMPORTANT: We do NOT count "inactive" pages because Metal/GPU cache may hold
-    them even though macOS reports them as "reclaimable". This was causing false
-    positives where Memory Gates reported sufficient memory but models failed
-    with OOM/Broken pipe due to actual memory pressure. (Session 136 fix)
-
-    Returns:
-        Available memory in bytes, or None if unavailable.
-    """
-    try:
-        import subprocess
-        # macOS: Use vm_stat to get available memory
-        result = subprocess.run(
-            ["vm_stat"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            lines = result.stdout.split("\n")
-            page_size = 16384  # Default macOS page size (Apple Silicon)
-            # Parse page size from first line if available
-            if "page size of" in lines[0]:
-                try:
-                    page_size = int(lines[0].split("page size of")[1].split()[0])
-                except (ValueError, IndexError):
-                    pass
-
-            free_pages = 0
-            speculative_pages = 0
-            for line in lines:
-                if "Pages free:" in line:
-                    free_pages = int(line.split(":")[1].strip().rstrip("."))
-                elif "Pages speculative:" in line:
-                    speculative_pages = int(line.split(":")[1].strip().rstrip("."))
-
-            # Available = free + speculative only (NOT inactive - may be held by GPU cache)
-            return (free_pages + speculative_pages) * page_size
-    except Exception:
-        pass
-    return None
-
-
-def _get_memory_pressure() -> int:
-    """Get macOS memory pressure level via sysctl.
-
-    Returns:
-        0 = NORMAL (system relaxed, safe to load models)
-        1 = WARN (system under some pressure)
-        4 = CRITICAL (system under severe pressure)
-        -1 = Unable to determine
-    """
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["sysctl", "-n", "vm.memory_pressure"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if result.returncode == 0:
-            return int(result.stdout.strip())
-    except Exception:
-        pass
-    return -1
-
-
-def _wait_for_memory_release(
-    required_bytes: int,
-    timeout_seconds: float = 30.0,
-    poll_interval: float = 0.5,
-) -> bool:
-    """Wait for memory to be released after model unload.
-
-    Metal GPU cache is released asynchronously. This function waits
-    until enough memory is available before loading the next model.
-
-    Uses TWO indicators for robust detection (Session 136 finding):
-    1. vm.memory_pressure == 0 (macOS kernel says system is relaxed)
-    2. Available memory >= required_bytes (enough free+speculative pages)
-
-    Args:
-        required_bytes: Minimum available memory needed
-        timeout_seconds: Maximum wait time (default 30s for GPU cache release)
-        poll_interval: Time between memory checks (default 0.5s)
-
-    Returns:
-        True if memory threshold reached, False if timeout
-    """
-    start_time = time.time()
-
-    while time.time() - start_time < timeout_seconds:
-        # Check memory pressure first (fast sysctl call)
-        pressure = _get_memory_pressure()
-        if pressure == 0:  # NORMAL - system is relaxed
-            available = _get_available_memory_bytes()
-            if available is not None and available >= required_bytes:
-                return True
-        time.sleep(poll_interval)
-
-    return False
 
 
 class CompletionRequest(BaseModel):
@@ -233,205 +142,14 @@ def get_or_load_model(model_spec: str, verbose: bool = False) -> Any:
     Thread-safe model switching with proper cleanup on interruption.
     Supports both text models (MLXRunner) and vision models (VisionRunner).
 
+    Delegates to ModelManager singleton (Phase 2 refactoring).
+
     Returns:
         MLXRunner for text models, VisionRunner for vision models
     """
-    global _model_cache, _current_model_path
-
-    # Abort early if shutdown requested
-    if _shutdown_event.is_set():
-        raise HTTPException(status_code=503, detail="Server is shutting down")
-
-    # Thread-safe model switching
-    with _model_lock:
-        if _shutdown_event.is_set():
-            raise HTTPException(status_code=503, detail="Server is shutting down")
-        # Simple approach like run command - let MLXRunner handle everything
-        if _current_model_path != model_spec:
-            # Clean up previous model
-            if _model_cache:
-                try:
-                    for _old_runner in list(_model_cache.values()):
-                        try:
-                            # VisionRunner uses _cleanup_temp_files, MLXRunner uses cleanup
-                            if hasattr(_old_runner, 'cleanup'):
-                                _old_runner.cleanup()
-                            if hasattr(_old_runner, '_cleanup_temp_files'):
-                                _old_runner._cleanup_temp_files()
-                        except Exception as e:
-                            logger.warning(f"Warning during cleanup: {e}")
-                finally:
-                    _model_cache.clear()
-                    _current_model_path = None
-
-                # Force Metal GPU memory release before loading new model
-                # Critical for model switching - prevents memory accumulation
-                try:
-                    import mlx.core as mx
-                    mx.clear_cache()
-                except (ImportError, AttributeError):
-                    pass  # MLX not installed or API changed
-
-                # Memory Gate: Wait for memory release (ADR-016, ARCHITECTURE.md Principle #4)
-                # Metal releases GPU memory asynchronously - wait until enough is free
-                # 8 GB threshold validated via wet-memmon (avg 10.5 GB free, Firefox running)
-                MIN_FREE_BYTES = 8 * 1024 * 1024 * 1024  # 8 GB
-                if not _wait_for_memory_release(MIN_FREE_BYTES, timeout_seconds=10.0):
-                    available = _get_available_memory_bytes()
-                    available_gb = (available / (1024**3)) if available else 0
-                    logger.warning(
-                        f"Memory release timeout: {available_gb:.1f} GB available (wanted 8 GB)",
-                        model=model_spec
-                    )
-                    # Continue anyway - the probe/policy check will catch real OOM situations
-
-            # Load new model (disable signal handlers for server mode)
-            try:
-                # Unified probe/policy architecture (ARCHITECTURE.md principles)
-                # Probe and select backend (fail-fast validation)
-                caps = None
-                policy = None
-                model_path = None
-                resolved_name = None
-                try:
-                    from ..operations.workspace import is_workspace_path
-
-                    resolved_name, _, _ = resolve_model_for_operation(model_spec)
-
-                    # Check if resolved_name is a workspace path (ADR-018 Phase 0c)
-                    if resolved_name and is_workspace_path(resolved_name):
-                        # Workspace path - use directly
-                        model_path = Path(resolved_name)
-
-                        # Debug logging for workspace path
-                        logger.debug(
-                            f"Preload path (workspace): resolved_name={resolved_name}, model_path={model_path}",
-                            model=model_spec
-                        )
-
-                        # Check workspace exists
-                        if not model_path.exists():
-                            raise HTTPException(
-                                status_code=404,
-                                detail=f"Workspace not found: {model_spec}"
-                            )
-                    elif resolved_name:
-                        # Cache model found - existing logic
-                        cache_root = get_current_model_cache()
-                        cache_dir = cache_root / hf_to_cache_dir(resolved_name)
-
-                        # Debug logging for preload path
-                        logger.debug(
-                            f"Preload path (cache): resolved_name={resolved_name}, cache_dir={cache_dir}",
-                            model=model_spec
-                        )
-
-                        # Get actual snapshot path
-                        snapshots_dir = cache_dir / "snapshots"
-                        model_path = cache_dir
-                        if snapshots_dir.exists():
-                            snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                            if snapshots:
-                                model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
-                    else:
-                        # Resolution failed - check if local directory exists as fallback
-                        if is_workspace_path(model_spec):
-                            # Local workspace exists - use it
-                            model_path = Path(model_spec).resolve()
-                            resolved_name = str(model_path)
-
-                            logger.debug(
-                                f"Preload path (fallback workspace): model_spec={model_spec}, model_path={model_path}",
-                                model=model_spec
-                            )
-                        else:
-                            # Not found in cache and no local workspace
-                            raise HTTPException(
-                                status_code=404,
-                                detail=f"Model not found in cache: {model_spec}"
-                            )
-
-                    logger.debug(
-                        f"Preload path: model_path={model_path}",
-                        model=model_spec
-                    )
-
-                    # Unified probe/policy check (ARCHITECTURE.md Principle #1: Pipeline always runs)
-                    caps, policy = probe_and_select(
-                        model_path,
-                        resolved_name or model_spec,
-                        context="server",
-                        has_images=False,  # Preload doesn't have images
-                    )
-
-                    # Debug logging for probe/policy results
-                    logger.debug(
-                        f"Probe/policy results: is_vision={caps.is_vision}, "
-                        f"backend={policy.backend.value}, decision={policy.decision.value}, "
-                        f"http_status={policy.http_status}",
-                        model=model_spec
-                    )
-
-                    # Handle policy decision (ARCHITECTURE.md Principle #3: Fail Fast, Fail Clearly)
-                    if policy.decision == PolicyDecision.BLOCK:
-                        # Use policy-defined HTTP status code (not heuristics on message)
-                        # Vision: 501, Memory: 507, Dependency: 501, Framework: 400
-                        status_code = policy.http_status or 400  # Default to 400 if not specified
-                        logger.error(f"Model blocked by policy: {policy.message}", model=model_spec)
-                        raise HTTPException(
-                            status_code=status_code,
-                            detail=policy.message
-                        )
-
-                    if policy.decision == PolicyDecision.WARN:
-                        # Log warning but continue (e.g., text model with high memory)
-                        logger.warning(f"Policy warning: {policy.message}", model=model_spec)
-
-                except HTTPException:
-                    raise  # Re-raise HTTP exceptions from policy
-
-                # Select runner based on backend (ADR-012 Phase 3)
-                if policy.backend == Backend.MLX_VLM:
-                    # Vision model - use VisionRunner
-                    from .vision_runner import VisionRunner
-                    logger.info(f"Loading vision model: {model_spec}", model=model_spec, backend="mlx_vlm")
-                    runner = VisionRunner(model_path, resolved_name or model_spec, verbose=verbose)
-                else:
-                    # Text model - use MLXRunner (use resolved_name for workspace support)
-                    runner = MLXRunner(resolved_name or model_spec, verbose=verbose, install_signal_handlers=False)
-
-                # If shutdown was requested, abort before expensive load
-                if _shutdown_event.is_set():
-                    raise KeyboardInterrupt()
-                runner.load_model()
-                if _shutdown_event.is_set():
-                    raise KeyboardInterrupt()
-
-                _model_cache[model_spec] = runner
-                _current_model_path = model_spec
-
-                logger.info(f"Switched to model: {model_spec}", model=model_spec)
-
-            except HTTPException:
-                # Re-raise HTTP exceptions (501, 507, etc.) from vision/memory checks
-                raise
-            except KeyboardInterrupt:
-                # Handle interruption during model loading
-                logger.warning("Model loading interrupted")
-                _model_cache.clear()
-                _current_model_path = None
-                raise HTTPException(status_code=503, detail="Server interrupted during model load")
-            except Exception as e:
-                # Clean up on failed load
-                logger.error(f"Model load failed: {model_spec}", error_key=f"model_load_{model_spec}", detail=str(e))
-                _model_cache.clear()
-                _current_model_path = None
-                status_code = 404
-                detail = f"Model '{model_spec}' not found or failed to load: {str(e)}"
-
-                raise HTTPException(status_code=status_code, detail=detail)
-
-        return _model_cache[model_spec]
+    if _model_manager is None:
+        raise HTTPException(503, "Server not ready - lifespan not initialized")
+    return _model_manager.get_or_load_model(model_spec, verbose)
 
 
 def get_or_load_audio_model(model_spec: str, verbose: bool = False) -> Any:
@@ -440,124 +158,14 @@ def get_or_load_audio_model(model_spec: str, verbose: bool = False) -> Any:
     Thread-safe model switching with AudioRunner for STT models (ADR-020).
     Uses the same cache as get_or_load_model() but creates AudioRunner instances.
 
+    Delegates to ModelManager singleton (Phase 2 refactoring).
+
     Returns:
         AudioRunner for STT models
     """
-    global _model_cache, _current_model_path
-
-    # Abort early if shutdown requested
-    if _shutdown_event.is_set():
-        raise HTTPException(status_code=503, detail="Server is shutting down")
-
-    # Thread-safe model switching
-    with _model_lock:
-        if _shutdown_event.is_set():
-            raise HTTPException(status_code=503, detail="Server is shutting down")
-
-        # Check if model is already cached and is an AudioRunner
-        if _current_model_path == model_spec:
-            from .audio_runner import AudioRunner
-            cached = _model_cache.get(model_spec)
-            if isinstance(cached, AudioRunner):
-                return cached
-
-        # Clean up previous model
-        if _model_cache:
-            try:
-                for _old_runner in list(_model_cache.values()):
-                    try:
-                        if hasattr(_old_runner, 'cleanup'):
-                            _old_runner.cleanup()
-                        if hasattr(_old_runner, '_cleanup_temp_files'):
-                            _old_runner._cleanup_temp_files()
-                    except Exception as e:
-                        logger.warning(f"Warning during cleanup: {e}")
-            finally:
-                _model_cache.clear()
-                _current_model_path = None
-
-            # Force Metal GPU memory release before loading new model
-            # Critical for model switching - prevents memory accumulation
-            try:
-                import mlx.core as mx
-                mx.clear_cache()
-            except (ImportError, AttributeError):
-                pass  # MLX not installed or API changed
-
-            # Memory Gate: Wait for memory release (ADR-016, ARCHITECTURE.md Principle #4)
-            # Metal releases GPU memory asynchronously - wait until enough is free
-            # 4 GB threshold validated via wet-memmon (Whisper ~1.5 GB, plenty of headroom)
-            MIN_FREE_BYTES = 4 * 1024 * 1024 * 1024  # 4 GB
-            if not _wait_for_memory_release(MIN_FREE_BYTES, timeout_seconds=10.0):
-                available = _get_available_memory_bytes()
-                available_gb = (available / (1024**3)) if available else 0
-                logger.warning(
-                    f"Memory release timeout: {available_gb:.1f} GB available (wanted 4 GB)",
-                    model=model_spec
-                )
-                # Continue anyway - the probe/policy check will catch real OOM situations
-
-        # Load new audio model
-        try:
-            from ..operations.workspace import is_workspace_path
-            from .audio_runner import AudioRunner
-
-            resolved_name, _, _ = resolve_model_for_operation(model_spec)
-            model_path = None
-
-            # Resolve model path
-            if resolved_name and is_workspace_path(resolved_name):
-                model_path = Path(resolved_name)
-            elif resolved_name:
-                cache_root = get_current_model_cache()
-                cache_dir = cache_root / hf_to_cache_dir(resolved_name)
-                snapshots_dir = cache_dir / "snapshots"
-                if snapshots_dir.exists():
-                    snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                    if snapshots:
-                        model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
-            elif is_workspace_path(model_spec):
-                model_path = Path(model_spec).resolve()
-                resolved_name = str(model_path)
-
-            if model_path is None or not model_path.exists():
-                raise HTTPException(status_code=404, detail=f"Audio model not found: {model_spec}")
-
-            # Check shutdown before expensive load
-            if _shutdown_event.is_set():
-                raise KeyboardInterrupt()
-
-            logger.info(f"Loading audio model: {model_spec}", model=model_spec, backend="mlx_audio")
-
-            # Suppress mlx-audio WhisperProcessor warnings in server mode
-            # These warnings are informational (mlx-community models lack preprocessor_config.json,
-            # mlx-audio falls back to tiktoken) and pollute JSON logs. CLI users should see them.
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="Could not load WhisperProcessor")
-                runner = AudioRunner(model_path, resolved_name or model_spec, verbose=verbose)
-                runner.load_model()
-
-            if _shutdown_event.is_set():
-                raise KeyboardInterrupt()
-
-            _model_cache[model_spec] = runner
-            _current_model_path = model_spec
-
-            logger.info(f"Audio model loaded: {model_spec}", model=model_spec)
-            return runner
-
-        except HTTPException:
-            raise
-        except KeyboardInterrupt:
-            logger.warning("Audio model loading interrupted")
-            _model_cache.clear()
-            _current_model_path = None
-            raise HTTPException(status_code=503, detail="Server interrupted during model load")
-        except Exception as e:
-            logger.error(f"Audio model load failed: {model_spec}", error_key=f"audio_model_load_{model_spec}", detail=str(e))
-            _model_cache.clear()
-            _current_model_path = None
-            raise HTTPException(status_code=404, detail=f"Audio model '{model_spec}' failed to load: {str(e)}")
+    if _model_manager is None:
+        raise HTTPException(503, "Server not ready - lifespan not initialized")
+    return _model_manager.get_or_load_audio_model(model_spec, verbose)
 
 
 async def generate_completion_stream(
@@ -565,136 +173,25 @@ async def generate_completion_stream(
     prompt: str,
     request: CompletionRequest,
 ) -> AsyncGenerator[str, None]:
-    """Generate streaming completion response."""
-    completion_id = f"cmpl-{uuid.uuid4()}"
-    created = int(time.time())
+    """Generate streaming completion response.
 
-    # Yield initial response
-    initial_response = {
-        "id": completion_id,
-        "object": "text_completion",
-        "created": created,
-        "model": request.model,
-        "choices": [
-            {
-                "index": 0,
-                "text": "",
-                "logprobs": None,
-                "finish_reason": None
-            }
-        ]
-    }
+    Delegates to extracted streaming module (Phase 1 refactoring).
+    """
+    max_tokens = get_effective_max_tokens(runner, request.max_tokens, server_mode=True)
+    stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
 
-    yield f"data: {json.dumps(initial_response)}\n\n"
-
-    # Stream tokens
-    try:
-        token_count = 0
-        for token in runner.generate_streaming(
-            prompt=prompt,
-            max_tokens=get_effective_max_tokens(runner, request.max_tokens, server_mode=True),
-            temperature=request.temperature,
-            top_p=request.top_p,
-            repetition_penalty=request.repetition_penalty,
-            use_chat_template=False  # Raw completion mode
-        ):
-            # Stop promptly if server is shutting down
-            if _shutdown_event.is_set():
-                raise KeyboardInterrupt()
-            token_count += 1
-
-            chunk_response = {
-                "id": completion_id,
-                "object": "text_completion",
-                "created": created,
-                "model": request.model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "text": token,
-                        "logprobs": None,
-                        "finish_reason": None
-                    }
-                ]
-            }
-
-            yield f"data: {json.dumps(chunk_response)}\n\n"
-
-            # Check for stop sequences
-            if request.stop:
-                stop_sequences = request.stop if isinstance(request.stop, list) else [request.stop]
-                if any(stop in token for stop in stop_sequences):
-                    break
-
-    except KeyboardInterrupt:
-        # During shutdown/disconnect avoid extra logs; best-effort cleanup
-        if not _shutdown_event.is_set():
-            try:
-                import mlx.core as mx
-                mx.clear_cache()
-            except (ImportError, AttributeError):
-                pass  # MLX not installed or API changed
-            except Exception as e:
-                logger.debug(f"Metal cache cleanup failed: {e}")
-            # Try to send an interrupt marker if client still connected
-            try:
-                interrupt_response = {
-                    "id": completion_id,
-                    "object": "text_completion",
-                    "created": created,
-                    "model": request.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "text": "\n\n[Generation interrupted by user]",
-                            "logprobs": None,
-                            "finish_reason": "stop"
-                        }
-                    ]
-                }
-                yield f"data: {json.dumps(interrupt_response)}\n\n"
-            except Exception:
-                pass
-        return
-        
-    except Exception as e:
-        error_response = {
-            "id": completion_id,
-            "object": "text_completion",
-            "created": created,
-            "model": request.model,
-            "choices": [
-                {
-                    "index": 0,
-                    "text": "",
-                    "logprobs": None,
-                    "finish_reason": "error"
-                }
-            ],
-            "error": str(e)
-        }
-        yield f"data: {json.dumps(error_response)}\n\n"
-
-    # Final response (skip if shutting down)
-    if _shutdown_event.is_set():
-        return
-    final_response = {
-        "id": completion_id,
-        "object": "text_completion",
-        "created": created,
-        "model": request.model,
-        "choices": [
-            {
-                "index": 0,
-                "text": "",
-                "logprobs": None,
-                "finish_reason": "stop"
-            }
-        ]
-    }
-
-    yield f"data: {json.dumps(final_response)}\n\n"
-    yield "data: [DONE]\n\n"
+    async for chunk in _generate_completion_stream_impl(
+        runner=runner,
+        prompt=prompt,
+        request_model=request.model,
+        max_tokens=max_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        repetition_penalty=request.repetition_penalty,
+        stop=stop,
+        shutdown_event=_shutdown_event,
+    ):
+        yield chunk
     
 
 
@@ -703,166 +200,26 @@ async def generate_chat_stream(
     messages: List[ChatMessage],
     request: ChatCompletionRequest,
 ) -> AsyncGenerator[str, None]:
-    """Generate streaming chat completion response."""
-    completion_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
+    """Generate streaming chat completion response.
 
-    # Convert messages to dict format for runner
+    Delegates to extracted streaming module (Phase 1 refactoring).
+    """
     message_dicts = format_chat_messages_for_runner(messages)
-    
-    # Let the runner format with chat templates
-    prompt = runner._format_conversation(message_dicts)
+    max_tokens = get_effective_max_tokens(runner, request.max_tokens, server_mode=True)
+    stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
 
-    # Yield initial response
-    initial_response = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": request.model,
-        "choices": [
-            {
-                "index": 0,
-                "delta": {"role": "assistant", "content": ""},
-                "finish_reason": None
-            }
-        ]
-    }
-
-    yield f"data: {json.dumps(initial_response)}\n\n"
-
-    # Stream tokens
-    try:
-        for token in runner.generate_streaming(
-            prompt=prompt,
-            max_tokens=get_effective_max_tokens(runner, request.max_tokens, server_mode=True),
-            temperature=request.temperature,
-            top_p=request.top_p,
-            repetition_penalty=request.repetition_penalty,
-            use_chat_template=False,  # Already applied in _format_conversation
-            use_chat_stop_tokens=True   # Server NEEDS chat stop tokens to prevent self-conversations
-        ):
-            # Stop promptly if server is shutting down
-            if _shutdown_event.is_set():
-                raise KeyboardInterrupt()
-            chunk_response = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": request.model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {"content": token},
-                        "finish_reason": None
-                    }
-                ]
-            }
-
-            yield f"data: {json.dumps(chunk_response)}\n\n"
-
-            # Check for stop sequences
-            if request.stop:
-                stop_sequences = request.stop if isinstance(request.stop, list) else [request.stop]
-                if any(stop in token for stop in stop_sequences):
-                    break
-
-    except KeyboardInterrupt:
-        if not _shutdown_event.is_set():
-            try:
-                import mlx.core as mx
-                mx.clear_cache()
-            except (ImportError, AttributeError):
-                pass  # MLX not installed or API changed
-            except Exception as e:
-                logger.debug(f"Metal cache cleanup failed: {e}")
-            try:
-                interrupt_response = {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": request.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"content": "\n\n[Generation interrupted by user]"},
-                            "finish_reason": "stop"
-                        }
-                    ]
-                }
-                yield f"data: {json.dumps(interrupt_response)}\n\n"
-            except Exception:
-                pass
-        return
-        
-    except Exception as e:
-        # Optional debug logging for chat streaming errors
-        try:
-            import os
-            if os.environ.get("MLXK2_DEBUG"):
-                print(f"[DEBUG] Exception in chat streaming: {type(e).__name__}: {e}")
-        except Exception:
-            pass
-        
-        # Try MLX recovery for any exception that might be interrupt-related
-        if "interrupt" in str(e).lower() or "keyboard" in str(e).lower():
-            try:
-                import os
-                if os.environ.get("MLXK2_DEBUG"):
-                    print("[Server] Detected interrupt-like exception, attempting MLX recovery...")
-            except Exception:
-                pass
-            try:
-                import mlx.core as mx
-                mx.clear_cache()
-                try:
-                    import os
-                    if os.environ.get("MLXK2_DEBUG"):
-                        print("[Server] MLX state recovered after exception")
-                except Exception:
-                    pass
-            except Exception as recovery_error:
-                try:
-                    import os
-                    if os.environ.get("MLXK2_DEBUG"):
-                        print(f"[Server] MLX recovery warning: {recovery_error}")
-                except Exception:
-                    pass
-        
-        error_response = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": request.model,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "error"
-                }
-            ],
-            "error": str(e)
-        }
-        yield f"data: {json.dumps(error_response)}\n\n"
-
-    # Final response (skip if shutting down)
-    if _shutdown_event.is_set():
-        return
-    final_response = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": request.model,
-        "choices": [
-            {
-                "index": 0,
-                "delta": {},
-                "finish_reason": "stop"
-            }
-        ]
-    }
-
-    yield f"data: {json.dumps(final_response)}\n\n"
-    yield "data: [DONE]\n\n"
+    async for chunk in _generate_chat_stream_impl(
+        runner=runner,
+        messages=message_dicts,
+        request_model=request.model,
+        max_tokens=max_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        repetition_penalty=request.repetition_penalty,
+        stop=stop,
+        shutdown_event=_shutdown_event,
+    ):
+        yield chunk
     
 
 
@@ -1048,96 +405,30 @@ def _detect_audio_backend_for_model(model_spec: str) -> Optional[Backend]:
 async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatCompletionResponse:
     """Handle audio STT chat completion with AudioRunner (ADR-020).
 
-    Uses mlx-audio backend for Whisper and Voxtral STT models.
+    Delegates to extracted audio handler module (Phase 1 refactoring).
     """
-    import time
-    import uuid
-
-    # Parse audio from messages
-    from ..tools.vision_adapter import VisionHTTPAdapter
-
     message_dicts = _messages_to_dicts(request.messages)
-
-    # Find the last user message only
-    last_user_msg = None
-    for msg in reversed(message_dicts):
-        if msg.get("role") == "user":
-            last_user_msg = msg
-            break
-
-    if last_user_msg is None:
-        raise HTTPException(status_code=400, detail="No user message found")
-
-    # Parse audio content from last user message
-    prompt, _, audio = VisionHTTPAdapter.parse_openai_messages([last_user_msg])
-
-    if not audio:
-        raise HTTPException(status_code=400, detail="No audio content found in request")
-
-    logger.info(
-        f"Audio STT request: {len(audio)} audio(s), model={request.model}",
-        model=request.model,
-        audio_count=len(audio)
+    result = await _handle_audio_chat_completion_impl(
+        request_model=request.model,
+        messages=message_dicts,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+        stream=request.stream,
+        get_audio_model_fn=get_or_load_audio_model,
+        emulate_sse_fn=_emulate_sse_stream,
+        count_tokens_fn=count_tokens,
     )
-
-    # Load AudioRunner
-    runner = get_or_load_audio_model(request.model, verbose=False)
-
-    # Generate transcription
-    completion_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
-
-    generated_text = runner.transcribe(
-        audio=list(audio),
-        prompt=prompt or "Transcribe this audio.",
-        max_tokens=request.max_tokens or 4096,
-        temperature=request.temperature or 0.0,
-    )
-
-    logger.info(
-        f"Audio STT complete: {len(generated_text)} chars",
-        model=request.model,
-        output_length=len(generated_text)
-    )
-
-    # Token counting
-    prompt_tokens = count_tokens(prompt or "")
-    completion_tokens = count_tokens(generated_text)
-
-    # Emulate SSE for stream=true
-    if request.stream:
-        logger.info("Audio STT: emulating SSE stream (batch response as single event)")
-        return StreamingResponse(
-            _emulate_sse_stream(completion_id, created, request.model, generated_text),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache"}
-        )
-
-    return ChatCompletionResponse(
-        id=completion_id,
-        created=created,
-        model=request.model,
-        choices=[
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": generated_text
-                },
-                "finish_reason": "stop"
-            }
-        ],
-        usage={
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
-        }
-    )
+    # Return StreamingResponse directly or convert dict to Pydantic model
+    if isinstance(result, StreamingResponse):
+        return result
+    return ChatCompletionResponse(**result)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
+    global _model_manager, _preload_model
+
     # Configure log level early (from environment if subprocess mode)
     import os
     env_log_level = os.environ.get("MLXK2_LOG_LEVEL", "info")
@@ -1145,8 +436,10 @@ async def lifespan(app: FastAPI):
 
     logger.info("MLX Knife Server 2.0 starting up...")
 
+    # Initialize ModelManager singleton (Phase 2 refactoring)
+    _model_manager = ModelManager(_shutdown_event)
+
     # Pre-load model with probe/policy validation (if specified)
-    global _preload_model
     preload_spec = os.environ.get("MLXK2_PRELOAD_MODEL")
     if preload_spec:
         try:
@@ -1186,26 +479,22 @@ async def lifespan(app: FastAPI):
         _request_global_interrupt()
     except Exception:
         pass
-    # Clean up model cache
-    global _model_cache
-    try:
-        for _runner in list(_model_cache.values()):
-            try:
-                _runner.cleanup()
-            except Exception:
-                pass
-    finally:
-        _model_cache.clear()
-
-        # Force MLX Metal memory cleanup
+    # Clean up model cache via ModelManager
+    if _model_manager:
         try:
-            import mlx.core as mx
-            mx.clear_cache()
-            logger.info("MLX Metal cache cleared")
-        except (ImportError, AttributeError):
-            pass  # MLX not installed or API changed
-        except Exception as e:
-            logger.warning(f"Metal cache cleanup failed: {e}")
+            _model_manager.cleanup()
+        except Exception:
+            pass
+
+    # Force MLX Metal memory cleanup
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+        logger.info("MLX Metal cache cleared")
+    except (ImportError, AttributeError):
+        pass  # MLX not installed or API changed
+    except Exception as e:
+        logger.warning(f"Metal cache cleanup failed: {e}")
 
 
 # Create FastAPI app
@@ -1309,96 +598,23 @@ async def health_check():
 async def list_models():
     """List available MLX models in the cache.
 
-    Returns models sorted with preloaded model first (if set), then alphabetically.
-    Filters to healthy + runtime_compatible models.
+    Delegates to extracted handler module (Phase 1 refactoring).
     """
-    from .cache import cache_dir_to_hf
-    from ..operations.common import build_model_object
-
-    model_list = []
-    model_cache = get_current_model_cache()
-
-    # Find all model directories (handle missing cache gracefully)
-    if not model_cache.exists():
-        # Fresh installation or custom cache location - no models yet
-        models = []
-    else:
-        models = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
-
-    for model_dir in models:
-        model_name = cache_dir_to_hf(model_dir.name)
-
-        try:
-            # Get snapshot path
-            snapshots_dir = model_dir / "snapshots"
-            selected_path = None
-            if snapshots_dir.exists():
-                snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
-                if snapshots:
-                    selected_path = snapshots[0]
-
-            # Use shared build_model_object (single source of truth)
-            model_obj = build_model_object(model_name, model_dir, selected_path)
-
-            # Filter: healthy AND runtime_compatible
-            if model_obj.get("health") != "healthy":
-                continue
-            if not model_obj.get("runtime_compatible"):
-                continue
-
-            # Get model context length (best effort)
-            context_length = None
-            try:
-                if selected_path:
-                    from .runner import get_model_context_length
-                    context_length = get_model_context_length(str(selected_path))
-            except Exception:
-                pass
-
-            model_list.append(ModelInfo(
-                id=model_name,
-                object="model",
-                owned_by="mlx-knife-2.0",
-                context_length=context_length
-            ))
-        except Exception as e:
-            # Skip models that can't be processed
-            logger.warning(f"Skipping model {model_name} from /v1/models: {e}")
-            continue
-
-    # Add preloaded workspace if present and not already in list
-    global _preload_model
-    if _preload_model:
-        # Check if it's a workspace path
-        from ..operations.workspace import is_workspace_path
-        if is_workspace_path(_preload_model):
-            # Check if already in list (avoid duplicates)
-            if not any(m.id == _preload_model for m in model_list):
-                # Get context length
-                context_length = None
-                try:
-                    from .runner import get_model_context_length
-                    context_length = get_model_context_length(_preload_model)
-                except Exception:
-                    pass
-
-                model_list.append(ModelInfo(
-                    id=_preload_model,  # Original path string
-                    object="model",
-                    owned_by="workspace",
-                    context_length=context_length
-                ))
-
-    # Sort: preloaded model first, then alphabetically by id
-    if _preload_model:
-        def sort_key(model: ModelInfo):
-            # Preloaded model gets priority (0), others sorted alphabetically
-            return (0 if model.id == _preload_model else 1, model.id)
-        model_list.sort(key=sort_key)
-    else:
-        # No preload: just alphabetical
-        model_list.sort(key=lambda m: m.id)
-
+    result = await _handle_list_models_impl(
+        get_cache_fn=get_current_model_cache,
+        preload_model=_preload_model,
+    )
+    # Convert dicts to ModelInfo Pydantic objects
+    model_list = [
+        ModelInfo(
+            id=m["id"],
+            object=m["object"],
+            owned_by=m["owned_by"],
+            permission=m.get("permission", []),
+            context_length=m.get("context_length"),
+        )
+        for m in result["data"]
+    ]
     return {"object": "list", "data": model_list}
 
 
@@ -1524,136 +740,48 @@ async def create_chat_completion(request: ChatCompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _create_chat_handler_context() -> ChatHandlerContext:
+    """Create a ChatHandlerContext with all required dependencies."""
+    return ChatHandlerContext(
+        get_model_fn=get_or_load_model,
+        get_effective_max_tokens_fn=get_effective_max_tokens,
+        get_effective_max_tokens_vision_fn=get_effective_max_tokens_vision,
+        count_tokens_fn=count_tokens,
+        format_messages_fn=format_chat_messages_for_runner,
+        extract_text_fn=_extract_text_from_messages,
+        filter_multimodal_fn=_filter_multimodal_history_for_text_models,
+        messages_to_dicts_fn=_messages_to_dicts,
+        generate_chat_stream_fn=_generate_chat_stream_impl,
+        emulate_sse_fn=_emulate_sse_stream,
+        stream_vision_chunks_fn=_stream_vision_chunks_impl,
+        process_vision_chunks_fn=_process_vision_chunks_server,
+        shutdown_event=_shutdown_event,
+    )
+
+
 async def _handle_text_chat_completion(request: ChatCompletionRequest, runner: Any = None) -> ChatCompletionResponse:
     """Handle text-only chat completion.
 
-    Works with both MLXRunner (text models) and VisionRunner (vision models without images).
-
-    Args:
-        request: Chat completion request
-        runner: Pre-loaded model runner (optional, will load if not provided)
+    Delegates to extracted chat handler module (Phase 1 refactoring).
     """
-    if runner is None:
-        runner = get_or_load_model(request.model)
-
-    # Check if runner is VisionRunner (vision model loaded without images in request)
-    from .vision_runner import VisionRunner
-    is_vision_runner = isinstance(runner, VisionRunner)
-
-    # Filter multimodal history for text-only models
-    # Vision models can handle multimodal content, text models cannot
-    # See: docs/ISSUES/VISION-MULTIMODAL-HISTORY-ISSUE.md
-    messages = request.messages
-    if not is_vision_runner:
-        # Text-only model: filter out image_url content from history
-        messages = _filter_multimodal_history_for_text_models(messages)
-
-    if is_vision_runner:
-        # Vision model: use VisionRunner.generate() without images
-        completion_id = f"chatcmpl-{uuid.uuid4()}"
-        created = int(time.time())
-
-        # Extract text prompt from messages (already filtered if needed)
-        prompt = _extract_text_from_messages(messages)
-
-        # Vision model WITHOUT images: Use text-model max_tokens logic
-        # (half context for conversation history, not the 2048 vision default)
-        generated_text = runner.generate(
-            prompt=prompt,
-            images=None,  # No images for text-only request
-            max_tokens=get_effective_max_tokens(runner, request.max_tokens, server_mode=True),
-            temperature=0.0,  # Experiment: greedy sampling to reduce hallucinations
-            top_p=request.top_p or 0.9,
-            repetition_penalty=request.repetition_penalty or 1.0,
-        )
-
-        prompt_tokens = count_tokens(prompt)
-        completion_tokens = count_tokens(generated_text)
-
-        # Graceful degradation: emulate SSE for stream=true
-        if request.stream:
-            logger.info("Vision model: emulating SSE stream (batch response as single event)")
-            return StreamingResponse(
-                _emulate_sse_stream(completion_id, created, request.model, generated_text),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache"}
-            )
-
-        return ChatCompletionResponse(
-            id=completion_id,
-            created=created,
-            model=request.model,
-            choices=[
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": generated_text
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
-            usage={
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens
-            }
-        )
-
-    # Text model: use MLXRunner (existing behavior)
-    if request.stream:
-        # Streaming response (use filtered messages)
-        return StreamingResponse(
-            generate_chat_stream(runner, messages, request),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache"}
-        )
-
-    # Non-streaming response
-    completion_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
-
-    # Convert messages to dict format for runner (use filtered messages)
-    message_dicts = format_chat_messages_for_runner(messages)
-
-    # Let the runner format with chat templates
-    prompt = runner._format_conversation(message_dicts)
-
-    generated_text = runner.generate_batch(
-        prompt=prompt,
-        max_tokens=get_effective_max_tokens(runner, request.max_tokens, server_mode=True),
+    ctx = _create_chat_handler_context()
+    stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
+    result = await _handle_text_chat_completion_impl(
+        ctx=ctx,
+        request_model=request.model,
+        messages=request.messages,
+        max_tokens=request.max_tokens,
         temperature=request.temperature,
         top_p=request.top_p,
         repetition_penalty=request.repetition_penalty,
-        use_chat_template=False,  # Already applied in _format_conversation
-        use_chat_stop_tokens=True  # Server NEEDS chat stop tokens to prevent self-conversations
+        stream=request.stream,
+        stop=stop,
+        runner=runner,
     )
-
-    # Token counting (handle both string and list content - use filtered messages)
-    total_prompt = _extract_text_from_messages(messages)
-    prompt_tokens = count_tokens(total_prompt)
-    completion_tokens = count_tokens(generated_text)
-
-    return ChatCompletionResponse(
-        id=completion_id,
-        created=created,
-        model=request.model,
-        choices=[
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": generated_text
-                },
-                "finish_reason": "stop"
-            }
-        ],
-        usage={
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
-        }
-    )
+    # Return StreamingResponse directly or convert dict to Pydantic model
+    if isinstance(result, StreamingResponse):
+        return result
+    return ChatCompletionResponse(**result)
 
 
 def _process_vision_chunks_server(
@@ -1671,48 +799,21 @@ def _process_vision_chunks_server(
 ) -> str:
     """Process vision images in batches with isolated model instances per chunk.
 
-    Each chunk creates a fresh VisionRunner to prevent state leakage between batches.
-    Similar to CLI _process_images_in_chunks but server-optimized
-    (no verbose output to stderr, uses existing image_id_map).
-
-    Args:
-        model_path: Path to model snapshot directory
-        model_name: Model name for VisionRunner
-        prompt: User prompt
-        images: Full list of (filename, bytes) tuples
-        chunk_size: Images per batch
-        image_id_map: Pre-computed global image IDs (from conversation history)
-        max_tokens, temperature, top_p, repetition_penalty: Generation params
-        audio: Optional list of (filename, bytes) tuples for audio input
-
-    Returns:
-        Combined text with merged filename mappings
+    Delegates to extracted chat handler module (Phase 1 refactoring).
     """
-    from .vision_runner import VisionRunner
-
-    # Split into chunks
-    chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
-
-    # Process each chunk with fresh runner (prevents state leakage)
-    all_results = []
-    for chunk in chunks:
-        # Fresh runner per chunk to prevent KV-cache/state accumulation
-        with VisionRunner(model_path, model_name, verbose=False) as runner:
-            chunk_result = runner.generate(
-                prompt=prompt,
-                images=chunk,
-                audio=audio,  # Pass audio with each chunk
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-                image_id_map=image_id_map,  # Global numbering from conversation
-                total_images=len(images),  # Enable chunk context line
-            )
-        all_results.append(chunk_result)
-
-    # Concatenate results
-    return "\n\n".join(all_results)
+    return _process_vision_chunks_server_impl(
+        model_path=model_path,
+        model_name=model_name,
+        prompt=prompt,
+        images=images,
+        chunk_size=chunk_size,
+        image_id_map=image_id_map,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        audio=audio,
+    )
 
 
 async def _stream_vision_chunks(
@@ -1733,334 +834,50 @@ async def _stream_vision_chunks(
 ) -> AsyncGenerator[str, None]:
     """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
 
-    Unlike _process_vision_chunks_server() which waits for all chunks,
-    this yields SSE events immediately after each chunk finishes.
-    Uses asyncio.to_thread() to keep the event loop responsive.
-
-    Args:
-        model_path: Path to model snapshot directory
-        model_name: Model name for VisionRunner
-        prompt: User prompt
-        images: Full list of (filename, bytes) tuples
-        chunk_size: Images per chunk
-        image_id_map: Pre-computed global image IDs (from conversation history)
-        max_tokens, temperature, top_p, repetition_penalty: Generation params
-        completion_id: Unique completion ID for SSE events
-        created: Timestamp for SSE events
-        model: Model name for SSE events
-        audio: Optional list of (filename, bytes) tuples for audio input
-
-    Yields:
-        SSE event strings (data: {...}\n\n format)
+    Delegates to extracted streaming module (Phase 1 refactoring).
     """
-    import asyncio
-    from .vision_runner import VisionRunner
-
-    chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
-    total_images = len(images)
-
-    # Initial role event
-    initial_event = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": {"role": "assistant"},
-            "finish_reason": None
-        }]
-    }
-    yield f"data: {json.dumps(initial_event)}\n\n"
-
-    # Process each chunk and stream result immediately
-    for chunk_idx, chunk in enumerate(chunks, start=1):
-        logger.info(
-            f"Vision chunk {chunk_idx}/{len(chunks)} starting",
-            chunk=chunk_idx,
-            total_chunks=len(chunks),
-            images_in_chunk=len(chunk)
-        )
-
-        # Check shutdown before processing
-        if _shutdown_event.is_set():
-            interrupt_event = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": "\n\n[Generation interrupted]"},
-                    "finish_reason": "stop"
-                }]
-            }
-            yield f"data: {json.dumps(interrupt_event)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
-        # Process chunk in thread pool (keeps event loop responsive)
-        # NOTE: Pass chunk_images as argument to avoid closure late-binding issues
-        def process_chunk(chunk_images):
-            with VisionRunner(model_path, model_name, verbose=False) as runner:
-                return runner.generate(
-                    prompt=prompt,
-                    images=chunk_images,
-                    audio=audio,  # Pass audio with each chunk
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                    image_id_map=image_id_map,
-                    total_images=total_images,
-                )
-
-        try:
-            chunk_result = await asyncio.to_thread(process_chunk, chunk)
-        except Exception as e:
-            logger.error(f"Vision chunk {chunk_idx}/{len(chunks)} failed: {e}")
-            error_event = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": f"\n\n[Error in chunk {chunk_idx}: {str(e)}]"},
-                    "finish_reason": "error"
-                }]
-            }
-            yield f"data: {json.dumps(error_event)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
-        # Content event for this chunk (with separator for multi-chunk)
-        separator = "\n\n" if chunk_idx < len(chunks) else ""
-        content_event = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": chunk_result + separator},
-                "finish_reason": None
-            }]
-        }
-        yield f"data: {json.dumps(content_event)}\n\n"
-
-        logger.info(
-            f"Vision chunk {chunk_idx}/{len(chunks)} streamed",
-            chunk=chunk_idx,
-            total_chunks=len(chunks),
-            output_length=len(chunk_result)
-        )
-
-    # Final event with finish_reason
-    final_event = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "stop"
-        }]
-    }
-    yield f"data: {json.dumps(final_event)}\n\n"
-    yield "data: [DONE]\n\n"
+    async for chunk in _stream_vision_chunks_impl(
+        model_path=model_path,
+        model_name=model_name,
+        prompt=prompt,
+        images=images,
+        chunk_size=chunk_size,
+        image_id_map=image_id_map,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        completion_id=completion_id,
+        created=created,
+        model=model,
+        shutdown_event=_shutdown_event,
+        audio=audio,
+    ):
+        yield chunk
 
 
 async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner: Any = None) -> ChatCompletionResponse:
-    """Handle vision/audio chat completion with images or audio (ADR-012 Phase 3, ADR-019 Phase 4).
+    """Handle vision/audio chat completion with images or audio.
 
-    Supports per-chunk streaming for multi-image requests (stream=True yields
-    SSE events as each chunk completes). Single-chunk requests use batch mode
-    with optional SSE emulation.
-
-    Args:
-        request: Chat completion request
-        runner: Pre-loaded model runner (optional, will load if not provided)
+    Delegates to extracted chat handler module (Phase 1 refactoring).
     """
-    # Lazy import vision components (Python 3.9 compatibility)
-    from ..tools.vision_adapter import VisionHTTPAdapter
-
-    # Vision/Audio requests are STATELESS for the model prompt, but we track image IDs
-    # across the session for consistent numbering (Image 1, 2, 3...).
-    #
-    # Rationale:
-    # - Vision models can't "see" previous images (Metal memory limitations)
-    # - History text causes pattern reproduction (model copies mappings)
-    # - But we want consistent image numbering across the conversation
-    # - Follow-up questions should use text models (which have history)
-    message_dicts = _messages_to_dicts(request.messages)
-
-    # Find the last user message only (for stateless prompt)
-    last_user_msg = None
-    for msg in reversed(message_dicts):
-        if msg.get("role") == "user":
-            last_user_msg = msg
-            break
-
-    if last_user_msg is None:
-        raise HTTPException(status_code=400, detail="No user message found")
-
-    # Parse only the last user message (stateless prompt)
-    # Returns (prompt, images, audio) tuple
-    prompt, images, audio = VisionHTTPAdapter.parse_openai_messages([last_user_msg])
-
-    # But use FULL history for image ID assignment (consistent numbering)
-    image_id_map = VisionHTTPAdapter.assign_image_ids_from_history(message_dicts)
-
-    image_count = len(images)
-    audio_count = len(audio)
-    logger.info(
-        f"Vision/Audio request: {image_count} image(s), {audio_count} audio(s), model={request.model}",
-        model=request.model,
-        image_count=image_count,
-        audio_count=audio_count
+    ctx = _create_chat_handler_context()
+    result = await _handle_vision_chat_completion_impl(
+        ctx=ctx,
+        request_model=request.model,
+        messages=request.messages,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+        top_p=request.top_p,
+        repetition_penalty=request.repetition_penalty,
+        stream=request.stream,
+        chunk_size_request=request.chunk,
+        runner=runner,
     )
-
-    # Get or load VisionRunner (uses cache if model already loaded)
-    # get_or_load_model now handles Backend selection and uses VisionRunner for vision models
-    if runner is None:
-        runner = get_or_load_model(request.model, verbose=False)
-
-    # Verify we got a VisionRunner (not MLXRunner) for vision request
-    from .vision_runner import VisionRunner
-    if not isinstance(runner, VisionRunner):
-        # Model was loaded as text model but vision request received
-        # This shouldn't happen if probe_and_select works correctly
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model '{request.model}' does not support vision inputs"
-        )
-
-    # Generate with VisionRunner
-    completion_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
-
-    # Get chunk size: request param > ENV > default (F-05: respect explicit chunk=1)
-    env_chunk = int(os.environ.get("MLXK2_VISION_CHUNK_SIZE", "1"))
-    chunk_size = request.chunk if request.chunk is not None else env_chunk
-
-    # F-03: Audio+Vision - audio silently ignored when images present (SERVER-HANDBOOK)
-    # mlx-vlm behavior is undefined for combined audio+vision, so we enforce single modality
-    effective_audio = None if images else audio
-
-    # Validate chunk size for Metal API stability
-    from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
-    if chunk_size < 1:
-        raise HTTPException(
-            status_code=400,
-            detail=f"chunk size must be at least 1 (got: {chunk_size})."
-        )
-    if chunk_size > MAX_SAFE_CHUNK_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
-                f"This limit is based on empirically tested performance."
-            )
-        )
-
-    if len(images) <= chunk_size:
-        # Single batch (no chunking) - also handles audio-only requests
-        generated_text = runner.generate(
-            prompt=prompt,
-            images=images if images else None,
-            audio=effective_audio,
-            max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
-            temperature=0.0,  # Experiment: greedy sampling to reduce hallucinations
-            top_p=request.top_p or 0.9,
-            repetition_penalty=request.repetition_penalty or 1.0,
-            image_id_map=image_id_map if images else None,
-        )
-    else:
-        # Multi-chunk processing
-        if request.stream:
-            # True per-chunk streaming (yields SSE events as chunks complete)
-            logger.info(
-                f"Vision request: chunk streaming ({len(images)} images, chunk_size={chunk_size})",
-                model=request.model,
-                image_count=len(images),
-                chunk_size=chunk_size
-            )
-            return StreamingResponse(
-                _stream_vision_chunks(
-                    model_path=runner.model_path,
-                    model_name=runner.model_name,
-                    prompt=prompt,
-                    images=images,
-                    chunk_size=chunk_size,
-                    image_id_map=image_id_map,
-                    max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
-                    temperature=0.0,
-                    top_p=request.top_p or 0.9,
-                    repetition_penalty=request.repetition_penalty or 1.0,
-                    completion_id=completion_id,
-                    created=created,
-                    model=request.model,
-                    audio=effective_audio,
-                ),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache"}
-            )
-        # Non-streaming multi-chunk (batch mode)
-        generated_text = _process_vision_chunks_server(
-            model_path=runner.model_path,
-            model_name=runner.model_name,
-            prompt=prompt,
-            images=images,
-            chunk_size=chunk_size,
-            image_id_map=image_id_map,
-            max_tokens=get_effective_max_tokens_vision(runner, request.max_tokens),
-            temperature=0.0,
-            top_p=request.top_p or 0.9,
-            repetition_penalty=request.repetition_penalty or 1.0,
-            audio=effective_audio,
-        )
-
-    logger.info(
-        f"Vision generation complete: {len(generated_text)} chars",
-        model=request.model,
-        output_length=len(generated_text)
-    )
-
-    # Token counting
-    prompt_tokens = count_tokens(prompt)
-    completion_tokens = count_tokens(generated_text)
-
-    # Graceful degradation: emulate SSE for stream=true (single-chunk only)
-    if request.stream:
-        logger.info("Vision request: emulating SSE stream (single-chunk batch response)")
-        return StreamingResponse(
-            _emulate_sse_stream(completion_id, created, request.model, generated_text),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache"}
-        )
-
-    return ChatCompletionResponse(
-        id=completion_id,
-        created=created,
-        model=request.model,
-        choices=[
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": generated_text
-                },
-                "finish_reason": "stop"
-            }
-        ],
-        usage={
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
-        }
-    )
+    # Return StreamingResponse directly or convert dict to Pydantic model
+    if isinstance(result, StreamingResponse):
+        return result
+    return ChatCompletionResponse(**result)
 
 
 async def _emulate_sse_stream(
@@ -2071,55 +888,15 @@ async def _emulate_sse_stream(
 ) -> AsyncGenerator[str, None]:
     """Emulate SSE streaming for vision models (batch response as SSE events).
 
-    Vision models don't support real streaming, so we send the complete
-    response as SSE events to be compatible with streaming clients.
+    Delegates to extracted streaming module (Phase 1 refactoring).
     """
-    import json
-
-    # First chunk: role
-    chunk1 = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": {"role": "assistant"},
-            "finish_reason": None
-        }]
-    }
-    yield f"data: {json.dumps(chunk1)}\n\n"
-
-    # Second chunk: content (all at once)
-    chunk2 = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": {"content": content},
-            "finish_reason": None
-        }]
-    }
-    yield f"data: {json.dumps(chunk2)}\n\n"
-
-    # Final chunk: finish_reason
-    chunk3 = {
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "stop"
-        }]
-    }
-    yield f"data: {json.dumps(chunk3)}\n\n"
-
-    # Done marker
-    yield "data: [DONE]\n\n"
+    async for chunk in _emulate_sse_stream_impl(
+        completion_id=completion_id,
+        created=created,
+        model=model,
+        content=content,
+    ):
+        yield chunk
 
 
 def _extract_text_from_messages(messages: List[ChatMessage]) -> str:
@@ -2247,20 +1024,9 @@ async def create_transcription(
 ):
     """Create an audio transcription (OpenAI-compatible Whisper API).
 
-    Accepts audio files and returns transcribed text.
-    Supports Whisper and Voxtral STT models via mlx-audio backend.
-
-    Args:
-        file: Audio file (WAV, MP3, M4A, FLAC, OGG)
-        model: Model ID (e.g., "whisper-large" or "mlx-community/whisper-large-v3-turbo-4bit")
-        language: Optional language code (e.g., "en", "de")
-        prompt: Optional prompt to guide transcription
-        response_format: Output format (json, text, verbose_json)
-        temperature: Sampling temperature (0.0 for greedy decoding)
+    Delegates to extracted audio handler module (Phase 1 refactoring).
     """
-    import time
-
-    # Validate model is an audio STT model
+    # Validate model is an audio STT model (routing decision stays here)
     audio_backend = _detect_audio_backend_for_model(model)
     if audio_backend != Backend.MLX_AUDIO:
         raise HTTPException(
@@ -2271,93 +1037,49 @@ async def create_transcription(
     # Read uploaded file
     try:
         content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Empty audio file")
-
-        # Enforce audio size limit (same as VisionHTTPAdapter)
-        if len(content) > MAX_AUDIO_SIZE_BYTES:
-            limit_mb = MAX_AUDIO_SIZE_BYTES // (1024 * 1024)
-            actual_mb = len(content) / (1024 * 1024)
-            raise HTTPException(
-                status_code=413,
-                detail=f"Audio file exceeds {limit_mb} MB limit (got {actual_mb:.1f} MB)"
-            )
-
         filename = file.filename or "audio.wav"
-
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read audio file: {str(e)}")
 
-    try:
-        # Load audio model
-        runner = get_or_load_audio_model(model, verbose=False)
+    # Delegate to extracted handler
+    result = await _handle_transcription_impl(
+        content=content,
+        filename=filename,
+        model=model,
+        language=language,
+        prompt=prompt,
+        response_format=response_format or "json",
+        temperature=temperature or 0.0,
+        get_audio_model_fn=get_or_load_audio_model,
+        max_audio_size_bytes=MAX_AUDIO_SIZE_BYTES,
+    )
 
-        start_time = time.time()
-
-        # Transcribe audio - runner.transcribe() expects List[(filename, bytes)]
-        transcription = runner.transcribe(
-            audio=[(filename, content)],
-            prompt=prompt or "Transcribe this audio.",
-            max_tokens=4096,
-            temperature=temperature,
-            language=language,
-        )
-
-        duration = time.time() - start_time
-
-        logger.info(
-            f"Transcription complete: {len(transcription)} chars in {duration:.2f}s",
-            model=model,
-            output_length=len(transcription),
-            duration=duration
-        )
-
-        # Return response based on format
-        if response_format == "text":
-            return PlainTextResponse(content=transcription)
-        elif response_format == "verbose_json":
-            return VerboseTranscriptionResponse(
-                language=language or "auto",
-                duration=duration,
-                text=transcription
-            )
-        else:
-            # Default: json
-            return TranscriptionResponse(text=transcription)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Transcription failed: {str(e)}", model=model)
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    # Convert dict results to Pydantic models
+    if isinstance(result, PlainTextResponse):
+        return result
+    if response_format == "verbose_json":
+        return VerboseTranscriptionResponse(**result)
+    return TranscriptionResponse(**result)
 
 
 def cleanup_server():
     """Manual cleanup function for emergency situations."""
-    global _model_cache, _current_model_path
     logger.warning("Forcing server cleanup...")
 
-    # Thread-safe cleanup
-    with _model_lock:
+    # Cleanup via ModelManager (Phase 2 refactoring)
+    if _model_manager:
         try:
-            for _runner in list(_model_cache.values()):
-                try:
-                    _runner.cleanup()
-                except Exception as e:
-                    logger.warning(f"Warning during runner cleanup: {e}")
-        finally:
-            _model_cache.clear()
-            _current_model_path = None
+            _model_manager.cleanup()
+        except Exception as e:
+            logger.warning(f"Warning during ModelManager cleanup: {e}")
 
-            # Force MLX Metal memory cleanup
-            try:
-                import mlx.core as mx
-                mx.clear_cache()
-                logger.info("MLX Metal cache cleared")
-            except Exception as e:
-                logger.warning(f"Warning during MLX cleanup: {e}")
+    # Force MLX Metal memory cleanup
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+        logger.info("MLX Metal cache cleared")
+    except Exception as e:
+        logger.warning(f"Warning during MLX cleanup: {e}")
 
 
 def _request_global_interrupt() -> None:
@@ -2366,15 +1088,11 @@ def _request_global_interrupt() -> None:
     Used during server shutdown to ensure in-flight streams stop.
     """
     _shutdown_event.set()
-    try:
-        with _model_lock:
-            for _runner in list(_model_cache.values()):
-                try:
-                    _runner.request_interrupt()
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    if _model_manager:
+        try:
+            _model_manager.request_interrupt()
+        except Exception:
+            pass
 
 
 

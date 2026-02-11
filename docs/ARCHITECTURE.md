@@ -257,18 +257,65 @@ See module docstring for detailed API documentation.
 
 ---
 
+## ModelManager State Machine
+
+The server's model lifecycle is managed by `ModelManager` in `mlxk2/core/server/model_manager.py`.
+
+### States
+
+| State | Description |
+|-------|-------------|
+| IDLE | No model loaded (`_current_model_path = None`) |
+| LOADED(X) | Model X loaded and cached |
+| SWITCHING | Model switch in progress (lock held, cleanup + load) |
+| SHUTTING_DOWN | Server shutting down (all requests → 503) |
+
+### Transitions
+
+```
+IDLE ──get_or_load(X)──→ LOADED(X) ──get_or_load(Y)──→ SWITCHING ──→ LOADED(Y)
+  ↑                           │                              │
+  └───────cleanup()───────────┴──────────────────────────────┘
+
+ANY ──shutdown_event.set()──→ SHUTTING_DOWN
+```
+
+### Thread Safety
+
+- `_lock` serializes all state changes
+- Double-check pattern: Check shutdown before AND after lock acquire
+- Cleanup with `list()` copy to avoid dict mutation during iteration
+
+### Memory Gates (see Principle #4)
+
+- Vision/Text: 8 GB minimum before load
+- Audio: 4 GB minimum before load
+- `wait_for_memory_release()` polls until threshold reached or timeout
+
+### API
+
+```python
+# Thin wrappers in server_base.py delegate to ModelManager singleton
+get_or_load_model(model_spec, verbose=False) -> MLXRunner | VisionRunner
+get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
+```
+
+---
+
 ## References
 
 - **ADR-012:** Vision Support (backend selection for vision models)
 - **ADR-014:** Unix Pipe Integration (feature gates)
 - **ADR-016:** Memory-Aware Model Loading (pre-load memory checks)
 - **ADR-020:** Audio Backend Architecture (speech-to-text transcription)
-- **Code:** `mlxk2/core/capabilities.py` (implementation)
+- **Code:** `mlxk2/core/capabilities.py` (probe/policy implementation)
+- **Code:** `mlxk2/core/server/model_manager.py` (model lifecycle)
 - **Original Discussion:** `docs/vision_server_leitplanken.md` (German, historical)
 
 ---
 
 ## Changelog
 
+- **2026-02-11:** Added ModelManager State Machine documentation (Phase 2 refactoring)
 - **2026-02-03:** Modality-agnostic update (audio backend added, examples generalized)
 - **2025-12-07:** Initial version
