@@ -1,8 +1,8 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.1.7
+**Specification Version:** 0.2.0
 **Status:** Stable (backward-compatible)
-**Released:** MLX-Knife 2.0.4-beta.1
+**Released:** MLX-Knife 2.0.5-beta.1
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
@@ -106,8 +106,8 @@ JSON output example:
   "status": "success",
   "command": "version",
   "data": {
-    "cli_version": "2.0.4-beta.1",
-    "json_api_spec_version": "0.1.7",
+    "cli_version": "2.0.5-beta.1",
+    "json_api_spec_version": "0.2.0",
     "system": {
       "memory_total_bytes": 137438953472
     }
@@ -585,6 +585,26 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
   }
 }
 ```
+
+## Changes in 0.2.0 (2.0.5-beta.1)
+
+**ADR-022: Workspace-First Paradigm**
+
+Major version bump to reflect the workspace-first paradigm shift. New fields in `modelObject` enable workspace tracking and clean indicator:
+
+- `origin: string | null` - Source HuggingFace repo for workspaces (from sentinel). null for cache models.
+- `content_hash: string | null` - SHA256 hash of workspace content at clone time. null for cache models.
+- `hash_modified: string | null` - ISO8601 timestamp when content_hash was computed. null for cache models.
+- `clean: boolean | null` - Workspace clean indicator: true=unchanged since clone, false=modified, null=unknown or cache model.
+
+**UX Changes:**
+- `mlxk list` Source column: `ws*` indicates dirty workspace (modified since clone)
+- `mlxk list --verbose` adds `Clean` column (✓/✗/—)
+
+**Backward Compatibility:**
+- New fields are optional in schema (not in `required` array)
+- Cache models return null for all workspace-specific fields
+- Existing scripts parsing JSON output continue to work
 
 ## Changes in 0.1.7 (2.0.4-beta.8)
 

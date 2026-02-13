@@ -32,10 +32,13 @@ class TestModelNameValidation:
         assert isinstance(resolved_name, (str, type(None)))
         assert isinstance(ambiguous, list)
     
-    def test_empty_and_whitespace_names(self):
+    def test_empty_and_whitespace_names(self, monkeypatch):
         """Test empty and whitespace-only model names."""
+        # Isolate from MLXK_WORKSPACE_HOME to avoid workspace fuzzy matches
+        monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
+
         test_cases = ["", " ", "  ", "\t", "\n", "   \t\n   "]
-        
+
         for test_name in test_cases:
             resolved_name, commit_hash, ambiguous = resolve_model_for_operation(test_name)
             # Should handle gracefully, not crash

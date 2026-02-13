@@ -25,14 +25,48 @@ ADR-018 Contract:
 - Unmanaged workspaces can be converted to managed via convert operation
 """
 
+import hashlib
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 SENTINEL_FILENAME = ".mlxk_workspace.json"
+
+
+def get_workspace_home() -> Optional[Path]:
+    """Get workspace home directory from MLXK_WORKSPACE_HOME environment variable.
+
+    ADR-022: Workspace-first paradigm. When set, this directory is searched
+    before the HuggingFace cache for model resolution.
+
+    Returns:
+        Path to workspace home directory if MLXK_WORKSPACE_HOME is set and exists,
+        None otherwise.
+
+    Example:
+        >>> os.environ["MLXK_WORKSPACE_HOME"] = "/path/to/workspaces"
+        >>> get_workspace_home()
+        PosixPath('/path/to/workspaces')
+    """
+    workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
+    if not workspace_home:
+        return None
+
+    path = Path(workspace_home).expanduser()
+    if not path.exists():
+        logger.debug(f"MLXK_WORKSPACE_HOME set but path doesn't exist: {path}")
+        return None
+
+    if not path.is_dir():
+        logger.warning(f"MLXK_WORKSPACE_HOME is not a directory: {path}")
+        return None
+
+    return path.resolve()
 
 
 def write_workspace_sentinel(workspace_path: Path, metadata: Dict[str, Any]) -> None:
@@ -276,3 +310,169 @@ def find_matching_workspaces(pattern: str) -> list:
     except (TypeError, OSError) as e:
         logger.debug(f"Error finding workspaces for pattern '{pattern}': {e}")
         return []
+
+
+def compute_workspace_hash(workspace_path: Path) -> Optional[str]:
+    """Compute content hash for workspace (ADR-022 Phase 1.5).
+
+    Hash is computed over MODEL CONTENT only:
+    - config.json (model configuration)
+    - All *.safetensors files in root (model weights), sorted by name
+    - tokenizer*.json files (tokenizer config)
+
+    Explicitly EXCLUDED from hash (runtime artifacts):
+    - .hf_cache/ (HF runtime downloads like tokenizer models)
+    - .mlxk_workspace.json (our sentinel)
+    - *.lock files
+    - .git/ (if versioned)
+    - __pycache__/
+
+    This hash changes when model weights or configuration are modified,
+    enabling detection of workspace modifications after clone.
+
+    Args:
+        workspace_path: Path to workspace directory
+
+    Returns:
+        SHA256 hash (hex) or None if workspace is invalid
+    """
+    if not isinstance(workspace_path, Path):
+        return None
+
+    workspace_path = workspace_path.resolve()
+    config_path = workspace_path / "config.json"
+
+    if not config_path.exists():
+        logger.debug(f"No config.json in {workspace_path}")
+        return None
+
+    try:
+        hasher = hashlib.sha256()
+
+        # Hash config.json content
+        hasher.update(config_path.read_bytes())
+
+        # Hash safetensors files in ROOT only (not in .hf_cache/)
+        safetensors_files = sorted(workspace_path.glob("*.safetensors"))
+        for sf in safetensors_files:
+            # Include filename in hash (detect renames)
+            hasher.update(sf.name.encode("utf-8"))
+            # Hash file size (fast proxy for content change)
+            hasher.update(str(sf.stat().st_size).encode("utf-8"))
+
+        # Hash tokenizer files (important for model behavior)
+        tokenizer_patterns = ["tokenizer*.json", "vocab*.json", "merges.txt"]
+        for pattern in tokenizer_patterns:
+            for tf in sorted(workspace_path.glob(pattern)):
+                if tf.is_file():
+                    hasher.update(tf.name.encode("utf-8"))
+                    hasher.update(str(tf.stat().st_size).encode("utf-8"))
+
+        return hasher.hexdigest()
+
+    except (OSError, PermissionError) as e:
+        logger.debug(f"Error computing hash for {workspace_path}: {e}")
+        return None
+
+
+def update_workspace_hash(workspace_path: Path) -> Tuple[bool, Optional[str]]:
+    """Recalculate and store content hash in workspace sentinel (ADR-022 Phase 1.5).
+
+    This function:
+    1. Computes current content hash
+    2. Updates sentinel with new hash and timestamp
+    3. Pins current workspace state as "clean"
+
+    Use case: Upgrade old workspaces (cloned before 2.0.5) to have hash tracking,
+    or deliberately mark modified workspace as new baseline.
+
+    Args:
+        workspace_path: Path to workspace directory
+
+    Returns:
+        Tuple of (success, content_hash):
+        - success: True if hash was stored successfully
+        - content_hash: The computed hash (or None on failure)
+
+    Note: This is a write operation - caller is responsible for confirming intent.
+    """
+    if not isinstance(workspace_path, Path):
+        return (False, None)
+
+    workspace_path = workspace_path.resolve()
+
+    # Must be a managed workspace
+    if not is_managed_workspace(workspace_path):
+        logger.warning(f"Cannot update hash: not a managed workspace: {workspace_path}")
+        return (False, None)
+
+    # Compute current hash
+    content_hash = compute_workspace_hash(workspace_path)
+    if content_hash is None:
+        logger.warning(f"Cannot compute hash for {workspace_path}")
+        return (False, None)
+
+    # Read existing metadata
+    metadata = read_workspace_metadata(workspace_path)
+    if not metadata:
+        logger.warning(f"Cannot read metadata for {workspace_path}")
+        return (False, None)
+
+    # Update with new hash
+    hash_modified = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    metadata["content_hash"] = content_hash
+    metadata["hash_modified"] = hash_modified
+
+    # Write back
+    try:
+        write_workspace_sentinel(workspace_path, metadata)
+        logger.info(f"Updated content hash for {workspace_path}")
+        return (True, content_hash)
+    except Exception as e:
+        logger.warning(f"Failed to update sentinel: {e}")
+        return (False, None)
+
+
+def is_workspace_clean(workspace_path: Path) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Check if workspace is clean (unchanged since clone/convert).
+
+    ADR-022 Phase 1.5: Compares current content hash with stored hash
+    in sentinel file.
+
+    Args:
+        workspace_path: Path to workspace directory
+
+    Returns:
+        Tuple of (is_clean, current_hash, stored_hash):
+        - is_clean: True if hashes match, False if different, None if unknown
+        - current_hash: Current computed hash (or None)
+        - stored_hash: Hash from sentinel (or None)
+
+    Examples:
+        >>> is_workspace_clean(Path("./my-model"))
+        (True, "abc123...", "abc123...")  # Clean workspace
+
+        >>> is_workspace_clean(Path("./modified-model"))
+        (False, "def456...", "abc123...")  # Dirty workspace
+
+        >>> is_workspace_clean(Path("./unmanaged-model"))
+        (None, None, None)  # No sentinel, unknown state
+    """
+    if not isinstance(workspace_path, Path):
+        return (None, None, None)
+
+    workspace_path = workspace_path.resolve()
+
+    # Read stored hash from sentinel
+    metadata = read_workspace_metadata(workspace_path)
+    stored_hash = metadata.get("content_hash")
+
+    # Compute current hash
+    current_hash = compute_workspace_hash(workspace_path)
+
+    if stored_hash is None or current_hash is None:
+        # Unknown state (unmanaged workspace or computation failed)
+        return (None, current_hash, stored_hash)
+
+    is_clean = (current_hash == stored_hash)
+    return (is_clean, current_hash, stored_hash)

@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.5-beta.1] - 2026-02-13
+
+> **Workspace-First Paradigm (ADR-022).** HF cache isolation, content hash tracking, convert command production-ready. JSON API 0.2.0.
+
+### Added
+
+- **HF Cache Isolation:** Workspace runs use `.hf_cache/` inside workspace, runtime downloads isolated from user cache
+- **`MLXK_WORKSPACE_HOME`:** Environment variable for workspace discovery
+- **Content Hash Tracking:** `compute_workspace_hash()`, `is_workspace_clean()`, `--recalc-hash` for `mlxk show`
+- **JSON API 0.2.0:** New fields `origin`, `content_hash`, `hash_modified`, `clean`, `display_name`
+- **Convert Production:** `mlxk convert --repair-index` no longer requires alpha flag, computes content hash
+- **VibeVoice-ASR:** Model support enabled (HF cache isolation makes runtime downloads safe)
+
+### Changed
+
+- **`mlxk list`:** New Hash/Src columns, `ws*` for dirty workspaces, clean status in verbose mode
+
+### Fixed
+
+- **`serve --model` Workspace Isolation:** Tokenizer downloads no longer pollute user cache
+- **Test Suite:** 4 tests fixed for `MLXK_WORKSPACE_HOME` isolation
+
+### Known Issues
+
+- E2E wet-umbrella not validated for this beta
+- README.md: Workspace-first workflow documentation pending
+
+### Tags
+
+- `2.0.5-beta.1`, `json-0.2.0`
+
+---
+
 ## [2.0.5-beta.0] - 2026-02-11
 
 > **Server Refactoring.** Major internal restructuring of server_base.py (2524 → 1241 LOC, -51%) with zero API changes. Functionally identical to 2.0.4 — merge-safe to main for bugfixes.

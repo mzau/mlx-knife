@@ -4,4 +4,4 @@ Single source of truth for the JSON API specification version used by the
 current code and tests. Keep this in sync with docs/json-api-specification.md.
 """
 
-JSON_API_SPEC_VERSION = "0.1.7"
+JSON_API_SPEC_VERSION = "0.2.0"

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Tuple, Optional, List
 from .cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
-from ..operations.workspace import is_workspace_path, is_explicit_path
+from ..operations.workspace import is_workspace_path, is_explicit_path, get_workspace_home
 
 
 def expand_model_name(model_name: str) -> str:
@@ -101,6 +101,20 @@ def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optiona
     if is_explicit_path(model_spec) and is_workspace_path(model_spec):
         # Explicit workspace path - return absolute path, skip cache logic
         return (str(Path(model_spec).resolve()), None, None)
+
+    # ADR-022: Check MLXK_WORKSPACE_HOME first (workspace-first paradigm)
+    workspace_home = get_workspace_home()
+    if workspace_home:
+        # Try exact match in workspace home
+        ws_path = workspace_home / model_spec
+        if is_workspace_path(str(ws_path)):
+            return (str(ws_path), None, None)
+
+        # Try fuzzy match in workspace home (case-insensitive substring)
+        for subdir in workspace_home.iterdir():
+            if subdir.is_dir() and model_spec.lower() in subdir.name.lower():
+                if is_workspace_path(str(subdir)):
+                    return (str(subdir), None, None)
 
     model_name, commit_hash = parse_model_spec(model_spec)
     

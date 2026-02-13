@@ -1,13 +1,104 @@
 #!/usr/bin/env python3
 """MLX-Knife CLI - HuggingFace model management for MLX."""
 
-import argparse
-import json
+# =============================================================================
+# ADR-022: HF_HOME Bootstrap (MUST BE BEFORE ANY OTHER IMPORTS)
+# =============================================================================
+# mlx-knife controls HF cache location. This MUST happen before huggingface_hub
+# is imported (by any transitive dependency), because HF reads HF_HOME at import time.
+#
+# Priority:
+# 1. Workspace/.hf_cache for workspace runs (CoW compatibility) - ALWAYS
+# 2. User's HF_HOME environment variable (for non-workspace runs)
+# 3. Default: ~/.cache/huggingface (standard location)
+#
+# Note: os.environ changes only affect THIS process, not the user's shell.
+# =============================================================================
 import os
-import signal
-import subprocess
 import sys
 from pathlib import Path
+
+def _is_workspace(path: Path) -> bool:
+    """Check if path is a valid MLX workspace (has config.json). No imports allowed."""
+    return path.exists() and path.is_dir() and (path / "config.json").exists()
+
+
+def _resolve_workspace_for_bootstrap(model_spec: str) -> "Path | None":
+    """Resolve model_spec to workspace path for HF_HOME bootstrap. No imports allowed.
+
+    Supports:
+    - Explicit paths: ./workspace, ../workspace, /abs/path
+    - MLXK_WORKSPACE_HOME fuzzy match: "VibeVoice" → $MLXK_WORKSPACE_HOME/VibeVoice-ASR-8bit
+    """
+    # 1. Explicit path (starts with ./ ../ / or is . ..)
+    if model_spec.startswith(("./", "../", "/")) or model_spec in (".", ".."):
+        workspace_path = Path(model_spec).resolve()
+        if _is_workspace(workspace_path):
+            return workspace_path
+        return None
+
+    # 2. MLXK_WORKSPACE_HOME fuzzy match
+    workspace_home_str = os.environ.get("MLXK_WORKSPACE_HOME")
+    if workspace_home_str:
+        workspace_home = Path(workspace_home_str).expanduser().resolve()
+        if workspace_home.exists() and workspace_home.is_dir():
+            # Try exact match
+            exact = workspace_home / model_spec
+            if _is_workspace(exact):
+                return exact
+            # Try fuzzy match (case-insensitive substring)
+            for subdir in workspace_home.iterdir():
+                if subdir.is_dir() and model_spec.lower() in subdir.name.lower():
+                    if _is_workspace(subdir):
+                        return subdir
+
+    return None
+
+
+def _set_workspace_hf_home(workspace_path: Path) -> None:
+    """Set HF_HOME to workspace/.hf_cache for isolation."""
+    hf_cache = workspace_path / ".hf_cache"
+    os.environ["HF_HOME"] = str(hf_cache)
+
+
+def _bootstrap_hf_home():
+    """Set HF_HOME before any huggingface_hub import. Called at module load."""
+    # Workspace isolation takes PRIORITY - even over user-set HF_HOME (ADR-022)
+    # This ensures CoW compatibility and workspace self-containment.
+
+    for i, arg in enumerate(sys.argv):
+        # Case 1: mlxk run <model_spec>
+        if arg == "run" and i + 1 < len(sys.argv):
+            model_spec = sys.argv[i + 1]
+            if model_spec.startswith("-"):
+                continue
+            workspace_path = _resolve_workspace_for_bootstrap(model_spec)
+            if workspace_path:
+                _set_workspace_hf_home(workspace_path)
+                return
+            break
+
+        # Case 2: mlxk serve --model <model_spec>
+        if arg == "serve":
+            # Find --model argument
+            for j in range(i + 1, len(sys.argv)):
+                if sys.argv[j] == "--model" and j + 1 < len(sys.argv):
+                    model_spec = sys.argv[j + 1]
+                    workspace_path = _resolve_workspace_for_bootstrap(model_spec)
+                    if workspace_path:
+                        _set_workspace_hf_home(workspace_path)
+                        return
+            break
+
+    # Non-workspace: respect user HF_HOME or use HuggingFace default
+
+_bootstrap_hf_home()
+# =============================================================================
+
+import argparse
+import json
+import signal
+import subprocess
 from typing import Dict, Any, Optional
 
 # Suppress huggingface_hub progress bars (used by mlx-vlm during model loading)
@@ -161,6 +252,7 @@ def main():
     show_parser.add_argument("model", help="Model name to show")
     show_parser.add_argument("--files", action="store_true", help="Include file listing")
     show_parser.add_argument("--config", action="store_true", help="Include config.json content")
+    show_parser.add_argument("--recalc-hash", action="store_true", help="Recalculate and store content hash for workspace (pins current state as clean)")
     show_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     
     # Pull command
@@ -179,26 +271,25 @@ def main():
     clone_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     clone_parser.add_argument("--force-resume", action="store_true", help="Force resume of partial downloads without prompting")
 
-    # Convert command (alpha) - only show if alpha features enabled
-    if os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
-        convert_parser = subparsers.add_parser(
-            "convert",
-            help="ALPHA: Convert workspace to workspace with transformations",
-            description="Transform model workspaces (repair-index, quantize, etc.)"
-        )
-        convert_parser.add_argument("source", help="Source workspace path")
-        convert_parser.add_argument("target", help="Target workspace path")
-        convert_parser.add_argument(
-            "--repair-index",
-            action="store_true",
-            help="Rebuild model.safetensors.index.json from shards (fixes mlx-vlm #624)"
-        )
-        convert_parser.add_argument(
-            "--skip-health",
-            action="store_true",
-            help="Skip health check on output (debug only)"
-        )
-        convert_parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    # Convert command
+    convert_parser = subparsers.add_parser(
+        "convert",
+        help="Convert workspace to workspace with transformations",
+        description="Transform model workspaces (repair-index, quantize, etc.)"
+    )
+    convert_parser.add_argument("source", help="Source workspace path")
+    convert_parser.add_argument("target", help="Target workspace path")
+    convert_parser.add_argument(
+        "--repair-index",
+        action="store_true",
+        help="Rebuild model.safetensors.index.json from shards (fixes mlx-vlm #624)"
+    )
+    convert_parser.add_argument(
+        "--skip-health",
+        action="store_true",
+        help="Skip health check on output (debug only)"
+    )
+    convert_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
     # Remove command
     rm_parser = subparsers.add_parser("rm", help="Delete a model")
@@ -339,7 +430,8 @@ def main():
             result = health_check_operation(args.model)
             print_result(result, render_health, args.json)
         elif args.command == "show":
-            result = show_model_operation(args.model, args.files, args.config)
+            recalc = getattr(args, 'recalc_hash', False)
+            result = show_model_operation(args.model, args.files, args.config, recalc)
             print_result(result, render_show, args.json)
         elif args.command == "pull":
             result = pull_operation(args.model)
@@ -398,12 +490,6 @@ def main():
             print_result(result, render_clone, args.json,
                         quiet=getattr(args, "quiet", False))
         elif args.command == "convert":
-            # Check if alpha features are enabled (should not reach here if not, but double-check)
-            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
-                result = handle_error("CommandError", "Convert command requires MLXK2_ENABLE_ALPHA_FEATURES=1")
-                print_result(result, None, True)  # Always JSON for this error
-                sys.exit(1)
-
             from .operations.convert import convert_operation
 
             # Validate mode flags

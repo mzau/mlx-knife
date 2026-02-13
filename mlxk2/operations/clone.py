@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
 from .pull import pull_to_cache
-from .workspace import write_workspace_sentinel
+from .workspace import write_workspace_sentinel, compute_workspace_hash
 from ..core.cache import hf_to_cache_dir
 from mlxk2 import __version__
 
@@ -196,13 +196,19 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
             # Extract commit hash if available from pull result
             commit_hash = pull_result["data"].get("commit_hash")
 
+            # ADR-022 Phase 1.5: Compute content hash for clean indicator
+            content_hash = compute_workspace_hash(target_path)
+            hash_modified = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
             metadata = {
                 "mlxk_version": __version__,
                 "created_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 "source_repo": resolved_model,
                 "source_revision": commit_hash,
                 "managed": True,
-                "operation": "clone"
+                "operation": "clone",
+                "content_hash": content_hash,
+                "hash_modified": hash_modified,
             }
 
             try:

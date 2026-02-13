@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from ..core.cache import get_current_model_cache, cache_dir_to_hf
 from .common import build_model_object
-from .workspace import find_matching_workspaces, is_explicit_path
+from .workspace import find_matching_workspaces, is_explicit_path, is_workspace_path, get_workspace_home
 
 
 def _compute_display_name(workspace_path: Path, pattern: str) -> str:
@@ -99,6 +99,21 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
         }
 
     models = []
+
+    # ADR-022: Include MLXK_WORKSPACE_HOME models (workspace-first paradigm)
+    workspace_home = get_workspace_home()
+    if workspace_home:
+        for ws_dir in workspace_home.iterdir():
+            if ws_dir.is_dir() and is_workspace_path(str(ws_dir)):
+                # Apply pattern filter if specified
+                if pattern and pattern.strip():
+                    if pattern.lower() not in ws_dir.name.lower():
+                        continue
+                model_obj = build_model_object(str(ws_dir), ws_dir, ws_dir)
+                # Add display_name for human output
+                model_obj["display_name"] = ws_dir.name
+                models.append(model_obj)
+
     model_cache = get_current_model_cache()
 
     if not model_cache.exists():

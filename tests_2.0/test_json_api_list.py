@@ -24,8 +24,11 @@ def _is_iso_utc_z(ts: str) -> bool:
 
 
 @pytest.mark.spec
-def test_list_minimal_model_object_fields(mock_models, isolated_cache):
+def test_list_minimal_model_object_fields(mock_models, isolated_cache, monkeypatch):
     """Each model entry returns the minimal model object with health."""
+    # Isolate from MLXK_WORKSPACE_HOME (this test validates cache models only)
+    monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
+
     result = list_models()
     assert result["status"] == "success"
     assert result["command"] == "list"
@@ -40,10 +43,10 @@ def test_list_minimal_model_object_fields(mock_models, isolated_cache):
 
     # Verify minimal fields and types
     for m in models:
-        # Required fields
+        # Required fields (JSON API 0.2.0 schema)
         assert set([
             "name", "hash", "size_bytes", "last_modified", "framework",
-            "model_type", "capabilities", "health", "cached"
+            "model_type", "capabilities", "health", "runtime_compatible", "cached"
         ]).issubset(m.keys())
 
         assert isinstance(m["name"], str) and "/" in m["name"]
@@ -96,8 +99,11 @@ def test_list_pattern_filter_case_insensitive(mock_models, isolated_cache):
 
 
 @pytest.mark.spec
-def test_list_empty_cache(isolated_cache):
+def test_list_empty_cache(isolated_cache, monkeypatch):
     """Empty cache yields empty list and count 0."""
+    # Isolate from MLXK_WORKSPACE_HOME to avoid workspace pollution
+    monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
+
     # Remove all models (keep canary)
     for d in isolated_cache.iterdir():
         if d.is_dir() and d.name.startswith("models--") and "TEST-CACHE-SENTINEL" not in d.name:

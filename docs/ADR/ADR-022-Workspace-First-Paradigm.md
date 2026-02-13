@@ -206,6 +206,48 @@ ADR-018 defines workspace operations (clone, convert, push) and the workspace se
 
 **Tests:** ~10-15 new tests
 
+### Phase 1.5: Content Hash & Clean Indicator (2.0.5-beta.1)
+
+**Goal:** Track workspace integrity and runtime artifact state
+
+**Features:**
+
+1. **Content Hash** — SHA256 of workspace files (excluding `.hf_cache/`, `.mlxk_workspace.json`)
+   - Computed after `clone` and `convert`
+   - Stored in `.mlxk_workspace.json` as `content_hash`
+   - `hash_modified: true` when current hash differs from stored
+
+2. **Clean Indicator** — Shows if `.hf_cache/` contains runtime artifacts
+   - `clean`: `.hf_cache/` empty or non-existent
+   - `dirty`: `.hf_cache/` contains downloaded artifacts
+
+**UX:**
+
+Default (`mlxk list`):
+```
+Name              | Src   | Size
+whisper-large-v3  | ws    | 400MB    ← clean
+vibevoice-asr     | ws*   | 2.1GB    ← dirty (*)
+phi-3-mini        | cache | 2.1GB
+```
+
+Verbose (`mlxk list --verbose`):
+```
+Name              | Src   | Clean | Size
+whisper-large-v3  | ws    | ✓     | 400MB
+vibevoice-asr     | ws    | ✗     | 2.1GB
+phi-3-mini        | cache | —     | 2.1GB
+```
+
+**Files:**
+- `mlxk2/operations/workspace.py` — `compute_workspace_hash()`, `is_workspace_clean()`
+- `mlxk2/operations/clone.py` — hash computation after clone
+- `mlxk2/operations/list.py` — clean indicator in model_obj
+- `mlxk2/operations/show.py` — hash + clean in response
+- `mlxk2/output/human.py` — UX formatting (default vs verbose)
+
+**LOC:** ~100
+
 ### Phase 2: Testsuite Migration (2.0.5-beta.2)
 
 **Goal:** Tests support both paradigms
@@ -389,6 +431,7 @@ New fields in `modelObject`:
   "origin": "mlx-community/whisper-large-v3-mlx",
   "content_hash": "sha256:a1b2c3...",
   "hash_modified": false,
+  "clean": true,
   "cached": false
 }
 ```
@@ -399,8 +442,18 @@ New fields in `modelObject`:
 | `origin` | `string \| null` | HF origin (from sentinel) |
 | `content_hash` | `string \| null` | SHA256 of workspace content |
 | `hash_modified` | `boolean` | True if hash changed since clone/convert |
+| `clean` | `boolean \| null` | `.hf_cache/` empty (workspace only, null for cache) |
 
 **Breaking Changes:** None (additive)
+
+**Implementation Status (Phase 1.5):**
+| Field | Status | Notes |
+|-------|--------|-------|
+| `source` | ✅ Done | Via `cached` field (Phase 1) |
+| `origin` | 🔜 Phase 1.5 | From `.mlxk_workspace.json` |
+| `content_hash` | 🔜 Phase 1.5 | Computed on clone |
+| `hash_modified` | 🔜 Phase 1.5 | Compare stored vs current |
+| `clean` | 🔜 Phase 1.5 | Check `.hf_cache/` state |
 
 ---
 

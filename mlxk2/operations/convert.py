@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any
 
-from .workspace import write_workspace_sentinel, is_managed_workspace, read_workspace_metadata
+from .workspace import write_workspace_sentinel, is_managed_workspace, read_workspace_metadata, update_workspace_hash
 from .health import health_check_workspace
 from ..core.cache import get_current_cache_root
 from mlxk2 import __version__
@@ -342,6 +342,15 @@ def convert_operation(
                     "message": f"Output workspace failed health check: {reason}"
                 }
                 return result
+
+        # ADR-022 Phase 2a: Compute content hash for clean tracking
+        try:
+            content_hash = update_workspace_hash(dst)
+            if content_hash:
+                result["data"]["content_hash"] = content_hash
+                logger.debug(f"Content hash computed: {content_hash[:7]}")
+        except Exception as e:
+            logger.warning(f"Failed to compute content hash: {e}")
 
         logger.info("Convert operation completed successfully")
 

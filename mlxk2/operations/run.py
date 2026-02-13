@@ -452,6 +452,8 @@ def run_model(
         return error_result
 
     # Runtime compatibility verified, proceed with model loading
+    # Note: HF_HOME is set at CLI bootstrap (cli.py) for workspace isolation (ADR-022)
+
     try:
         # ADR-020: Audio STT path uses mlx-audio backend (Whisper, Voxtral)
         # Routes audio-only requests to AudioRunner when backend is MLX_AUDIO

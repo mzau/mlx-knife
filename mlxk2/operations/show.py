@@ -7,7 +7,7 @@ from typing import Dict, Any
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from .common import build_model_object
-from .workspace import is_workspace_path
+from .workspace import is_workspace_path, read_workspace_metadata, update_workspace_hash
 
 
 def get_file_type(file_name):
@@ -114,15 +114,25 @@ def _is_40_hex(s: str) -> bool:
     return len(s) == 40 and all(c in "0123456789abcdef" for c in s.lower())
 
 
-def show_model_operation(model_pattern: str, include_files: bool = False, include_config: bool = False) -> Dict[str, Any]:
-    """Show detailed model information."""
+def show_model_operation(model_pattern: str, include_files: bool = False, include_config: bool = False, recalc_hash: bool = False) -> Dict[str, Any]:
+    """Show detailed model information.
+
+    Args:
+        model_pattern: Model name or path pattern
+        include_files: Include file listing in response
+        include_config: Include config.json content in response
+        recalc_hash: Recalculate and store content hash for workspace (ADR-022 Phase 1.5)
+
+    Returns:
+        JSON response dict
+    """
     result = {
         "status": "success",
         "command": "show",
         "data": None,
         "error": None
     }
-    
+
     try:
         # Resolve model name and hash
         resolved_name, commit_hash, ambiguous_matches = resolve_model_for_operation(model_pattern)
@@ -145,10 +155,21 @@ def show_model_operation(model_pattern: str, include_files: bool = False, includ
             return result
 
         # Check if resolved_name is a workspace path
+        ws_metadata = None
+        hash_updated = False
         if is_workspace_path(resolved_name):
             # Workspace path - use directly
             model_path = Path(resolved_name)
             model_cache_dir = model_path.parent
+
+            # ADR-022 Phase 1.5: Recalculate hash if requested
+            if recalc_hash:
+                success, new_hash = update_workspace_hash(model_path)
+                if success:
+                    hash_updated = True
+
+            # ADR-022: Read workspace metadata if available (after potential update)
+            ws_metadata = read_workspace_metadata(model_path)
         else:
             # Cache model - existing logic
             model_cache_dir = get_current_model_cache() / hf_to_cache_dir(resolved_name)
@@ -190,7 +211,12 @@ def show_model_operation(model_pattern: str, include_files: bool = False, includ
         model_obj = build_model_object(resolved_name, model_cache_dir, model_path)
 
         # Build response data
-        data = {"model": model_obj}
+        # ADR-022: Include workspace metadata for workspace paths
+        data = {"model": model_obj, "workspace_metadata": ws_metadata}
+
+        # ADR-022 Phase 1.5: Include hash_updated flag
+        if hash_updated:
+            data["hash_updated"] = True
         
         if include_files:
             data["files"] = get_model_files(model_path)

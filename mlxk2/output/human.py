@@ -13,10 +13,21 @@ def humanize_size(num_bytes: Optional[int]) -> str:
     return f"{n:.1f}PB"
 
 
-def fmt_hash7(h: Optional[str]) -> str:
-    if not h:
-        return "-"
-    return h[:7]
+def fmt_hash7(h: Optional[str], content_hash: Optional[str] = None) -> str:
+    """Format hash for display (first 7 chars).
+
+    Args:
+        h: Git commit hash (for cache models)
+        content_hash: Content hash (for workspaces, ADR-022 Phase 1.5)
+
+    Returns:
+        First 7 chars of hash, or "-" if none
+    """
+    if h:
+        return h[:7]
+    if content_hash:
+        return content_hash[:7]
+    return "-"
 
 
 def fmt_time(iso_utc_z: Optional[str]) -> str:
@@ -121,10 +132,12 @@ def _table(rows: List[List[str]], headers: List[str], max_col_width: Optional[in
 def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose: bool) -> str:
     models: List[Dict[str, Any]] = data.get("data", {}).get("models", [])
     compact = (not show_all) and (not verbose)
+    # ADR-022: Added "Src" column to show workspace vs cache source
+    # ADR-022 Phase 1.5: Added "Clean" column in verbose mode
     if compact:
-        headers = ["Name", "Hash", "Size", "Modified", "Type"]
+        headers = ["Name", "Hash", "Size", "Modified", "Src", "Type"]
     else:
-        headers = ["Name", "Hash", "Size", "Modified", "Framework", "Type"]
+        headers = ["Name", "Hash", "Size", "Modified", "Src", "Clean", "Framework", "Type"]
     if show_health:
         if verbose:
             # Verbose mode: split health into Integrity + Runtime + Reason columns
@@ -164,20 +177,44 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
         # Only add +audio if model_type is not already "audio" (avoid "audio+audio")
         if "audio" in caps and type_label != "-" and type_label != "audio":
             type_label = f"{type_label}+audio"
+        # ADR-022: Source column - "cache" for HF cache, "ws" for workspace
+        # Phase 1.5: "ws*" for dirty workspaces (modified since clone)
+        if m.get("cached", True):
+            source = "cache"
+        else:
+            clean = m.get("clean")
+            if clean is False:
+                source = "ws*"  # Dirty workspace
+            else:
+                source = "ws"  # Clean or unknown
         if compact:
             row = [
                 name,
-                fmt_hash7(m.get("hash")),
+                fmt_hash7(m.get("hash"), m.get("content_hash")),
                 humanize_size(m.get("size_bytes")),
                 fmt_time(m.get("last_modified")),
+                source,
                 type_label,
             ]
         else:
+            # ADR-022 Phase 1.5: Clean column (✓/✗/— for clean/dirty/unknown)
+            clean = m.get("clean")
+            if m.get("cached", True):
+                clean_str = "—"  # Not applicable for cache models
+            elif clean is True:
+                clean_str = "✓"
+            elif clean is False:
+                clean_str = "✗"
+            else:
+                clean_str = "—"  # Unknown (no sentinel hash)
+
             row = [
                 name,
-                fmt_hash7(m.get("hash")),
+                fmt_hash7(m.get("hash"), m.get("content_hash")),
                 humanize_size(m.get("size_bytes")),
                 fmt_time(m.get("last_modified")),
+                source,
+                clean_str,
                 str(m.get("framework", "-")),
                 type_label,
             ]
@@ -303,6 +340,25 @@ def render_show(data: Dict[str, Any]) -> str:
         out.append("Metadata:")
         for k, v in d["metadata"].items():
             out.append(f"  {k}: {v}")
+
+    # ADR-022: Show workspace metadata if available
+    ws_meta = d.get("workspace_metadata")
+    if ws_meta and ws_meta.get("source_repo"):
+        out.append("")
+        out.append("Workspace:")
+        out.append(f"  Source: {ws_meta.get('source_repo', '-')}")
+        out.append(f"  Operation: {ws_meta.get('operation', '-')}")
+        out.append(f"  Created: {ws_meta.get('created_at', '-')}")
+        # ADR-022 Phase 1.5: Show hash info if available
+        if ws_meta.get("content_hash"):
+            out.append(f"  Content Hash: {ws_meta.get('content_hash', '-')[:16]}...")
+            out.append(f"  Hash Modified: {ws_meta.get('hash_modified', '-')}")
+
+    # ADR-022 Phase 1.5: Show hash_updated flag
+    if d.get("hash_updated"):
+        out.append("")
+        out.append("Hash recalculated and stored (workspace now marked as clean)")
+
     return "\n".join(out)
 
 

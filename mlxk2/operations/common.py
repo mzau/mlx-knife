@@ -373,10 +373,11 @@ def detect_audio_backend(probe: Path, config: Optional[Dict[str, Any]]) -> Optio
         if isinstance(vision_config, dict) and len(vision_config) > 0:
             return Backend.MLX_VLM
 
-    # Priority 3: STT model_type = mlx-audio STT (Whisper only for 2.0.4 stable)
+    # Priority 3: STT model_type = mlx-audio STT
     # Uses substring matching for flexibility
-    # Note: Voxtral/VibeVoice/Qwen3-ASR excluded - see docs/ISSUES/
-    stt_model_types = ["whisper"]
+    # 2.0.5: Added VibeVoice (ADR-022 HF cache isolation enables runtime downloads)
+    # Note: Voxtral/Qwen3-ASR still excluded - see docs/ISSUES/
+    stt_model_types = ["whisper", "vibevoice"]
     if any(stt in model_type_lower for stt in stt_model_types):
         return Backend.MLX_AUDIO
 
@@ -508,10 +509,10 @@ def audio_runtime_compatibility(
                     if isinstance(model_type, str):
                         model_type_lower = model_type.lower()
                         # Check if model_type is a known STT type (substring match)
-                        # For 2.0.4 stable: Only Whisper is production-ready
-                        stt_model_types = ["whisper"]
+                        # For 2.0.5: Whisper + VibeVoice (ADR-022 HF cache isolation)
+                        stt_model_types = ["whisper", "vibevoice"]
                         if not any(stt in model_type_lower for stt in stt_model_types):
-                            return False, f"Model type '{model_type}' not supported (only Whisper is production-ready in 2.0.4)"
+                            return False, f"Model type '{model_type}' not supported (supported: whisper, vibevoice)"
                 except Exception:
                     pass  # If config can't be read, proceed (health check will catch it)
 
@@ -579,9 +580,10 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     like a 40-char hex string, else None.
 
     ADR-018 Phase 0c: Supports workspace paths (hf_name can be absolute path).
+    ADR-022 Phase 1.5: Adds origin, content_hash, hash_modified, clean for workspaces.
     """
     from ..operations.health import is_model_healthy, check_runtime_compatibility, health_check_workspace
-    from ..operations.workspace import is_workspace_path
+    from ..operations.workspace import is_workspace_path, read_workspace_metadata, is_workspace_clean
 
     # Compute commit hash if selected path is a snapshot dir
     commit_hash: Optional[str] = None
@@ -659,6 +661,23 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     # Cached flag: True for cache models, False for workspace paths (ADR-018 Phase 0c)
     cached = not is_workspace_path(hf_name)
 
+    # ADR-022 Phase 1.5: Workspace-specific fields (origin, clean indicator)
+    origin: Optional[str] = None
+    content_hash: Optional[str] = None
+    hash_modified: Optional[str] = None
+    clean: Optional[bool] = None
+
+    if not cached:
+        # Workspace: read metadata from sentinel
+        ws_metadata = read_workspace_metadata(Path(hf_name))
+        origin = ws_metadata.get("source_repo")
+        content_hash = ws_metadata.get("content_hash")
+        hash_modified = ws_metadata.get("hash_modified")
+
+        # Compute clean status
+        is_clean, _, _ = is_workspace_clean(Path(hf_name))
+        clean = is_clean  # True/False/None
+
     model_obj = {
         "name": hf_name,
         "hash": commit_hash,
@@ -671,5 +690,10 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         "runtime_compatible": runtime_compatible,
         "reason": reason,
         "cached": cached,
+        # ADR-022 Phase 1.5: Workspace fields
+        "origin": origin,
+        "content_hash": content_hash,
+        "hash_modified": hash_modified,
+        "clean": clean,
     }
     return model_obj
