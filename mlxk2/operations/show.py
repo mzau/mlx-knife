@@ -210,6 +210,18 @@ def show_model_operation(model_pattern: str, include_files: bool = False, includ
         # Build unified model object
         model_obj = build_model_object(resolved_name, model_cache_dir, model_path)
 
+        # Always read quantization info from config.json (lightweight, no --config needed)
+        config_path = model_path / "config.json"
+        if config_path.exists():
+            try:
+                import json as _json
+                config_data = _json.loads(config_path.read_text(encoding="utf-8"))
+                quant = config_data.get("quantization")
+                if isinstance(quant, dict):
+                    model_obj["quantization"] = quant
+            except (ValueError, OSError):
+                pass
+
         # Build response data
         # ADR-022: Include workspace metadata for workspace paths
         data = {"model": model_obj, "workspace_metadata": ws_metadata}

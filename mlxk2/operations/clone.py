@@ -14,6 +14,7 @@ User cache is NEVER touched - only temp cache is used and cleaned up.
 
 import hashlib
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -62,6 +63,26 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
         target_path = Path(target_dir).resolve()
         result["data"]["target_dir"] = str(target_path)
 
+        # Validate target parent exists and is writable
+        target_parent = target_path.parent
+        if not target_parent.exists():
+            result["status"] = "error"
+            result["error"] = {
+                "type": "InvalidTargetError",
+                "message": f"Parent directory does not exist: {target_parent}"
+            }
+            result["data"]["clone_status"] = "error"
+            return result
+
+        if not os.access(target_parent, os.W_OK):
+            result["status"] = "error"
+            result["error"] = {
+                "type": "InvalidTargetError",
+                "message": f"Parent directory is not writable: {target_parent}"
+            }
+            result["data"]["clone_status"] = "error"
+            return result
+
         # Check if target exists and is not empty
         if target_path.exists():
             if not target_path.is_dir():
@@ -83,17 +104,9 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
                 result["data"]["clone_status"] = "error"
                 return result
 
-        # Phase 1: Validate APFS requirement (ADR-007)
-        try:
-            _validate_apfs_filesystem(target_path.parent)
-        except FilesystemError as e:
-            result["status"] = "error"
-            result["error"] = {
-                "type": "FilesystemError",
-                "message": str(e)
-            }
-            result["data"]["clone_status"] = "filesystem_error"
-            return result
+        # Phase 1: Check APFS (warn if not, but continue with fallback)
+        # ADR-022: Cross-volume and non-APFS are now supported via regular copy fallback
+        _check_apfs_and_warn(target_path.parent)
 
         # Phase 1b: Removed - same-volume validation obsolete (ADR-022)
         # Temp cache is always created on workspace volume (line ~440), so cross-volume
@@ -311,43 +324,54 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
     return result
 
 
-def _validate_apfs_filesystem(path: Path) -> None:
-    """Validate APFS requirement for clone operations.
+def _check_apfs_and_warn(path: Path) -> bool:
+    """Check if path is on APFS and warn if not.
 
-    Called lazily - only on first clone operation, not at CLI startup.
+    Returns True if APFS (CoW available), False otherwise.
+    Logs warning for non-APFS but does NOT raise exception.
     """
-    if not _is_apfs_filesystem(path):
-        raise FilesystemError(
-            f"APFS required for clone operations. "
-            f"Path: {path}\n"
-            f"Solution: Use APFS volume or external APFS SSD."
+    is_apfs = _is_apfs_filesystem(path)
+    if not is_apfs:
+        logger.warning(
+            f"Non-APFS filesystem detected at {path}. "
+            f"Copy operations will use regular copy instead of CoW (slower, uses disk space)."
         )
+    return is_apfs
 
 
 def _is_apfs_filesystem(path: Path) -> bool:
-    """Simple APFS check - returns True/False only.
+    """Check if path is on an APFS filesystem.
 
-    Used by both clone (validation) and push (conditional warning).
+    Uses st_dev matching instead of path prefix comparison.
+    This correctly handles macOS firmlinks (e.g., /Users is a firmlink
+    to /System/Volumes/Data/Users but has the same st_dev as /).
+
+    If path doesn't exist, checks nearest existing parent.
     """
     try:
-        # Use mount command to check filesystem type on macOS
-        result = subprocess.run(['mount'], capture_output=True, text=True)
-        abs_path = str(path.resolve())
+        # Walk up to nearest existing directory
+        check_path = path.resolve()
+        while not check_path.exists() and check_path != check_path.parent:
+            check_path = check_path.parent
 
-        # Regex pattern for mount lines: device on mountpoint (fstype, options...)
+        path_dev = os.stat(check_path).st_dev
+
+        # Parse mount output, find entry with matching st_dev
+        result = subprocess.run(['mount'], capture_output=True, text=True)
         mount_pattern = r'^(.+?) on (.+?) \(([^,]+),'
 
         for line in result.stdout.strip().split('\n'):
             match = re.match(mount_pattern, line)
             if match:
                 device, mountpoint, fstype = match.groups()
-
-                # Check if our path is under this mountpoint
-                if abs_path.startswith(mountpoint + '/') or abs_path == mountpoint:
-                    return fstype == 'apfs'
+                try:
+                    if os.stat(mountpoint).st_dev == path_dev:
+                        return fstype == 'apfs'
+                except OSError:
+                    continue
 
         return False  # No matching mount found
-    except (subprocess.CalledProcessError, re.error):
+    except (OSError, subprocess.CalledProcessError):
         return False  # Safe fallback
 
 
@@ -415,12 +439,14 @@ def _create_temp_cache_same_volume(target_workspace: Path, model_spec: str, forc
         - temp_cache_path: Path to temp cache directory
         - should_download: True if download needed, False if resuming healthy cache
     """
-    # Get target volume mount point via st_dev
-    target_volume = _get_volume_mount_point(target_workspace)
+    # Place temp cache next to target workspace (same volume, writable)
+    # Note: Previously used volume mount point, but that may lack write permissions
+    # (e.g., /Volumes/mz-SSD/ root). Target parent is always writable by the user.
+    target_parent = target_workspace.resolve().parent
 
     # Deterministic naming (ADR-018 Phase 0b)
     temp_cache_name = _get_deterministic_temp_cache_name(model_spec, target_workspace)
-    temp_cache = target_volume / temp_cache_name
+    temp_cache = target_parent / temp_cache_name
 
     # Check if we can resume existing temp cache
     can_resume, resume_reason, is_healthy = _check_temp_cache_resume(temp_cache, model_spec)
@@ -503,21 +529,37 @@ def _resolve_latest_snapshot(temp_cache: Path, model_name: str) -> Optional[Path
 
 
 def _apfs_clone_directory(source: Path, target: Path) -> bool:
-    """Clone directory using APFS copy-on-write via clonefile."""
-    try:
-        for item in source.rglob("*"):
-            if item.is_file():
-                relative_path = item.relative_to(source)
-                target_file = target / relative_path
-                target_file.parent.mkdir(parents=True, exist_ok=True)
+    """Clone directory using APFS CoW with fallback to regular copy.
 
-                # Use cp -c for clonefile (APFS CoW)
-                subprocess.run(['cp', '-c', str(item), str(target_file)],
-                             check=True, capture_output=True)
-        return True
+    Tries cp -c (CoW) first. If that fails (cross-volume or non-APFS),
+    falls back to shutil.copy2 (regular copy).
+    """
+    cow_failed = False
 
-    except subprocess.CalledProcessError:
-        return False
+    for item in source.rglob("*"):
+        if item.is_file():
+            relative_path = item.relative_to(source)
+            target_file = target / relative_path
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Try CoW first (unless we already know it won't work)
+            if not cow_failed:
+                try:
+                    subprocess.run(['cp', '-c', str(item), str(target_file)],
+                                 check=True, capture_output=True)
+                    continue  # Success, next file
+                except subprocess.CalledProcessError:
+                    # CoW failed - switch to regular copy for all remaining files
+                    cow_failed = True
+
+            # Fallback: regular copy
+            try:
+                shutil.copy2(item, target_file)
+            except (OSError, IOError) as e:
+                logger.error(f"Failed to copy {item}: {e}")
+                return False
+
+    return True
 
 
 def _cleanup_temp_cache_safe(temp_cache: Path) -> bool:

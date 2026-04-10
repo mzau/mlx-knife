@@ -127,6 +127,8 @@ class TestPipeModeSingleModel:
 
         assert code != 0, "Expected non-zero exit for interactive JSON"
         data = json.loads(stdout)
+        from .conftest import assert_json_api_schema
+        assert_json_api_schema(data)
         assert data["status"] == "error"
         assert "interactive" in data["error"]["message"].lower()
 

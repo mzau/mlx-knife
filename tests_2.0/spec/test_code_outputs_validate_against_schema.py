@@ -119,6 +119,77 @@ def test_version_output_matches_schema(monkeypatch, capsys):
 
 
 @pytest.mark.spec
+def test_convert_output_matches_schema():
+    """Test convert response schema with static example data."""
+    validator = _get_validator()
+
+    # Static example: quantize operation (text model)
+    convert_response = {
+        "status": "success",
+        "command": "convert",
+        "error": None,
+        "data": {
+            "source": "/path/to/source-workspace",
+            "target": "/path/to/target-workspace",
+            "mode": "quantize",
+            "health_check": True,
+            "message": "Quantized to 4-bit successfully",
+            "bits": 4,
+            "group_size": 64,
+            "health_status": "healthy",
+            "health_reason": "Multi-file model complete",
+            "content_hash": "bdd5a5be06e3e612bd91ad8ebdcfa787c892e0cf78dc2a585e0a092e32e9ed5f"
+        }
+    }
+
+    errors = sorted(validator.iter_errors(convert_response), key=lambda e: e.path)
+    assert not errors, f"convert output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+
+    # Static example: quantize with warning (re-quantizing already quantized model)
+    convert_warning = {
+        "status": "success",
+        "command": "convert",
+        "error": None,
+        "data": {
+            "source": "/path/to/4bit-model",
+            "target": "/path/to/8bit-model",
+            "mode": "quantize",
+            "health_check": True,
+            "warning": "Source already 4-bit. Quantizing to 8-bit does not increase precision.",
+            "message": "Quantized to 8-bit successfully",
+            "bits": 8,
+            "group_size": 64,
+            "health_status": "healthy",
+            "health_reason": "Multi-file model complete",
+            "content_hash": "abc123"
+        }
+    }
+
+    errors = sorted(validator.iter_errors(convert_warning), key=lambda e: e.path)
+    assert not errors, f"convert (warning) output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+
+    # Static example: repair-index operation
+    repair_response = {
+        "status": "success",
+        "command": "convert",
+        "error": None,
+        "data": {
+            "source": "/path/to/broken-workspace",
+            "target": "/path/to/fixed-workspace",
+            "mode": "repair-index",
+            "health_check": True,
+            "message": "Index rebuilt successfully",
+            "health_status": "healthy",
+            "health_reason": "Multi-file model complete",
+            "content_hash": "def456"
+        }
+    }
+
+    errors = sorted(validator.iter_errors(repair_response), key=lambda e: e.path)
+    assert not errors, f"convert (repair) output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+
+
+@pytest.mark.spec
 def test_clone_output_matches_schema():
     """Test clone response schema with static example data."""
     validator = _get_validator()

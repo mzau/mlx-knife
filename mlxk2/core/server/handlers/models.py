@@ -7,7 +7,7 @@ Extracted from server_base.py as part of Phase 1 refactoring.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 def _get_logger():

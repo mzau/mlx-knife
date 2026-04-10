@@ -43,6 +43,31 @@ finally:
 # The imported fixture is now available to all tests in this package
 
 
+def assert_json_api_schema(response_dict: dict) -> None:
+    """Validate a JSON API response dict against the JSON schema.
+
+    Call after json.loads() in any live test that produces --json output.
+    Skips silently if jsonschema is not installed (optional dependency).
+    """
+    try:
+        from jsonschema import Draft7Validator
+    except ImportError:
+        return  # jsonschema not installed, skip validation silently
+
+    schema_path = Path(__file__).parent.parent.parent / "docs" / "json-api-schema.json"
+    if not schema_path.exists():
+        return
+
+    import json
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator = Draft7Validator(schema)
+    errors = sorted(validator.iter_errors(response_dict), key=lambda e: list(e.path))
+    assert not errors, (
+        f"JSON API schema violation: {errors[0].message} "
+        f"at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+    )
+
+
 @pytest.fixture(scope="function", autouse=True)
 def _skip_unless_live_e2e_marker(request):
     """Auto-skip E2E tests unless -m live_e2e is explicitly used.

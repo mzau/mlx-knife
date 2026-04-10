@@ -1,16 +1,23 @@
-"""Convert operation for MLX Knife 2.0 (ADR-018 Phase 1).
+"""Convert operation for MLX Knife 2.0 (ADR-018 Phase 1+2).
 
 Workspace-to-workspace transformations:
 - repair-index: Rebuild safetensors index from existing shards (fixes mlx-vlm #624)
-- quantize: (Phase 2, future)
+- quantize: Quantize text or vision model to N bits (2, 3, 4, 6, 8)
 - dequantize: (Phase 3, future)
 
 ADR-018 Core Rules:
 1. Convert operates on workspaces, NEVER on HF cache (hard block)
-2. Target workspace gets sentinel written FIRST (atomic)
+2. Target workspace gets sentinel written FIRST (atomic) - repair-index
+   OR sentinel written AFTER mlx-lm completes - quantize
 3. Source can be managed or unmanaged
 4. Output is always managed workspace
 5. Health check runs on output (unless --skip-health)
+
+Quantize Workflow (differs from repair-index):
+- mlx-lm convert() requires target to NOT exist
+- mlx-lm creates target directory itself
+- Sentinel written AFTER successful quantization
+- On failure: shutil.rmtree(dst) for cleanup
 
 Philosophy:
 - HF cache is "holy mirror" of remote repos (read-only for convert)
@@ -20,17 +27,143 @@ Philosophy:
 
 import json
 import logging
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Callable
 
 from .workspace import write_workspace_sentinel, is_managed_workspace, read_workspace_metadata, update_workspace_hash
 from .health import health_check_workspace
+from .clone import _check_apfs_and_warn
 from ..core.cache import get_current_cache_root
 from mlxk2 import __version__
 
 logger = logging.getLogger(__name__)
+
+
+def _quantize_text_model(source: Path, target: Path, bits: int, group_size: int = 64) -> None:
+    """Quantize text model using mlx-lm.
+
+    NOTE: mlx-lm requires target to NOT exist. We validate this upfront,
+    then mlx-lm creates the directory. Sentinel is written AFTER success.
+
+    Future: mlx-vlm/mlx-audio may have different requirements.
+
+    Args:
+        source: Source workspace/model path
+        target: Target workspace path (must not exist)
+        bits: Quantization bits (2, 3, 4, 6, 8)
+        group_size: Quantization group size (default: 64)
+
+    Raises:
+        ValueError: If quantization fails or mlx-lm not available
+    """
+    try:
+        from mlx_lm import convert as mlx_lm_convert
+    except ImportError:
+        raise ValueError("mlx-lm not installed. Install with: pip install mlx-lm")
+
+    logger.info(f"Quantizing {source} → {target} ({bits}-bit, group_size={group_size})")
+
+    # mlx-lm creates target directory itself
+    mlx_lm_convert(
+        hf_path=str(source),
+        mlx_path=str(target),
+        quantize=True,
+        q_bits=bits,
+        q_group_size=group_size,
+    )
+
+    # Safety: Always rebuild index for consistency after quantization
+    rebuild_safetensors_index(target)
+
+
+def _quantize_vision_model(source: Path, target: Path, bits: int, group_size: int = 64) -> None:
+    """Quantize vision model using mlx-vlm.
+
+    API signature is identical to mlx-lm convert(). Same workflow:
+    target must NOT exist, mlx-vlm creates the directory.
+
+    Args:
+        source: Source workspace/model path
+        target: Target workspace path (must not exist)
+        bits: Quantization bits (2, 3, 4, 6, 8)
+        group_size: Quantization group size (default: 64)
+
+    Raises:
+        ValueError: If quantization fails or mlx-vlm not available
+    """
+    try:
+        from mlx_vlm import convert as mlx_vlm_convert
+    except ImportError:
+        raise ValueError("mlx-vlm not installed. Install with: pip install mlx-vlm")
+
+    logger.info(f"Quantizing vision model {source} → {target} ({bits}-bit, group_size={group_size})")
+
+    mlx_vlm_convert(
+        hf_path=str(source),
+        mlx_path=str(target),
+        quantize=True,
+        q_bits=bits,
+        q_group_size=group_size,
+    )
+
+    # Safety: Always rebuild index for consistency after quantization
+    rebuild_safetensors_index(target)
+
+
+def _detect_quantize_backend(source: Path) -> str:
+    """Detect whether source is a text or vision model for quantization dispatch.
+
+    Reads config.json and checks for vision_config or vision model_type markers.
+
+    Returns:
+        "vision" or "text"
+    """
+    config_path = source / "config.json"
+    if config_path.exists():
+        try:
+            import json as _json
+            config = _json.loads(config_path.read_text(encoding="utf-8"))
+            # Vision models have vision_config or a vision model_type
+            if isinstance(config.get("vision_config"), dict):
+                return "vision"
+            model_type = config.get("model_type", "")
+            if isinstance(model_type, str) and model_type.lower() in (
+                "llava", "pixtral", "qwen2_vl", "idefics2", "idefics3",
+                "mllama", "mistral3", "gemma3", "mimo",
+            ):
+                return "vision"
+        except Exception:
+            pass
+    return "text"
+
+
+# Backend dispatch
+QUANTIZE_BACKENDS: Dict[str, Callable[[Path, Path, int, int], None]] = {
+    "text": _quantize_text_model,
+    "vision": _quantize_vision_model,
+    # "audio": _quantize_audio_model,  # Future: mlx-audio
+}
+
+
+def _get_quantize_backend(model_type: str) -> Callable[[Path, Path, int, int], None]:
+    """Get quantization backend for model type.
+
+    Args:
+        model_type: Model type ("text", "vision", "audio")
+
+    Returns:
+        Quantization function
+
+    Raises:
+        ValueError: If model type not supported for quantization
+    """
+    backend = QUANTIZE_BACKENDS.get(model_type)
+    if not backend:
+        raise ValueError(f"Quantization not supported for {model_type} models (text and vision supported)")
+    return backend
 
 
 def rebuild_safetensors_index(workspace_path: Path) -> bool:
@@ -136,30 +269,40 @@ def convert_operation(
     source_path: str,
     target_path: str,
     mode: str,
+    mode_opts: Optional[Dict[str, Any]] = None,
     skip_health: bool = False
 ) -> Dict[str, Any]:
     """Convert operation: workspace → workspace transformation.
 
-    Phase 1 modes:
+    Modes:
     - "repair-index": Rebuild safetensors index only (fixes mlx-vlm #624)
+    - "quantize": Quantize to N bits (requires mode_opts["bits"])
 
-    Future modes (Phase 2+):
-    - "quantize": Quantize to N bits
+    Future modes:
     - "dequantize": Dequantize weights
 
-    Workflow:
+    Workflow (repair-index):
     1. Validate source exists, target is empty
     2. Cache sanctity check (hard block if source/target in cache)
     3. Create target, write sentinel FIRST (atomic)
     4. Copy non-weight assets (config, tokenizer, etc.) with CoW
     5. Clone safetensors shards with CoW
-    6. Apply mode operation (repair-index/quantize/etc.)
+    6. Apply mode operation (repair-index)
     7. Health check on output
+
+    Workflow (quantize):
+    1. Validate source exists, target does NOT exist
+    2. Cache sanctity check
+    3. mlx-lm creates target and quantizes
+    4. Write sentinel AFTER success
+    5. Health check on output
+    6. On failure: cleanup target directory
 
     Args:
         source_path: Source workspace path
         target_path: Target workspace path
-        mode: Conversion mode ("repair-index" for Phase 1)
+        mode: Conversion mode ("repair-index", "quantize")
+        mode_opts: Mode-specific options (e.g., {"bits": 4, "group_size": 64})
         skip_health: Skip health check on output (debug only)
 
     Returns:
@@ -185,6 +328,8 @@ def convert_operation(
     Raises:
         None - all errors returned in result dict
     """
+    if mode_opts is None:
+        mode_opts = {}
     result = {
         "status": "success",
         "command": "convert",
@@ -235,18 +380,7 @@ def convert_operation(
                 f"  mlxk convert {source_path} ./fixed-workspace --repair-index"
             )
 
-        # Phase 3: Validate target is empty or new
-        if dst.exists():
-            if any(dst.iterdir()):
-                raise ValueError(
-                    f"Target directory not empty: {target_path}\n"
-                    "Convert requires empty target workspace. Use different path or delete contents."
-                )
-        else:
-            dst.mkdir(parents=True)
-
-        # Phase 4: Write workspace sentinel FIRST (atomic, ADR-018 contract)
-        # Ensures target is identifiable as managed workspace before any processing
+        # Prepare metadata (used for sentinel in both workflows)
         src_metadata = {}
         if is_managed_workspace(src):
             src_metadata = read_workspace_metadata(src)
@@ -261,61 +395,124 @@ def convert_operation(
             "mode": mode
         }
 
-        try:
-            write_workspace_sentinel(dst, target_metadata)
-            logger.debug(f"Wrote workspace sentinel to {dst}")
-        except Exception as e:
-            raise OSError(f"Failed to write workspace sentinel: {e}") from e
+        # === QUANTIZE WORKFLOW ===
+        # Different from repair-index: mlx-lm creates target itself
+        if mode == "quantize":
+            # Phase 3Q: Validate target does NOT exist (mlx-lm requirement)
+            if dst.exists():
+                raise ValueError(
+                    f"Target directory exists: {target_path}\n"
+                    "Quantize requires target to NOT exist (mlx-lm creates it).\n"
+                    "Delete target or choose different path."
+                )
 
-        # Phase 5: Copy non-weight assets with CoW
-        # Skip .safetensors (will be cloned), copy config/tokenizer/images/etc.
-        # Use APFS CoW (cp -c) for efficient cloning
-        logger.info(f"Copying non-weight assets from {src} to {dst}")
+            bits = mode_opts.get("bits", 4)
+            group_size = mode_opts.get("group_size", 64)
 
-        for item in src.iterdir():
-            # Skip safetensors files (handled separately)
-            # Skip existing sentinel in target
-            # Skip model.safetensors.index.json (will be rebuilt)
-            if item.name.endswith(".safetensors"):
-                continue
-            if item.name == ".mlxk_workspace.json":
-                continue
-            if item.name == "model.safetensors.index.json":
-                continue
-
-            if item.is_file():
+            # Check if source is already quantized (warn if re-quantizing)
+            src_config_path = src / "config.json"
+            if src_config_path.exists():
                 try:
-                    # Use APFS CoW for large files (instant, zero space initially)
+                    src_config = json.loads(src_config_path.read_text(encoding="utf-8"))
+                    src_quant = src_config.get("quantization", {})
+                    src_bits = src_quant.get("bits") if isinstance(src_quant, dict) else None
+                    if src_bits is not None and bits > src_bits:
+                        result["data"]["warning"] = (
+                            f"Source already {src_bits}-bit. "
+                            f"Quantizing to {bits}-bit does not increase precision."
+                        )
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Add quantization info to metadata
+            target_metadata["quantization"] = {
+                "bits": bits,
+                "group_size": group_size
+            }
+
+            try:
+                # Phase 4Q: Auto-detect backend (text vs vision) and quantize
+                backend_type = _detect_quantize_backend(src)
+                backend = _get_quantize_backend(backend_type)
+                logger.info(f"Using {backend_type} quantization backend")
+                backend(src, dst, bits, group_size)
+
+                # Phase 5Q: Write sentinel AFTER successful quantization
+                write_workspace_sentinel(dst, target_metadata)
+                logger.debug(f"Wrote workspace sentinel to {dst}")
+
+                result["data"]["message"] = f"Quantized to {bits}-bit successfully"
+                result["data"]["bits"] = bits
+                result["data"]["group_size"] = group_size
+
+            except Exception as e:
+                # Cleanup on failure
+                if dst.exists():
+                    logger.warning(f"Quantization failed, cleaning up {dst}")
+                    shutil.rmtree(dst)
+                raise ValueError(f"Quantization failed: {e}") from e
+
+        # === REPAIR-INDEX WORKFLOW ===
+        elif mode == "repair-index":
+            # Phase 3: Validate target is empty or new
+            if dst.exists():
+                if any(dst.iterdir()):
+                    raise ValueError(
+                        f"Target directory not empty: {target_path}\n"
+                        "Convert requires empty target workspace. Use different path or delete contents."
+                    )
+            else:
+                dst.mkdir(parents=True)
+
+            # Phase 4: Write workspace sentinel FIRST (atomic, ADR-018 contract)
+            try:
+                write_workspace_sentinel(dst, target_metadata)
+                logger.debug(f"Wrote workspace sentinel to {dst}")
+            except Exception as e:
+                raise OSError(f"Failed to write workspace sentinel: {e}") from e
+
+            # Phase 4b: Check APFS for CoW support (warn if not available)
+            _check_apfs_and_warn(dst)
+
+            # Phase 5: Copy non-weight assets with CoW
+            logger.info(f"Copying non-weight assets from {src} to {dst}")
+
+            for item in src.iterdir():
+                # Skip safetensors files (handled separately)
+                # Skip existing sentinel in target
+                # Skip model.safetensors.index.json (will be rebuilt)
+                if item.name.endswith(".safetensors"):
+                    continue
+                if item.name == ".mlxk_workspace.json":
+                    continue
+                if item.name == "model.safetensors.index.json":
+                    continue
+
+                if item.is_file():
+                    try:
+                        # Use APFS CoW for large files (instant, zero space initially)
+                        subprocess.run(
+                            ["cp", "-c", str(item), str(dst / item.name)],
+                            check=True,
+                            capture_output=True,
+                            text=True
+                        )
+                    except subprocess.CalledProcessError:
+                        shutil.copy2(item, dst / item.name)
+
+            # Phase 6: Clone safetensors shards (CoW with fallback)
+            for shard in src.glob("*.safetensors"):
+                try:
                     subprocess.run(
-                        ["cp", "-c", str(item), str(dst / item.name)],
+                        ["cp", "-c", str(shard), str(dst / shard.name)],
                         check=True,
                         capture_output=True,
                         text=True
                     )
-                except subprocess.CalledProcessError as e:
-                    logger.warning(f"Failed to CoW copy {item.name}, using regular copy: {e}")
-                    # Fallback to regular copy
-                    import shutil
-                    shutil.copy2(item, dst / item.name)
+                except subprocess.CalledProcessError:
+                    shutil.copy2(shard, dst / shard.name)
 
-        # Phase 6: Clone safetensors shards (CoW)
-        logger.info("Cloning safetensors shards")
-
-        for shard in src.glob("*.safetensors"):
-            try:
-                subprocess.run(
-                    ["cp", "-c", str(shard), str(dst / shard.name)],
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"Failed to CoW copy {shard.name}, using regular copy: {e}")
-                import shutil
-                shutil.copy2(shard, dst / shard.name)
-
-        # Phase 7: Apply mode operation
-        if mode == "repair-index":
+            # Phase 7: Rebuild index
             logger.info("Rebuilding safetensors index")
             success = rebuild_safetensors_index(dst)
 
@@ -345,17 +542,14 @@ def convert_operation(
 
         # ADR-022 Phase 2a: Compute content hash for clean tracking
         try:
-            content_hash = update_workspace_hash(dst)
-            if content_hash:
-                result["data"]["content_hash"] = content_hash
-                logger.debug(f"Content hash computed: {content_hash[:7]}")
+            hash_success, hash_value = update_workspace_hash(dst)
+            if hash_success and hash_value:
+                result["data"]["content_hash"] = hash_value
+                logger.debug(f"Content hash computed: {hash_value[:7]}")
         except Exception as e:
             logger.warning(f"Failed to compute content hash: {e}")
 
-        logger.info("Convert operation completed successfully")
-
     except Exception as e:
-        logger.error(f"Convert operation failed: {e}")
         result["status"] = "error"
         result["error"] = {
             "type": type(e).__name__,

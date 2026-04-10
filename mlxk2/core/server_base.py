@@ -3,7 +3,6 @@ OpenAI-compatible API server for MLX models (2.0 implementation).
 Provides REST endpoints for text generation with MLX backend.
 """
 
-import json
 import os
 import threading
 import time
@@ -22,7 +21,7 @@ from pydantic import BaseModel, Field
 from .cache import get_current_model_cache, hf_to_cache_dir
 from .runner import MLXRunner
 from .model_resolution import resolve_model_for_operation
-from .capabilities import probe_and_select, PolicyDecision, Backend
+from .capabilities import Backend
 from ..operations.common import detect_audio_backend
 from ..tools.vision_adapter import MAX_AUDIO_SIZE_BYTES
 from .. import __version__

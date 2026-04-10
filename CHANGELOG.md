@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.0.5-beta.2] - 2026-04-09
+
+> **Quantize (Text + Vision) + Cross-Volume + Health Workspace Discovery.** Model quantization for text and vision models. Clone and convert work across volumes and non-APFS. Clean `--json` output. Multiple bugfixes from smoke testing.
+
+### Added
+
+- **`mlxk convert --quantize <bits>`:** Quantize text and vision models to 2, 3, 4, 6, or 8 bits (auto-detects backend: mlx-lm for text, mlx-vlm for vision)
+- **`--q-group-size N`:** Optional group size for quantization (default: 64)
+- **Re-Quantize Warning:** Warns when quantizing an already-quantized model (in `data.warning` field)
+- **Health Workspace Discovery:** `mlxk health` scans `MLXK_WORKSPACE_HOME` (workspace-first parity with `list`)
+- **Health Fuzzy Match:** `mlxk health <name>` resolves workspaces via `MLXK_WORKSPACE_HOME`
+- **`mlxk show` Quantization Display:** Shows bits + group_size; detects re-quantize mismatch
+- **`convert` in JSON API:** Added to command enum (JSON API 0.2.0)
+- **Schema Validation in Live Tests:** `assert_json_api_schema()` validates all `--json` output against schema
+- **Convert Schema Test:** 3 variants (quantize, quantize+warning, repair-index)
+
+### Changed
+
+- **Clone Cross-Volume Support:** `mlxk clone` works across volumes with silent fallback to regular copy
+- **Convert Cross-Volume Support:** `mlxk convert --repair-index` works across volumes
+- **Clean `--json` Output:** Upstream library print() noise suppressed (fd-level redirect)
+- **Target Parent Validation:** Clone validates parent directory exists and is writable before starting
+
+### Fixed
+
+- **APFS Detection:** Rewritten to use `st_dev` matching instead of path prefix. Fixes false "Non-APFS" on macOS firmlinks (`/Users` was incorrectly detected as non-APFS)
+- **Temp Cache Location:** Created in target parent instead of volume root (fixes Permission denied on volume mount points like `/Volumes/mz-SSD/`)
+- **`content_hash` Tuple Bug:** `update_workspace_hash()` return value correctly unpacked (was `[true, "hash"]` in JSON)
+- **Hash Algorithm:** Now samples first 4KB of safetensor files (different quantizations no longer produce identical hashes)
+- **Health Workspace Resolution:** `resolve_model_for_operation()` returning workspace path no longer breaks health check
+- **Silent CoW Fallback:** Removed dead `logger.warning()` calls that went to unconfigured loggers
+- **Misleading Error for Missing Models:** `mlxk run nonexistent --image x.jpg` now says "not found" instead of "not vision-capable"
+
+### Tests
+
+- 699 unit tests passing, 16 schema validation tests
+
+---
+
 ## [2.0.5-beta.1] - 2026-02-13
 
 > **Workspace-First Paradigm (ADR-022).** HF cache isolation, content hash tracking, convert command production-ready. JSON API 0.2.0.

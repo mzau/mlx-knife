@@ -37,7 +37,7 @@ dependencies = [
     "mlx>=0.30.0",
     "mlx-lm>=0.30.5",
     "mlx-vlm==0.3.10",
-    "mlx-audio==0.3.1",
+    "mlx-audio==0.3.0",
     "tiktoken>=0.7.0",
 ]
 
@@ -68,6 +68,10 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.5.0",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# cli.py: HF_HOME bootstrap (ADR-022) must run before any huggingface imports
+"mlxk2/cli.py" = ["E402"]
 
 [tool.setuptools]
 license-files = [

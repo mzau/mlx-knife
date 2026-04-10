@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "status": {"type": "string", "enum": ["success", "error"]},
-    "command": {"type": "string", "enum": ["list", "show", "health", "pull", "rm", "clone", "version", "push", "run", "server"]},
+    "command": {"type": "string", "enum": ["list", "show", "health", "pull", "rm", "clone", "convert", "version", "push", "run", "server"]},
     "api_version": {"type": "string", "pattern": "^json-[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "data": {"type": ["object", "null"]},
     "error": {

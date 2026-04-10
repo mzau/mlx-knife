@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import Tuple, Optional
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
-from .workspace import is_workspace_path
+from .workspace import is_workspace_path, get_workspace_home
+
+logger = logging.getLogger(__name__)
 
 
 def is_model_healthy(model_spec):
@@ -570,12 +572,6 @@ def health_check_operation(model_pattern=None):
 
             return result
 
-        # Not a workspace - proceed with cache-based health check
-        model_cache = get_current_model_cache()
-        if not model_cache.exists():
-            result["data"]["summary"]["total"] = 0
-            return result
-
         # Use model resolution if specific pattern provided
         if model_pattern:
             resolved_name, commit_hash, ambiguous_matches = resolve_model_for_operation(model_pattern)
@@ -593,24 +589,75 @@ def health_check_operation(model_pattern=None):
                 # No matches found
                 result["data"]["summary"]["total"] = 0
                 return result
-            else:
-                # Single match found - check just this model
+
+            # ADR-022: resolve_model_for_operation may return a workspace path
+            # (from MLXK_WORKSPACE_HOME fuzzy match). Detect and delegate.
+            resolved_path = Path(resolved_name)
+            if resolved_path.is_absolute() and is_workspace_path(str(resolved_path)):
+                healthy, reason, managed = health_check_workspace(resolved_path)
+                model_info = {
+                    "name": resolved_path.name,
+                    "status": "healthy" if healthy else "unhealthy",
+                    "reason": reason
+                }
+                result["data"]["summary"]["total"] = 1
+                if healthy:
+                    result["data"]["healthy"].append(model_info)
+                    result["data"]["summary"]["healthy_count"] = 1
+                else:
+                    result["data"]["unhealthy"].append(model_info)
+                    result["data"]["summary"]["unhealthy_count"] = 1
+                return result
+
+            # Cache model - check in HF cache
+            model_cache = get_current_model_cache()
+            if model_cache.exists():
                 model_cache_dir = model_cache / hf_to_cache_dir(resolved_name)
                 if model_cache_dir.exists():
                     models_to_check = [model_cache_dir]
                 else:
                     models_to_check = []
+            else:
+                models_to_check = []
         else:
-            # No pattern - check all models
-            models_to_check = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
+            # No pattern - check all models (workspaces + cache)
+            models_to_check = []
 
-        result["data"]["summary"]["total"] = len(models_to_check)
+            # ADR-022: Include MLXK_WORKSPACE_HOME workspaces (workspace-first)
+            workspace_home = get_workspace_home()
+            if workspace_home:
+                for ws_dir in sorted(workspace_home.iterdir(), key=lambda x: x.name):
+                    if ws_dir.is_dir() and is_workspace_path(str(ws_dir)):
+                        healthy, reason, managed = health_check_workspace(ws_dir)
+                        model_info = {
+                            "name": ws_dir.name,
+                            "status": "healthy" if healthy else "unhealthy",
+                            "reason": reason
+                        }
+                        if healthy:
+                            result["data"]["healthy"].append(model_info)
+                            result["data"]["summary"]["healthy_count"] += 1
+                        else:
+                            result["data"]["unhealthy"].append(model_info)
+                            result["data"]["summary"]["unhealthy_count"] += 1
 
+            # Cache models
+            model_cache = get_current_model_cache()
+            if model_cache.exists():
+                models_to_check = [d for d in model_cache.iterdir() if d.name.startswith("models--")]
+
+        # Process cache models
         for model_dir in sorted(models_to_check, key=lambda x: x.name):
             hf_name = cache_dir_to_hf(model_dir.name)
 
             # Hide test sentinel directories from listings
             if "TEST-CACHE-SENTINEL" in hf_name:
+                continue
+
+            # Deduplicate: skip cache model if workspace with same name already checked
+            workspace_names = {m["name"] for m in result["data"]["healthy"] + result["data"]["unhealthy"]}
+            model_short_name = hf_name.split("/")[-1] if "/" in hf_name else hf_name
+            if model_short_name in workspace_names:
                 continue
 
             # Use same integrity check as list/show (CONSISTENCY)
@@ -628,6 +675,12 @@ def health_check_operation(model_pattern=None):
             else:
                 result["data"]["unhealthy"].append(model_info)
                 result["data"]["summary"]["unhealthy_count"] += 1
+
+        # Update total count
+        result["data"]["summary"]["total"] = (
+            result["data"]["summary"]["healthy_count"] +
+            result["data"]["summary"]["unhealthy_count"]
+        )
 
     except Exception as e:
         result["status"] = "error"

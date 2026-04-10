@@ -4,9 +4,10 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.4** (Stable)
+**Current Version: 2.0.5-beta.2** | **Stable: 2.0.4**
 
-[![GitHub Release](https://img.shields.io/badge/version-2.0.4-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/beta-2.0.5--beta.2-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/stable-2.0.4-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -17,27 +18,26 @@
 
 ## Features
 
-### What's New in 2.0.4
-- **Audio Transcription (STT)** - Whisper speech-to-text (`--audio` flag)
-- **Vision Models with EXIF Metadata** - Image analysis + automatic GPS/date/camera extraction visible to the model
-- **Unix Pipe Integration** - Chain models without temp files (`vision → text` workflows)
-- **Local Development Workflow** - Clone → Repair → Test models without HuggingFace round-trips
-- **Community Model Repair Tool** - Fix broken mlx-vlm models with `--repair-index`
-- **Resumable Downloads** - Interrupted clone/pull operations continue automatically
-- **Safe Vision Batch Processing** - Automatic chunking prevents Metal OOM crashes
-- **Workspace Path Support** - Run/show/server/list commands work with local directories
-- **Updated [SECURITY.md](SECURITY.md)** - Clarifies mlx-knife vs. upstream library behavior; important for offline/air-gapped use
+### What's New in 2.0.5
+- **Workspace-First Paradigm** - Isolated model workspaces with HF cache separation (runtime downloads stay local)
+- **Model Quantization** - `mlxk convert --quantize <bits>` for text and vision models (2, 3, 4, 6, 8 bit)
+- **Cross-Volume Support** - Clone and convert work across volumes and filesystems
+- **Content Hash Tracking** - Detect workspace modifications; `--recalc-hash` pins current state
+- **`MLXK_WORKSPACE_HOME`** - Central workspace directory for portfolio discovery
 
 ### Core Functionality
-- **List & Manage Models**: Browse your HuggingFace cache with MLX-specific filtering
-- **Model Information**: Detailed model metadata including quantization info
-- **Download Models**: Pull models from HuggingFace with progress tracking
-- **Run Models**: Native MLX execution with streaming and chat modes
-- **Health Checks**: Verify model integrity and MLX runtime compatibility
-- **Cache Management**: Clean up and organize your model storage
-- **Privacy & Network**: No background network or telemetry; only explicit Hugging Face interactions when you run pull or the experimental push.
+- **Run Models** - Native MLX execution with streaming, chat modes, vision, and audio
+- **Audio Transcription (STT)** - Whisper speech-to-text via `--audio` flag
+- **Vision with EXIF Metadata** - Image analysis with automatic GPS/date/camera extraction
+- **Clone & Convert** - Local model workflows without HuggingFace round-trips
+- **Model Repair** - Fix broken mlx-vlm models with `--repair-index`
+- **List & Health** - Browse cache, verify integrity, check MLX runtime compatibility
+- **Resumable Downloads** - Interrupted clone/pull operations continue automatically
+- **Safe Vision Chunking** - Automatic batching prevents Metal OOM crashes
+- **Unix Pipes (Beta)** - Chain models without temp files (`cat | mlx-run model -`)
+- **Privacy** - No background network or telemetry; explicit HuggingFace interactions only
 
-### Unix Pipe Integration (Beta, 2.0.4)
+### Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
 ```bash
 export MLXK2_ENABLE_PIPES=1
@@ -154,7 +154,7 @@ mlxk serve --port 8080
 | `server`/`serve` | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
 | `clone` | Model workspace cloning - create local editable copy from cache |
 | `push` | Upload to HuggingFace Hub (requires `--private` flag for safety) |
-| 🔒 `convert` | **Experimental** - Workspace transformations; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| `convert` | Workspace transformations: `--repair-index`, `--quantize <bits>` |
 | 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
 ## Model References
@@ -205,14 +205,45 @@ mlxk run ./fixed "Test"
 
 ---
 
-## Workspace Development Workflow (2.0.4-beta.6+)
+## Workspaces
 
-**Complete local development cycle** for model experimentation, repair, and testing without HuggingFace round-trips:
+### Why Workspaces?
+
+The HuggingFace cache (`~/.cache/huggingface`) is a shared namespace. Multiple libraries write to it during inference, often without notice. This makes it hard to know what a model actually needs, whether it works offline, or if something changed since you last tested it.
+
+Workspaces solve this by giving each model its own directory with full isolation:
+
+- **Self-contained:** All files in one place — model weights, config, tokenizer, and any runtime downloads (captured in `.hf_cache/`)
+- **Reproducible:** After one successful run, everything is local. Archive it, move it to another machine, run it offline
+- **Platform-independent:** Workspaces are plain directories with standard formats (safetensors + config.json). They work regardless of where the model originally came from
+- **Transparent:** `mlxk show` and `mlxk health` tell you exactly what's inside, whether anything changed, and if the model is ready to run
+
+For quick testing, `mlxk pull` + `mlxk run` still works. Workspaces are for when you want control.
+
+### Quick Start
 
 ```bash
-# Clone → Repair → Test → Publish (optional)
+# Set up a workspace directory (add to your shell profile)
+export MLXK_WORKSPACE_HOME=~/mlx-models
+
+# Clone a model into a workspace
+mlxk clone Llama-3.2-1B-Instruct-4bit ~/mlx-models/Llama-3.2-1B-Instruct-4bit
+
+# Run it
+mlxk run Llama-3.2 "Hello"
+
+# See your portfolio (workspaces + cache)
+mlxk list
+```
+
+### Development Workflow
+
+Full local cycle for model experimentation, repair, quantization, and testing:
+
+```bash
 mlxk clone "model" ./workspace
-MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk convert ./workspace ./fixed --repair-index
+mlxk convert ./workspace ./fixed --repair-index    # Fix broken index
+mlxk convert ./workspace ./quantized --quantize 4  # Or quantize to 4-bit
 mlxk list .                                        # See all local workspaces
 mlxk run ./fixed "test prompt"                     # Local inference
 mlxk server --model ./fixed                        # Dev server
@@ -220,9 +251,10 @@ mlxk push ./fixed "your-org/model"                 # Optional publish
 ```
 
 **Key capabilities:**
-- **Model repair:** Fix index/shard mismatches from mlx-vlm #624
+- **Model repair:** Fix index/shard mismatches from mlx-vlm conversions
+- **Quantization:** Convert bf16/fp16 models to 2, 3, 4, 6, or 8-bit
+- **Cross-volume:** Clone/convert works across APFS volumes, SMB, NFS
 - **Local testing:** Run/server/show without pushing to HuggingFace
-- **Side-by-side comparison:** Multiple workspaces with parallel servers
 - **Rapid iteration:** Clone → Modify → Test loop
 
 ### Workspace Commands Reference
@@ -234,7 +266,7 @@ mlxk push ./fixed "your-org/model"                 # Optional publish
 | `health` | ✅ Yes | `mlxk health ./workspace` |
 | `server` | ✅ Yes | `mlxk server --model ./workspace` |
 | `clone` | ✅ Creates | `mlxk clone model ./workspace` |
-| `convert` | ✅ Yes | `mlxk convert ./in ./out --repair-index` |
+| `convert` | ✅ Repair/Quantize | `mlxk convert ./in ./out --quantize 4` |
 | `push` | ✅ Yes | `mlxk push ./workspace "org/name"` |
 | `list` | ✅ Yes | `mlxk list .` or `mlxk list ./gemma-` |
 | `pull` | ❌ Cache only | Downloads to HuggingFace cache |
@@ -298,7 +330,7 @@ mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "What is 2+2?"
 
 **Terminology Note:** mlx-knife uses "batch" in the traditional computing sense (sequential job processing in groups), not ML inference batching (parallel batch_size > 1 in a single forward pass). Images are processed sequentially in groups for memory safety, not performance parallelization.
 
-**Breaking Change (2.0.4-beta.6):** Vision processing now defaults to processing **one image at a time** for maximum stability on all systems. Use `--chunk N` to process multiple images per batch when your system can handle it.
+**Default behavior:** Vision processing defaults to **one image at a time** for maximum stability on all systems. Use `--chunk N` to process multiple images per batch when your system can handle it.
 
 ```bash
 # Default: one image at a time (most robust, automatic chunking)
@@ -320,7 +352,7 @@ mlxk run pixtral "Describe images" --image photos/*.jpg
 - **Isolation:** Fresh inference session per chunk (KV cache cleared, conversation context reset)
 - **Trade-off:** ~2-3s model load overhead per chunk vs guaranteed isolation
 
-**Reliability (2.0.4-beta.7):** Vision models can sometimes describe details they didn't actually see. MLX Knife prevents this automatically:
+**Reliability:** Vision models can sometimes describe details they didn't actually see. MLX Knife prevents this automatically:
 - **Default (chunk=1):** Most reliable - each image processed independently
 - **Larger chunks:** Still safe, but models may occasionally confuse details between images in the same batch
 
@@ -412,7 +444,7 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 
 **⚠️ Important:** Vision support relies on mlx-vlm (upstream), which has known stability issues. While `mlxk health` verifies file integrity, **runtime failures may occur** with certain model architectures due to upstream bugs.
 
-**✅ Tested & Working Models** (mlx-knife v2.0.4):
+**✅ Tested & Working Models:**
 
 | Model | Size | Notes |
 |-------|------|-------|
@@ -446,7 +478,7 @@ mlxk convert <model> <output> --repair-index
 - **Python 3.10+** (mlx-audio dependency, included in base install)
 - **No system dependencies:** MP3/WAV decoding via embedded libsndfile (no ffmpeg or Homebrew required)
 
-**✅ Recommended Models** (mlx-knife v2.0.4):
+**✅ Recommended Models:**
 
 | Model | Backend | Size | Duration | Notes |
 |-------|---------|------|----------|-------|
@@ -512,7 +544,6 @@ MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
 
 ```bash
 # One-time setup (if using Gemma-3n)
-MLXK2_ENABLE_ALPHA_FEATURES=1
 mlxk clone mlx-community/gemma-3n-E2B-it-4bit ./gemma-3n-audio
 mlxk convert ./gemma-3n-audio ./gemma-3n-audio-FIXED --repair-index
 
@@ -849,13 +880,27 @@ Using token [REDACTED_TOKEN] from ~/models
 
 MLX Knife supports comprehensive runtime configuration via environment variables. All settings can be controlled without code changes.
 
-### Feature Gates
-
-Enable experimental and alpha features:
+### Workspace Configuration
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|
-| `MLXK2_ENABLE_ALPHA_FEATURES` | Enable alpha commands (`convert`) | `0` (disabled) | 2.0.0 |
+| `MLXK_WORKSPACE_HOME` | Directory for workspace model portfolio. Commands like `list`, `health`, `run`, and `serve` discover models here. | (none) | 2.0.5 |
+
+```bash
+# Recommended: add to shell profile
+export MLXK_WORKSPACE_HOME=~/mlx-models
+
+mlxk list                    # Shows workspaces + cache models
+mlxk run whisper "transcribe" # Finds whisper-large-v3-mlx in workspace home
+mlxk health                  # Checks workspaces + cache
+```
+
+### Feature Gates
+
+Enable experimental features:
+
+| Variable | Description | Default | Since |
+|----------|-------------|---------|-------|
 | `MLXK2_ENABLE_PIPES` | Enable Unix pipe integration (`mlxk run <model> -`) | `0` (disabled) | 2.0.4 |
 | `MLXK2_EXIF_METADATA` | Extract EXIF metadata from images (Vision models) | `1` (enabled) | 2.0.4 |
 
@@ -868,10 +913,6 @@ echo "Hello" | mlxk run model - "translate to Spanish"
 # Disable EXIF extraction for privacy (enabled by default)
 export MLXK2_EXIF_METADATA=0
 mlxk run vision-model --image photo.jpg "describe this"
-
-# Enable alpha features for convert command
-export MLXK2_ENABLE_ALPHA_FEATURES=1
-mlxk convert ./broken ./fixed --repair-index
 ```
 
 ### Server Configuration
@@ -961,7 +1002,7 @@ HF_HOME=/data/models mlxk list
 # Authentication for private models
 HF_TOKEN=hf_... mlxk pull org/private-model
 
-# Upload to HuggingFace Hub (requires MLXK2_ENABLE_ALPHA_FEATURES=1)
+# Upload to HuggingFace Hub
 HF_TOKEN=hf_... mlxk push ./workspace org/model --private
 ```
 
@@ -1086,17 +1127,12 @@ Example:
 mlxk push --private ./workspace org/model --create --commit "init"
 ```
 
-### `convert` - Workspace Transformations (Experimental)
+### `convert` - Workspace Transformations
 
-`mlxk convert` is **experimental** and requires `MLXK2_ENABLE_ALPHA_FEATURES=1`. Currently implements `--repair-index` for fixing safetensors index mismatches (mlx-vlm #624). Future modes like `--quantize` are planned but not yet implemented.
+Transform models with `--repair-index` (fix broken mlx-vlm conversions) or `--quantize` (reduce model size).
 
-**Use case:** Repair models affected by mlx-vlm #624 conversion bug (7+ mlx-community Vision models).
-
-**Workflow:**
+**Repair workflow** (mlx-vlm #624 affected models):
 ```bash
-# Enable alpha features (required for clone)
-export MLXK2_ENABLE_ALPHA_FEATURES=1
-
 # Clone affected model to workspace
 mlxk clone mlx-community/Qwen2.5-VL-7B-Instruct-4bit ./ws-qwen
 
@@ -1107,21 +1143,27 @@ mlxk convert ./ws-qwen ./ws-qwen-fixed --repair-index
 mlxk health ./ws-qwen-fixed  # Should report healthy
 ```
 
-**Affected models (mlx-vlm #624):**
-- Qwen2.5-VL-7B-Instruct-4bit
-- gemma-3-27b-it-4bit
-- Mistral-Small-3.1-24B-Instruct-2503-4bit
-- DeepSeek-OCR-4bit
-- Devstral-Small-2-24B-Instruct-2512-6bit
-- (7+ models total)
+**Quantize workflow** (text models only):
+```bash
+# Clone bf16/fp16 model
+mlxk clone mlx-community/Llama-3.2-1B-Instruct ./llama-bf16
+
+# Quantize to 4-bit (default group_size: 64)
+mlxk convert ./llama-bf16 ./llama-4bit --quantize 4
+
+# Or with custom group size (32 = better quality, larger file)
+mlxk convert ./llama-bf16 ./llama-4bit-g32 --quantize 4 --q-group-size 32
+```
+
+**Supported bits:** 2, 3, 4, 6, 8
 
 **Key features:**
 - **Cache sanctity:** Hard blocks writes to HF cache (workspaces only)
-- **Workspace-to-workspace:** Source can be managed or unmanaged, output always managed
+- **Cross-volume:** Works across APFS volumes, SMB, NFS (with fallback copy)
 - **Health check integration:** Automatic validation (skip with `--skip-health`)
-- **APFS CoW:** Instant, space-efficient cloning via `cp -c`
+- **APFS CoW:** Instant, space-efficient cloning when on same volume
 
-**Future modes:** `--quantize <bits>` (text models), `--dequantize` (planned).
+**Future modes:** `--dequantize`, vision model quantization (planned).
 
 ### `pipe mode` - stdin for `run` (beta, `mlx-run` shorthand)
 
@@ -1227,7 +1269,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.4 | February 2026</i><br>
+  <i>Version 2.0.5 beta2 | April 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

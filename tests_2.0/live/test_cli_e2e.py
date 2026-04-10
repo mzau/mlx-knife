@@ -170,10 +170,12 @@ class TestRunCommandJSON:
         # Parse JSON
         data = json.loads(stdout)
 
+        # Validate against JSON API schema
+        from .conftest import assert_json_api_schema
+        assert_json_api_schema(data)
+
         # Validate envelope structure
-        assert "status" in data, "Missing 'status' field"
         assert data["status"] == "success", f"Expected status=success, got {data['status']}"
-        assert "data" in data, "Missing 'data' field"
         assert "response" in data["data"], "Missing 'data.response' field"
 
         # Extract response
@@ -242,14 +244,14 @@ class TestRunCommandExitCodes:
             f"stdout: {stdout}"
         )
 
-        # JSON should have error status
+        # JSON should have error status and be schema-valid
         try:
             data = json.loads(stdout)
-            assert "status" in data, "Missing 'status' field in error JSON"
+            from .conftest import assert_json_api_schema
+            assert_json_api_schema(data)
             assert data["status"] == "error", (
                 f"Expected status=error, got {data['status']}"
             )
-            assert "error" in data, "Missing 'error' field in error JSON"
         except json.JSONDecodeError:
             # If JSON parsing fails, check stderr
             assert "error" in stderr.lower(), (

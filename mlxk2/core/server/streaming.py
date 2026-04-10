@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from threading import Event
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
     from ..runner import MLXRunner

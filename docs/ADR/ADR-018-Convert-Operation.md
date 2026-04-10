@@ -480,6 +480,7 @@ These defects can be fixed from the MLX model alone, without access to the origi
 | A4 | **eos_token_id=null** | Various | config.json check | `--repair-config` | ❌ Future |
 | A5 | **video_processor=null** | Qwen2-VL models | config.json check | `--repair-config` | ❌ Future |
 | A6 | **Missing preprocessor_config.json** | mlx-community Whisper models | mlx-audio warning | `convert --add-preprocessor-config` | ❌ Future |
+| A7 | **spatial_merge_size wrong/missing** | Pixtral/Mistral3 models | processor_config.json vs config.json | `--repair-config` | ❌ 2.0.5 |
 
 #### Category B: Requires Original Model or Manual Intervention
 
@@ -584,6 +585,37 @@ These defects require access to the original HuggingFace model or manual configu
 
 ---
 
+#### A7: spatial_merge_size wrong/missing (mlx-vlm #741)
+
+**Root Cause:** mlx-vlm 0.1.19 (March 19, 2025) used transformers 8 days before PR #37019 fixed spatial_merge_size serialization. `processor.save_pretrained()` writes `processor_config.json` with wrong default (1) or omits the field entirely.
+
+**Symptoms:**
+```
+Number of image token positions (5476) does not match number of image features (1369)
+```
+The ratio 5476/1369 = 4 = `spatial_merge_size²`, indicating value 1 instead of correct value 2.
+
+**Affected Models:**
+- mlx-community/Mistral-Small-3.1-24B-Instruct-2503-4bit
+- Other Pixtral-based models converted around March 2025
+
+**Detection:**
+```python
+config = load_config("config.json")
+proc_config = load_config("processor_config.json")
+if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
+    # Defect detected
+```
+
+**Repair:** `mlxk convert ./ws ./ws-fixed --repair-config`
+- Copy `spatial_merge_size` from `config.json` to `processor_config.json`
+
+**Upstream:**
+- transformers PR #37019 (March 27, 2025) - Fixed calculation, not serialization
+- mlx-vlm PR #741 (February 2026) - Defensive fix in convert.py
+
+---
+
 ### Upstream Issue Survey
 
 #### mlx-lm / mlx-examples Issues
@@ -606,6 +638,7 @@ These defects require access to the original HuggingFace model or manual configu
 |-------|-------------|----------|--------|
 | [#624](https://github.com/Blaizzy/mlx-vlm/issues/624) | Index/shard mismatch | A1 | Fixed PR #638 |
 | [#676](https://github.com/Blaizzy/mlx-vlm/issues/676) | MP3 transcription bug | - | Fixed 0.3.10 |
+| [#741](https://github.com/Blaizzy/mlx-vlm/pull/741) | spatial_merge_size not preserved | A7 | PR submitted |
 
 #### mlx Core Issues
 
@@ -619,6 +652,7 @@ These defects require access to the original HuggingFace model or manual configu
 |--------|------------|--------------------------|---------------|----------|
 | Index Mismatch | ✅ | ✅ | `--repair-index` | ✅ Done |
 | Tokenizer Regex | ⚠️ Runtime only | ✅ | Runtime workaround | ✅ Done |
+| spatial_merge_size | ✅ | ✅ | `--repair-config` | **High (2.0.5)** |
 | weights.npz | ✅ | ✅ | `--repair-weights` | Medium |
 | eos_token_id=null | ✅ | ⚠️ Needs heuristics | `--repair-config` | Low |
 | video_processor=null | ✅ | ⚠️ Model-specific | `--repair-config` | Low |

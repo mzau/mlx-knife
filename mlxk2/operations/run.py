@@ -440,13 +440,19 @@ def run_model(
         pass
 
     if images and not is_vision_model:
-        error_result = "Error: Vision inputs require a vision-capable model in cache (config not found)"
+        if not resolved_name or model_path is None:
+            error_result = f"Error: Model '{model_spec}' not found. Check the name or path."
+        else:
+            error_result = f"Error: Model '{model_spec}' does not support vision inputs."
         if not json_output:
             print(error_result, file=sys.stderr)
         return error_result
 
     if audio and not is_audio_model:
-        error_result = "Error: Audio inputs require an audio-capable model in cache (config not found)"
+        if not resolved_name or model_path is None:
+            error_result = f"Error: Model '{model_spec}' not found. Check the name or path."
+        else:
+            error_result = f"Error: Model '{model_spec}' does not support audio inputs."
         if not json_output:
             print(error_result, file=sys.stderr)
         return error_result

@@ -353,12 +353,15 @@ def compute_workspace_hash(workspace_path: Path) -> Optional[str]:
         hasher.update(config_path.read_bytes())
 
         # Hash safetensors files in ROOT only (not in .hf_cache/)
+        SAMPLE_BYTES = 4096  # First 4 KB per file — distinguishes different quantizations
         safetensors_files = sorted(workspace_path.glob("*.safetensors"))
         for sf in safetensors_files:
             # Include filename in hash (detect renames)
             hasher.update(sf.name.encode("utf-8"))
-            # Hash file size (fast proxy for content change)
+            # Hash file size + first bytes (fast, distinguishes different quantizations)
             hasher.update(str(sf.stat().st_size).encode("utf-8"))
+            with open(sf, "rb") as f:
+                hasher.update(f.read(SAMPLE_BYTES))
 
         # Hash tokenizer files (important for model behavior)
         tokenizer_patterns = ["tokenizer*.json", "vocab*.json", "merges.txt"]

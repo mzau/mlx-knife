@@ -161,22 +161,20 @@ Notes:
 
 ### Supported Commands
 
-| Command | Description | JSON-Only in 2.0 | Alpha Feature |
-|---------|-------------|------------------|---------------|
-| `list` | List models with metadata and hash codes | ✅ | - |
-| `show` | Detailed model inspection with files/config | ✅ | - |
-| `health` | Check model integrity and corruption | ✅ | - |
-| `pull` | Download models from HuggingFace | ✅ | - |
-| `rm` | Delete models from cache | ✅ | - |
-| `clone` | Clone models to workspace directory | ✅ | - |
-| `convert` | Workspace transformations (experimental: --repair-index) | ✅ | `MLXK2_ENABLE_ALPHA_FEATURES=1` |
-| `push` | Upload a local folder to Hugging Face | ✅ | - |
-| `run` | Execute model inference | ✅ | - |
-| `serve`/`server` | OpenAI-compatible API server | ✅ | - |
+| Command | Description |
+|---------|-------------|
+| `list` | List models with metadata and hash codes |
+| `show` | Detailed model inspection with files/config |
+| `health` | Check model integrity and corruption |
+| `pull` | Download models from HuggingFace |
+| `rm` | Delete models from cache |
+| `clone` | Clone models to workspace directory |
+| `convert` | Workspace transformations: `--repair-index`, `--quantize` |
+| `push` | Upload a local folder to Hugging Face |
+| `run` | Execute model inference |
+| `serve`/`server` | OpenAI-compatible API server |
 
-**Notes:**
-- Commands marked with `MLXK2_ENABLE_ALPHA_FEATURES=1` are experimental and require this environment variable.
-- **Workspace Path Support (ADR-018 Phase 0c):** Commands `show`, `run`, `serve`/`server`, and `health` now accept workspace paths (e.g., `./workspace` or `/absolute/path`) in addition to HuggingFace model IDs. Models in workspaces return `"cached": false` to distinguish them from cache-managed models.
+All commands support `--json` for machine-readable output. Commands that accept model names also accept workspace paths (`./workspace`, `/absolute/path`). Workspace models return `"cached": false`.
 
 ## Model Discovery & Metadata
 

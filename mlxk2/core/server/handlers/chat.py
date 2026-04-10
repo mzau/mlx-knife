@@ -18,8 +18,8 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 if TYPE_CHECKING:
-    from ...runner import MLXRunner
-    from ...vision_runner import VisionRunner
+    from ...runner import MLXRunner  # noqa: F401
+    from ...vision_runner import VisionRunner  # noqa: F401
 
 
 def _get_logger():

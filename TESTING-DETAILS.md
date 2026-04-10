@@ -4,17 +4,18 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.4** — **First stable release with Vision + Audio.** Vision support (CLI + Server, EXIF metadata); Audio transcription (Whisper via mlx-audio); Runtime compatibility accuracy; Server `/v1/audio/transcriptions` endpoint; Probe/Policy architecture; Pipes/Memory-Aware; **Test Portfolio Separation complete**; Workspace Infrastructure (ADR-018 Phase 0a+0b+0c); Convert Operation (ADR-018 Phase 1); Resumable Clone; **Benchmark Schema v0.2.2**.
+✅ **2.0.5-beta.2** — Workspace-First (ADR-022), Quantize (text + vision), Cross-Volume, Health Workspace Discovery, Clean JSON output. See CHANGELOG.md for details.
+
+✅ **2.0.4** — First stable release with Vision + Audio. See CHANGELOG.md for details.
 
 ### Test Results (Official Reference)
 
-**Standard Unit Tests (Multi-Python):**
+**Standard Unit Tests (2.0.5-beta.2):**
 ```
-Platform: macOS 26.2 (Tahoe), M2 Max, 64GB RAM
-Python 3.10: 697 passed, 13 skipped
-Python 3.11: 697 passed, 13 skipped
-Python 3.12: 697 passed, 13 skipped
+Platform: macOS 26.4 (Tahoe), Apple Silicon (M2 Max, 64GB RAM)
+Python 3.10: 699 passed, 13 skipped
 Note: Default suite works on 16GB. Full integration tests: 64GB recommended
+      Apple Silicon (M-series) required for MLX
 ```
 
 **Full Integration Tests (`./scripts/test-wet-umbrella.sh`):**
@@ -72,6 +73,7 @@ Total:                       182 passed across all phases
 | Live E2E (ADR-011) | `pytest -m live_e2e -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `httpx` | Server/HTTP/CLI validation. Uses Portfolio Discovery or fallback models. | No |
 | Vision E2E (ADR-012) | `pytest -m live_e2e tests_2.0/live/test_vision*.py -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `mlx-vlm` | Vision CLI + Server. Uses Portfolio Discovery or `pixtral-12b-4bit` fallback. | No |
 | Audio E2E (ADR-020) | `pytest -m live_e2e tests_2.0/live/test_audio*.py -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `mlx-audio` | Audio transcription + Server. Uses Portfolio Discovery or `whisper` fallback. | No |
+| Cross-Volume (ADR-022) | `pytest -m live_cross_volume -v` | `live_cross_volume`; Env: `MLXK_WORKSPACE_HOME` (source vol); `/tmp` must be different volume | Clone + Convert cross-volume fallback. Requires small model (~700MB) in portfolio. Tests CoW fallback to regular copy. | No |
 | Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v` | `live_pull` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
 | Show E2E portfolios | `HF_HOME=/path/to/cache python tests_2.0/show_portfolios.py` OR `pytest -m show_model_portfolio -s` | Env: `HF_HOME` | Displays TEXT and VISION portfolios separately. Shows model keys (text_XX, vision_XX), RAM requirements, and test/skip status. Diagnostic tool for understanding portfolio separation. Use script for detailed output, or pytest marker for quick check. | No (uses local cache) |
 | Manual debug mode | `mlxk run <model> "test prompt" --verbose` | Manual CLI usage with `--verbose` flag | Shows token generation details including multiple EOS token warnings. Use this for manual debugging of model quality issues. Output includes `[DEBUG] Token generation analysis` and `⚠️ WARNING: Multiple EOS tokens detected` for broken models. | No (uses local cache) |
@@ -88,6 +90,83 @@ pytest -m live_e2e --collect-only -q
 
 # Empirical Mapping (heavy, excluded from wet)
 pytest -m live_stop_tokens tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping -v
+```
+
+---
+
+## Cross-Volume Testing (ADR-022)
+
+### Requirements
+
+| Requirement | Description |
+|-------------|-------------|
+| **Two Volumes** | Source and target on different volumes (APFS or non-APFS) |
+| **Small Test Model** | ~500MB-1GB model in portfolio (avoid filling /tmp on internal SSD) |
+| **Disk Space Check** | Tests should verify available space before copy operations |
+
+**Recommended Test Model:** `mlx-community/Llama-3.2-1B-Instruct-4bit` (~700MB)
+
+**Volume Setup:**
+
+| Environment | Volume 1 (Source) | Volume 2 (Target) | Tests |
+|-------------|-------------------|-------------------|-------|
+| **CI/Automated** | MLXK_WORKSPACE_HOME | `/tmp` (if different st_dev) | APFS→APFS cross-volume |
+| **Manual Smoke** | Local SSD | SMB/NFS mount | APFS→non-APFS + network |
+| **Single Volume** | — | — | Skip (pytest.skip) |
+
+**SMB/NFS Benefits for Manual Testing:**
+- Non-APFS detection ✅ (tests warning path)
+- Cross-network robustness ✅
+- Realistic use case (NAS backup, shared storage)
+
+### Test Matrix
+
+| Command | Test Case | Source → Target | What to Test |
+|---------|-----------|-----------------|--------------|
+| `mlxk clone` | Same-volume APFS | VOL1 → VOL1 | APFS CoW (instant, zero space) |
+| `mlxk clone` | **Cross-volume APFS** | HF → VOL2 | Silent fallback to regular copy |
+| `mlxk clone` | **Non-APFS target** | APFS → SMB | Silent fallback to regular copy |
+| `mlxk convert --repair-index` | Same-volume | VOL1 → VOL1 | APFS CoW for safetensors |
+| `mlxk convert --repair-index` | **Cross-volume** | VOL1 → VOL2 | Silent fallback to regular copy |
+| `mlxk convert --repair-index` | **Non-APFS** | APFS → SMB | Silent fallback to regular copy |
+| `mlxk convert --quantize` | Any | VOL1 → VOL2 | mlx-lm/vlm handles copy (no CoW expected) |
+
+### Skip Conditions
+
+```python
+def _same_volume(path1: Path, path2: Path) -> bool:
+    """Check if two paths are on same volume (via st_dev)."""
+    return path1.stat().st_dev == path2.stat().st_dev
+
+@pytest.mark.live_e2e
+def test_clone_cross_volume():
+    workspace = Path(os.environ.get("MLXK_WORKSPACE_HOME", "."))
+    target = Path("/tmp")
+    if _same_volume(workspace, target):
+        pytest.skip("Cross-volume test requires different volumes")
+    # ... test clone to /tmp/mlxk-cross-volume-test-xxx
+```
+
+### Expected Behavior
+
+| Scenario | APFS Check | Copy Method | User Feedback |
+|----------|------------|-------------|---------------|
+| Same APFS volume | ✅ APFS | `cp -c` (CoW) | Silent (instant) |
+| Cross-volume (both APFS) | ✅ APFS | `cp -c` fails → `shutil.copy2` | Silent (slower) |
+| Non-APFS volume | ❌ Not APFS | `shutil.copy2` | Silent (slower) |
+
+Note: APFS detection uses `st_dev` matching (firmlink-safe). CoW fallback is silent — no warnings on stdout or stderr.
+
+### Marker
+
+```bash
+# Cross-volume tests (subset of live_e2e)
+pytest -m live_cross_volume -v
+
+# Requires:
+# - MLXK_WORKSPACE_HOME (source volume)
+# - /tmp on different volume (target)
+# - Small model in portfolio (~700MB)
 ```
 
 ---
@@ -1724,6 +1803,87 @@ mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cat
 # [DEBUG] Token generation analysis:
 # [DEBUG]   Last 3 tokens: ["29889='.'", "32007='<|end|>'", "32000='<|endoftext|>'"]
 # [DEBUG]   ⚠️ WARNING: Multiple EOS tokens detected (2) - model quality issue
+```
+
+---
+
+### A6. Manual Release Validation: Cross-Volume & Network Filesystems
+
+**Context:** Unit tests mock cross-volume behavior (EXDEV errors, warnings). This appendix covers manual validation on real hardware that cannot be automated in CI.
+
+#### A6.1 Why Manual Testing is Required
+
+| Aspect | Unit Tests (Automated) | Manual Validation |
+|--------|------------------------|-------------------|
+| CoW Fallback | ✅ Mock `OSError EXDEV` | ✅ Real cross-volume copy |
+| Warning Messages | ✅ `capfd.readouterr()` | ✅ Visual confirmation |
+| SMB/NFS | ❌ Requires network share | ✅ Real NAS/share |
+| Performance | ❌ Mocked (instant) | ✅ Actual copy times |
+| Space Requirements | ❌ Trivial test data | ✅ Real model sizes |
+
+#### A6.2 Pre-Release Checklist
+
+**Requirements:**
+- [ ] Two APFS volumes (internal SSD + external drive)
+- [ ] Optional: SMB or NFS share for non-APFS testing
+- [ ] Test model: `mlx-community/Llama-3.2-1B-Instruct-4bit` (~700MB)
+
+**Test Commands:**
+
+```bash
+# Setup - adjust paths to your environment
+export SOURCE_VOL="$HOME/mlx-workspaces"           # APFS, has models
+export TARGET_VOL="/Volumes/ExternalDrive/mlx-test" # Different APFS volume
+export SMB_TARGET="/Volumes/NAS/mlx-test"           # Optional: SMB/NFS
+
+# 1. Clone: Same-volume APFS (CoW expected)
+mlxk clone Llama-3.2-1B "$SOURCE_VOL/llama-1b-clone"
+# Expected: Instant, no warning
+
+# 2. Clone: Cross-volume APFS (fallback expected)
+mlxk clone Llama-3.2-1B "$TARGET_VOL/llama-1b-clone"
+# Expected: Warning "Cross-volume copy (no CoW)", ~10s copy
+
+# 3. Clone: Non-APFS target (warning expected)
+mlxk clone Llama-3.2-1B "$SMB_TARGET/llama-1b-clone"
+# Expected: Warning "Non-APFS filesystem", ~30s+ copy (network)
+
+# 4. Convert --repair-index: Cross-volume
+mlxk convert "$SOURCE_VOL/model-with-bad-index" "$TARGET_VOL/repaired" --repair-index
+# Expected: Warning, successful repair
+
+# 5. Convert --quantize: Cross-volume (mlx-lm handles copy)
+mlxk convert "$SOURCE_VOL/llama-1b-clone" "$TARGET_VOL/llama-1b-4bit" --quantize 4
+# Expected: No CoW warning (mlx-lm does its own copy)
+```
+
+#### A6.3 Expected Output
+
+All scenarios produce the same user-visible output — CoW fallback is silent:
+```
+clone: mlx-community/Llama-3.2-1B-Instruct-4bit → /path/to/target (✓ healthy)
+```
+
+Difference is only in speed: same-volume CoW is instant, cross-volume/non-APFS takes longer (regular copy).
+
+#### A6.4 Failure Modes (Fixed in 2.0.5-beta.2)
+
+| Scenario | Previous Behavior (2.0.4) | Current Behavior (2.0.5) |
+|----------|---------------------------|--------------------------|
+| Cross-volume clone | `FileSystemError: APFS required` | Silent fallback copy |
+| SMB target | `FileSystemError: APFS required` | Silent fallback copy |
+| NFS target | `FileSystemError: APFS required` | Silent fallback copy |
+| Convert cross-volume | `FileSystemError: APFS required` | Silent fallback copy |
+| `/Users` path on macOS | False "Non-APFS" (firmlink bug) | Correct APFS detection (st_dev) |
+
+#### A6.5 Cleanup
+
+```bash
+# Remove test artifacts
+rm -rf "$SOURCE_VOL/llama-1b-clone"
+rm -rf "$TARGET_VOL/llama-1b-clone"
+rm -rf "$TARGET_VOL/llama-1b-4bit"
+rm -rf "$SMB_TARGET/llama-1b-clone"
 ```
 
 ---

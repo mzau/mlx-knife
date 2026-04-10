@@ -162,7 +162,6 @@ def print_result(result: Dict[str, Any], render_func=None, json_mode=False, **re
     is_error = result.get("status") == "error"
 
     if json_mode:
-        # JSON mode: Always stdout (for scripting/jq)
         print(format_json_output(result), file=sys.stdout)
     elif is_error:
         # Human-mode error: stderr (for pipes)
@@ -285,6 +284,19 @@ def main():
         help="Rebuild model.safetensors.index.json from shards (fixes mlx-vlm #624)"
     )
     convert_parser.add_argument(
+        "--quantize",
+        type=int,
+        metavar="BITS",
+        help="Quantize to N bits (2, 3, 4, 6, 8)"
+    )
+    convert_parser.add_argument(
+        "--q-group-size",
+        type=int,
+        default=64,
+        metavar="N",
+        help="Quantization group size (default: 64)"
+    )
+    convert_parser.add_argument(
         "--skip-health",
         action="store_true",
         help="Skip health check on output (debug only)"
@@ -387,7 +399,10 @@ def main():
     push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     
     args = parser.parse_args()
-    
+
+    # Note: fd-level stdout suppression is applied locally around convert_operation()
+    # only, not globally. Only mlx_lm.convert() / mlx_vlm.convert() use print("[INFO]...").
+
     try:
         # Handle top-level version first
         if args.version:
@@ -492,19 +507,49 @@ def main():
         elif args.command == "convert":
             from .operations.convert import convert_operation
 
-            # Validate mode flags
-            if args.repair_index:
-                mode = "repair-index"
-            else:
-                print("Error: Must specify conversion mode (--repair-index)", file=sys.stderr)
+            # Validate mode flags (mutually exclusive)
+            def _convert_arg_error(msg):
+                err = {"status": "error", "command": "convert", "data": None,
+                       "error": {"type": "InvalidArgumentError", "message": msg}}
+                if args.json:
+                    print(format_json_output(err), file=sys.stdout)
+                else:
+                    print(f"convert: Error: {msg}", file=sys.stderr)
                 sys.exit(1)
 
-            result = convert_operation(
-                args.source,
-                args.target,
-                mode=mode,
-                skip_health=args.skip_health
-            )
+            if args.repair_index and args.quantize:
+                _convert_arg_error("--repair-index and --quantize are mutually exclusive")
+
+            if args.repair_index:
+                mode = "repair-index"
+                mode_opts = {}
+            elif args.quantize:
+                if args.quantize not in (2, 3, 4, 6, 8):
+                    _convert_arg_error(f"--quantize must be 2, 3, 4, 6, or 8 (got {args.quantize})")
+                mode = "quantize"
+                mode_opts = {"bits": args.quantize, "group_size": getattr(args, "q_group_size", 64)}
+            else:
+                _convert_arg_error("Must specify conversion mode (--repair-index or --quantize N)")
+
+            # Suppress upstream print("[INFO]...") from mlx-lm/mlx-vlm convert()
+            if args.json:
+                _saved_fd = os.dup(1)
+                _devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(_devnull_fd, 1)
+                os.close(_devnull_fd)
+
+            try:
+                result = convert_operation(
+                    args.source,
+                    args.target,
+                    mode=mode,
+                    mode_opts=mode_opts,
+                    skip_health=args.skip_health
+                )
+            finally:
+                if args.json:
+                    os.dup2(_saved_fd, 1)
+                    os.close(_saved_fd)
 
             # Import render_convert from output.human
             from .output.human import render_convert
@@ -667,7 +712,7 @@ def main():
                     },
                     "error": None
                 }
-                print(format_json_output(result))
+                print_result(result, None, True)
             else:
                 # For non-JSON or interactive mode, set success result
                 result = {"status": "success"}
@@ -729,6 +774,7 @@ def main():
             # No command specified - show help or JSON error depending on --json flag
             if args.json:
                 result = handle_error("CommandError", "No command specified")
+
                 print(format_json_output(result), file=sys.stdout)
                 sys.exit(1)
             else:
@@ -738,6 +784,7 @@ def main():
             # Unknown command - show help or JSON error depending on --json flag
             if args.json:
                 result = handle_error("CommandError", f"Unknown command: {args.command}")
+
                 print(format_json_output(result), file=sys.stdout)
                 sys.exit(1)
             else:

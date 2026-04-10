@@ -119,7 +119,6 @@ def test_something(isolated_cache):
 pytest -m live_stop_tokens -v
 
 # Live push (requires credentials + workspace)
-export MLXK2_ENABLE_ALPHA_FEATURES=1
 export MLXK2_LIVE_PUSH=1
 export HF_TOKEN=...
 export MLXK2_LIVE_REPO=org/model

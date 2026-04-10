@@ -309,10 +309,25 @@ def render_show(data: Dict[str, Any]) -> str:
     caps = model.get('capabilities', [])
     caps_str = ', '.join(caps) if caps else '-'
 
+    # Extract quantization info: config.json = actual, sentinel = requested
+    quant = model.get("quantization") or {}
+    quant_bits = quant.get("bits")
+    quant_group = quant.get("group_size")
+    quant_str = f"{quant_bits}-bit (group_size={quant_group})" if quant_bits else "-"
+
+    # Check if sentinel records a different request (re-quantize scenario)
+    ws_meta = d.get("workspace_metadata") or {}
+    ws_quant = ws_meta.get("quantization") or {}
+    ws_bits = ws_quant.get("bits")
+    ws_group = ws_quant.get("group_size")
+    if ws_bits and quant_bits and (ws_bits != quant_bits or ws_group != quant_group):
+        quant_str += f" (requested: {ws_bits}-bit, group_size={ws_group})"
+
     details = [
         f"Framework: {model.get('framework','-')}",
         f"Type: {model.get('model_type','-')}",
         f"Capabilities: {caps_str}",
+        f"Quantization: {quant_str}",
         f"Size: {humanize_size(model.get('size_bytes'))}",
         f"Modified: {fmt_time(model.get('last_modified'))}",
         f"Health: {health_str}",
@@ -450,6 +465,9 @@ def render_convert(data: Dict[str, Any]) -> str:
     if status == "success":
         output = f"convert: {source} → {target}\n"
         output += f"  Mode: {mode}\n"
+
+        if d.get("warning"):
+            output += f"  ⚠ {d['warning']}\n"
 
         if message:
             output += f"  {message}\n"

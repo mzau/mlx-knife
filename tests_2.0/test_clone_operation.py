@@ -24,7 +24,7 @@ import pytest
 
 from mlxk2.operations.clone import (
     clone_operation,
-    _validate_apfs_filesystem,
+    _check_apfs_and_warn,
     _is_apfs_filesystem,
     _create_temp_cache_same_volume,
     _get_deterministic_temp_cache_name,
@@ -38,26 +38,24 @@ from mlxk2.operations.clone import (
 
 
 class TestAPFSFilesystemValidation:
-    """Test suite for APFS filesystem requirement validation."""
+    """Test suite for APFS filesystem check and warning."""
 
-    def test_validate_apfs_filesystem_success(self):
-        """Test APFS validation passes on APFS filesystem."""
+    def test_check_apfs_and_warn_success(self):
+        """Test APFS check returns True on APFS filesystem."""
         test_path = Path("/tmp/test")
 
         with patch('mlxk2.operations.clone._is_apfs_filesystem', return_value=True):
-            # Should not raise exception
-            _validate_apfs_filesystem(test_path)
+            result = _check_apfs_and_warn(test_path)
+            assert result is True
 
-    def test_validate_apfs_filesystem_failure(self):
-        """Test APFS validation fails on non-APFS filesystem."""
+    def test_check_apfs_and_warn_non_apfs(self):
+        """Test APFS check returns False and logs warning on non-APFS (no exception)."""
         test_path = Path("/tmp/test")
 
         with patch('mlxk2.operations.clone._is_apfs_filesystem', return_value=False):
-            with pytest.raises(FilesystemError) as exc_info:
-                _validate_apfs_filesystem(test_path)
-
-            assert "APFS required for clone operations" in str(exc_info.value)
-            assert str(test_path) in str(exc_info.value)
+            # Should NOT raise exception, just return False and log warning
+            result = _check_apfs_and_warn(test_path)
+            assert result is False
 
     def test_is_apfs_filesystem_true(self):
         """Test APFS detection returns True - real test on Phase 1 APFS system."""
@@ -74,11 +72,19 @@ class TestAPFSFilesystemValidation:
     def test_is_apfs_filesystem_false(self):
         """Test APFS detection returns False for non-APFS."""
         test_path = Path("/mnt/nfs")
+        fake_dev = 99999  # Fake device ID for NFS mount
 
-        with patch('subprocess.run') as mock_run:
+        with patch('subprocess.run') as mock_run, \
+             patch('os.stat') as mock_stat:
+            # Mount output: only an NFS mount
             mock_result = MagicMock()
             mock_result.stdout = '/dev/nfs on /mnt/nfs (nfs, local, nodev, nosuid)\n'
             mock_run.return_value = mock_result
+
+            # os.stat returns same fake dev for both the path and the NFS mountpoint
+            mock_stat_result = MagicMock()
+            mock_stat_result.st_dev = fake_dev
+            mock_stat.return_value = mock_stat_result
 
             result = _is_apfs_filesystem(test_path)
 
@@ -228,14 +234,14 @@ class TestRealFilesystemValidation:
         if is_apfs:
             # If APFS, validation should pass
             try:
-                _validate_apfs_filesystem(current_path)
+                _check_apfs_and_warn(current_path)
                 print(f"✅ APFS validation passed for: {current_path}")
             except FilesystemError:
                 pytest.fail("APFS validation failed on APFS filesystem")
         else:
             # If not APFS, validation should fail (Phase 1 requirement)
             with pytest.raises(FilesystemError) as exc_info:
-                _validate_apfs_filesystem(current_path)
+                _check_apfs_and_warn(current_path)
             assert "APFS required" in str(exc_info.value)
             print(f"⚠️ Non-APFS detected: {current_path} - Phase 1 will reject")
 
@@ -420,16 +426,39 @@ class TestAPFSCloneDirectory:
                 assert args[0] == 'cp'
                 assert '-c' in args
 
-    def test_apfs_clone_directory_subprocess_error(self, tmp_path):
-        """Test APFS cloning handles subprocess errors."""
+    def test_apfs_clone_directory_cow_fails_fallback_succeeds(self, tmp_path):
+        """Test APFS cloning falls back to regular copy when CoW fails."""
         source = tmp_path / "source"
         target = tmp_path / "target"
 
         source.mkdir()
+        target.mkdir()
         (source / "file.txt").write_text("content")
 
         with patch('subprocess.run') as mock_run:
+            # CoW fails, but shutil.copy2 fallback should succeed
             mock_run.side_effect = subprocess.CalledProcessError(1, 'cp')
+
+            result = _apfs_clone_directory(source, target)
+
+            # Should succeed via fallback
+            assert result is True
+            assert (target / "file.txt").exists()
+            assert (target / "file.txt").read_text() == "content"
+
+    def test_apfs_clone_directory_both_fail(self, tmp_path):
+        """Test APFS cloning returns False when both CoW and fallback fail."""
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+
+        source.mkdir()
+        target.mkdir()
+        (source / "file.txt").write_text("content")
+
+        with patch('subprocess.run') as mock_run, \
+             patch('shutil.copy2') as mock_copy:
+            mock_run.side_effect = subprocess.CalledProcessError(1, 'cp')
+            mock_copy.side_effect = OSError("Copy failed")
 
             result = _apfs_clone_directory(source, target)
 
@@ -470,7 +499,7 @@ class TestCloneOperationIntegration:
         sentinel = real_temp_cache / ".mlxk2_temp_cache_sentinel"
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -517,19 +546,21 @@ class TestCloneOperationIntegration:
             # Verify real cleanup happened (temp cache should be deleted)
             assert not real_temp_cache.exists()
 
-    def test_clone_operation_apfs_validation_failure(self, tmp_path):
-        """Test clone operation fails APFS validation."""
+    def test_clone_operation_non_apfs_continues_with_fallback(self, tmp_path):
+        """Test clone operation continues with fallback on non-APFS (no longer fails)."""
         target_dir = str(tmp_path / "workspace")
         model_spec = "any/model"
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem') as mock_validate:
-            mock_validate.side_effect = FilesystemError("APFS required")
+        with patch('mlxk2.operations.clone._check_apfs_and_warn', return_value=False), \
+             patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_cache:
+            # Mock returns path and should_download=True
+            mock_cache.return_value = (tmp_path / "temp_cache", True)
 
+            # Will fail at pull stage, but NOT at APFS validation
             result = clone_operation(model_spec, target_dir)
 
-            assert result["status"] == "error"
-            assert result["data"]["clone_status"] == "filesystem_error"
-            assert "APFS required" in result["error"]["message"]
+            # Should NOT be a filesystem_error - APFS check is now just a warning
+            assert result["data"].get("clone_status") != "filesystem_error"
 
     def test_clone_operation_pull_failure(self, tmp_path):
         """Test clone operation handles pull failure."""
@@ -542,7 +573,7 @@ class TestCloneOperationIntegration:
         sentinel = real_temp_cache / ".mlxk2_temp_cache_sentinel"
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull:
 
@@ -576,7 +607,7 @@ class TestCloneOperationIntegration:
         sentinel = real_temp_cache / ".mlxk2_temp_cache_sentinel"
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -645,7 +676,7 @@ class TestCloneOperationIntegration:
         sentinel = real_temp_cache / ".mlxk2_temp_cache_sentinel"
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -690,7 +721,7 @@ class TestCloneJSONAPICompliance:
         sentinel = real_temp_cache / ".mlxk2_temp_cache_sentinel"
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -729,37 +760,38 @@ class TestCloneJSONAPICompliance:
 
     def test_clone_error_response_schema(self, tmp_path):
         """Test error clone response matches JSON API 0.1.4 schema."""
-        target_dir = str(tmp_path / "workspace")
-        model_spec = "invalid/model"
+        # Use non-empty target to trigger InvalidTargetError
+        target_dir = tmp_path / "workspace"
+        target_dir.mkdir()
+        (target_dir / "existing_file.txt").write_text("existing")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem') as mock_validate:
-            mock_validate.side_effect = FilesystemError("APFS required")
+        model_spec = "test/model"
 
-            result = clone_operation(model_spec, target_dir)
+        result = clone_operation(model_spec, str(target_dir))
 
-            # Validate error response structure
-            assert result["status"] == "error"
-            assert result["command"] == "clone"
-            assert result["error"] is not None
+        # Validate error response structure
+        assert result["status"] == "error"
+        assert result["command"] == "clone"
+        assert result["error"] is not None
 
-            # Validate error section
-            error = result["error"]
-            assert "type" in error
-            assert "message" in error
-            assert isinstance(error["type"], str)
-            assert isinstance(error["message"], str)
+        # Validate error section
+        error = result["error"]
+        assert "type" in error
+        assert "message" in error
+        assert isinstance(error["type"], str)
+        assert isinstance(error["message"], str)
 
-            # Validate data section still present
-            assert "data" in result
-            assert "clone_status" in result["data"]
-            assert result["data"]["clone_status"] == "filesystem_error"
+        # Validate data section still present
+        assert "data" in result
+        assert "clone_status" in result["data"]
+        assert result["data"]["clone_status"] == "error"
 
     def test_clone_response_no_extra_fields(self, tmp_path):
         """Test clone response doesn't include fields not in JSON API 0.1.4."""
         target_dir = str(tmp_path / "workspace")
         model_spec = "test/model"
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume'), \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -798,7 +830,7 @@ class TestCloneCoreFeatures:
         target_dir2 = str(tmp_path / "workspace2")
         model_spec = "org/model"
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -858,7 +890,7 @@ class TestCloneCoreFeatures:
         user_cache = tmp_path / "user_cache"
         user_cache.mkdir()
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -903,7 +935,7 @@ class TestCloneEdgeCases:
         temp_cache = tmp_path / "temp_cache"
         temp_cache.mkdir()
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -940,7 +972,7 @@ class TestCloneEdgeCases:
         sentinel = real_temp_cache / ".mlxk2_temp_cache_sentinel"
         sentinel.write_text("mlxk2_temp_cache_created_test")
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve:
@@ -969,7 +1001,7 @@ class TestCloneEdgeCases:
         temp_cache = tmp_path / "temp_cache"
         temp_cache.mkdir()
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'), \
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'), \
              patch('mlxk2.operations.clone._create_temp_cache_same_volume') as mock_create_cache, \
              patch('mlxk2.operations.clone.pull_to_cache') as mock_pull, \
              patch('mlxk2.operations.clone._resolve_latest_snapshot') as mock_resolve, \
@@ -998,7 +1030,7 @@ class TestCloneEdgeCases:
         target_dir = str(tmp_path / "workspace")
         model_spec = "test/model"
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem') as mock_validate:
+        with patch('mlxk2.operations.clone._check_apfs_and_warn') as mock_validate:
             mock_validate.side_effect = RuntimeError("Unexpected error")
 
             result = clone_operation(model_spec, target_dir)
@@ -1018,7 +1050,7 @@ class TestUnhealthyModelClone:
     - Health check should be informational only, not blocking
     """
 
-    @patch('mlxk2.operations.clone._validate_apfs_filesystem')
+    @patch('mlxk2.operations.clone._check_apfs_and_warn')
     @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
     @patch('mlxk2.operations.clone.pull_to_cache')
     @patch('mlxk2.operations.clone._resolve_latest_snapshot')
@@ -1071,7 +1103,7 @@ class TestUnhealthyModelClone:
         # Sentinel should have been written
         mock_sentinel.assert_called_once()
 
-    @patch('mlxk2.operations.clone._validate_apfs_filesystem')
+    @patch('mlxk2.operations.clone._check_apfs_and_warn')
     @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
     @patch('mlxk2.operations.clone.pull_to_cache')
     @patch('mlxk2.operations.clone._resolve_latest_snapshot')
@@ -1118,7 +1150,7 @@ class TestUnhealthyModelClone:
         assert result["data"]["health"] == "healthy"
         assert result["data"]["health_reason"] == "Multi-file model complete"
 
-    @patch('mlxk2.operations.clone._validate_apfs_filesystem')
+    @patch('mlxk2.operations.clone._check_apfs_and_warn')
     @patch('mlxk2.operations.clone._create_temp_cache_same_volume')
     @patch('mlxk2.operations.clone.pull_to_cache')
     @patch('mlxk2.operations.clone._resolve_latest_snapshot')
@@ -1341,7 +1373,7 @@ class TestResumableClone:
         target = tmp_path / "workspace"
         model_spec = "test/model"
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'):
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'):
             with patch('mlxk2.operations.clone._get_volume_mount_point', return_value=tmp_path):
                 # Mock pull_to_cache to raise KeyboardInterrupt
                     with patch('mlxk2.operations.clone.pull_to_cache', side_effect=KeyboardInterrupt()):
@@ -1369,9 +1401,9 @@ class TestResumableClone:
         target = tmp_path / "workspace"
         model_spec = "test/model"
 
-        with patch('mlxk2.operations.clone._validate_apfs_filesystem'):
-            # Raise KeyboardInterrupt during volume mount check
-            with patch('mlxk2.operations.clone._get_volume_mount_point', side_effect=KeyboardInterrupt()):
+        with patch('mlxk2.operations.clone._check_apfs_and_warn'):
+            # Raise KeyboardInterrupt during temp cache creation
+            with patch('mlxk2.operations.clone._create_temp_cache_same_volume', side_effect=KeyboardInterrupt()):
                     result = clone_operation(model_spec, str(target))
 
         # Should handle gracefully even without temp cache
