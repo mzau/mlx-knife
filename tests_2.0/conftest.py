@@ -1581,3 +1581,59 @@ def pytest_runtest_makereport(item, call):
         except Exception as e:
             # Don't fail tests if reporting fails
             print(f"\n⚠️  Benchmark report write failed: {e}")
+
+
+# =============================================================================
+# Workspace Home Fixture (ADR-022: Workspace-First Testing)
+# =============================================================================
+
+@pytest.fixture
+def workspace_home(tmp_path, monkeypatch):
+    """Create a minimal MLXK_WORKSPACE_HOME with test workspaces.
+
+    Provides a flat directory with two workspace models (one clone, one quantized)
+    and sets MLXK_WORKSPACE_HOME to point to it. Cleans up env after test.
+
+    Yields:
+        Path to the workspace home directory.
+    """
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+
+    # Workspace 1: cloned model (bf16)
+    ws1 = ws_home / "test-model-bf16"
+    ws1.mkdir()
+    (ws1 / "config.json").write_text(
+        '{"model_type": "llama", "hidden_size": 4096, "num_hidden_layers": 32}'
+    )
+    (ws1 / "model.safetensors").write_bytes(b"\x00" * 256)
+    (ws1 / ".mlxk_workspace.json").write_text(_json.dumps({
+        "managed": True,
+        "operation": "clone",
+        "source": "mlx-community/test-model-bf16",
+        "mlxk_version": "2.0.5",
+        "created": "2026-04-13T12:00:00Z",
+    }))
+
+    # Workspace 2: quantized model (4bit)
+    ws2 = ws_home / "test-model-4bit"
+    ws2.mkdir()
+    (ws2 / "config.json").write_text(_json.dumps({
+        "model_type": "llama",
+        "hidden_size": 4096,
+        "num_hidden_layers": 32,
+        "quantization": {"bits": 4, "group_size": 64},
+    }))
+    (ws2 / "model.safetensors").write_bytes(b"\x00" * 128)
+    (ws2 / ".mlxk_workspace.json").write_text(_json.dumps({
+        "managed": True,
+        "operation": "convert",
+        "mode": "quantize",
+        "source": "mlx-community/test-model-bf16",
+        "mlxk_version": "2.0.5",
+        "created": "2026-04-13T12:00:00Z",
+    }))
+
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    yield ws_home

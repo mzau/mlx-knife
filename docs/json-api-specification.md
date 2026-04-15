@@ -1,8 +1,8 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.2.0
+**Specification Version:** 0.2.1
 **Status:** Stable (backward-compatible)
-**Released:** MLX-Knife 2.0.5-beta.1
+**Released:** MLX-Knife 2.0.5-beta.3
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
@@ -842,14 +842,34 @@ mlxk-json rm "locked-model" --json               # Error: requires --force due t
 }
 ```
 
-### `mlxk-json clone <model> <target_dir> --json`
+### `mlxk clone <model> [<target_dir>] --json`
 
-**Usage:**
+**Usage (0.2.1+):**
 ```bash
-mlxk-json clone "Phi-3-mini" ./workspace --json              # Clone to workspace directory
-mlxk-json clone "mlx-community/Phi-3-mini" ./my-model --json # Full name to custom directory
-mlxk-json clone "microsoft/DialoGPT-small" ./workspace --json # Non-MLX model
+# Shorthand: target derived from MLXK_WORKSPACE_HOME (org prefix stripped)
+export MLXK_WORKSPACE_HOME=~/mlx-models
+mlxk clone mlx-community/pixtral-12b-bf16 --json     # → ~/mlx-models/pixtral-12b-bf16
+mlxk clone mlx-community/pixtral-12b-bf16 my-pixtral --json  # → ~/mlx-models/my-pixtral
+
+# Explicit paths (MLXK_WORKSPACE_HOME ignored):
+mlxk clone mlx-community/pixtral-12b-bf16 ./local-dir --json
+mlxk clone mlx-community/pixtral-12b-bf16 /abs/path --json
 ```
+
+> **target_dir** is optional when `MLXK_WORKSPACE_HOME` is set. Bare names resolve into workspace home; paths with `./`, `../`, or `/` are used literally.
+
+**data fields (schema 0.2.1):**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | string | yes | Resolved HF model name |
+| `clone_status` | string | yes | Status enum (see below) |
+| `message` | string | yes | Human-readable status message |
+| `target_dir` | string | yes | Resolved absolute target path |
+| `health_check` | boolean | no | Whether health check was run |
+| `health` | string | no | `"healthy"` or `"unhealthy"` |
+| `health_reason` | string | no | Health check detail |
+
+**clone_status values:** `success`, `error`, `cancelled`, `pulling`, `resuming`, `preparing`, `cloning`, `health_checking`, `pull_failed`, `cache_not_found`, `filesystem_error`, `unknown`
 
 **Successful Clone:**
 ```json
@@ -857,29 +877,32 @@ mlxk-json clone "microsoft/DialoGPT-small" ./workspace --json # Non-MLX model
   "status": "success",
   "command": "clone",
   "data": {
-    "model": "mlx-community/Phi-3-mini-4k-instruct-4bit",
+    "model": "mlx-community/pixtral-12b-bf16",
     "clone_status": "success",
-    "message": "Cloned to ./workspace",
-    "target_dir": "./workspace",
-    "expanded_name": "mlx-community/Phi-3-mini-4k-instruct-4bit"
+    "message": "Cloned to /Users/me/mlx-models/pixtral-12b-bf16",
+    "target_dir": "/Users/me/mlx-models/pixtral-12b-bf16",
+    "health_check": true,
+    "health": "healthy",
+    "health_reason": "Multi-file model complete"
   },
   "error": null
 }
 ```
 
-**Target Directory Not Empty:**
+**Target Already Exists:**
 ```json
 {
   "status": "error",
   "command": "clone",
   "data": {
-    "model": null,
+    "model": "mlx-community/pixtral-12b-bf16",
     "clone_status": "error",
-    "target_dir": "./workspace"
+    "message": "Target directory already exists",
+    "target_dir": "/Users/me/mlx-models/pixtral-12b-bf16"
   },
   "error": {
     "type": "ValidationError",
-    "message": "Target directory './workspace' already exists and is not empty"
+    "message": "Target directory already exists and is not empty"
   }
 }
 ```
@@ -891,8 +914,9 @@ mlxk-json clone "microsoft/DialoGPT-small" ./workspace --json # Non-MLX model
   "command": "clone",
   "data": {
     "model": "nonexistent/model",
-    "clone_status": "failed",
-    "target_dir": "./workspace"
+    "clone_status": "pull_failed",
+    "message": "Repository not found",
+    "target_dir": "/Users/me/mlx-models/model"
   },
   "error": {
     "type": "clone_failed",
@@ -901,41 +925,74 @@ mlxk-json clone "microsoft/DialoGPT-small" ./workspace --json # Non-MLX model
 }
 ```
 
-**Access Denied:**
+### `mlxk convert <source> <target> [--quantize <bits>] [--repair-index] --json`
+
+**Usage:**
+```bash
+mlxk convert ./model-bf16 ./model-4bit --quantize 4 --json    # Quantize to 4-bit
+mlxk convert ./broken-model ./fixed-model --repair-index --json # Rebuild safetensors index
+```
+
+**data fields (schema 0.2.1):**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source` | string | yes | Source workspace path |
+| `target` | string | yes | Target workspace path |
+| `mode` | string | yes | `"quantize"` or `"repair-index"` |
+| `health_check` | boolean | no | Whether health check was run |
+| `health_status` | string | no | `"healthy"` or `"unhealthy"` |
+| `health_reason` | string | no | Health check detail |
+| `message` | string | no | Human-readable status |
+| `warning` | string | no | Warning (e.g., re-quantizing) |
+| `bits` | integer | no | Quantization bits (quantize mode) |
+| `group_size` | integer | no | Quantization group size |
+| `content_hash` | string | no | SHA256 workspace content hash |
+
+**Successful Quantize:**
 ```json
 {
-  "status": "error",
-  "command": "clone",
+  "status": "success",
+  "command": "convert",
   "data": {
-    "model": "gated/model",
-    "clone_status": "access_denied",
-    "target_dir": "./workspace"
+    "source": "/Users/me/mlx-models/model-bf16",
+    "target": "/Users/me/mlx-models/model-4bit",
+    "mode": "quantize",
+    "health_check": true,
+    "message": "Quantized to 4-bit successfully",
+    "bits": 4,
+    "group_size": 64,
+    "health_status": "healthy",
+    "health_reason": "Multi-file model complete",
+    "content_hash": "bdd5a5be06e3e612bd91ad8ebdcfa787c892e0cf"
   },
-  "error": {
-    "type": "access_denied",
-    "message": "Access denied: gated/private model 'gated/model'. Accept terms and set HF_TOKEN."
-  }
+  "error": null
 }
 ```
 
-**APFS Filesystem Error:**
+**Quantize with Warning (re-quantize):**
 ```json
 {
-  "status": "error",
-  "command": "clone",
+  "status": "success",
+  "command": "convert",
   "data": {
-    "model": "org/model",
-    "clone_status": "filesystem_error",
-    "target_dir": "./workspace"
+    "source": "/Users/me/mlx-models/model-4bit",
+    "target": "/Users/me/mlx-models/model-8bit",
+    "mode": "quantize",
+    "health_check": true,
+    "warning": "Source already 4-bit. Quantizing to 8-bit does not increase precision.",
+    "message": "Quantized to 8-bit successfully",
+    "bits": 8,
+    "group_size": 64,
+    "health_status": "healthy",
+    "health_reason": "Multi-file model complete"
   },
-  "error": {
-    "type": "FilesystemError",
-    "message": "APFS required for clone operations."
-  }
+  "error": null
 }
 ```
 
-### `mlxk-json push <dir> <org/model> [--create] [--private] [--branch <b>] [--commit "..."] [--verbose] [--check-only] --json`
+---
+
+### `mlxk push <dir> <org/model> [--create] [--private] [--branch <b>] [--commit "..."] [--verbose] [--check-only] --json`
 
 Behavior:
 - Requires `HF_TOKEN` env.
@@ -1195,6 +1252,8 @@ All commands use consistent exit codes for scripting:
 
 ## Version History
 
+- **0.2.1** (2.0.5-beta.3): Added `data` schema definitions for `clone` and `convert` commands (if/then blocks with required fields)
+- **0.2.0** (2.0.5-beta.1): Workspace-first fields: `origin`, `content_hash`, `hash_modified`, `clean`, `display_name` on modelObject. `convert` added to command enum.
 - **2.0.0-alpha:** JSON-only implementation with `mlxk-json --json`
-- **2.0.0-alphha.1:** Full implementation with both JSON and human-readable output
-- **2.0.0-alphha.2:** Push function protocol extension (json-0.1.3)
+- **2.0.0-alpha.1:** Full implementation with both JSON and human-readable output
+- **2.0.0-alpha.2:** Push function protocol extension (json-0.1.3)

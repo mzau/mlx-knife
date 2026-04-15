@@ -61,6 +61,51 @@ def _set_workspace_hf_home(workspace_path: Path) -> None:
     os.environ["HF_HOME"] = str(hf_cache)
 
 
+def _is_explicit_path(target: str) -> bool:
+    """Check if a clone target is an explicit path (not a bare name).
+
+    Bare names like 'my-model' get resolved into MLXK_WORKSPACE_HOME.
+    Explicit paths like './my-model', '/abs/path', '../up' stay literal.
+    """
+    return target.startswith(("/", "./", "../")) or os.sep in target
+
+
+def _resolve_clone_target(model_spec: str) -> str:
+    """Resolve clone target when no explicit target_dir is given.
+
+    Requires MLXK_WORKSPACE_HOME. Strips org prefix from HF model spec
+    to keep workspace directory flat.
+
+    Examples:
+        mlx-community/pixtral-12b-bf16  → $MLXK_WORKSPACE_HOME/pixtral-12b-bf16
+        Qwen/Qwen2.5-7B                → $MLXK_WORKSPACE_HOME/Qwen2.5-7B
+        model@revision                  → $MLXK_WORKSPACE_HOME/model (revision stripped)
+    """
+    workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
+    if not workspace_home:
+        print("Error: Target directory required.", file=sys.stderr)
+        print("Hint: Set MLXK_WORKSPACE_HOME or specify target:", file=sys.stderr)
+        print(f"  mlxk clone {model_spec} ./my-model", file=sys.stderr)
+        sys.exit(1)
+
+    ws_path = Path(workspace_home).expanduser().resolve()
+    if not ws_path.is_dir():
+        print(f"Error: MLXK_WORKSPACE_HOME is not a directory: {ws_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Strip revision (@branch) from model spec
+    base_spec = model_spec.split("@")[0]
+    # Strip org prefix (org/model → model)
+    model_name = base_spec.split("/")[-1] if "/" in base_spec else base_spec
+
+    target = ws_path / model_name
+    if target.exists():
+        print(f"Error: {model_name} already exists in {ws_path}", file=sys.stderr)
+        sys.exit(1)
+
+    return str(target)
+
+
 def _bootstrap_hf_home():
     """Set HF_HOME before any huggingface_hub import. Called at module load."""
     # Workspace isolation takes PRIORITY - even over user-set HF_HOME (ADR-022)
@@ -263,7 +308,8 @@ def main():
     # Clone command - create local workspace from cached model
     clone_parser = subparsers.add_parser("clone", help="Clone a model to a local workspace")
     clone_parser.add_argument("model", help="Model name to clone (org/repo[@revision])")
-    clone_parser.add_argument("target_dir", help="Target directory for workspace")
+    clone_parser.add_argument("target_dir", nargs="?", default=None,
+                              help="Target directory (optional if MLXK_WORKSPACE_HOME is set)")
     clone_parser.add_argument("--branch", help="Specific branch/revision to clone")
     clone_parser.add_argument("--no-health-check", action="store_true", help="Skip health validation before copy")
     clone_parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
@@ -495,10 +541,22 @@ def main():
                 # If --branch is provided, append it to model spec
                 model_spec = f"{args.model}@{args.branch}"
 
+            # Resolve target_dir: optional when MLXK_WORKSPACE_HOME is set
+            target_dir = args.target_dir
+            if target_dir is None:
+                target_dir = _resolve_clone_target(model_spec)
+            elif not _is_explicit_path(target_dir):
+                # Bare name with MLXK_WORKSPACE_HOME → resolve into workspace home
+                workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
+                if workspace_home:
+                    ws_path = Path(workspace_home).expanduser().resolve()
+                    if ws_path.is_dir():
+                        target_dir = str(ws_path / target_dir)
+
             from .operations.clone import clone_operation
             result = clone_operation(
                 model_spec=model_spec,
-                target_dir=args.target_dir,
+                target_dir=target_dir,
                 health_check=not getattr(args, "no_health_check", False),
                 force_resume=getattr(args, "force_resume", False)
             )
@@ -532,22 +590,47 @@ def main():
                 _convert_arg_error("Must specify conversion mode (--repair-index or --quantize N)")
 
             # Suppress upstream print("[INFO]...") from mlx-lm/mlx-vlm convert()
+            # Must redirect BOTH fd 1 (OS-level) AND sys.stdout (Python-level)
+            # to catch all print() calls from upstream libraries.
             if args.json:
+                sys.stdout.flush()
                 _saved_fd = os.dup(1)
                 _devnull_fd = os.open(os.devnull, os.O_WRONLY)
                 os.dup2(_devnull_fd, 1)
                 os.close(_devnull_fd)
+                _saved_stdout = sys.stdout
+                sys.stdout = open(os.devnull, "w")
+
+            # Resolve bare names via MLXK_WORKSPACE_HOME
+            source_path = args.source
+            target_path = args.target
+            if not _is_explicit_path(source_path):
+                workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
+                if workspace_home:
+                    ws_path = Path(workspace_home).expanduser().resolve()
+                    if ws_path.is_dir():
+                        resolved = ws_path / source_path
+                        if resolved.is_dir():
+                            source_path = str(resolved)
+            if not _is_explicit_path(target_path):
+                workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
+                if workspace_home:
+                    ws_path = Path(workspace_home).expanduser().resolve()
+                    if ws_path.is_dir():
+                        target_path = str(ws_path / target_path)
 
             try:
                 result = convert_operation(
-                    args.source,
-                    args.target,
+                    source_path,
+                    target_path,
                     mode=mode,
                     mode_opts=mode_opts,
                     skip_health=args.skip_health
                 )
             finally:
                 if args.json:
+                    sys.stdout.close()
+                    sys.stdout = _saved_stdout
                     os.dup2(_saved_fd, 1)
                     os.close(_saved_fd)
 

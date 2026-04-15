@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://example.com/mlxk-json-api.schema.json",
-  "title": "MLX-Knife 2.0 JSON API 0.2.0 (current)",
+  "title": "MLX-Knife 2.0 JSON API 0.2.1 (current)",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -60,7 +60,8 @@
         "content_hash": {"type": ["string", "null"], "description": "SHA256 hash of workspace content at clone time. null for cache models."},
         "hash_modified": {"type": ["string", "null"], "description": "ISO8601 timestamp when content_hash was computed. null for cache models."},
         "clean": {"type": ["boolean", "null"], "description": "Workspace clean indicator: true=unchanged since clone, false=modified, null=unknown/cache model."},
-        "display_name": {"type": ["string", "null"], "description": "Human-friendly display name for workspaces. Relative path for relative patterns, absolute path for absolute patterns. null for cache models."}
+        "display_name": {"type": ["string", "null"], "description": "Human-friendly display name for workspaces. Relative path for relative patterns, absolute path for absolute patterns. null for cache models."},
+        "quantization": {"type": ["object", "null"], "description": "Quantization info from config.json (bits, group_size). null for non-quantized models."}
       },
       "required": [
         "name", "hash", "size_bytes", "last_modified", "framework",
@@ -288,6 +289,64 @@
                   "tokens_generated": {"type": "integer"},
                   "generation_time_s": {"type": "number"}
                 }
+              }
+            }
+          },
+          "else": {}
+        },
+        {
+          "if": {
+            "allOf": [
+              {"properties": {"status": {"const": "success"}}},
+              {"properties": {"command": {"const": "clone"}}}
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "model": {"type": "string"},
+                  "clone_status": {"type": "string", "enum": ["success", "error", "cancelled", "pulling", "resuming", "preparing", "cloning", "health_checking", "pull_failed", "cache_not_found", "filesystem_error", "unknown"]},
+                  "message": {"type": "string"},
+                  "target_dir": {"type": "string"},
+                  "health_check": {"type": "boolean"},
+                  "health": {"type": "string", "enum": ["healthy", "unhealthy"]},
+                  "health_reason": {"type": "string"}
+                },
+                "required": ["model", "clone_status", "message", "target_dir"]
+              }
+            }
+          },
+          "else": {}
+        },
+        {
+          "if": {
+            "allOf": [
+              {"properties": {"status": {"const": "success"}}},
+              {"properties": {"command": {"const": "convert"}}}
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "source": {"type": "string"},
+                  "target": {"type": "string"},
+                  "mode": {"type": "string", "enum": ["repair-index", "quantize"]},
+                  "health_check": {"type": "boolean"},
+                  "health_status": {"type": "string", "enum": ["healthy", "unhealthy"]},
+                  "health_reason": {"type": "string"},
+                  "message": {"type": "string"},
+                  "warning": {"type": "string"},
+                  "bits": {"type": "integer"},
+                  "group_size": {"type": "integer"},
+                  "content_hash": {"type": "string"}
+                },
+                "required": ["source", "target", "mode"]
               }
             }
           },

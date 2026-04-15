@@ -1,6 +1,51 @@
 # Changelog
 
-## [2.0.5-beta.2] - 2026-04-09
+## [2.0.5-beta.3] - 2026-04-15
+
+> **Clone Shorthand + JSON Schema 0.2.1 + Workspace Test Infrastructure.** Clone and convert resolve bare names via `MLXK_WORKSPACE_HOME`. JSON API data-schemas for clone/convert. Portfolio discovery uses `list --json` as single source of truth. Automated smoke tests.
+
+### Added
+
+- **Clone Shorthand:** `mlxk clone org/model` without target — auto-resolves to `$MLXK_WORKSPACE_HOME/model` (org prefix stripped, flat layout)
+- **Clone Bare Target:** `mlxk clone org/model my-name` resolves to `$MLXK_WORKSPACE_HOME/my-name` when MLXK_WORKSPACE_HOME is set
+- **Convert Bare Names:** `mlxk convert source target --quantize 4` resolves bare names via MLXK_WORKSPACE_HOME
+- **JSON API 0.2.1:** `data` schema definitions for `clone` and `convert` commands (if/then blocks with required fields)
+- **Workspace Test Infrastructure:** `workspace_home` fixture, 21 integration tests (list, health, show, clone, convert with MLXK_WORKSPACE_HOME)
+- **Workspace-Only Portfolio:** `list` and `health` work correctly with only workspace models (no HF cache required)
+- **Automated Smoke Tests:** `test_json_smoke.py` — JSON validation per command as subprocess (8 tests, wet marker)
+- **Workspace Live Tests:** `test_workspace_live.py` — clone shorthand + convert bare names with real models (7 tests, wet marker)
+- **Clone Live Safety:** Test workspaces use `mlxk-test-` prefix; `_safe_rmtree()` refuses to delete directories without prefix
+
+### Changed
+
+- **Portfolio Discovery:** Uses `mlxk list --json` as single source of truth. No cache-format back-conversion. Workspace models (absolute paths) filtered out to prevent double-testing.
+- **Clone Live Test:** `MLXK2_LIVE_CLONE_WORKSPACE` replaced by `MLXK_WORKSPACE_HOME` (target always `mlxk-test-clone`)
+- **`pyproject.toml`:** License format updated (`license = "Apache-2.0"`, PEP 639 compliant)
+
+### Fixed
+
+- **`list` Count Bug:** `list_models()` returned `count: 0` when HF cache didn't exist, even with workspace models present
+- **Clone without MLXK_WORKSPACE_HOME:** Clear error message with hint instead of argparse error
+
+### Removed
+
+- **`MLXK2_LIVE_CLONE_WORKSPACE`:** Deprecated env var, replaced by `MLXK_WORKSPACE_HOME`
+
+### Documentation
+
+- **TESTING-DETAILS.md:** Workspace-first paradigm, CoW/volume semantics, portfolio discovery, test safety
+- **README.md:** Clone shorthand examples, MLXK_WORKSPACE_HOME usage
+- **`json-api-specification.md`:** Clone/convert data-field tables, version 0.2.1
+- **`json-api-schema.json`:** clone + convert if/then blocks
+
+### Tests
+
+- 720 unit tests passing, 80 deselected (live tests)
+- wet-umbrella: 197 passed (Phase 1), 3+3 passed (Phase 2-4)
+
+---
+
+## [2.0.5-beta.2] - 2026-04-10
 
 > **Quantize (Text + Vision) + Cross-Volume + Health Workspace Discovery.** Model quantization for text and vision models. Clone and convert work across volumes and non-APFS. Clean `--json` output. Multiple bugfixes from smoke testing.
 
@@ -68,7 +113,7 @@
 
 ### Tags
 
-- `2.0.5-beta.1`, `json-0.2.0`
+- `2.0.5-beta.1`
 
 ---
 

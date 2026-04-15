@@ -8,7 +8,8 @@ dynamic = ["version"]
 description = "HuggingFace model management for MLX on Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE", "mlxk2/NOTICE"]
 authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
@@ -22,7 +23,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: MacOS",
     "Environment :: Console",
-    "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
     # Core
@@ -72,12 +72,6 @@ dev = [
 [tool.ruff.lint.per-file-ignores]
 # cli.py: HF_HOME bootstrap (ADR-022) must run before any huggingface imports
 "mlxk2/cli.py" = ["E402"]
-
-[tool.setuptools]
-license-files = [
-  "LICENSE",
-  "mlxk2/NOTICE",
-]
 
 [tool.setuptools.package-data]
 mlxk2 = [

@@ -1,13 +1,13 @@
 """Opt-in live clone test.
 
 Runs only when explicitly selected via markers/env, per TESTING.md mini‑matrix.
-Validates ADR-007 Phase 1 compliance: real pull→temp cache→APFS same-volume clone→workspace.
+Validates real pull→temp cache→clone→workspace with cross-volume fallback.
 
 Enable with ALL required env vars:
-- MLXK2_LIVE_CLONE=1 (enable live test)
+- MLXK2_LIVE_CLONE=1 (enable live test — does real HF download)
 - HF_TOKEN=<your_token> (for model access)
 - MLXK2_LIVE_CLONE_MODEL=<model_name> (e.g., "mlx-community/bge-small-en-v1.5-4bit")
-- MLXK2_LIVE_CLONE_WORKSPACE=<workspace_path> (must be on same volume as HF_HOME for APFS)
+- MLXK_WORKSPACE_HOME=<path> (ADR-022: target goes here as mlxk-test-clone)
 
 Run:
 - pytest -m live_clone -v
@@ -15,10 +15,8 @@ Run:
 
 NOT part of wet marker (incompatible with Portfolio Discovery - does fresh HF download).
 
-ADR-007 Phase 1 Requirements:
-- Same volume: workspace and HF_HOME cache must be on same volume
-- APFS filesystem: required for copy-on-write optimization
-- User cache safety: never touched, always use temp cache isolation
+Safety: test workspace is always named mlxk-test-clone (TEST_PREFIX).
+_safe_rmtree() refuses to delete directories without this prefix.
 """
 
 from __future__ import annotations
@@ -32,23 +30,48 @@ from pathlib import Path
 import pytest
 
 
+TEST_PREFIX = "mlxk-test-"
+
 # Environment validation
 live_enabled = os.environ.get("MLXK2_LIVE_CLONE") == "1"
 hf_token_present = bool(os.environ.get("HF_TOKEN"))
 model = os.environ.get("MLXK2_LIVE_CLONE_MODEL")
-workspace = os.environ.get("MLXK2_LIVE_CLONE_WORKSPACE")
+ws_home = os.environ.get("MLXK_WORKSPACE_HOME")
+# ADR-022: target is always mlxk-test-clone in MLXK_WORKSPACE_HOME.
+# Safe prefix → _safe_rmtree won't touch real models.
+# Replaces MLXK2_LIVE_CLONE_WORKSPACE (no longer needed).
+workspace = f"{TEST_PREFIX}clone"
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.live_clone,
     pytest.mark.skipif(
-        not (live_enabled and hf_token_present and model and workspace),
+        not (live_enabled and hf_token_present and model and ws_home),
         reason=(
             "Live clone disabled. Set MLXK2_LIVE_CLONE=1, "
-            "HF_TOKEN, MLXK2_LIVE_CLONE_MODEL, and MLXK2_LIVE_CLONE_WORKSPACE to enable."
+            "HF_TOKEN, MLXK2_LIVE_CLONE_MODEL, and MLXK_WORKSPACE_HOME."
         ),
     ),
 ]
+
+
+def _resolve_workspace_path(ws: str) -> Path:
+    """Resolve workspace path like CLI does (ADR-022 bare-name resolution)."""
+    p = Path(ws)
+    if not p.is_absolute():
+        ws_home = os.environ.get("MLXK_WORKSPACE_HOME")
+        if ws_home:
+            return Path(ws_home).resolve() / ws
+    return p.resolve()
+
+
+def _safe_rmtree(path: Path) -> None:
+    """Remove directory only if its name starts with TEST_PREFIX.
+
+    Safety: prevents accidental deletion of real models in MLXK_WORKSPACE_HOME.
+    """
+    if path.exists() and path.name.startswith(TEST_PREFIX):
+        shutil.rmtree(path)
 
 
 def _run_cli(argv: list[str], capsys) -> str:
@@ -82,10 +105,9 @@ def test_live_clone_workflow_adr007_phase1(capsys, tmp_path):
     - APFS clone with copy-on-write optimization
     - Clean workspace output ready for development
     """
-    # Ensure clean workspace
-    workspace_path = Path(workspace)
-    if workspace_path.exists():
-        shutil.rmtree(workspace_path)
+    # Ensure clean workspace (ADR-022: bare names resolve into MLXK_WORKSPACE_HOME)
+    workspace_path = _resolve_workspace_path(workspace)
+    _safe_rmtree(workspace_path)
 
     # Run live clone operation
     result_json = _run_cli([
@@ -102,7 +124,7 @@ def test_live_clone_workflow_adr007_phase1(capsys, tmp_path):
     assert result["status"] == "success", f"Clone failed: {result.get('error', 'Unknown error')}"
     assert result["command"] == "clone"
     assert result["data"]["model"] == model
-    assert result["data"]["target_dir"] == str(Path(workspace).resolve())
+    assert result["data"]["target_dir"] == str(workspace_path.resolve())
 
     # ADR-007 Phase 1 validation
     assert result["data"]["health_check"] is True, "Health check should be enabled by default"
@@ -143,7 +165,7 @@ def test_live_clone_health_check_integration(capsys, tmp_path):
     from mlxk2.core.cache import get_current_cache_root
 
     # Note: This test assumes the previous test ran and workspace exists
-    workspace_path = Path(workspace)
+    workspace_path = _resolve_workspace_path(workspace)
     if not workspace_path.exists():
         pytest.skip(f"Workspace {workspace} not found - run full clone test first")
 
@@ -178,7 +200,7 @@ def test_live_clone_health_check_integration(capsys, tmp_path):
 def test_live_clone_workspace_validation(capsys):
     """Test workspace validation with real filesystem constraints."""
     # Test that workspace directory must be empty or non-existent
-    workspace_path = Path(workspace)
+    workspace_path = _resolve_workspace_path(workspace)
 
     if workspace_path.exists():
         # Create a dummy file to make workspace non-empty

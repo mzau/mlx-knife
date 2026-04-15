@@ -122,7 +122,7 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
             "command": "list",
             "data": {
                 "models": models,
-                "count": 0
+                "count": len(models)
             },
             "error": None
         }

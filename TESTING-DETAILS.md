@@ -4,16 +4,18 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.5-beta.2** — Workspace-First (ADR-022), Quantize (text + vision), Cross-Volume, Health Workspace Discovery, Clean JSON output. See CHANGELOG.md for details.
+✅ **2.0.5-beta.3** — Clone shorthand (target optional), Convert bare names, JSON Schema 0.2.1 (clone/convert data-blocks), Workspace test infrastructure, list count bugfix. See CHANGELOG.md for details.
+
+✅ **2.0.5-beta.2** — Workspace-First (ADR-022), Quantize (text + vision), Cross-Volume, Health Workspace Discovery, Clean JSON output.
 
 ✅ **2.0.4** — First stable release with Vision + Audio. See CHANGELOG.md for details.
 
 ### Test Results (Official Reference)
 
-**Standard Unit Tests (2.0.5-beta.2):**
+**Standard Unit Tests (2.0.5-beta.3):**
 ```
 Platform: macOS 26.4 (Tahoe), Apple Silicon (M2 Max, 64GB RAM)
-Python 3.10: 699 passed, 13 skipped
+Python 3.10: 720 passed, 13 skipped
 Note: Default suite works on 16GB. Full integration tests: 64GB recommended
       Apple Silicon (M-series) required for MLX
 ```
@@ -31,7 +33,7 @@ Total:                       182 passed across all phases
 ✅ **3-category test strategy** - optimized for performance and safety
 ✅ **Portfolio Separation** - Text and Vision models tested independently with separate RAM formulas
 
-### Skipped Tests Breakdown (65 deselected, standard run without HF_HOME)
+### Skipped Tests Breakdown (72 deselected, standard run without HF_HOME)
 - **38 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011 + Portfolio Separation)
   - **23 Text model tests** - Parametrized across text_portfolio (chat completions batch/streaming)
   - **3 Vision model tests** - Parametrized across vision_portfolio (multimodal, SSE, text-on-vision)
@@ -39,7 +41,8 @@ Total:                       182 passed across all phases
   - **11 Audio E2E tests** - Audio transcription (CLI + Server `/v1/audio/transcriptions`) with Whisper models (ADR-020)
   - **3 Non-parametrized tests** - Health, models list, vision→text switching
 - **4 Live Stop Tokens tests** - Stop token validation with real models (requires `pytest -m live_stop_tokens`, ADR-009)
-- **3 Live Clone tests** - APFS same-volume clone workflow (requires `MLXK2_LIVE_CLONE=1`)
+- **7 Workspace Live tests** - Clone shorthand + convert bare names with `MLXK_WORKSPACE_HOME` (subset of `wet`, requires workspace models)
+- **3 Live Clone tests** - Clone from HF to workspace (requires `MLXK2_LIVE_CLONE=1`, `MLXK_WORKSPACE_HOME`; target always `mlxk-test-clone`)
 - **2 Issue #37 tests** - Private/org model detection (requires `pytest -m live_run`, Issue #37)
 - **2 Runtime Compatibility tests** - Reason chain validation (requires specific model types)
 - **1 Live List test** - Tests against user cache (requires HF_HOME with models)
@@ -48,9 +51,11 @@ Total:                       182 passed across all phases
 - **2 Show Portfolio tests** - Display text/vision portfolios separately (requires HF_HOME)
 - **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
-**Portfolio Discovery** (ADR-009) auto-discovers MLX models in user cache using `mlxk list --json`. Validates fixes across the full model portfolio with RAM-aware skipping.
+**Portfolio Discovery** (ADR-009) auto-discovers MLX models using `mlxk list --json` as single source of truth. Since 2.0.5-beta.2, `list` includes both **HuggingFace cache** and **MLXK_WORKSPACE_HOME** workspaces (ADR-022). Portfolio discovery filters to **cache models only** for test parametrization (workspace models are skipped to avoid double-testing when the same model exists in both). No cache-format back-conversion needed — model names from `list --json` are used directly.
 
-**Note:** Portfolio Discovery only includes **cache models** (HuggingFace cache). Workspace paths (e.g., `./my-workspace`) are not discovered. Models requiring workspace repair (e.g., Gemma-3n for audio) must be tested manually.
+**Note:** Models requiring workspace repair (e.g., Gemma-3n for audio) must be tested manually.
+
+**Safety:** Live tests that create workspace directories use `mlxk-test-` prefix. `_safe_rmtree()` refuses to delete directories without this prefix, preventing accidental deletion of real models in MLXK_WORKSPACE_HOME.
 
 ---
 
@@ -67,7 +72,8 @@ Total:                       182 passed across all phases
 | Live push | `pytest -m live_push -v` | `live_push` (subset of `wet`) + Env: `MLXK2_LIVE_PUSH=1`, `HF_TOKEN`, `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` | JSON push against the real Hub; on errors the test SKIPs (diagnostic) | Yes |
 | Live list | `pytest -m live_list -v` | `live_list` (subset of `wet`) + Env: `HF_HOME` (user cache with models) | Tests list/health against user cache models | No (uses local cache) |
 | Clone offline | `pytest -k clone -v` | — | Clone offline tests (APFS validation, temp cache, CoW workflow); no network needed | No |
-| Live clone (ADR-007) | `pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK2_LIVE_CLONE_WORKSPACE` | Real clone workflow: pull→temp cache→APFS same-volume clone→workspace (ADR-007 Phase 1 constraints: same volume + APFS required) | Yes |
+| Workspace live (ADR-022) | `pytest -m wet tests_2.0/live/test_workspace_live.py -v` | `wet` (subset); Env: `MLXK_WORKSPACE_HOME` (directory with workspace models) | Clone shorthand (target optional, org-stripped), convert bare names, JSON schema validation. Safe: only creates temp directories, never touches HF cache. | No (uses workspace models) |
+| Live clone (ADR-022) | `pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK_WORKSPACE_HOME` | Real clone workflow: pull→temp cache→clone→workspace. Target always `mlxk-test-clone` in MLXK_WORKSPACE_HOME (safe prefix, `_safe_rmtree`). Cross-volume CoW fallback. `MLXK2_LIVE_CLONE_WORKSPACE` no longer needed. | Yes |
 | Live stop tokens (ADR-009) | `pytest -m live_stop_tokens -v` | `live_stop_tokens`; Optional: `HF_HOME` | Issue #32: Stop token behavior. Uses Portfolio Discovery or fallback models (see below). | No |
 | Live run | `pytest -m live_run -v` | `live_run` + `HF_HOME` (needs Phi-3-mini) | Issue #37: Private/org MLX model framework detection. | No |
 | Live E2E (ADR-011) | `pytest -m live_e2e -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `httpx` | Server/HTTP/CLI validation. Uses Portfolio Discovery or fallback models. | No |
@@ -255,25 +261,32 @@ HF_HOME = /Volumes/ExternalSSD/huggingface/cache  # Restored
 MLXK2_STRICT_TEST_DELETE = <original>         # Restored
 ```
 
-**Workspace (Separate Concept - NOT a Cache)**
+**Workspace (ADR-022: Workspace-First Paradigm)**
 
-Workspace is semantically distinct from Cache - it's a **self-contained, portable** directory for Clone/Push operations.
+Workspace is the **primary** model storage for MLX-Knife 2.0.5+. Self-contained, portable, human-readable names. HF cache remains as download intermediary.
 
 ```
 What:      Self-contained directory with model files (standalone health-check capable)
-Purpose:   Clone target (output) OR Push source (input)
-Location:  User-specified path (production) OR tmp_path (tests)
-           Goal: Any location (USB stick, SMB share, different volumes)
-           Phase 1: Same APFS volume as cache (CoW optimization)
+Purpose:   Primary model storage (run/serve), clone target, push source
+Location:  MLXK_WORKSPACE_HOME (portfolio) or explicit path
 Structure: Flat directory with config.json + weights (*.safetensors, *.gguf, etc.)
            NOT HuggingFace cache structure (no hub/snapshots/blobs)
-Lifecycle: Permanent (user owns it) OR temporary (tests use tmp_path)
-Portable:  Yes (conceptually) - can be copied, moved, shared via USB/SMB
+           Names: human-readable (pixtral-12b-bf16), no org prefix in dir name
+Naming:    Org prefix stripped on clone (mlx-community/model → model)
+           See docs/model-naming-specification.md for HF cache encoding (different world)
+Lifecycle: Permanent (user owns it) OR temporary (tests use mlxk-test- prefix)
+Portable:  Yes - cross-volume, SMB, NFS, USB (CoW on same APFS, fallback copy otherwise)
+⚠ CoW:     CoW is transparent — results are identical whether CoW or fallback copy.
+           Tests validate outcomes (workspace created correctly), not mechanism.
+           Live tests place targets in MLXK_WORKSPACE_HOME (same volume → CoW if APFS).
+           Unit tests use tmp_path (different volume → fallback copy). Both are valid.
+           Dedicated cross-volume tests (ADR-022) explicitly verify fallback detection.
 ```
 
 **Workspace vs Cache:**
-- **Cache**: HuggingFace internal structure (hub/models--org--repo/snapshots/...), **many models**
-- **Workspace**: User-facing structure (config.json, model.safetensors, tokenizer.json, ...), **exactly one model**
+- **Cache**: HuggingFace internal structure (`hub/models--org--repo/snapshots/...`), encoded names, **many models**
+- **Workspace**: User-facing flat structure (`config.json`, `model.safetensors`, ...), human names, **one model per dir**
+- **Portfolio**: `MLXK_WORKSPACE_HOME` + HF cache combined. `list`, `health` scan both; workspace models have `display_name`.
 
 **Self-contained health check:**
 - Workspace contains all files needed for validation
@@ -281,19 +294,21 @@ Portable:  Yes (conceptually) - can be copied, moved, shared via USB/SMB
 - `mlxk push --check-only workspace/` validates standalone
 
 **Workspace in production:**
-- **Clone**: `mlxk clone org/model /path/to/workspace` → Creates workspace at user-specified path
-- **Push**: `mlxk push /path/to/workspace org/model` → Uploads from user-specified path
-- **Validation**: Clone requires empty directory, Push requires valid model structure
-- **Portability**: Phase 1 requires same APFS volume (limitation), future: any location
+- **Clone**: `mlxk clone org/model` → `$MLXK_WORKSPACE_HOME/model` (org stripped, target optional)
+- **Clone explicit**: `mlxk clone org/model ./local-dir` or `mlxk clone org/model custom-name`
+- **Convert**: `mlxk convert source target --quantize 4` (bare names resolve via MLXK_WORKSPACE_HOME)
+- **Push**: `mlxk push ./workspace org/model` → Uploads from workspace
+- **Run/Serve**: `mlxk run model-name "prompt"` → Fuzzy-matches in MLXK_WORKSPACE_HOME
 
 **Workspace in tests:**
-- Uses pytest's `tmp_path` fixture (NOT `isolated_cache`)
-- Pattern: `target_dir = str(tmp_path / "workspace")`
-- Example: `test_clone_operation.py` line 489, `test_push_workspace_check.py` line 18
+- **Unit tests**: pytest `tmp_path` fixture or `workspace_home` fixture from conftest.py
+- **Live tests**: `mlxk-test-` prefix names in MLXK_WORKSPACE_HOME (safe to delete via `_safe_rmtree`)
+- Pattern: `target_dir = str(tmp_path / "workspace")` (unit) or `f"{TEST_PREFIX}clone"` (live)
 
-**Workspace safety (Clone operation):**
+**Workspace safety:**
+- Live test directories always use `mlxk-test-` prefix
+- `_safe_rmtree()` refuses to delete directories without this prefix
 - Temp cache during clone: `.mlxk2_temp_cache_sentinel` (cleanup protection)
-- Sentinel is in temp cache, NOT in final workspace
 - Temp cache deleted after successful clone → workspace remains
 
 **Workspace dimension in truth table:**
@@ -1651,7 +1666,7 @@ These variables enable optional live tests that interact with real models or ext
 | `MLXK2_LIVE_WORKSPACE` | Workspace path for push tests | `pytest -m live_push` |
 | `MLXK2_LIVE_CLONE` | Enable live clone tests | `pytest -m live_clone` |
 | `MLXK2_LIVE_CLONE_MODEL` | Model to clone in live tests | `pytest -m live_clone` |
-| `MLXK2_LIVE_CLONE_WORKSPACE` | Clone destination path | `pytest -m live_clone` |
+| `MLXK2_LIVE_CLONE_WORKSPACE` | **Deprecated** (2.0.5-beta.3): replaced by `MLXK_WORKSPACE_HOME`. Target is always `mlxk-test-clone`. | `pytest -m live_clone` |
 | `MLXK2_USER_HF_HOME` | User cache path for read-only tests | `pytest -m issue27` or `pytest -m live_run` |
 | `MLXK2_ISSUE27_MODEL` | Specific model for Issue #27 tests | `pytest -m issue27` |
 | `MLXK2_ISSUE27_INDEX_MODEL` | Index-based model for Issue #27 | `pytest -m issue27` |

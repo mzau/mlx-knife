@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.4-beta.9 (WIP)
+**Version:** 2.0.4 stable (server API unchanged in 2.0.5)
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-02-02
+**Last Updated:** 2026-04-14
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)

@@ -212,8 +212,6 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     """
     import subprocess
     import json
-    from mlxk2.core.model_resolution import resolve_model_for_operation
-    from mlxk2.core.cache import get_current_model_cache, hf_to_cache_dir
 
     # Import blacklist (local import to avoid circular dependency)
     # KNOWN_BROKEN_MODELS is defined in tests_2.0/live/test_utils.py
@@ -267,29 +265,22 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
                 size_bytes = model.get("size_bytes", 0)
                 ram_gb = (size_bytes / (1024**3)) * 1.2 if size_bytes else 0
 
-                # Resolve to canonical cache name to avoid 404 during preload
+                # Use name from list --json directly (human-readable, always valid)
                 model_name = model["name"]
-                try:
-                    resolved_name, _, _ = resolve_model_for_operation(model_name)
-                    if resolved_name:
-                        model_name = resolved_name
-                except Exception:
-                    pass
+
+                # FILTER: Skip workspace models (absolute paths from MLXK_WORKSPACE_HOME).
+                # Workspace models lack org prefix and HF cache structure.
+                # If same model exists in both workspace and cache, cache wins
+                # (avoids double-testing).
+                if model_name.startswith("/"):
+                    continue
 
                 # FILTER: Exclude known broken models (upstream runtime bugs)
                 if model_name in KNOWN_BROKEN_MODELS:
                     continue
 
-                # Ensure cache directory exists (defensive against stale listings)
-                try:
-                    cache_dir = get_current_model_cache() / hf_to_cache_dir(model_name)
-                    if not cache_dir.exists():
-                        continue
-                except Exception:
-                    continue
-
                 discovered.append({
-                    "model_id": model_name,  # Canonical model ID
+                    "model_id": model_name,  # HF name from list, e.g. "mlx-community/model"
                     "ram_needed_gb": ram_gb,
                     "snapshot_path": None,      # Not provided by list, not needed
                     "weight_count": None        # Not provided by list, not needed

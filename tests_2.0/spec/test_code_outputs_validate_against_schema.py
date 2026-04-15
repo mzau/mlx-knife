@@ -194,21 +194,40 @@ def test_clone_output_matches_schema():
     """Test clone response schema with static example data."""
     validator = _get_validator()
 
-    # Static example of clone operation response
+    # Static example: successful clone operation
     clone_response = {
         "status": "success",
         "command": "clone",
         "error": None,
         "data": {
             "model": "mlx-community/Phi-3-mini-4k-instruct-4bit",
-            "target_dir": "./workspace",
-            "message": "Cloned mlx-community/Phi-3-mini-4k-instruct-4bit to ./workspace",
-            "commit_hash": "a1b2c3d4e5f6789012345678901234567890abcd"
+            "clone_status": "success",
+            "target_dir": "/Users/me/workspaces/Phi-3-mini-4k-instruct-4bit",
+            "message": "Cloned mlx-community/Phi-3-mini-4k-instruct-4bit",
+            "health_check": True,
+            "health": "healthy",
+            "health_reason": "Multi-file model complete"
         }
     }
 
     errors = sorted(validator.iter_errors(clone_response), key=lambda e: e.path)
     assert not errors, f"clone output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+
+    # Static example: clone error
+    clone_error = {
+        "status": "error",
+        "command": "clone",
+        "error": {"type": "not_found", "message": "Model not found"},
+        "data": {
+            "model": "nonexistent/model",
+            "clone_status": "error",
+            "target_dir": "/tmp/target",
+            "message": "Model not found in HuggingFace"
+        }
+    }
+
+    errors = sorted(validator.iter_errors(clone_error), key=lambda e: e.path)
+    assert not errors, f"clone error output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
 
 
 @pytest.mark.spec

@@ -4,9 +4,9 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.5-beta.2** | **Stable: 2.0.4**
+**Current Version: 2.0.5-beta.3** | **Stable: 2.0.4**
 
-[![GitHub Release](https://img.shields.io/badge/beta-2.0.5--beta.2-orange.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/beta-2.0.5--beta.3-orange.svg)](https://github.com/mzau/mlx-knife/releases)
 [![GitHub Release](https://img.shields.io/badge/stable-2.0.4-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
@@ -226,28 +226,31 @@ For quick testing, `mlxk pull` + `mlxk run` still works. Workspaces are for when
 # Set up a workspace directory (add to your shell profile)
 export MLXK_WORKSPACE_HOME=~/mlx-models
 
-# Clone a model into a workspace
-mlxk clone Llama-3.2-1B-Instruct-4bit ~/mlx-models/Llama-3.2-1B-Instruct-4bit
+# Clone a model (target auto-derived from model name, org prefix stripped)
+mlxk clone mlx-community/Llama-3.2-1B-Instruct-4bit
+# → ~/mlx-models/Llama-3.2-1B-Instruct-4bit
 
-# Run it
+# Run it (fuzzy match finds the workspace)
 mlxk run Llama-3.2 "Hello"
 
 # See your portfolio (workspaces + cache)
 mlxk list
 ```
 
+> When `MLXK_WORKSPACE_HOME` is set, `clone` derives the target directory automatically (strips org prefix, stays flat). Explicit targets still work: `mlxk clone model ./local-dir` or `mlxk clone model custom-name`.
+
 ### Development Workflow
 
 Full local cycle for model experimentation, repair, quantization, and testing:
 
 ```bash
-mlxk clone "model" ./workspace
-mlxk convert ./workspace ./fixed --repair-index    # Fix broken index
-mlxk convert ./workspace ./quantized --quantize 4  # Or quantize to 4-bit
-mlxk list .                                        # See all local workspaces
-mlxk run ./fixed "test prompt"                     # Local inference
-mlxk server --model ./fixed                        # Dev server
-mlxk push ./fixed "your-org/model"                 # Optional publish
+mlxk clone mlx-community/model                     # Clone to workspace home
+mlxk convert ./model ./fixed --repair-index         # Fix broken index
+mlxk convert ./model ./quantized --quantize 4       # Or quantize to 4-bit
+mlxk list .                                         # See all local workspaces
+mlxk run ./fixed "test prompt"                      # Local inference
+mlxk server --model ./fixed                         # Dev server
+mlxk push ./fixed "your-org/model"                  # Optional publish
 ```
 
 **Key capabilities:**
@@ -265,7 +268,7 @@ mlxk push ./fixed "your-org/model"                 # Optional publish
 | `show` | ✅ Yes | `mlxk show ./workspace --files` |
 | `health` | ✅ Yes | `mlxk health ./workspace` |
 | `server` | ✅ Yes | `mlxk server --model ./workspace` |
-| `clone` | ✅ Creates | `mlxk clone model ./workspace` |
+| `clone` | ✅ Creates | `mlxk clone org/model` (shorthand) or `mlxk clone org/model ./workspace` |
 | `convert` | ✅ Repair/Quantize | `mlxk convert ./in ./out --quantize 4` |
 | `push` | ✅ Yes | `mlxk push ./workspace "org/name"` |
 | `list` | ✅ Yes | `mlxk list .` or `mlxk list ./gemma-` |
@@ -544,11 +547,11 @@ MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
 
 ```bash
 # One-time setup (if using Gemma-3n)
-mlxk clone mlx-community/gemma-3n-E2B-it-4bit ./gemma-3n-audio
-mlxk convert ./gemma-3n-audio ./gemma-3n-audio-FIXED --repair-index
+mlxk clone mlx-community/gemma-3n-E2B-it-4bit
+mlxk convert gemma-3n-E2B-it-4bit gemma-3n-audio-FIXED --repair-index
 
 # Run (30s limit, multimodal audio)
-mlxk run ./gemma-3n-audio-FIXED --audio short-clip.wav
+mlxk run gemma-3n-audio-FIXED --audio short-clip.wav
 ```
 
 
@@ -572,7 +575,7 @@ mlxk show "Phi-3-mini" --json | jq '.data.model'
 ```json
 {
     "status": "success|error",
-    "command": "list|health|show|pull|rm|clone|version|push|run|server",
+    "command": "list|health|show|pull|rm|clone|convert|version|push|run|server",
     "data": { /* command-specific data */ },
     "error": null | { "type": "...", "message": "..." }
 }
@@ -884,15 +887,16 @@ MLX Knife supports comprehensive runtime configuration via environment variables
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|
-| `MLXK_WORKSPACE_HOME` | Directory for workspace model portfolio. Commands like `list`, `health`, `run`, and `serve` discover models here. | (none) | 2.0.5 |
+| `MLXK_WORKSPACE_HOME` | Directory for workspace model portfolio. Enables `clone` shorthand (no target needed), portfolio discovery for `list`, `health`, `run`, `serve`. | (none) | 2.0.5 |
 
 ```bash
 # Recommended: add to shell profile
 export MLXK_WORKSPACE_HOME=~/mlx-models
 
-mlxk list                    # Shows workspaces + cache models
-mlxk run whisper "transcribe" # Finds whisper-large-v3-mlx in workspace home
-mlxk health                  # Checks workspaces + cache
+mlxk clone mlx-community/model  # → ~/mlx-models/model (org stripped)
+mlxk list                       # Shows workspaces + cache models
+mlxk run whisper "transcribe"   # Finds whisper in workspace home
+mlxk health                     # Checks workspaces + cache
 ```
 
 ### Feature Gates
@@ -1091,15 +1095,19 @@ workspace/
 `mlxk clone` creates a local workspace from a cached model for modification and development.
 
 - Creates isolated workspace from cached models
-- Supports APFS copy-on-write optimization on same-volume scenarios
+- **Shorthand:** When `MLXK_WORKSPACE_HOME` is set, target is optional (org prefix stripped automatically)
+- Supports APFS copy-on-write optimization on same-volume scenarios; falls back to regular copy cross-volume
 - Includes health check integration for workspace validation
 - Resumable: Interrupted pulls resume automatically
-- Use case: Fork-modify-push workflows
 
-Example:
+Examples:
 ```bash
-# Clone model to workspace
-mlxk clone org/model ./workspace
+# Shorthand (MLXK_WORKSPACE_HOME set):
+mlxk clone mlx-community/pixtral-12b-bf16          # → $MLXK_WORKSPACE_HOME/pixtral-12b-bf16
+mlxk clone mlx-community/pixtral-12b-bf16 my-name  # → $MLXK_WORKSPACE_HOME/my-name
+
+# Explicit path:
+mlxk clone org/model ./workspace                   # → ./workspace
 ```
 
 ### `push` - Upload to Hub
@@ -1133,26 +1141,24 @@ Transform models with `--repair-index` (fix broken mlx-vlm conversions) or `--qu
 
 **Repair workflow** (mlx-vlm #624 affected models):
 ```bash
-# Clone affected model to workspace
+# With MLXK_WORKSPACE_HOME (bare names):
+mlxk clone mlx-community/Qwen2.5-VL-7B-Instruct-4bit
+mlxk convert Qwen2.5-VL-7B-Instruct-4bit ws-qwen-fixed --repair-index
+mlxk health ws-qwen-fixed
+
+# Or with explicit paths:
 mlxk clone mlx-community/Qwen2.5-VL-7B-Instruct-4bit ./ws-qwen
-
-# Repair safetensors index (no weights changed)
 mlxk convert ./ws-qwen ./ws-qwen-fixed --repair-index
-
-# Verify health
-mlxk health ./ws-qwen-fixed  # Should report healthy
 ```
 
-**Quantize workflow** (text models only):
+**Quantize workflow:**
 ```bash
-# Clone bf16/fp16 model
-mlxk clone mlx-community/Llama-3.2-1B-Instruct ./llama-bf16
-
-# Quantize to 4-bit (default group_size: 64)
-mlxk convert ./llama-bf16 ./llama-4bit --quantize 4
+# With MLXK_WORKSPACE_HOME (bare names):
+mlxk clone mlx-community/Llama-3.2-1B-Instruct
+mlxk convert Llama-3.2-1B-Instruct llama-4bit --quantize 4
 
 # Or with custom group size (32 = better quality, larger file)
-mlxk convert ./llama-bf16 ./llama-4bit-g32 --quantize 4 --q-group-size 32
+mlxk convert Llama-3.2-1B-Instruct llama-4bit-g32 --quantize 4 --q-group-size 32
 ```
 
 **Supported bits:** 2, 3, 4, 6, 8
@@ -1269,7 +1275,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.5 beta2 | April 2026</i><br>
+  <i>Version 2.0.5 beta3 | April 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>
