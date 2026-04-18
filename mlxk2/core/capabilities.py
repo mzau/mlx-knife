@@ -100,6 +100,75 @@ AUDIO_MODEL_TYPES = frozenset({
 })
 
 
+# Vision model types verified for convert --quantize dispatch (ADR-023).
+#
+# This is a SEPARATE curated list from VISION_MODEL_TYPES (which covers runtime
+# capability). Quantize-support does not strictly follow runtime-support:
+# some runtime-capable types are not quantize-verified, and some quantize-
+# verified types are not listed as generic runtime vision types (they route
+# to mlx-vlm only for convert, not for run).
+#
+# Rule for 2.0.5: entries below were the accepted quantize-whitelist from the
+# beta.4 stage. They stay as-is until wet-umbrella (Phase 5) provides empirical
+# evidence to add or drop a type. From 2.0.6 onward, list follows upstream
+# reality — see ADR-023 Übergangsregel.
+#
+# A model_type NOT in this list that carries vision_config or audio_config
+# markers is rejected with ErrorType.UNSUPPORTED_MULTIMODAL (no silent text fallback).
+VISION_QUANTIZE_TYPES = frozenset({
+    "llava",          # tested with mlx-vlm 0.3.11
+    "pixtral",        # tested with mlx-vlm 0.3.11
+    "qwen2_vl",       # tested with mlx-vlm 0.3.11
+    "idefics2",       # tested with mlx-vlm 0.3.11
+    "idefics3",       # tested with mlx-vlm 0.3.11
+    "mllama",         # tested with mlx-vlm 0.3.11
+    "mistral3",       # tested with mlx-vlm 0.3.11
+    "gemma3",         # tested with mlx-vlm 0.3.11
+    "mimo",           # tested with mlx-vlm 0.3.11
+})
+
+
+def classify_convert_target(config: Dict[str, Any]) -> str:
+    """Classify a model config for convert --quantize dispatch (ADR-023).
+
+    Policy order (verified-first):
+        1. model_type in VISION_QUANTIZE_TYPES → "vision"
+        2. model_type in STT_MODEL_TYPES      → "stt_unsupported"
+           (quantization of STT models is not currently implemented)
+        3. config carries vision_config or audio_config
+           (multimodal marker but not verified) → "unsupported_multimodal"
+        4. otherwise                          → "text"
+
+    Returns:
+        One of "vision", "text", "stt_unsupported", "unsupported_multimodal".
+
+    Rationale:
+        Verified wins over multimodal-marker. A model_type that is on
+        VISION_QUANTIZE_TYPES is routed to the vision backend even when it
+        also carries vision_config (e.g. gemma3). A model_type NOT on the
+        verified list that carries vision_config / audio_config is rejected
+        explicitly rather than silently degraded to the text backend — the
+        text backend (mlx-lm) drops vision_config when saving, which would
+        produce a semantically broken target workspace.
+    """
+    model_type = config.get("model_type", "")
+    if not isinstance(model_type, str):
+        model_type = ""
+    model_type = model_type.lower()
+
+    if model_type in VISION_QUANTIZE_TYPES:
+        return "vision"
+    if model_type in STT_MODEL_TYPES:
+        return "stt_unsupported"
+
+    has_vision_marker = isinstance(config.get("vision_config"), dict)
+    has_audio_marker = isinstance(config.get("audio_config"), dict)
+    if has_vision_marker or has_audio_marker:
+        return "unsupported_multimodal"
+
+    return "text"
+
+
 @dataclass
 class ModelCapabilities:
     """Probed model capabilities and runtime information.

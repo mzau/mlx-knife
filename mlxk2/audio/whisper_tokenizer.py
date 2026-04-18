@@ -5,7 +5,12 @@
 # This code was removed in PyPI release 0.3.1 (2026-01-29), breaking Whisper
 # transcription for models without HuggingFace processor.
 #
-# Bundled here as workaround for mlx-audio Issue #479.
+# WORKAROUND: mlx-audio#479 — sunset-by 2.0.6
+# Bundle of tokenizer assets kept here because upstream removed them.
+# If upstream restores assets by the 2.0.6 freeze → this whole module
+# (and the patches in `audio_runner.py` that install it) is removed.
+# If upstream does not → module is removed anyway and Whisper drops from
+# the verified list per ADR-023 Workaround-Sunset Policy.
 # See: https://github.com/Blaizzy/mlx-audio/issues/479
 #
 # Original source:

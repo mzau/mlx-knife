@@ -7,7 +7,7 @@ echo "=========================================="
 echo "Prerequisites: Python versions should be available as:"
 echo "  - python3.10, python3.11, python3.12 (full support: text + vision + audio)"
 echo "Note: Python 3.9 not supported (MLX 0.30+ requires 3.10+)"
-echo "Note: Python 3.13+ not supported (miniaudio lacks pre-built wheels)"
+echo "Note: Python 3.13+ blocked (miniaudio lacks pre-built wheels, requires C compiler + macOS SDK)"
 echo ""
 
 # Colors for output
@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 # Python versions to test (bash 3.2 compatible)
 # Note: Python 3.9 dropped (MLX 0.30+ requires 3.10+)
-# Note: Python 3.13+ dropped (miniaudio wheel limitation)
+# Note: Python 3.13+ blocked (miniaudio has no pre-built wheel, C compiler + macOS SDK required)
 PYTHON_COMMANDS=("python3.10" "python3.11" "python3.12")
 VERSION_NAMES=("3.10" "3.11" "3.12")
 RESULTS=()

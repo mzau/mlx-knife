@@ -165,9 +165,12 @@ def detect_cold_starts(benchmark_data: List[dict]) -> Dict[str, bool]:
         test_id = test.get("test", "unknown")
         model_id = test.get("model", {}).get("id", "unknown")
 
-        # Normalize model_id: some tests report "mlx-community/foo", others just "foo"
-        # This is a data inconsistency in test fixtures, not different models
-        normalized_model_id = model_id.replace("mlx-community/", "")
+        # Normalize via resolve_model_display_id so workspace paths and their
+        # upstream-mirror name (for clones) count as the same identity, and
+        # convert-variants stay distinct.
+        # Then strip the "mlx-community/" prefix to absorb fixture inconsistencies.
+        display_id = resolve_model_display_id(model_id)
+        normalized_model_id = display_id.replace("mlx-community/", "")
 
         if normalized_model_id not in seen_models:
             cold_starts[test_id] = True
@@ -176,6 +179,60 @@ def detect_cold_starts(benchmark_data: List[dict]) -> Dict[str, bool]:
             cold_starts[test_id] = False
 
     return cold_starts
+
+
+_WORKSPACE_DISPLAY_CACHE: Dict[str, str] = {}
+
+
+def resolve_model_display_id(model_id: str) -> str:
+    """Normalize a model_id for report display, aware of clone vs. convert workspaces.
+
+    Benchmark JSONL may record model identity as an absolute workspace path
+    (e.g. "/Volumes/mz-SSD/mlx-models/Qwen2.5-Coder-32B-Instruct-8bit"). The
+    workspace sentinel (`.mlxk_workspace.json`) tells us what kind of workspace
+    it is; clones and converts need different display behavior:
+
+    - operation == "clone": the workspace is a byte-identity mirror of its
+      source_repo. Showing source_repo (e.g. "mlx-community/whisper-...-4bit")
+      is the right label.
+
+    - operation == "convert": the workspace IS the variant
+      (e.g. "...-4bit", "...-6bit", "...-8bit") and source_repo is the bf16
+      ancestor shared by all variants. Using source_repo here collapses all
+      variants into the same row — so we keep the workspace directory basename
+      as the display name and let source_repo stay as provenance only.
+
+    - missing / malformed sentinel: fall back to basename (safe default, also
+      what we want when the report is generated on a different machine).
+
+    Non-absolute inputs (HF names, relative paths) are returned unchanged.
+    """
+    if not model_id or not model_id.startswith("/"):
+        return model_id
+
+    if model_id in _WORKSPACE_DISPLAY_CACHE:
+        return _WORKSPACE_DISPLAY_CACHE[model_id]
+
+    basename = Path(model_id).name
+    display = basename
+
+    try:
+        metadata_file = Path(model_id) / ".mlxk_workspace.json"
+        if metadata_file.exists():
+            with open(metadata_file, encoding="utf-8") as f:
+                meta = json.load(f)
+            operation = meta.get("operation")
+            source_repo = meta.get("source_repo")
+            if operation == "clone" and source_repo:
+                display = source_repo
+            # operation == "convert" (or unknown) -> keep basename as display.
+            # Convert variants (foo-4bit, foo-6bit) share a source_repo and
+            # must not collapse onto the same display name.
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    _WORKSPACE_DISPLAY_CACHE[model_id] = display
+    return display
 
 
 def load_schema() -> dict:
@@ -413,7 +470,8 @@ def calculate_statistics(data: List[dict]) -> Dict:
         test_name = test_full.split("[")[0]  # Remove [discovered_XX] part
 
         model_id = entry["model"]["id"]
-        model_short = model_id.replace("mlx-community/", "").split("-")[0]  # Short name
+        display_id = resolve_model_display_id(model_id)
+        model_short = display_id.replace("mlx-community/", "").split("-")[0]  # Short name
         duration = entry["duration"]
         modality = entry.get("metadata", {}).get("inference_modality", "unknown")
 
@@ -462,12 +520,12 @@ def calculate_statistics(data: List[dict]) -> Dict:
     for entry in benchmark_data:
         if "test" in entry and "model" in entry:
             test_id = entry["test"]
-            model_id = entry["model"]["id"]
+            display_id = resolve_model_display_id(entry["model"]["id"])
             # Short name: remove org/ prefix (mlx-community/, BrokeC/, etc.)
-            if "/" in model_id:
-                model_short = model_id.split("/", 1)[1]
+            if "/" in display_id:
+                model_short = display_id.split("/", 1)[1]
             else:
-                model_short = model_id
+                model_short = display_id
             test_model_map[test_id] = model_short
 
     return {
@@ -628,10 +686,11 @@ Quality Flags (Thresholds: RAM <5 GB free, zombies >0):
         md += "|-------|-----:|:----:|------:|-----:|---------:|\n"
 
     def format_model_short(model_id):
-        """Remove org prefix from model ID."""
-        if "/" in model_id:
-            return model_id.split("/", 1)[1]
-        return model_id
+        """Remove org prefix from model ID (workspace paths resolved to source repo)."""
+        display_id = resolve_model_display_id(model_id)
+        if "/" in display_id:
+            return display_id.split("/", 1)[1]
+        return display_id
 
     for model in sorted_models:
         model_short = format_model_short(model['id'])

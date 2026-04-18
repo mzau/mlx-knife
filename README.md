@@ -4,16 +4,36 @@
   <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
 </p>
 
-**Current Version: 2.0.5-beta.3** | **Stable: 2.0.4**
+**Current Version: 2.0.5** (stable)
 
-[![GitHub Release](https://img.shields.io/badge/beta-2.0.5--beta.3-orange.svg)](https://github.com/mzau/mlx-knife/releases)
-[![GitHub Release](https://img.shields.io/badge/stable-2.0.4-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/stable-2.0.5-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
 
 **Release Notes:** See [CHANGELOG.md](CHANGELOG.md) for detailed changes, fixes, and migration guides.
+
+
+## What mlx-knife is
+
+A **text-first model CLI for Apple Silicon**. Every standard text model
+(Llama, Mistral, Qwen, Phi, Gemma, etc.) works out of the box via `list`,
+`clone`, `run`, `convert`, `quantize`, and `serve`.
+
+Alongside text, mlx-knife has **curated support for a verified set of
+vision and audio model types** (Whisper, Pixtral, Gemma-3, Qwen2-VL,
+VibeVoice, and others). The current per-release list with status per
+operation lives in [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md).
+
+## What mlx-knife is not
+
+A universal multimodal wrapper. Vision and audio support tracks a chosen
+subset of `mlx-vlm` / `mlx-audio` upstream capabilities — not every model
+those libraries load will be accepted here. Model types outside the
+verified set are **rejected explicitly** at `convert --quantize`, not
+silently converted (which would destroy the multimodal config and
+produce a broken workspace).
 
 
 ## Features
@@ -90,7 +110,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ```bash
 pip install mlx-knife
-mlxk --version  # → mlxk 2.0.4
+mlxk --version  # → mlxk 2.0.5
 ```
 
 **Requirements:** macOS Apple Silicon, Python 3.10-3.12
@@ -103,7 +123,7 @@ git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 pip install -e ".[dev,test]"
 
-mlxk --version  # → mlxk 2.0.4
+mlxk --version  # → mlxk 2.0.5
 pytest -v
 ```
 
@@ -302,14 +322,14 @@ open webui/index.html
 
 MLX Knife supports multiple input modalities beyond text. All multi-modal features share a **common output pattern**: model responses are followed by collapsible metadata tables for transparency and traceability.
 
-### Vision (Beta)
+### Vision
 
-Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+.
+Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+. Stable since 2.0.4.
 
 #### Requirements
 
 - **Python 3.10+** (mlx-vlm dependency)
-- **Backend:** mlx-vlm 0.3.10 (included in base install)
+- **Backend:** mlx-vlm 0.3.10+ (included in base install)
 
 #### Usage
 
@@ -447,19 +467,27 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 
 **⚠️ Important:** Vision support relies on mlx-vlm (upstream), which has known stability issues. While `mlxk health` verifies file integrity, **runtime failures may occur** with certain model architectures due to upstream bugs.
 
+> **For the authoritative per-release status of every supported `model_type`, see [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md).** The tables here are curated recommendations, not an exhaustive support list.
+
 **✅ Tested & Working Models:**
 
 | Model | Size | Notes |
 |-------|------|-------|
-| `mlx-community/pixtral-12b-8bit` | ~13.5GB | **⭐ Recommended:** Excellent text recognition, multi-image support (5+ images on M2 Max 64GB); beta.4+ for text-only |
+| `mlx-community/pixtral-12b-8bit` | ~13.5GB | **⭐ Recommended:** Excellent text recognition, multi-image support (5+ images on M2 Max 64GB); 2.0.4+ for text-only via MLXRunner (ADR-020 three-tier routing) |
 | `mlx-community/Llama-3.2-11B-Vision-Instruct-4bit` | ~6.5GB | Reliable, good quality; single-image only |
 | `Devstral-Small-2-24B-Instruct-2512-6bit` | ~14GB | Single-image only on 64GB RAM; requires `--repair-index` (mlx-vlm #624); better for Mac Studio/Ultra |
+
+**🔧 Works after repair workflow:**
+
+| Model | Repair needed | Status |
+|-------|---------------|--------|
+| `Mistral-Small-3.1-24B-Instruct-2503-4bit` | Two-step fix: (1) `mlxk convert <src> <dst> --repair-index`, (2) add `"spatial_merge_size": 2` manually to `processor_config.json` | Vision + text-only verified after repair; auto-repair planned for 2.0.6 via `--repair-config` |
+| `gemma-3n-E2B-it-4bit` | `mlxk convert <src> <dst> --repair-index` | Multimodal (vision + audio). Not part of the verified set for 2.0.5 — runtime status depends on upstream mlx-vlm. |
 
 **❌ Known Issues** (as of 2026-01-03):
 
 | Model | Issue | Workaround |
 |-------|-------|------------|
-| `Mistral-Small-3.1-24B-Instruct-2503-4bit` | Vision feature mismatch (5476 positions ≠ 1369 features). **Note:** This is a different bug than mlx-vlm #624 - `--repair-index` cannot fix it | Use alternative models (pixtral-12b-8bit, Llama-3.2-11B) |
 | `MiMo-VL-7B-RL-bf16` | NoneType iteration error | mlx-vlm processor bug, no workaround |
 | `DeepSeek-OCR-8bit` | Runs but hallucinates details | Quality issue, not recommended |
 
@@ -469,7 +497,7 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 mlxk convert <model> <output> --repair-index
 ```
 
-**Recommendation:** Test models with real images before production use. The vision ecosystem is evolving rapidly - this list will be updated as mlx-vlm matures.
+**Recommendation:** Test models with real images before production use. The vision ecosystem is evolving rapidly — this list will be updated as mlx-vlm matures.
 
 **Reporting Issues:** If you encounter vision model failures, please report with model name and error message to help improve compatibility tracking.
 
@@ -483,11 +511,13 @@ mlxk convert <model> <output> --repair-index
 
 **✅ Recommended Models:**
 
+> See also [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md) for the per-release test evidence behind these entries.
+
 | Model | Backend | Size | Duration | Notes |
 |-------|---------|------|----------|-------|
-| `whisper-large-v3-turbo-4bit` | mlx-audio | ~464MB | >10 min | **Recommended** - Best accuracy/speed balance |
+| `whisper-large-v3-turbo-4bit` | mlx-audio | ~464MB | >10 min | **⭐ Recommended** — Best accuracy/speed balance; 4bit + 8bit variants both verified in 2.0.5 |
 | `whisper-tiny` | mlx-audio | ~74MB | >10 min | Fast, lower accuracy |
-| `gemma-3n-E2B-it-4bit` | mlx-vlm | ~2.1GB | ~30s | Multimodal (vision+audio), requires workspace repair |
+| `gemma-3n-E2B-it-4bit` | mlx-vlm | ~2.1GB | ~30s | Multimodal (vision+audio). See **Works after repair workflow** under *Vision Model Compatibility* — not part of the verified set for 2.0.5; runtime status depends on upstream mlx-vlm. |
 
 **🔧 Backend Architecture:**
 
@@ -1275,7 +1305,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.5 beta3 | April 2026</i><br>
+  <i>Version 2.0.5 | April 2026</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

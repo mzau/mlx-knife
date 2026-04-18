@@ -1,5 +1,164 @@
 # Changelog
 
+## [2.0.5] - 2026-04-18
+
+> **Dependency modernization + Text-First policy.** Dependency stack moves to
+> transformers 5.0.0 stable, mlx-lm 0.31.1, mlx-audio 0.4.x, mlx-vlm 0.3.11
+> on top of the beta.1–beta.3 workspace-first line. A new ADR-023 writes a
+> scope policy into code: multimodal model types outside the verified list
+> are rejected explicitly at `convert --quantize` instead of silently
+> degrading to the text backend.
+
+### ⚠️ Upgrade Notes
+
+- **mlx-audio 0.3.0 → 0.4.x is a major upstream bump.** mlx-knife carries
+  three workarounds in `mlxk2/core/audio_runner.py` against mlx-audio #479
+  (tiktoken assets) and #645 (`post_load_hook` / `WhisperProcessor`).
+  Per ADR-023 Workaround-Sunset Policy, these patches have a 2.0.6
+  deadline — if upstream does not fix by then, the patches are removed
+  and the affected model type drops from the verified list.
+- **transformers is now explicitly pinned to `==5.0.0`** (was transitively
+  `rc3` through mlx-audio 0.3.0).
+- **Breaking for silent-fallback callers of `mlxk convert --quantize`:**
+  multimodal model types not on `VISION_QUANTIZE_TYPES` (e.g. `gemma3n`,
+  hypothetical `qwen3_vl`) now return exit code non-zero with
+  `error.type == "unsupported_multimodal"` instead of silently writing
+  a semantically-broken text-backend output. No silent data loss; callers
+  need to either use a verified type or handle the new error.
+
+### Added
+
+- **ADR-023 Text-First + Verified Multimodal**
+  (`docs/ADR/ADR-023-Text-First-Verified-Multimodal.md`): written scope
+  policy. mlx-knife is positioned as text-first with a curated multimodal
+  list; the 2.0.5 → 2.0.6 transition rule ends the grandfather clause at
+  2.0.6 and switches the lists to "follow upstream reality".
+- **`ErrorType.UNSUPPORTED_MULTIMODAL`** (`mlxk2/errors.py`): new error
+  type for multimodal model types outside the verified list. HTTP 501
+  mapping. Factory: `unsupported_multimodal_error(model_type, operation)`.
+- **`classify_convert_target(config) -> str`**
+  (`mlxk2/core/capabilities.py`): single dispatcher for convert
+  classification. Returns one of `"vision"`, `"text"`, `"stt_unsupported"`,
+  `"unsupported_multimodal"`. Policy order: verified types win over
+  multimodal-marker reject.
+- **`VISION_QUANTIZE_TYPES`** (`mlxk2/core/capabilities.py`): separately
+  curated convert-whitelist, independent from runtime `VISION_MODEL_TYPES`.
+  Each entry carries a per-line comment naming the mlx-vlm version it was
+  last verified against.
+- **Coverage Matrix** (`docs/MODEL-COVERAGE.md`): new per-release
+  report of which `model_type` is verified for which operation. Rolling
+  document — overwritten per release, historical snapshots via git log.
+  Linked from the README.
+- **Policy contract tests** (`tests_2.0/`):
+  - `test_convert_multimodal_reject.py` (5 tests): gemma3n hard-reject,
+    unknown-vision-type reject, whisper stt-unsupported, gemma3 routing,
+    llama routing. Backends are monkey-patched to `pytest.fail`, so any
+    silent-fallback regression fails the test.
+  - `test_capabilities_invariants.py` (15 tests): frozenset hygiene,
+    `classify_convert_target` algorithmic contract, case-insensitivity,
+    non-dict guard rails.
+  - `test_rm_workspace_guard.py` (2 tests): locks the ADR-022 workspace
+    guard in `mlxk rm` — absolute workspace paths return
+    `error.type == "workspace_model"` with an actionable "use rm -rf"
+    hint, and the workspace directory is not deleted.
+
+### Changed
+
+- **Dependency Upgrade + explicit upper bounds (ADR-023 hygiene):**
+  `mlx>=0.30.0,<0.32`, `mlx-lm>=0.31.1,<0.32`, `mlx-audio>=0.4.1,<0.5`,
+  `mlx-vlm>=0.3.10,<0.4`, `transformers==5.0.0`, `tiktoken>=0.7.0,<1.0`.
+  Every upstream minor bump now requires an explicit mlx-knife release
+  with a re-verified integration — no implicit upgrade on `pip install`.
+- **Convert dispatch** (`mlxk2/operations/convert.py`): the local
+  duplicate `_VISION_QUANTIZE_TYPES` frozenset in `convert.py` is gone.
+  Dispatch now runs through `classify_convert_target` from
+  `capabilities.py` (single source of truth). Reject path fires before
+  any filesystem side-effect on the target — no partial write possible.
+- **README positioning:** new "What mlx-knife is / What mlx-knife is not"
+  section aligns documentation with ADR-023. Vision Compatibility section
+  restructured: new **"Works after repair workflow"** table for
+  `Mistral-Small-3.1-24B-Instruct-2503-4bit` (two-step repair) and
+  `gemma-3n-E2B-it-4bit`; audio-recommendations now link to the new
+  Coverage Matrix. "Vision (Beta)" dropped — vision has been stable since
+  2.0.4.
+- **TESTING-DETAILS restructured:** the verified-coverage section moved
+  out of `TESTING-DETAILS.md` into its own `docs/MODEL-COVERAGE.md` —
+  TESTING-DETAILS now carries operational test-execution details only,
+  MODEL-COVERAGE is the per-release report.
+- **Test portfolio discovery (ADR-022 workspace-first migration):**
+  `discover_mlx_models_in_user_cache()` and `discover_audio_models()`
+  now route every `mlxk list --json` entry through
+  `apply_cache_wins_workspace_fallback()`. Clone workspaces whose
+  `source_repo` already exists in the HF cache are skipped (cache wins);
+  convert workspaces and clones without a cache equivalent are kept.
+  Makes workspace-only models (e.g. Whisper clones, converted variants)
+  discoverable by the wet-benchmark without losing cache deduplication.
+- **Python 3.13 note:** clarified blocker (C compiler + macOS SDK required
+  for miniaudio, no pre-built wheel).
+
+### Fixed
+
+- **Convert silent multimodal downgrade (found during pre-release review):**
+  an earlier iteration of `_detect_quantize_backend` dropped the
+  `vision_config` heuristic and replaced it with a small whitelist. Any
+  multimodal model whose `model_type` was not on that whitelist fell
+  through to `mlx_lm.convert`, which drops `vision_config` when saving
+  the target config (`config.pop("vision_config", None)` in
+  `mlx_lm/utils.py`). Target workspaces were semantically broken. Now
+  rejected explicitly; locked by new tests and documented in ADR-023.
+- **Benchmark report variant collapse:**
+  `benchmarks/generate_benchmark_report.py:resolve_model_display_id` now
+  reads the `operation` field from `.mlxk_workspace.json`:
+  - `operation == "clone"` → display as `source_repo` (upstream mirror),
+  - `operation == "convert"` → display as workspace basename so variants
+    (`foo-4bit`, `foo-6bit`, `foo-8bit`) stay distinct instead of
+    collapsing onto the shared bf16 ancestor.
+  `detect_cold_starts` uses the same normalization so cold-start tracking
+  and per-model tables agree. Empirically verified against 14 clones + 3
+  converts in the maintainer's local portfolio.
+- **`mlxk rm` Workspace Guard (ADR-022):** `mlxk rm <workspace-model>`
+  now returns a clear error instead of the misleading
+  `requires_confirmation` envelope. Workspace models are user-managed
+  (`rm -rf`); only cache models are removable via `mlxk rm`.
+- **Whisper `post_load_hook` Patch (mlx-audio#645, sunset-by 2.0.6):**
+  mlx-audio 0.4.x `_init_processor()` fails on mlx-community Whisper
+  models (missing `preprocessor_config.json`) and emits a `UserWarning`
+  on every run. Patch skips `WhisperProcessor` loading — tiktoken handles
+  tokenization. Remove when #645 is resolved upstream.
+
+### Policy
+
+From 2.0.5, mlx-knife writes its scope policy into code (not just docs):
+
+- **Single source of truth** for model-type whitelists:
+  `mlxk2/core/capabilities.py` (four frozensets, documented individually).
+- **Explicit reject at destructive boundaries:** `convert --quantize`
+  never silently routes a multimodal model to the text backend. Either a
+  verified backend runs, or a typed error is returned.
+- **Workaround marker convention:** every upstream-bug workaround carries
+  `# WORKAROUND: <issue> — sunset-by <version>`. Inventory via
+  `grep -rn "sunset-by" mlxk2/`.
+
+See [ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md) for the
+policy statement, the transition rule 2.0.5 → 2.0.6, and the
+Workaround-Sunset policy in full.
+
+### Known Issues
+
+- **`content_hash` has a coverage gap.** The workspace content hash
+  does not cover `model.safetensors.index.json`,
+  `processor_config.json`, `preprocessor_config.json`,
+  `chat_template.json`, `generation_config.json`, or tokenizer file
+  *content* (only filename + size are considered for tokenizer files).
+  As a result, `mlxk convert … --repair-index` rewrites the index
+  file but leaves `content_hash` unchanged — the repaired workspace
+  is indistinguishable from its source per the sentinel, and both
+  still report `clean: ✓`. The same applies to manual config edits
+  (e.g. `spatial_merge_size: 2` in the Mistral-Small-3.1 repair
+  workflow). Tracked in [#52](https://github.com/mzau/mlx-knife/issues/52).
+
+---
+
 ## [2.0.5-beta.3] - 2026-04-15
 
 > **Clone Shorthand + JSON Schema 0.2.1 + Workspace Test Infrastructure.** Clone and convert resolve bare names via `MLXK_WORKSPACE_HOME`. JSON API data-schemas for clone/convert. Portfolio discovery uses `list --json` as single source of truth. Automated smoke tests.

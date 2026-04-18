@@ -4,28 +4,34 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.5-beta.3** — Clone shorthand (target optional), Convert bare names, JSON Schema 0.2.1 (clone/convert data-blocks), Workspace test infrastructure, list count bugfix. See CHANGELOG.md for details.
-
-✅ **2.0.5-beta.2** — Workspace-First (ADR-022), Quantize (text + vision), Cross-Volume, Health Workspace Discovery, Clean JSON output.
+✅ **2.0.5** — Dependency modernization (transformers 5.0.0, mlx-lm 0.31.1, mlx-audio 0.4.x) on top of workspace-first (beta.1), quantize/cross-volume (beta.2), clone shorthand + JSON API 0.2.1 (beta.3). Quantize/rm/audio-patch fixes. **New Text-First + Verified Multimodal policy** ([ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md)) with explicit reject for unverified multimodal types at `convert --quantize`. See CHANGELOG.md for details.
 
 ✅ **2.0.4** — First stable release with Vision + Audio. See CHANGELOG.md for details.
 
 ### Test Results (Official Reference)
 
-**Standard Unit Tests (2.0.5-beta.3):**
+**Standard Unit Tests (2.0.5):**
 ```
 Platform: macOS 26.4 (Tahoe), Apple Silicon (M2 Max, 64GB RAM)
-Python 3.10: 720 passed, 13 skipped
+Python 3.10: 749 passed, 6 skipped
 Note: Default suite works on 16GB. Full integration tests: 64GB recommended
       Apple Silicon (M-series) required for MLX
 ```
 
 **Full Integration Tests (`./scripts/test-wet-umbrella.sh`):**
 ```
-Phase 1 (portfolio tests):   179 passed, 73 skipped, 732 deselected
-Phase 2-4 (live operations): 3 passed
-Total:                       182 passed across all phases
+Phase 1 (portfolio tests):   170 passed, 61 skipped, 751 deselected
+Phase 2-4 (live operations): 3+3+3 passed
 ```
+
+> Phase 1 counts are **portfolio-bound**: they reflect the set of models
+> the maintainer has locally available at release time. 2.0.5 was
+> measured with a smaller text portfolio than 2.0.4b10 (selective model
+> rotation to free disk for convert/quantize work), so a lower Phase 1
+> test count here does not imply a regression in coverage — the
+> `Verified in` column of [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md)
+> is the authoritative statement of which model types were empirically
+> exercised in this release.
 
 ✅ **Production verified & reported:** M1, M1 Max, M2 Max in real-world use
 ✅ **License:** Apache 2.0 (was MIT in 1.x)
@@ -56,6 +62,14 @@ Total:                       182 passed across all phases
 **Note:** Models requiring workspace repair (e.g., Gemma-3n for audio) must be tested manually.
 
 **Safety:** Live tests that create workspace directories use `mlxk-test-` prefix. `_safe_rmtree()` refuses to delete directories without this prefix, preventing accidental deletion of real models in MLXK_WORKSPACE_HOME.
+
+---
+
+## Verified Model Coverage
+
+The per-release table of which model types are verified for which operation
+lives in [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md). Policy is
+defined in [ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md).
 
 ---
 

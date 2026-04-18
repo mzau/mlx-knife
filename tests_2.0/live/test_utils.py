@@ -19,6 +19,7 @@ sys.path.insert(0, str(_parent_dir))
 
 try:
     from test_stop_tokens_live import (
+        apply_cache_wins_workspace_fallback,
         discover_mlx_models_in_user_cache,
         get_safe_ram_budget_gb,
         get_system_ram_gb,
@@ -352,7 +353,12 @@ def discover_audio_models() -> list[Dict[str, Any]]:
             return []
 
         data = json.loads(result.stdout)
-        models_list = data.get("data", {}).get("models", [])
+        # Apply cache-wins workspace-fallback dedup so workspace-only audio
+        # models (e.g. Whisper clones not present in the HF cache) become
+        # discoverable (ADR-022 migration-ready).
+        models_list = apply_cache_wins_workspace_fallback(
+            data.get("data", {}).get("models", [])
+        )
 
         # Get system memory for RAM calculation
         system_memory_bytes = get_system_memory_bytes()

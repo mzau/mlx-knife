@@ -20,6 +20,7 @@ class ErrorType(str, Enum):
     SERVER_SHUTDOWN = "server_shutdown"
     INSUFFICIENT_MEMORY = "insufficient_memory"  # ADR-016: Model exceeds memory threshold
     NOT_IMPLEMENTED = "not_implemented"  # HTTP 501: Feature not supported
+    UNSUPPORTED_MULTIMODAL = "unsupported_multimodal"  # ADR-023: Model type outside verified multimodal list
     INTERNAL_ERROR = "internal_error"
 
 
@@ -34,6 +35,7 @@ ERROR_TYPE_TO_HTTP_STATUS: Dict[ErrorType, int] = {
     ErrorType.SERVER_SHUTDOWN: 503,
     ErrorType.INSUFFICIENT_MEMORY: 507,  # ADR-016: HTTP 507 Insufficient Storage
     ErrorType.NOT_IMPLEMENTED: 501,  # Feature not supported
+    ErrorType.UNSUPPORTED_MULTIMODAL: 501,  # ADR-023: Model type outside verified multimodal list
     ErrorType.INTERNAL_ERROR: 500,
 }
 
@@ -166,4 +168,46 @@ def access_denied_error(message: str, detail: Optional[str] = None) -> MLXKError
         message=message,
         detail=detail,
         retryable=False
+    )
+
+
+def unsupported_multimodal_error(model_type: str, operation: str = "convert --quantize") -> MLXKError:
+    """Create an unsupported_multimodal error (ADR-023).
+
+    Used when a model carries multimodal markers (vision_config / audio_config)
+    but its model_type is not in the verified VISION_QUANTIZE_TYPES list, so the
+    operation would otherwise silently fall through to the text backend and
+    destroy the multimodal config.
+
+    Message contract:
+        - Names the offending model_type.
+        - Enumerates the currently verified types (sourced from
+          VISION_QUANTIZE_TYPES, so the list cannot drift out of sync).
+        - Links to the per-release coverage matrix (MODEL-COVERAGE.md)
+          pinned to the installed version. That is the actionable
+          landing page: it carries the current per-type status and notes
+          and links back to ADR-023 for the policy rationale.
+    """
+    # Lazy imports: keep errors.py free of package-level dependencies at module scope.
+    from mlxk2 import __version__
+    from .core.capabilities import VISION_QUANTIZE_TYPES
+
+    verified = ", ".join(sorted(VISION_QUANTIZE_TYPES))
+    coverage_url = (
+        f"https://github.com/mzau/mlx-knife/blob/{__version__}/"
+        f"docs/MODEL-COVERAGE.md"
+    )
+    return MLXKError(
+        type=ErrorType.UNSUPPORTED_MULTIMODAL,
+        message=(
+            f"Model type '{model_type}' is not in the verified multimodal list "
+            f"for {operation}. Verified: {verified}. See: {coverage_url}"
+        ),
+        detail={
+            "model_type": model_type,
+            "operation": operation,
+            "verified_types": sorted(VISION_QUANTIZE_TYPES),
+            "coverage_url": coverage_url,
+        },
+        retryable=False,
     )

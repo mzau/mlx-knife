@@ -14,7 +14,7 @@ authors = [
     {name = "The BROKE team", email = "broke@gmx.eu"},
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
@@ -33,12 +33,17 @@ dependencies = [
     "pydantic>=2.11.0",
     "httpx>=0.27.0",
     "python-multipart>=0.0.9",
-    # MLX stack (Text + Vision + Audio)
-    "mlx>=0.30.0",
-    "mlx-lm>=0.30.5",
-    "mlx-vlm==0.3.10",
-    "mlx-audio==0.3.0",
-    "tiktoken>=0.7.0",
+    # MLX stack (Text + Vision + Audio).
+    # Upper bounds are hygiene per ADR-023: every upstream minor bump gets an
+    # explicit compatibility check + release bump, never an implicit upgrade
+    # on `pip install`. Loosen only with a new mlx-knife release that has
+    # re-verified the integration.
+    "mlx>=0.30.0,<0.32",
+    "mlx-lm>=0.31.1,<0.32",
+    "mlx-audio>=0.4.1,<0.5",
+    "mlx-vlm>=0.3.10,<0.4",
+    "transformers==5.0.0",
+    "tiktoken>=0.7.0,<1.0",
 ]
 
 [project.scripts]

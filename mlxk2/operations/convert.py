@@ -37,6 +37,8 @@ from .workspace import write_workspace_sentinel, is_managed_workspace, read_work
 from .health import health_check_workspace
 from .clone import _check_apfs_and_warn
 from ..core.cache import get_current_cache_root
+from ..core.capabilities import classify_convert_target
+from ..errors import ErrorType, unsupported_multimodal_error
 from mlxk2 import __version__
 
 logger = logging.getLogger(__name__)
@@ -113,34 +115,9 @@ def _quantize_vision_model(source: Path, target: Path, bits: int, group_size: in
     rebuild_safetensors_index(target)
 
 
-def _detect_quantize_backend(source: Path) -> str:
-    """Detect whether source is a text or vision model for quantization dispatch.
-
-    Reads config.json and checks for vision_config or vision model_type markers.
-
-    Returns:
-        "vision" or "text"
-    """
-    config_path = source / "config.json"
-    if config_path.exists():
-        try:
-            import json as _json
-            config = _json.loads(config_path.read_text(encoding="utf-8"))
-            # Vision models have vision_config or a vision model_type
-            if isinstance(config.get("vision_config"), dict):
-                return "vision"
-            model_type = config.get("model_type", "")
-            if isinstance(model_type, str) and model_type.lower() in (
-                "llava", "pixtral", "qwen2_vl", "idefics2", "idefics3",
-                "mllama", "mistral3", "gemma3", "mimo",
-            ):
-                return "vision"
-        except Exception:
-            pass
-    return "text"
-
-
-# Backend dispatch
+# Backend dispatch. Only "text" and "vision" are executable backends;
+# "stt_unsupported" and "unsupported_multimodal" are reject classes handled
+# at the call site (see convert_operation quantize branch, ADR-023).
 QUANTIZE_BACKENDS: Dict[str, Callable[[Path, Path, int, int], None]] = {
     "text": _quantize_text_model,
     "vision": _quantize_vision_model,
@@ -148,21 +125,19 @@ QUANTIZE_BACKENDS: Dict[str, Callable[[Path, Path, int, int], None]] = {
 }
 
 
-def _get_quantize_backend(model_type: str) -> Callable[[Path, Path, int, int], None]:
-    """Get quantization backend for model type.
+def _get_quantize_backend(classification: str) -> Callable[[Path, Path, int, int], None]:
+    """Get executable quantization backend for a classification from classify_convert_target.
 
-    Args:
-        model_type: Model type ("text", "vision", "audio")
-
-    Returns:
-        Quantization function
-
-    Raises:
-        ValueError: If model type not supported for quantization
+    Accepts only "text" or "vision". Reject classifications ("stt_unsupported",
+    "unsupported_multimodal") are filtered out by the caller and never reach
+    this function.
     """
-    backend = QUANTIZE_BACKENDS.get(model_type)
+    backend = QUANTIZE_BACKENDS.get(classification)
     if not backend:
-        raise ValueError(f"Quantization not supported for {model_type} models (text and vision supported)")
+        raise ValueError(
+            f"No executable quantize backend for classification '{classification}' "
+            "(expected 'text' or 'vision')"
+        )
     return backend
 
 
@@ -409,20 +384,48 @@ def convert_operation(
             bits = mode_opts.get("bits", 4)
             group_size = mode_opts.get("group_size", 64)
 
-            # Check if source is already quantized (warn if re-quantizing)
+            # Read source config once, used for both re-quantize warning and dispatch
+            src_config: Dict[str, Any] = {}
             src_config_path = src / "config.json"
             if src_config_path.exists():
                 try:
                     src_config = json.loads(src_config_path.read_text(encoding="utf-8"))
-                    src_quant = src_config.get("quantization", {})
-                    src_bits = src_quant.get("bits") if isinstance(src_quant, dict) else None
-                    if src_bits is not None and bits > src_bits:
-                        result["data"]["warning"] = (
-                            f"Source already {src_bits}-bit. "
-                            f"Quantizing to {bits}-bit does not increase precision."
-                        )
                 except (json.JSONDecodeError, OSError):
-                    pass
+                    src_config = {}
+
+            # Warn if re-quantizing a model that is already quantized at lower precision
+            src_quant = src_config.get("quantization", {})
+            src_bits = src_quant.get("bits") if isinstance(src_quant, dict) else None
+            if src_bits is not None and bits > src_bits:
+                result["data"]["warning"] = (
+                    f"Source already {src_bits}-bit. "
+                    f"Quantizing to {bits}-bit does not increase precision."
+                )
+
+            # Phase 4Q: Classify source for dispatch (ADR-023 Text-First + Verified Multimodal).
+            # Hard reject BEFORE any filesystem side effect on dst, so an unsupported
+            # multimodal model never causes a partial write or silent text downgrade.
+            classification = classify_convert_target(src_config)
+            src_model_type_raw = src_config.get("model_type", "")
+            src_model_type = src_model_type_raw if isinstance(src_model_type_raw, str) and src_model_type_raw else "<unknown>"
+
+            if classification == "unsupported_multimodal":
+                err = unsupported_multimodal_error(src_model_type, operation="convert --quantize")
+                result["status"] = "error"
+                result["error"] = err.to_dict()
+                return result
+
+            if classification == "stt_unsupported":
+                result["status"] = "error"
+                result["error"] = {
+                    "type": ErrorType.NOT_IMPLEMENTED.value,
+                    "message": (
+                        f"Quantization of speech-to-text model type '{src_model_type}' "
+                        "is not currently supported."
+                    ),
+                    "detail": {"model_type": src_model_type, "operation": "convert --quantize"},
+                }
+                return result
 
             # Add quantization info to metadata
             target_metadata["quantization"] = {
@@ -431,10 +434,8 @@ def convert_operation(
             }
 
             try:
-                # Phase 4Q: Auto-detect backend (text vs vision) and quantize
-                backend_type = _detect_quantize_backend(src)
-                backend = _get_quantize_backend(backend_type)
-                logger.info(f"Using {backend_type} quantization backend")
+                backend = _get_quantize_backend(classification)
+                logger.info(f"Using {classification} quantization backend")
                 backend(src, dst, bits, group_size)
 
                 # Phase 5Q: Write sentinel AFTER successful quantization

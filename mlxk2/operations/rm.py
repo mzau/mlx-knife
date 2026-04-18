@@ -2,6 +2,7 @@ import shutil
 import os
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
+from ..operations.workspace import is_workspace_path
 
 
 def find_matching_models(pattern):
@@ -127,6 +128,16 @@ def rm_operation(model_spec, force=False):
             }
             return result
         
+        # ADR-022: Workspace models cannot be deleted via mlxk rm (cache only)
+        if is_workspace_path(resolved_name):
+            result["status"] = "error"
+            result["data"]["model"] = resolved_name
+            result["error"] = {
+                "type": "workspace_model",
+                "message": f"Cannot delete workspace model. Use: rm -rf {resolved_name}"
+            }
+            return result
+
         resolved_model_dir = model_cache / hf_to_cache_dir(resolved_name)
         is_fuzzy_match = resolved_name != model_spec.split('@')[0]
         

@@ -190,6 +190,60 @@ def get_safe_ram_budget_gb() -> float:
     return safe_budget
 
 
+def apply_cache_wins_workspace_fallback(raw_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Dedup policy for portfolio discovery with workspace-first migration support.
+
+    Accepts the raw `models` list from `mlxk list --json` (cache + workspaces
+    mixed) and returns the subset that should feed test discovery.
+
+    Rule (ADR-022-ready):
+      - Cache models are always kept.
+      - Workspace models (absolute paths) are kept IFF:
+          a) operation == "clone" AND origin is NOT already in the cache set
+             (lets a clone-only model get tested when the user has removed the
+             cache copy — enables Schritt-für-Schritt workspace-first migration)
+          b) operation == "convert"
+             (convert outputs are distinct variants, not mirrors of their
+             bf16 source; they share a source_repo with the cache entry but
+             are not the same model)
+          c) operation missing or unreadable
+             (safe default: keep; test discovery will fail cleanly downstream
+             if the entry is unusable)
+
+    The goal is: "cache wins over workspace when both hold the same model,
+    but workspace-only models are still discoverable". Previously the
+    discovery blindly skipped every absolute path, which broke audio
+    coverage (Whisper workspaces not mirrored in cache) and hid convert
+    outputs from tests entirely.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    cache_names = {m["name"] for m in raw_models if not m["name"].startswith("/")}
+
+    kept: List[Dict[str, Any]] = []
+    for m in raw_models:
+        name = m["name"]
+        if not name.startswith("/"):
+            kept.append(m)
+            continue
+
+        origin = m.get("origin")
+        operation = None
+        sentinel = _Path(name) / ".mlxk_workspace.json"
+        if sentinel.exists():
+            try:
+                operation = _json.loads(sentinel.read_text()).get("operation")
+            except Exception:
+                operation = None
+
+        if operation == "clone" and origin and origin in cache_names:
+            continue  # Cache wins — same model present in both.
+        kept.append(m)
+
+    return kept
+
+
 def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     """Discover MLX chat models via mlxk list --json (production command).
 
@@ -244,8 +298,11 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
         # Parse JSON response (docs/json-api-schema.json)
         data = json.loads(result.stdout)
 
-        # Extract models array from response
-        models = data.get("data", {}).get("models", [])
+        # Extract models array and apply cache-wins workspace-fallback dedup
+        # (ADR-022 migration-ready: workspace-only models ARE discoverable).
+        models = apply_cache_wins_workspace_fallback(
+            data.get("data", {}).get("models", [])
+        )
 
         # Filter per schema modelObject fields
         discovered = []
@@ -265,22 +322,17 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
                 size_bytes = model.get("size_bytes", 0)
                 ram_gb = (size_bytes / (1024**3)) * 1.2 if size_bytes else 0
 
-                # Use name from list --json directly (human-readable, always valid)
+                # Use name from list --json directly (human-readable, always valid;
+                # may be an absolute workspace path when the model lives only in
+                # the workspace, which downstream tests handle).
                 model_name = model["name"]
-
-                # FILTER: Skip workspace models (absolute paths from MLXK_WORKSPACE_HOME).
-                # Workspace models lack org prefix and HF cache structure.
-                # If same model exists in both workspace and cache, cache wins
-                # (avoids double-testing).
-                if model_name.startswith("/"):
-                    continue
 
                 # FILTER: Exclude known broken models (upstream runtime bugs)
                 if model_name in KNOWN_BROKEN_MODELS:
                     continue
 
                 discovered.append({
-                    "model_id": model_name,  # HF name from list, e.g. "mlx-community/model"
+                    "model_id": model_name,
                     "ram_needed_gb": ram_gb,
                     "snapshot_path": None,      # Not provided by list, not needed
                     "weight_count": None        # Not provided by list, not needed
