@@ -39,10 +39,10 @@ dependencies = [
     # on `pip install`. Loosen only with a new mlx-knife release that has
     # re-verified the integration.
     "mlx>=0.30.0,<0.32",
-    "mlx-lm>=0.31.1,<0.32",
-    "mlx-audio>=0.4.1,<0.5",
-    "mlx-vlm>=0.3.10,<0.4",
-    "transformers==5.0.0",
+    "mlx-lm==0.31.1",
+    "mlx-audio==0.4.2",
+    "mlx-vlm==0.4.4",
+    "transformers==5.1.0",
     "tiktoken>=0.7.0,<1.0",
 ]
 
