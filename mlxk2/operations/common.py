@@ -18,7 +18,7 @@ import importlib.util
 import sys
 
 # Import from unified capabilities module (ARCHITECTURE.md)
-from ..core.capabilities import VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES, Capability, Backend
+from ..core.capabilities import VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES, Capability, Backend, extract_chat_template
 
 
 @dataclass
@@ -108,21 +108,21 @@ def read_front_matter(root: Path) -> Optional[FrontMatter]:
 
 
 def read_tokenizer_hints(root: Path) -> Dict[str, Any]:
-    """Extract lightweight tokenizer hints (e.g., chat_template presence)."""
+    """Extract lightweight tokenizer hints (e.g., chat_template presence).
+
+    `tokenizer.json` is probed through a byte-substring gate to avoid the
+    multi-MB JSON parse that dominated `mlxk list` (the key is almost never
+    stored there in modern HF models — see `extract_chat_template` docstring).
+    """
     hints: Dict[str, Any] = {"chat_template": None}
     try:
         for fname in ("tokenizer_config.json", "tokenizer.json"):
             fp = root / fname
-            if fp.exists() and fp.is_file():
-                try:
-                    obj = _json.loads(fp.read_text(encoding="utf-8", errors="ignore"))
-                except Exception:
-                    obj = None
-                if isinstance(obj, dict):
-                    ct = obj.get("chat_template")
-                    if isinstance(ct, str) and ct.strip():
-                        hints["chat_template"] = ct
-                        break
+            if fp.is_file():
+                ct = extract_chat_template(fp)
+                if ct:
+                    hints["chat_template"] = ct
+                    break
     except Exception:
         pass
     return hints
@@ -204,8 +204,13 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
     ct = tok_hints.get("chat_template")
     if isinstance(ct, str) and ct.strip():
         return "chat"
-    # Check for chat_template.json file (Issue #48: reliable indicator)
-    if probe is not None and (probe / "chat_template.json").exists():
+    # Dedicated chat-template files (modern HF convention).
+    # `.json` has been checked here since Issue #48; `.jinja` added 2026-04
+    # after portfolio sampling showed 11/27 models keep the template there.
+    if probe is not None and (
+        (probe / "chat_template.json").is_file()
+        or (probe / "chat_template.jinja").is_file()
+    ):
         return "chat"
     if "instruct" in name or "chat" in name:
         return "chat"

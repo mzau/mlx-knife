@@ -27,6 +27,39 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+_CHAT_TEMPLATE_KEY_BYTES = b'"chat_template"'
+
+
+def extract_chat_template(path: Path) -> Optional[str]:
+    """Return the `chat_template` string from a tokenizer JSON file, or None.
+
+    Semantics-preserving perf optimisation: a valid JSON file carries the
+    key `chat_template` as a literal `"chat_template"` in its bytes. If the
+    byte substring isn't present, there is no key to extract, and we can
+    skip the JSON parse entirely. This matters for `tokenizer.json` files,
+    which commonly run to 10-20 MB (BPE/Unigram vocabularies and regex
+    patterns) but almost never carry a chat template — modern HF models
+    keep the template in `tokenizer_config.json`, `chat_template.jinja`,
+    or `chat_template.json` instead.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if _CHAT_TEMPLATE_KEY_BYTES not in data:
+        return None
+    try:
+        obj = json.loads(data)
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    ct = obj.get("chat_template")
+    if isinstance(ct, str) and ct.strip():
+        return ct
+    return None
+
+
 class Capability(str, Enum):
     """Known model capabilities.
 
@@ -451,19 +484,18 @@ def probe_model_capabilities(
             elif mt.lower() in VISION_MODEL_TYPES:
                 caps.is_chat = True  # Vision models are chat models
 
-    # Check for chat template in tokenizer
+    # Check for chat template in tokenizer (byte-gated; see extract_chat_template)
     for fname in ("tokenizer_config.json", "tokenizer.json"):
         fp = model_path / fname
-        if fp.exists():
-            try:
-                obj = json.loads(fp.read_text(encoding="utf-8", errors="ignore"))
-                if isinstance(obj, dict):
-                    ct = obj.get("chat_template")
-                    if isinstance(ct, str) and ct.strip():
-                        caps.is_chat = True
-                        break
-            except Exception:
-                pass
+        if fp.is_file() and extract_chat_template(fp):
+            caps.is_chat = True
+            break
+    else:
+        # Also recognise modern `chat_template.jinja` / `chat_template.json`
+        # as chat indicators even when no template key is stored in the
+        # tokenizer JSONs. Cheap existence check — no I/O beyond stat.
+        if (model_path / "chat_template.jinja").is_file() or (model_path / "chat_template.json").is_file():
+            caps.is_chat = True
 
     # Check name hints for chat
     name_lower = model_name.lower()
