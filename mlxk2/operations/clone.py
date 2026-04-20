@@ -23,7 +23,12 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
 from .pull import pull_to_cache
-from .workspace import write_workspace_sentinel, compute_workspace_hash
+from .workspace import (
+    write_workspace_sentinel,
+    compute_workspace_hash_v2,
+    DEFAULT_EXCLUDE_PATTERNS,
+    HASH_ALGORITHM_V2,
+)
 from ..core.cache import hf_to_cache_dir
 from mlxk2 import __version__
 
@@ -209,8 +214,8 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
             # Extract commit hash if available from pull result
             commit_hash = pull_result["data"].get("commit_hash")
 
-            # ADR-022 Phase 1.5: Compute content hash for clean indicator
-            content_hash = compute_workspace_hash(target_path)
+            # ADR-025: compute v2 content_hash + file_index
+            hash_result = compute_workspace_hash_v2(target_path)
             hash_modified = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
             metadata = {
@@ -220,9 +225,14 @@ def clone_operation(model_spec: str, target_dir: str, health_check: bool = True,
                 "source_revision": commit_hash,
                 "managed": True,
                 "operation": "clone",
-                "content_hash": content_hash,
                 "hash_modified": hash_modified,
             }
+            if hash_result is not None:
+                content_hash, file_index = hash_result
+                metadata["hash_algorithm"] = HASH_ALGORITHM_V2
+                metadata["content_hash"] = content_hash
+                metadata["exclude_patterns"] = list(DEFAULT_EXCLUDE_PATTERNS)
+                metadata["file_index"] = file_index
 
             try:
                 write_workspace_sentinel(target_path, metadata)
