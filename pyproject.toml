@@ -39,11 +39,20 @@ dependencies = [
     # on `pip install`. Loosen only with a new mlx-knife release that has
     # re-verified the integration.
     "mlx>=0.30.0,<0.32",
-    "mlx-lm==0.31.1",
-    "mlx-audio==0.4.2",
+    "mlx-lm==0.31.3",
+    "mlx-audio==0.4.3",
     "mlx-vlm==0.4.4",
-    "transformers==5.1.0",
+    "transformers==5.5.4",
     "tiktoken>=0.7.0,<1.0",
+    # TEMPORARY (2.0.6): torch+torchvision required for Pixtral / Llama-Vision /
+    # Mistral-Small-3.1 since transformers >=5.5 made the torchvision-backed
+    # "Fast" image processor the default class. Without these, mlx-vlm's
+    # AutoProcessor.from_pretrained(..., use_fast=True) fails with
+    # requires_backends ImportError on Pixtral-class models.
+    # Sunset-by mlx-vlm#1011 — once upstream provides use_fast=False fallback,
+    # remove these two lines and bump mlx-vlm.
+    "torch>=2.0",
+    "torchvision>=0.15",
 ]
 
 [project.scripts]

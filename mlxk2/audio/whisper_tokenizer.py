@@ -5,13 +5,18 @@
 # This code was removed in PyPI release 0.3.1 (2026-01-29), breaking Whisper
 # transcription for models without HuggingFace processor.
 #
-# WORKAROUND: mlx-audio#479 — sunset-by 2.0.6
-# Bundle of tokenizer assets kept here because upstream removed them.
-# If upstream restores assets by the 2.0.6 freeze → this whole module
-# (and the patches in `audio_runner.py` that install it) is removed.
-# If upstream does not → module is removed anyway and Whisper drops from
-# the verified list per ADR-023 Workaround-Sunset Policy.
-# See: https://github.com/Blaizzy/mlx-audio/issues/479
+# WORKAROUND: mlx-audio#645 — sunset-by 2.0.6
+# Bundled tiktoken-based tokenizer for Whisper. Used by audio_runner.py's
+# Whisper get_tokenizer() patch (#645 Patch #2) to fall back when no HF
+# Processor is available, and by the post_load_hook patch (#645 Patch #3).
+# Originally introduced for #479 (assets removed in mlx-audio f7328a4); that
+# issue is now closed upstream and the related _apply_tiktoken_patch was
+# dropped in 2.0.6. The module stays because #645 (Whisper post_load_hook)
+# still requires our tokenizer fallback.
+# If #645 is fixed upstream by the next freeze → this module is removed
+# along with audio_runner.py's #645 patches. If not → module is removed
+# anyway and Whisper drops from the verified list per ADR-023 policy.
+# See: https://github.com/Blaizzy/mlx-audio/issues/645
 #
 # Original source:
 # https://github.com/Blaizzy/mlx-audio/blob/9349644/mlx_audio/stt/models/whisper/tokenizer.py
@@ -367,7 +372,7 @@ def get_encoding(name: str = "gpt2", num_languages: int = 99) -> tiktoken.Encodi
     if not vocab_path.exists():
         raise FileNotFoundError(
             f"Tiktoken vocabulary file not found: {vocab_path}\n"
-            f"This is an mlx-audio Issue #479 workaround.\n"
+            f"This is an mlx-audio Issue #645 workaround.\n"
             f"Expected assets in: {_ASSETS_DIR}"
         )
 

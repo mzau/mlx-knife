@@ -20,8 +20,8 @@ from ..operations.workspace import is_workspace_path
 # ============================================================================
 # Workaround version gate (ADR-023 Workaround-Sunset Policy)
 # ============================================================================
-# The three whisper-related patches below target mlx-audio 0.4.x behavior
-# (issues #479 and #645). When mlx-audio reaches `_MLX_AUDIO_SUNSET_AT` they
+# The two whisper-related patches below target mlx-audio 0.4.x behavior
+# (issue #645). When mlx-audio reaches `_MLX_AUDIO_SUNSET_AT` they
 # auto-disable. Before shipping 2.0.6, every `sunset-by 2.0.6` marker in this
 # file must be re-evaluated:
 #   - if upstream fixed the issue -> delete the patch function entirely,
@@ -56,46 +56,6 @@ def _mlx_audio_version_tuple(v: str) -> Tuple[int, int, int]:
 _MLX_AUDIO_VERSION = _mlx_audio_version_tuple(_MLX_AUDIO_VERSION_STR)
 _MLX_AUDIO_SUNSET_AT = (0, 5, 0)
 _MLX_AUDIO_NEEDS_PATCHES = _MLX_AUDIO_VERSION < _MLX_AUDIO_SUNSET_AT
-
-
-# ============================================================================
-# CRITICAL: Monkey-patch mlx-audio tokenizer BEFORE any imports
-# ============================================================================
-# WORKAROUND: mlx-audio#479 — sunset-by 2.0.6
-# tiktoken assets were removed in mlx-audio commit f7328a4 (Jan 29, 2026)
-# but the code still tries to load them. We bundle the assets from commit
-# 9349644 in mlxk2/assets/whisper/ and patch get_encoding() to use them.
-# This MUST happen at module import time, before any mlx-audio code runs.
-# ============================================================================
-
-def _apply_tiktoken_patch():
-    """Apply tiktoken asset patch globally at module import time.
-
-    Patches mlx-audio's get_encoding() to use our bundled tiktoken files
-    from mlxk2/assets/whisper/ instead of the removed upstream assets.
-
-    The actual implementation lives in mlxk2.audio.whisper_tokenizer to avoid
-    code duplication. This function just wires it up as a monkey-patch.
-    """
-    if not _MLX_AUDIO_NEEDS_PATCHES:
-        return  # Upstream expected to have fixed this; no patch needed.
-    try:
-        # Import mlx-audio's tokenizer module (target of the patch)
-        import mlx_audio.stt.models.whisper.tokenizer as mlx_whisper_tokenizer
-
-        # Import our bundled implementation
-        from mlxk2.audio.whisper_tokenizer import get_encoding
-
-        # Patch the module globally
-        mlx_whisper_tokenizer.get_encoding = get_encoding
-
-    except ImportError:
-        # mlx-audio not installed - skip patching
-        pass
-
-
-# Apply patch immediately at module import
-_apply_tiktoken_patch()
 
 
 # ============================================================================

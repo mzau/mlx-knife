@@ -112,7 +112,6 @@ def pull_model_with_huggingface_hub(model_name, cache_dir=None):
         kwargs = {
             "repo_id": model_name,
             "local_files_only": False,
-            "resume_download": True
         }
         if cache_dir:
             kwargs["cache_dir"] = str(cache_dir)

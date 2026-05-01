@@ -1,6 +1,6 @@
 """Unit tests for mlxk2/audio/whisper_tokenizer.py.
 
-Tests the bundled Whisper tokenizer implementation (mlx-audio Issue #479 workaround).
+Tests the bundled Whisper tokenizer implementation (mlx-audio Issue #645 workaround).
 
 Coverage:
 - get_encoding(): Load tiktoken encodings from bundled assets
@@ -10,21 +10,6 @@ Coverage:
 
 import pytest
 from pathlib import Path
-
-
-def _mlx_audio_available():
-    """Check if mlx-audio is available and functional."""
-    try:
-        import mlx_audio.stt.models.whisper.tokenizer  # noqa: F401
-        return True
-    except Exception:
-        return False
-
-
-requires_mlx_audio = pytest.mark.skipif(
-    not _mlx_audio_available(),
-    reason="mlx-audio not available or MLX incompatible"
-)
 
 
 class TestGetEncoding:
@@ -66,7 +51,7 @@ class TestGetEncoding:
             get_encoding("nonexistent_encoding")
 
         assert "Tiktoken vocabulary file not found" in str(exc_info.value)
-        assert "mlx-audio Issue #479" in str(exc_info.value)
+        assert "mlx-audio Issue #645" in str(exc_info.value)
 
     def test_get_encoding_is_cached(self):
         """get_encoding() should be cached (lru_cache)."""
@@ -526,37 +511,3 @@ class TestAssetsPaths:
         multilingual_path = _ASSETS_DIR / "multilingual.tiktoken"
         assert multilingual_path.exists(), f"multilingual.tiktoken not found: {multilingual_path}"
         assert multilingual_path.stat().st_size > 100000  # Should be ~800KB
-
-
-@requires_mlx_audio
-class TestPatchIntegration:
-    """Tests for mlx-audio patch integration."""
-
-    def test_patch_applied_to_mlx_audio(self):
-        """Verify patch is applied when audio_runner is imported."""
-        # Import audio_runner which applies the patch
-        from mlxk2.core.audio_runner import AudioRunner  # noqa: F401
-        from mlxk2.audio.whisper_tokenizer import get_encoding
-
-        # Import the patched module
-        import mlx_audio.stt.models.whisper.tokenizer as mlx_tok
-
-        # Our get_encoding should be installed
-        assert mlx_tok.get_encoding is get_encoding
-
-    def test_patched_get_encoding_works(self):
-        """Verify patched get_encoding produces valid encodings."""
-        # Import to apply patch
-        from mlxk2.core.audio_runner import AudioRunner  # noqa: F401
-
-        # Use the patched version
-        import mlx_audio.stt.models.whisper.tokenizer as mlx_tok
-
-        enc = mlx_tok.get_encoding("gpt2")
-        assert enc.name == "gpt2.tiktoken"
-
-        # Verify encode/decode works
-        tokens = enc.encode("Test patch")
-        assert len(tokens) > 0
-        decoded = enc.decode(tokens)
-        assert decoded == "Test patch"

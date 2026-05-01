@@ -1,5 +1,183 @@
 # Changelog
 
+## [2.0.6] - Unreleased
+
+> **content_hash v2 closes Issue #52 coverage gap.** v1 only hashed
+> `config.json` plus safetensors name+size+4 KB and tokenizer
+> name+size, leaving `model.safetensors.index.json`, processor /
+> preprocessor / generation configs, chat templates, tokenizer
+> content, custom Python, and every subdirectory invisible. After
+> `mlxk convert --repair-index` the target carried the source's
+> `content_hash`, so `Clean: ✓` was not trustworthy. v2 is
+> include-by-default with a portable recipe stored in the sentinel —
+> see *Added* below for the algorithm.
+>
+> **`mlxk list` runs ~85% faster.** Byte-gating the `tokenizer.json`
+> chat-template scan plus recognising `chat_template.jinja` cuts a
+> 7.8 s portfolio listing to ~1.2 s and reclassifies 9 models from
+> `base` to `chat` where they correctly carry a `.jinja` template.
+>
+> **MLX stack moves forward, Pixtral-class temporarily depends on
+> torch.** mlx-lm 0.31.1 → 0.31.3, mlx-audio 0.4.1 → 0.4.3, mlx-vlm
+> 0.3.10-range → 0.4.4, transformers 5.0.0 → 5.5.4. transformers 5.5+
+> made the torchvision-backed Fast image processor the default for
+> Pixtral / Llama-Vision / Mistral-Small-3.1, so `torch` +
+> `torchvision` are bundled temporarily in base deps with a
+> `sunset-by mlx-vlm#1011` marker.
+>
+> **Sunset cleanup.** mlx-audio#479 closed upstream → the
+> `_apply_tiktoken_patch` family is removed. mlx-audio#645 stays open
+> → the two `post_load_hook` / `get_tokenizer` patches remain.
+
+### ⚠️ Upgrade Notes
+
+- **content_hash v2 one-time migration.** Existing 2.0.5 workspaces
+  lack a `hash_algorithm` field; v2 readers report `clean: None`
+  plus an actionable hint until the user runs
+  `mlxk show <name> --recalc-hash` once. The migration is in-place,
+  rewrites the sentinel with `hash_algorithm: "v2"` + `file_index` +
+  frozen `exclude_patterns`, and `Clean: ✓` returns on the next
+  listing. Workspaces remain fully usable during the transition.
+- **`transformers==5.5.4`** (was `==5.0.0`). Required by
+  mlx-audio 0.4.3 (`>=5.5.0`).
+- **NEW base dependencies: `torch>=2.0`, `torchvision>=0.15`.**
+  transformers 5.5+ made the torchvision-backed "Fast" image
+  processor the default class for Pixtral / Llama-Vision /
+  Mistral-Small-3.1 processor lineages. Without `torch +
+  torchvision`, `mlxk run` against those models fails at processor
+  instantiation with a `requires_backends` `ImportError`. Bundled as
+  a **temporary measure** under `# WORKAROUND: sunset-by
+  mlx-vlm#1011` in `pyproject.toml`. Adds ~1 GB to a fresh install.
+  When upstream provides a `use_fast=False` fallback, these two
+  lines drop. See *Migration* below for lean-stack instructions.
+- **mlx-audio#479 sunset complete (per ADR-023 Workaround-Sunset
+  Policy).** Issue closed upstream — `_apply_tiktoken_patch` in
+  `mlxk2/core/audio_runner.py` is dead code and removed. Whisper
+  stays on the verified list because a sibling patch (#645 Patch #2)
+  carries the bundled tokenizer forward via
+  `mlxk2/audio/whisper_tokenizer.py`.
+- **mlx-audio#645 still open.** The two `post_load_hook` /
+  `get_tokenizer` patches in `audio_runner.py` remain load-bearing
+  for Whisper.
+
+### Added
+
+- **content_hash v2 algorithm
+  ([ADR-025](docs/ADR/ADR-025-content-hash-v2.md), closes
+  [#52](https://github.com/mzau/mlx-knife/issues/52)).** Replaces
+  v1's narrow file set with include-by-default. Safetensors are
+  hashed header-only (JSON metadata bytes, never tensor data); every
+  other file is hashed full-content with a 1 GiB catch-all stat-only
+  cap. The sentinel stores the recipe — per-file `path` / `size` /
+  `mtime_ns` / `sha` in `file_index` plus the frozen
+  `exclude_patterns` — so future readers can verify v2 workspaces
+  without preserving v2 code. Hot-path clean-check is stat-only with
+  mtime-drift self-heal that silently persists back to the sentinel;
+  `cp -R` and Finder copies preserve `Clean: ✓` without user
+  intervention. Path validation runs before any filesystem op driven
+  by sentinel paths (no `..`, absolute, drive prefix, NUL, or
+  backslash). Symlinks pointing inside the workspace get a path
+  fingerprint; outside or broken targets are refused. No dual-algo
+  read logic. 52 new tests cover the ADR-025 verification matrix.
+- **`chat_template.jinja` recognition.** `detect_model_type` and
+  `detect_capabilities` now treat `chat_template.jinja` as a chat
+  indicator (existence check, no I/O beyond stat). Previously only
+  `chat_template.json` was checked, leaving 11 of 27 sampled
+  workspaces relying on the name heuristic.
+- **ADR-025** (Accepted) — content_hash v2 algorithm + sentinel
+  migration. **ADR-018** extended: Phase 2 (quantize + v1
+  content_hash) marked shipped in 2.0.5; Phase 3 delegated to
+  ADR-025; Phase 4 `--repair` unified detection-driven design added
+  (2.0.6 P2).
+
+### Changed
+
+- **`mlxk list` performance: ~85% wall-time reduction** for
+  portfolio listings. New `extract_chat_template(path)` helper in
+  `core/capabilities.py` byte-gates the `tokenizer.json`
+  chat-template scan: read the file bytes, check for the
+  `"chat_template"` substring first, only run `json.loads` on a hit.
+  Portfolio sampling (23 `tokenizer.json` files, 460 MB) found 0
+  occurrences of the key or even the byte literal, so the json-parse
+  cost is now skipped entirely on the cold path. Side effect: 9
+  models reclassified `base` → `chat` where they correctly carry a
+  `.jinja` template (gemma-3n/4 *-it-*, Josiefied-Qwen3, gpt-oss,
+  GLM-4.7-Flash). No `chat` → `base` regressions. Verified via
+  jq-normalized diff over 75 models.
+- **Dependency pins (vs 2.0.5):**
+  - `mlx-lm`: `==0.31.0`-range → `==0.31.3` (Gemma 4 + KV-cache
+    fixes upstream)
+  - `mlx-audio`: `==0.4.1` → `==0.4.3` (mlx-lm pin lifted upstream,
+    Voxtral tokenizer fixes, tiktoken explicit dep removed)
+  - `mlx-vlm`: `==0.3.10`-range → `==0.4.4`
+  - `transformers`: `==5.0.0` → `==5.5.4` (required by mlx-audio
+    0.4.3)
+- **`mlxk2/core/audio_runner.py`:** module header updated to reflect
+  that the surviving patches target only mlx-audio#645.
+- **`mlxk2/audio/whisper_tokenizer.py`:** module header
+  re-attributed from #479 to #645. The module is no longer the #479
+  workaround (closed upstream) but stays as the load-bearing
+  tokenizer for the #645 `post_load_hook` fallback in
+  `audio_runner.py`.
+- **`mlxk2/operations/pull.py`:** dropped deprecated
+  `resume_download=True` from the
+  `huggingface_hub.snapshot_download()` call. `huggingface-hub >=
+  1.0` defaults to "always resume" and emits a `UserWarning` for the
+  old argument; removing it silences the warning with no behaviour
+  change.
+- **Coverage matrix (`docs/MODEL-COVERAGE.md`).** Pixtral
+  convert-quantize verified (bf16 → 6bit clean). mllama vision
+  runtime verified with `--image`; row split out from the generic
+  VLM line, with a vision-only routing caveat documented.
+
+### Removed
+
+- **`compute_workspace_hash()` v1** in `mlxk2/operations/workspace.py`.
+  Replaced by `compute_workspace_hash_v2()` (see ADR-025).
+- **`_apply_tiktoken_patch`** in `mlxk2/core/audio_runner.py`
+  (mlx-audio#479 sunset). Module-level invocation also removed.
+- **`requires_mlx_audio` skipif marker** and **`TestPatchIntegration`
+  class** in `tests_2.0/test_whisper_tokenizer.py` — both targeted the
+  removed `_apply_tiktoken_patch` and became dead test code with the
+  #479 sunset.
+
+### Known Issues / Upstream Tracking
+
+- **mlx-vlm#1011** ([upstream
+  link](https://github.com/Blaizzy/mlx-vlm/issues/1011)): `torch` +
+  `torchvision` are currently bundled as a temporary measure for the
+  Pixtral-class processor families; tracked upstream.
+
+### Migration
+
+For most users `pip install -U mlx-knife` works as before; vision still
+runs out of the box because `torch + torchvision` are now pulled in by
+default.
+
+**One-time content_hash v2 step per existing workspace:**
+
+```bash
+mlxk show <workspace-name> --recalc-hash
+```
+
+Migrates the sentinel from v1 to v2 in place; subsequent listings show
+`Clean: ✓` again.
+
+**Lean-stack** users (build images, embedded deployments) who do not
+use Pixtral / Llama-Vision / Mistral-Small-3.1 can shrink the install:
+
+```bash
+pip install mlx-knife
+pip uninstall -y torch torchvision
+```
+
+This breaks the affected Pixtral-class vision models with a clear
+`requires_backends` error. Other VLM families — Gemma 4 VLM,
+Qwen 2.5-VL — still run; check `docs/MODEL-COVERAGE.md` for the
+per-class status.
+
+---
+
 ## [2.0.5] - 2026-04-18
 
 > **Dependency modernization + Text-First policy.** Dependency stack moves to
