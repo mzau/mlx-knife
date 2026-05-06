@@ -109,15 +109,14 @@ VISION_MODEL_TYPES = frozenset({
     "smolvlm",
 })
 
-# STT (Speech-to-Text) model types - Audio ONLY models (no text generation/chat)
-# These models transcribe audio to text, they cannot generate text or have conversations
-# Note: audio_runtime_compatibility() uses substring matching for flexibility
-# For 2.0.4 stable: Only Whisper is production-ready
-# - Voxtral: tekken.json tokenizer bug (mlx-audio#450)
-# - VibeVoice: Missing tokenizer, upstream bug (docs/ISSUES/vibevoice-missing-tokenizer.md)
-# - Qwen3-ASR: Not yet released in mlx-audio
+# STT (Speech-to-Text) model types - audio-only architecture (no text generation/chat).
+# Tokens are matched as substrings ("vibevoice_asr" matches "vibevoice").
+# Used by detect_model_type() and audio_runtime_compatibility().
+# Quantization of these types is not implemented (classify_convert_target).
 STT_MODEL_TYPES = frozenset({
-    "whisper",        # OpenAI Whisper variants - mlx-audio backend (only production-ready)
+    "whisper",
+    "vibevoice",
+    "voxtral",       # mlx-audio runtime gated by tekken.json bug (mlx-audio#450)
 })
 
 # Audio model types (ADR-019, ADR-020) - All audio-capable models
@@ -158,6 +157,7 @@ VISION_QUANTIZE_TYPES = frozenset({
     "mistral3",       # tested with mlx-vlm 0.3.11
     "gemma3",         # tested with mlx-vlm 0.3.11
     "mimo",           # tested with mlx-vlm 0.3.11
+    "gemma4",         # tested with mlx-vlm 0.4.4 (gemma-4-31b-bf16 → 6bit, 2026-05-06)
 })
 
 

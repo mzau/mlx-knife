@@ -312,6 +312,8 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 **Fix path.** Extend `STT_MODEL_TYPES` to `{"whisper", "vibevoice", "voxtral"}` (substring tokens), align `detect_model_type` to substring matching, ensuring consistency with `detect_audio_capability`. Independent of any reachability logic.
 
+**Fix path validated 2026-05-06 (2.0.6 surgical patch).** `STT_MODEL_TYPES` extended as planned. `detect_model_type` Step 4 (`common.py:202`) switched to substring matching. Effect verified on VibeVoice-ASR-{4,8}bit (now `audio` instead of `base+audio`); whisper-large-v3-turbo-{4,8}bit unchanged (was already matched via exact `whisper`).
+
 ### Class B — Audio capability false positive (key-existence vs truthy)
 
 **Symptom.** Models with `audio_config: null` (key present, value null) are tagged with audio.
@@ -321,6 +323,8 @@ to a distinct fix path; they cannot be collapsed into one patch.
 **Affected.** Gemma4 family with stripped or stubbed audio block: `gemma-4-31b-6bit`, `gemma-4-31b-bf16`, `gemma-4-26b-a4b-it-4bit`. The same pattern likely affects vision detection where a converter packs an empty `vision_config` stub.
 
 **Fix path.** Replace key-existence checks with truthy-dict / truthy-value checks. Apply symmetrically to `detect_vision_capability` for the Granite-Speech case (per existing memory `project_capability_label_bugs`).
+
+**Fix path validated 2026-05-06 (2.0.6 surgical patch).** Step 1 (`common.py:299`) switched to `isinstance(audio_config, dict) and bool(audio_config)`. `detect_vision_capability` (`common.py:233`) symmetric pull: `isinstance(vision_config, dict) and bool(vision_config)` — resolves §A.3 (`vision_config: {}` empty-dict edge). Step 4 (`audio_seq_length` at `common.py:328`) **dropped entirely** after empirical correction: the Gemma4 processor template ships `audio_seq_length=750` for every variant including audio-null ones, so the truthy-value predicate alone was insufficient (the value *is* truthy even when the model has no audio tower). No real audio model in the portfolio relies on this signal as standalone — all caught by Step 1 (truthy `audio_config`) or Step 2 (model_type substring). Effect verified on gemma-4-{26b-a4b-it-4bit, 31b-bf16} (audio tag dropped); regression-anchors gemma-4-e4b-it-4bit (`chat+vision+audio` preserved via truthy `audio_config`) and gemma-3n-{E2B,E2B-it} (audio preserved). **Lesson for Iter 2/3:** the original truthy-predicate framing was sound for `audio_config` (a dict-typed marker) but insufficient for `audio_seq_length` (an int-typed processor parameter that template-inheritance can keep truthy independent of architecture). When future Class C/D fixes derive predicates from `[CURRENT]` empirics, validate against real config files before declaring the predicate complete.
 
 ### Class C — Loader gap (mlx-lm cannot load text-only)
 
@@ -486,15 +490,15 @@ form. If a future probe layer ever becomes expensive enough to require
 caching, the natural home is the workspace sentinel — cache models stay
 re-classified per call, in line with their read-only role.
 
-### A.3 Class B vision-detection precision (§5 Class B)
+### A.3 Class B vision-detection precision (§5 Class B) — resolved 2026-05-06
 
-The fix path "apply symmetrically to `detect_vision_capability`" is
-imprecise. `detect_vision_capability` (`common.py:233`) already uses
-`isinstance(vision_config, dict)`, not key-existence. The remaining edge
-case is `vision_config: {}` (empty dict) which still passes `isinstance`.
-Open: which exact predicate is canonical (`isinstance(x, dict) and bool(x)`,
-`bool(x)` alone, or a typed schema check)? The same predicate must then be
-applied to `audio_config` for symmetric audio detection.
+**Resolved 2026-05-06.** Predicate `isinstance(x, dict) and bool(x)`
+chosen, applied symmetrically to `audio_config` and `vision_config`.
+The empty-dict edge (`vision_config: {}`, `audio_config: {}`) is now
+filtered. See §5 Class B Fix-path note for the empirical correction
+on the audio-side (Step 4 `audio_seq_length` dropped entirely after
+the Gemma4 processor-template-stub finding — the typed predicate
+applied to `audio_seq_length` would still have admitted `750`).
 
 ### A.4 Layer-2 "mlx-vlm verified set" substance (§2)
 

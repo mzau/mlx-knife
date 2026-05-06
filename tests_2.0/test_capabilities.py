@@ -26,7 +26,11 @@ from mlxk2.core.capabilities import (
     _detect_vision_from_config,
     _detect_vision_from_files,
 )
-from mlxk2.operations.common import detect_audio_capability
+from mlxk2.operations.common import (
+    detect_audio_capability,
+    detect_model_type,
+    detect_vision_capability,
+)
 
 
 class TestVisionModelTypes:
@@ -70,13 +74,19 @@ class TestDetectAudioCapability:
         (tmp_path / "config.json").write_text(json.dumps(config))
         assert detect_audio_capability(tmp_path, config) is True
 
-    def test_detects_audio_seq_length_in_processor_config(self, tmp_path):
-        """Should detect audio capability via processor_config.json."""
+    def test_processor_config_audio_seq_length_is_not_a_standalone_signal(self, tmp_path):
+        """Class B (2.0.6): processor_config.json:audio_seq_length is no longer trusted alone.
+
+        The Gemma4 processor template ships audio_seq_length=750 for every variant,
+        including text-only/vision-only ones with `audio_config: null` (gemma-4-26b-a4b-it-4bit,
+        gemma-4-31b-bf16). Real audio models are caught by audio_config or model_type
+        signals; processor_config.json is no longer consulted here.
+        """
         config = {"model_type": "llama"}  # Not an audio type
         (tmp_path / "config.json").write_text(json.dumps(config))
         processor_config = {"audio_seq_length": 188, "processor_class": "Gemma3nProcessor"}
         (tmp_path / "processor_config.json").write_text(json.dumps(processor_config))
-        assert detect_audio_capability(tmp_path, config) is True
+        assert detect_audio_capability(tmp_path, config) is False
 
     def test_non_audio_model(self, tmp_path):
         """Should return False for non-audio models."""
@@ -92,6 +102,105 @@ class TestDetectAudioCapability:
         """Should return False for empty config."""
         (tmp_path / "config.json").write_text("{}")
         assert detect_audio_capability(tmp_path, {}) is False
+
+    # Class B (2.0.6): audio_config key-existence false-positive fix.
+    # `audio_config: null` and `audio_config: {}` are stub markers that do
+    # not denote a real audio tower (Gemma4-31b-{6bit,bf16} carry the null
+    # form). Detection must require a truthy dict.
+
+    def test_audio_config_null_is_not_audio(self, tmp_path):
+        """Gemma4-31b/26b stub: audio_config: null (key present, value null)."""
+        config = {"model_type": "gemma4", "audio_config": None}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_audio_capability(tmp_path, config) is False
+
+    def test_audio_config_empty_dict_is_not_audio(self, tmp_path):
+        """audio_config: {} stub does not denote a real audio tower."""
+        config = {"model_type": "llama", "audio_config": {}}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_audio_capability(tmp_path, config) is False
+
+    def test_audio_config_truthy_dict_is_audio(self, tmp_path):
+        """Regression anchor: Gemma-4-e4b-it-4bit (truthy audio_config dict)."""
+        config = {"model_type": "gemma4", "audio_config": {"hidden_size": 1024}}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_audio_capability(tmp_path, config) is True
+
+    def test_gemma4_template_stub_is_not_audio(self, tmp_path):
+        """Real-world anchor: gemma-4-26b-a4b-it-4bit / gemma-4-31b-bf16.
+
+        These ship `audio_config: null` in config.json plus `audio_seq_length: 750`
+        in the Gemma4 processor template. Neither signal alone (per Class B) nor
+        the template stub may tag them as audio.
+        """
+        config = {"model_type": "gemma4", "audio_config": None, "vision_config": {"hidden_size": 1152}}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        (tmp_path / "processor_config.json").write_text(
+            json.dumps({"audio_seq_length": 750, "processor_class": "Gemma4Processor"})
+        )
+        assert detect_audio_capability(tmp_path, config) is False
+
+
+class TestDetectModelTypeSTT:
+    """Class A (2.0.6): STT model_type substring matching.
+
+    detect_model_type Step 4 must match STT_MODEL_TYPES tokens as substrings,
+    consistent with detect_audio_capability. Narrow exact-set membership left
+    e.g. `vibevoice_asr` misclassified as `base+audio` instead of `audio`.
+    """
+
+    def test_whisper_returns_audio(self):
+        """Regression anchor: exact whisper model_type still classifies as audio."""
+        config = {"model_type": "whisper"}
+        assert detect_model_type("openai/whisper-tiny", config, {}) == "audio"
+
+    def test_vibevoice_asr_returns_audio(self):
+        """VibeVoice-ASR substring match: 'vibevoice' in 'vibevoice_asr'."""
+        config = {"model_type": "vibevoice_asr"}
+        assert detect_model_type("microsoft/VibeVoice-ASR-4bit", config, {}) == "audio"
+
+    def test_voxtral_returns_audio(self):
+        """Voxtral classified as audio (substring or exact match)."""
+        config = {"model_type": "voxtral"}
+        assert detect_model_type("mistralai/Voxtral-Mini", config, {}) == "audio"
+
+    def test_text_model_unaffected(self):
+        """Regression anchor: plain llama still classifies as base."""
+        config = {"model_type": "llama"}
+        assert detect_model_type("meta-llama/Llama-3", config, {}) == "base"
+
+    def test_chat_model_takes_precedence(self):
+        """Chat models (Instruct/Chat name hint) still classify as chat over base."""
+        config = {"model_type": "llama"}
+        assert detect_model_type("meta-llama/Llama-3-Instruct", config, {}) == "chat"
+
+
+class TestDetectVisionCapabilityTruthyDict:
+    """Class B (2.0.6) symmetric vision fix: empty dict stub is not vision."""
+
+    def test_vision_config_null_is_not_vision(self, tmp_path):
+        """vision_config: null (isinstance check already filters this)."""
+        config = {"model_type": "llama", "vision_config": None}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_vision_capability(tmp_path, config) is False
+
+    def test_vision_config_empty_dict_is_not_vision(self, tmp_path):
+        """vision_config: {} stub does not denote a real vision tower."""
+        config = {"model_type": "llama", "vision_config": {}}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_vision_capability(tmp_path, config) is False
+
+    def test_vision_config_truthy_dict_is_vision(self, tmp_path):
+        """Regression anchor: Mistral-Small-3.1 / Gemma4 with vision_config dict."""
+        config = {"model_type": "llama", "vision_config": {"hidden_size": 1024}}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_vision_capability(tmp_path, config) is True
+
+    def test_vision_model_type_still_detected(self, tmp_path):
+        """Regression anchor: VISION_MODEL_TYPES match independently of vision_config."""
+        config = {"model_type": "pixtral"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        assert detect_vision_capability(tmp_path, config) is True
 
 
 class TestHelperFunctions:

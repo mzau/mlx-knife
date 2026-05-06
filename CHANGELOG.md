@@ -28,6 +28,26 @@
 > **Sunset cleanup.** mlx-audio#479 closed upstream → the
 > `_apply_tiktoken_patch` family is removed. mlx-audio#645 stays open
 > → the two `post_load_hook` / `get_tokenizer` patches remain.
+>
+> **More accurate capability labels.** STT models with `model_type`
+> like `vibevoice_asr` now show as `audio` (was `base+audio`) —
+> substring matching covers the full STT family. Gemma4
+> {26b-a4b-it-4bit, 31b-bf16} lose a spurious `audio` tag —
+> `audio_config: null` is no longer treated as audio capability,
+> and the `audio_seq_length` processor-template stub no longer acts
+> as a standalone signal (Gemma4 ships `audio_seq_length: 750` for
+> every variant including audio-null ones).
+>
+> **Better error message for unsupported request modes.**
+> `mlxk run M "prompt"` against an audio-only or embedding-only model
+> now rejects pre-execution with a clear hint
+> (`Model is audio-only (STT). Use --audio FILE for transcription.`)
+> instead of the cryptic `Model type 'X' not supported` loader error.
+>
+> **`gemma4` convert-quantize support.** mlx-vlm 0.4.4 supports
+> gemma4 vision; `mlxk convert --quantize` now accepts gemma4 models
+> and preserves the vision tower (verified gemma-4-31b-bf16 → 6bit).
+> Previously rejected with `unsupported_multimodal`.
 
 ### ⚠️ Upgrade Notes
 
@@ -129,6 +149,22 @@
   convert-quantize verified (bf16 → 6bit clean). mllama vision
   runtime verified with `--image`; row split out from the generic
   VLM line, with a vision-only routing caveat documented.
+- **Capability label corrections.** STT model types are matched as
+  substrings in `detect_model_type` (covers `vibevoice_asr` and other
+  `*_asr` family suffixes). `detect_audio_capability` and
+  `detect_vision_capability` use truthy-dict predicates instead of
+  key-existence checks (filters `null` and empty-`{}` stubs). Audio
+  detection no longer relies on `processor_config.json:audio_seq_length`
+  as standalone signal (Gemma4 ships it as a template constant
+  regardless of architecture).
+- **`mlxk run` pre-execution-rejects unsupported request modes.**
+  Text-only invocation against STT or embedding models now produces
+  a hint-bearing error instead of a backend-loader-failure trace.
+  Symmetrical to the existing `--image`/`--audio` capability-mismatch
+  rejects.
+- **`gemma4` added to `VISION_QUANTIZE_TYPES`.** mlx-vlm 0.4.4
+  supports gemma4; wet-tested via gemma-4-31b-bf16 → 6bit (vision
+  tower preserved, `mlxk run --image` produces visual output).
 
 ### Removed
 
@@ -147,6 +183,14 @@
   link](https://github.com/Blaizzy/mlx-vlm/issues/1011)): `torch` +
   `torchvision` are currently bundled as a temporary measure for the
   Pixtral-class processor families; tracked upstream.
+- **Text-only `mlxk run` against multimodal VLMs fails late with
+  cryptic mlx-lm loader error**
+  ([#53](https://github.com/mzau/mlx-knife/issues/53)). Affects e.g.
+  `mlxk run gemma-4-e4b-it-4bit "prompt"` (param mismatch),
+  `mlxk run gemma-3n-E2B-4bit "prompt"` (`KeyError 'model'`), and
+  Llama-3.2-Vision / mllama (no text-tower loader at all). Workaround:
+  pass `--image` or `--audio`. Principled fix scheduled for 2.1
+  (auto-discovered `MLX_LM_TEXT_LOADER_TYPES` + config-shape filter).
 
 ### Migration
 

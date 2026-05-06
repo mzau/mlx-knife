@@ -22,8 +22,10 @@ from ..operations.common import (
     detect_audio_backend,
     detect_audio_capability,
     detect_framework,
+    detect_model_type,
     detect_vision_capability,
     read_front_matter,
+    read_tokenizer_hints,
     vision_runtime_compatibility,
 )
 from ..core.capabilities import Backend
@@ -456,6 +458,32 @@ def run_model(
         if not json_output:
             print(error_result, file=sys.stderr)
         return error_result
+
+    # Pre-execution-reject text-only invocation against models without text-generation
+    # capability. Without this gate the request reaches mlx-lm which fails late with a
+    # cryptic "Model type 'X' not supported" loader error. Covers STT-only (Whisper,
+    # VibeVoice-ASR, Voxtral) via Class-A substring classification, and embedding-only
+    # models. Class C loader gaps (mllama text-only, gemma3n base text-only) report
+    # `text-generation` capability today and are deferred to 2.1+ reachability refactor.
+    if not audio and not images and resolved_name and model_path is not None and cfg is not None:
+        tok = read_tokenizer_hints(model_path)
+        mt = detect_model_type(resolved_name, cfg, tok, model_path)
+        if mt == "audio":
+            error_result = (
+                f"Error: Model '{model_spec}' is audio-only (STT). "
+                f"Use `--audio FILE` for transcription."
+            )
+            if not json_output:
+                print(error_result, file=sys.stderr)
+            return error_result
+        if mt == "embedding":
+            error_result = (
+                f"Error: Model '{model_spec}' is an embedding model — "
+                f"`mlxk run` does not support embeddings."
+            )
+            if not json_output:
+                print(error_result, file=sys.stderr)
+            return error_result
 
     # Runtime compatibility verified, proceed with model loading
     # Note: HF_HOME is set at CLI bootstrap (cli.py) for workspace isolation (ADR-022)

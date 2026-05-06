@@ -197,9 +197,10 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
             return "chat"
         if mt_lower in VISION_MODEL_TYPES:
             return "chat"
-        # STT/Audio-only models (Whisper, Voxtral) - NOT chat models
-        # These models only transcribe audio, they don't generate text or chat
-        if mt_lower in STT_MODEL_TYPES:
+        # STT/Audio-only models (Whisper, VibeVoice-ASR, Voxtral) - NOT chat models.
+        # Substring matching is consistent with detect_audio_capability(); narrow
+        # exact-set membership left "vibevoice_asr" misclassified as "base".
+        if any(stt_type in mt_lower for stt_type in STT_MODEL_TYPES):
             return "audio"
     ct = tok_hints.get("chat_template")
     if isinstance(ct, str) and ct.strip():
@@ -228,9 +229,10 @@ def detect_vision_capability(probe: Path, config: Optional[Dict[str, Any]]) -> b
     """
     try:
         if isinstance(config, dict):
-            # Check for vision_config presence (Mistral-Small 3.1 has vision_config with skip_vision)
+            # Check for vision_config presence (Mistral-Small 3.1 has vision_config with skip_vision).
+            # Require truthy dict: empty {} stub doesn't denote a real vision tower.
             vision_config = config.get("vision_config")
-            if isinstance(vision_config, dict):
+            if isinstance(vision_config, dict) and vision_config:
                 # Vision config present = vision model (even if skip_vision=true)
                 return True
 
@@ -288,15 +290,25 @@ def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bo
     """Detect whether the model snapshot supports audio inputs (ADR-019, ADR-020).
 
     Detection signals:
-    - config.json contains "audio_config" key (Gemma-3n, Voxtral)
+    - config.json carries a truthy audio_config dict (Gemma-3n, Voxtral)
     - config.json model_type in AUDIO_MODEL_TYPES (Whisper, Voxtral, Gemma-3n)
     - preprocessor_config.json contains WhisperFeatureExtractor (Whisper variants)
-    - processor_config.json contains "audio_seq_length" key (secondary)
+
+    Truthy predicate (not key-existence): Gemma4-31b/26b carry `audio_config: null`
+    as a stub — key present, value null. Key-existence would tag them as audio.
+
+    `processor_config.json:audio_seq_length` is intentionally not consulted: the
+    Gemma4 processor template ships `audio_seq_length=750` for every variant,
+    including text-only/vision-only ones with `audio_config: null`. Trusting it
+    independently produced FPs on gemma-4-26b-a4b-it-4bit and gemma-4-31b-bf16.
+    All real audio models in the portfolio are caught by the audio_config or
+    model_type signals above.
     """
     try:
         if isinstance(config, dict):
-            # Check for audio_config (Gemma-3n, Voxtral)
-            if "audio_config" in config:
+            # Check for audio_config (Gemma-3n, Voxtral) - truthy dict only
+            audio_config = config.get("audio_config")
+            if isinstance(audio_config, dict) and audio_config:
                 return True
 
             # Check model_type (Whisper, Voxtral, VibeVoice, Gemma-3n)
@@ -316,17 +328,6 @@ def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bo
                     feature_extractor = proc_data.get("feature_extractor_type", "")
                     if isinstance(feature_extractor, str) and "whisper" in feature_extractor.lower():
                         return True
-            except Exception:
-                pass
-
-        # Check processor_config.json for audio_seq_length (secondary)
-        processor_config_path = probe / "processor_config.json"
-        if processor_config_path.exists():
-            try:
-                with open(processor_config_path) as f:
-                    processor_data = _json.load(f)
-                if isinstance(processor_data, dict) and "audio_seq_length" in processor_data:
-                    return True
             except Exception:
                 pass
     except Exception:

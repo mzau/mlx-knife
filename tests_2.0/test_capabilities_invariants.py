@@ -41,6 +41,17 @@ class TestFrozensetHygiene:
         overlap = VISION_QUANTIZE_TYPES & STT_MODEL_TYPES
         assert not overlap, f"VISION_QUANTIZE_TYPES overlaps STT_MODEL_TYPES: {overlap}"
 
+    def test_stt_known_substring_tokens_present(self):
+        """Class A (2.0.6): STT_MODEL_TYPES must cover the active STT portfolio.
+
+        Tokens are substring-matched (see capabilities.py docstring), so
+        e.g. 'vibevoice' covers 'vibevoice_asr' and 'whisper' covers
+        'whisper-large-v3'. Removing one of these would silently regress
+        capability labelling for that family.
+        """
+        for token in ("whisper", "vibevoice", "voxtral"):
+            assert token in STT_MODEL_TYPES, f"STT_MODEL_TYPES missing '{token}'"
+
 
 class TestClassifyConvertTargetContract:
     """classify_convert_target must honor the four outcomes in the defined order."""
