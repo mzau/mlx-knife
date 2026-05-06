@@ -39,3 +39,4 @@ benchmarks/reports/2026-0[12]*.jsonl
 # Benchmark reports (ADR-013 Phase 0)
 # These reports ARE tracked in git for historical data
 #!benchmarks/reports/*.jsonl
+docs/RUNTIME-FEATURES-ITERATIONS.md
