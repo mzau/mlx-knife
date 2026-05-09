@@ -99,6 +99,15 @@
   backslash). Symlinks pointing inside the workspace get a path
   fingerprint; outside or broken targets are refused. No dual-algo
   read logic. 52 new tests cover the ADR-025 verification matrix.
+- **JSON API 0.2.2:** `content_hash` format documented as
+  `sha256:<64-hex>` in `docs/json-api-schema.json` with `pattern`
+  constraint, reflecting the v1→v2 format change introduced by
+  ADR-025. The `sha256:` prefix is part of the value
+  (algorithm-self-describing for future `hash_algorithm` bumps).
+  Additive tightening — no new fields, no breaking changes for
+  consumers that treat `content_hash` as an opaque string. Pre-2.0.6
+  (v1) workspaces still emit raw 64-hex without prefix until migrated
+  via `mlxk show <name> --recalc-hash`.
 - **`chat_template.jinja` recognition.** `detect_model_type` and
   `detect_capabilities` now treat `chat_template.jinja` as a chat
   indicator (existence check, no I/O beyond stat). Previously only
@@ -165,6 +174,22 @@
 - **`gemma4` added to `VISION_QUANTIZE_TYPES`.** mlx-vlm 0.4.4
   supports gemma4; wet-tested via gemma-4-31b-bf16 → 6bit (vision
   tower preserved, `mlxk run --image` produces visual output).
+- **`mlxk show` Content-Hash-Display extended** from 16 to 23
+  characters (the 7-char `sha256:` prefix plus 16 hex chars). The
+  prior `[:16]` slice surfaced only 9 discriminating hex chars
+  because the prefix consumed 7. Per ADR-025 design intent the
+  algorithm prefix stays visible in detail views.
+
+### Fixed
+
+- **`mlxk list` showed literal `sha256:` for v2 workspaces.** The
+  hash column renderer (`fmt_hash7` in `mlxk2/output/human.py`) sliced
+  the first 7 characters of the v2 `content_hash`, but the `sha256:`
+  prefix is exactly 7 characters — so the slice returned the prefix
+  only, with no digest. Fixed by stripping the algorithm prefix
+  before slicing. Cache-models (git commit hashes, no prefix) were
+  unaffected. Surfaced during the §A smoke test for fresh-cloned
+  workspaces.
 
 ### Removed
 

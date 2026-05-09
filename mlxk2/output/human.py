@@ -26,7 +26,8 @@ def fmt_hash7(h: Optional[str], content_hash: Optional[str] = None) -> str:
     if h:
         return h[:7]
     if content_hash:
-        return content_hash[:7]
+        digest = content_hash.split(":", 1)[1] if ":" in content_hash else content_hash
+        return digest[:7]
     return "-"
 
 
@@ -366,7 +367,7 @@ def render_show(data: Dict[str, Any]) -> str:
         out.append(f"  Created: {ws_meta.get('created_at', '-')}")
         # ADR-022 Phase 1.5: Show hash info if available
         if ws_meta.get("content_hash"):
-            out.append(f"  Content Hash: {ws_meta.get('content_hash', '-')[:16]}...")
+            out.append(f"  Content Hash: {ws_meta.get('content_hash', '-')[:23]}...")
             out.append(f"  Hash Modified: {ws_meta.get('hash_modified', '-')}")
 
     # ADR-022 Phase 1.5: Show hash_updated flag

@@ -1,8 +1,8 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.2.1
+**Specification Version:** 0.2.2
 **Status:** Stable (backward-compatible)
-**Released:** MLX-Knife 2.0.5-beta.3
+**Released:** MLX-Knife 2.0.6
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
@@ -1252,6 +1252,7 @@ All commands use consistent exit codes for scripting:
 
 ## Version History
 
+- **0.2.2** (2.0.6): Additive tightening — `content_hash` format documented (was: prose-only "SHA256 hash"); `pattern` constraint added to schema accepting both v2 (`sha256:<64-hex>`) and legacy v1 (`<64-hex>`) formats during the migration window. Reflects the v1→v2 format change introduced by ADR-025 (content_hash v2 algorithm) where the `sha256:` prefix entered the API output. Pre-2.0.6 (v1) workspaces continue to surface their legacy raw-hex value until migrated via `mlxk show <name> --recalc-hash`. No new fields, no breaking changes for consumers that treat `content_hash` as an opaque string.
 - **0.2.1** (2.0.5-beta.3): Added `data` schema definitions for `clone` and `convert` commands (if/then blocks with required fields)
 - **0.2.0** (2.0.5-beta.1): Workspace-first fields: `origin`, `content_hash`, `hash_modified`, `clean`, `display_name` on modelObject. `convert` added to command enum.
 - **2.0.0-alpha:** JSON-only implementation with `mlxk-json --json`

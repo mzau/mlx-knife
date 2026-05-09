@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://example.com/mlxk-json-api.schema.json",
-  "title": "MLX-Knife 2.0 JSON API 0.2.1 (current)",
+  "title": "MLX-Knife 2.0 JSON API 0.2.2 (current)",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -57,7 +57,7 @@
         "reason": {"type": ["string", "null"]},
         "cached": {"type": "boolean"},
         "origin": {"type": ["string", "null"], "description": "Source HF repo for workspaces (from sentinel). null for cache models."},
-        "content_hash": {"type": ["string", "null"], "description": "SHA256 hash of workspace content at clone time. null for cache models."},
+        "content_hash": {"type": ["string", "null"], "pattern": "^(sha256:[0-9a-f]{64}|[0-9a-f]{64})$", "description": "Aggregate content hash of workspace files. v2 (ADR-025, 2.0.6+) format: 'sha256:<64-hex>' — the 'sha256:' prefix is part of the value (algorithm-self-describing for future hash_algorithm bumps). v1 (2.0.5) format: raw '<64-hex>' without prefix; v1 workspaces continue to surface their legacy hash until migrated via 'mlxk show <name> --recalc-hash'. Pattern accepts both formats during the migration window. null for cache models."},
         "hash_modified": {"type": ["string", "null"], "description": "ISO8601 timestamp when content_hash was computed. null for cache models."},
         "clean": {"type": ["boolean", "null"], "description": "Workspace clean indicator: true=unchanged since clone, false=modified, null=unknown/cache model."},
         "display_name": {"type": ["string", "null"], "description": "Human-friendly display name for workspaces. Relative path for relative patterns, absolute path for absolute patterns. null for cache models."},
@@ -67,7 +67,7 @@
         "name", "hash", "size_bytes", "last_modified", "framework",
         "model_type", "capabilities", "health", "runtime_compatible", "cached"
       ],
-      "description": "Extended in 0.2.0 (ADR-022): added origin, content_hash, hash_modified, clean fields for workspace-first paradigm. All nullable (null for cache models). clean=true means workspace unchanged since clone, clean=false means modified."
+      "description": "Extended in 0.2.0 (ADR-022): added origin, content_hash, hash_modified, clean fields for workspace-first paradigm. All nullable (null for cache models). clean=true means workspace unchanged since clone, clean=false means modified. Extended in 0.2.2 (ADR-025): content_hash format gained 'sha256:' prefix in v2 algorithm; pattern constraint documented."
     },
     "fileEntry": {
       "type": "object",
