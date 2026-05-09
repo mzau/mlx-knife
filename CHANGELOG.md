@@ -179,6 +179,13 @@
   prior `[:16]` slice surfaced only 9 discriminating hex chars
   because the prefix consumed 7. Per ADR-025 design intent the
   algorithm prefix stays visible in detail views.
+- **Workspace clean-state visibility improved.** `mlxk list` compact
+  mode now distinguishes `ws` (clean), `ws*` (modified), and `ws?`
+  (state unknown — typically v1 workspaces awaiting `--recalc-hash`);
+  previously `clean=True` and `clean=None` both rendered as `ws`,
+  hiding the migration-pending state. `mlxk show` Workspace-block
+  now includes a `Clean:` line (✓/✗/— with hint) so the v1→v2
+  migration prompt is visible without inspecting the sentinel.
 
 ### Fixed
 

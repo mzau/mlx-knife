@@ -179,15 +179,17 @@ def render_list(data: Dict[str, Any], show_health: bool, show_all: bool, verbose
         if "audio" in caps and type_label != "-" and type_label != "audio":
             type_label = f"{type_label}+audio"
         # ADR-022: Source column - "cache" for HF cache, "ws" for workspace
-        # Phase 1.5: "ws*" for dirty workspaces (modified since clone)
+        # Phase 1.5: "ws*" dirty, "ws?" unknown (v1 legacy / migration pending)
         if m.get("cached", True):
             source = "cache"
         else:
             clean = m.get("clean")
             if clean is False:
                 source = "ws*"  # Dirty workspace
+            elif clean is None:
+                source = "ws?"  # Unknown — run --recalc-hash to migrate to v2
             else:
-                source = "ws"  # Clean or unknown
+                source = "ws"  # Clean (v2)
         if compact:
             row = [
                 name,
@@ -365,6 +367,14 @@ def render_show(data: Dict[str, Any]) -> str:
         out.append(f"  Source: {ws_meta.get('source_repo', '-')}")
         out.append(f"  Operation: {ws_meta.get('operation', '-')}")
         out.append(f"  Created: {ws_meta.get('created_at', '-')}")
+        # Phase 1.5 / ADR-025: Clean-state visibility (parallels list verbose Clean column)
+        clean = model.get("clean")
+        if clean is True:
+            out.append("  Clean: ✓")
+        elif clean is False:
+            out.append("  Clean: ✗ (workspace modified since clone)")
+        else:
+            out.append("  Clean: — (run with --recalc-hash to migrate to v2)")
         # ADR-022 Phase 1.5: Show hash info if available
         if ws_meta.get("content_hash"):
             out.append(f"  Content Hash: {ws_meta.get('content_hash', '-')[:23]}...")
