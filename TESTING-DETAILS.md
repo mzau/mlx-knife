@@ -39,23 +39,27 @@ Phase 2-4 (live operations): 3+3+3 passed
 ✅ **3-category test strategy** - optimized for performance and safety
 ✅ **Portfolio Separation** - Text and Vision models tested independently with separate RAM formulas
 
-### Skipped Tests Breakdown (72 deselected, standard run without HF_HOME)
-- **38 Live E2E tests** - Server/HTTP/CLI validation with real models (requires `pytest -m live_e2e`, ADR-011 + Portfolio Separation)
-  - **23 Text model tests** - Parametrized across text_portfolio (chat completions batch/streaming)
-  - **3 Vision model tests** - Parametrized across vision_portfolio (multimodal, SSE, text-on-vision)
-  - **5 Vision CLI E2E tests** - Deterministic vision queries (requires vision model in cache, ADR-012)
-  - **11 Audio E2E tests** - Audio transcription (CLI + Server `/v1/audio/transcriptions`) with Whisper models (ADR-020)
-  - **3 Non-parametrized tests** - Health, models list, vision→text switching
-- **4 Live Stop Tokens tests** - Stop token validation with real models (requires `pytest -m live_stop_tokens`, ADR-009)
-- **7 Workspace Live tests** - Clone shorthand + convert bare names with `MLXK_WORKSPACE_HOME` (subset of `wet`, requires workspace models)
-- **3 Live Clone tests** - Clone from HF to workspace (requires `MLXK2_LIVE_CLONE=1`, `MLXK_WORKSPACE_HOME`; target always `mlxk-test-clone`)
-- **2 Issue #37 tests** - Private/org model detection (requires `pytest -m live_run`, Issue #37)
-- **2 Runtime Compatibility tests** - Reason chain validation (requires specific model types)
-- **1 Live List test** - Tests against user cache (requires HF_HOME with models)
-- **1 Live Push test** - Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
-- **1 Resumable Pull test** - Real network download with controlled interruption (requires `MLXK2_TEST_RESUMABLE_DOWNLOAD=1`)
-- **2 Show Portfolio tests** - Display text/vision portfolios separately (requires HF_HOME)
-- **7 Issue #27 tests** - Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
+### Skipped Tests by Marker (live tests excluded from default run)
+
+> For current counts run `pytest --collect-only -q -m <marker>` — counts move with every test add/remove and are not maintained here.
+
+- **Live E2E tests** (`pytest -m live_e2e`, ADR-011 + Portfolio Separation) — Server/HTTP/CLI validation with real models. Categories:
+  - Text models — parametrized across text_portfolio (chat completions batch/streaming)
+  - Vision models — parametrized across vision_portfolio (multimodal, SSE, text-on-vision)
+  - Vision CLI E2E — deterministic vision queries (requires vision model in cache, ADR-012)
+  - Audio E2E — audio transcription (CLI + Server `/v1/audio/transcriptions`) with Whisper models (ADR-020)
+  - Non-parametrized — health, models list, vision→text switching
+- **Live Stop Tokens** (`pytest -m live_stop_tokens`, ADR-009) — Stop token validation with real models
+- **Workspace Live** (`pytest -m wet ... test_workspace_live.py`) — Clone shorthand + convert bare names with `MLXK_WORKSPACE_HOME`
+- **Live Clone** (`pytest -m live_clone`) — Clone from HF to workspace (requires `MLXK2_LIVE_CLONE=1`, `MLXK_WORKSPACE_HOME`; target always `mlxk-test-clone`)
+- **content_hash v2 live** (`pytest -m live_chv2`, ADR-025) — v2 sentinel format + file_index + repair-index Issue #52 regression (requires `MLXK2_LIVE_CHV2=1`, `HF_TOKEN`)
+- **Issue #37** (`pytest -m live_run`) — Private/org model detection
+- **Runtime Compatibility** — Reason chain validation (requires specific model types)
+- **Live List** — Tests against user cache (requires HF_HOME with models)
+- **Live Push** (`pytest -m live_push`) — Real HuggingFace push (requires `MLXK2_LIVE_PUSH=1`)
+- **Resumable Pull** (`pytest -m live_pull`) — Real network download with controlled interruption (requires `MLXK2_TEST_RESUMABLE_DOWNLOAD=1`)
+- **Show Portfolio** (`pytest -m show_model_portfolio`) — Display text/vision portfolios separately (requires HF_HOME)
+- **Issue #27** (`pytest -m issue27`) — Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
 **Portfolio Discovery** (ADR-009) auto-discovers MLX models using `mlxk list --json` as single source of truth. Since 2.0.5-beta.2, `list` includes both **HuggingFace cache** and **MLXK_WORKSPACE_HOME** workspaces (ADR-022). Portfolio discovery filters to **cache models only** for test parametrization (workspace models are skipped to avoid double-testing when the same model exists in both). No cache-format back-conversion needed — model names from `list --json` are used directly.
 
@@ -88,6 +92,7 @@ defined in [ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md).
 | Clone offline | `pytest -k clone -v` | — | Clone offline tests (APFS validation, temp cache, CoW workflow); no network needed | No |
 | Workspace live (ADR-022) | `pytest -m wet tests_2.0/live/test_workspace_live.py -v` | `wet` (subset); Env: `MLXK_WORKSPACE_HOME` (directory with workspace models) | Clone shorthand (target optional, org-stripped), convert bare names, JSON schema validation. Safe: only creates temp directories, never touches HF cache. | No (uses workspace models) |
 | Live clone (ADR-022) | `pytest -m live_clone -v` | `live_clone` + Env: `MLXK2_LIVE_CLONE=1`, `HF_TOKEN`, `MLXK2_LIVE_CLONE_MODEL`, `MLXK_WORKSPACE_HOME` | Real clone workflow: pull→temp cache→clone→workspace. Target always `mlxk-test-clone` in MLXK_WORKSPACE_HOME (safe prefix, `_safe_rmtree`). Cross-volume CoW fallback. `MLXK2_LIVE_CLONE_WORKSPACE` no longer needed. | Yes |
+| content_hash v2 live (ADR-025) | `pytest -m live_chv2 -v` | `live_chv2` + Env: `MLXK2_LIVE_CHV2=1`, `HF_TOKEN`; Optional: `MLXK2_LIVE_CHV2_TEXT_MODEL` (default `Llama-3.2-1B-Instruct-4bit`), `MLXK2_LIVE_CHV2_VISION_MODEL` (default `Llama-3.2-11B-Vision-Instruct-4bit`, multi-shard 4bit; bf16/fp16/fp32 hard-gated to skip). Validates v2 sentinel format, file-index completeness, repair-index hash divergence (Issue #52 regression). Per-session `tmp_path_factory` + `mlxk-test-chv2-` prefix + `_safe_rmtree` make the suite Ctrl-C-restartable. | Yes (if models not cached) |
 | Live stop tokens (ADR-009) | `pytest -m live_stop_tokens -v` | `live_stop_tokens`; Optional: `HF_HOME` | Issue #32: Stop token behavior. Uses Portfolio Discovery or fallback models (see below). | No |
 | Live run | `pytest -m live_run -v` | `live_run` + `HF_HOME` (needs Phi-3-mini) | Issue #37: Private/org MLX model framework detection. | No |
 | Live E2E (ADR-011) | `pytest -m live_e2e -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `httpx` | Server/HTTP/CLI validation. Uses Portfolio Discovery or fallback models. | No |
@@ -110,6 +115,9 @@ pytest -m live_e2e --collect-only -q
 
 # Empirical Mapping (heavy, excluded from wet)
 pytest -m live_stop_tokens tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping -v
+
+# content_hash v2 live (ADR-025, opt-in)
+MLXK2_LIVE_CHV2=1 HF_TOKEN=... pytest -m live_chv2 -v
 ```
 
 ---
@@ -726,7 +734,6 @@ tests_2.0/
   - `test_vision_e2e_live.py` - Vision CLI with real models from cache
   - `test_stop_tokens_live.py` - Stop token validation with discovered models
 - **Why in live/:** Portfolio Discovery hooks (`pytest_generate_tests`) auto-discover models from User Cache
-- **Count:** 10+ tests
 
 **Category 2: Isolated Cache WRITE (Fresh State)**
 - **Location:** `tests_2.0/`
@@ -737,7 +744,6 @@ tests_2.0/
   - `test_robustness.py` - Creates mock model files for testing
   - `test_integration.py` - Synthetic model creation for integration tests
 - **Why in parent:** Needs clean pytest environment without Portfolio Discovery hooks
-- **Count:** 15+ tests
 
 **Category 3: Isolated Cache READ (Safety Copies)**
 - **Location:** `tests_2.0/`
@@ -747,7 +753,6 @@ tests_2.0/
   - `test_issue_27.py` - Copies real models from User Cache, mutates copies, tests health
   - `test_issue_37_private_org_regression.py` - Copies model, renames to simulate private repo
 - **Why copy:** Protects User Cache from mutations (delete shards, truncate, inject LFS pointers)
-- **Count:** 2 tests
 
 **Category 4: Spec/Schema Validation**
 - **Location:** `tests_2.0/spec/`
@@ -757,7 +762,6 @@ tests_2.0/
   - `test_cli_commands_json_flag.py` - JSON output format validation
   - `test_code_outputs_validate_against_schema.py` - Schema compliance
 - **Why isolated:** Fast, deterministic, no real models needed
-- **Count:** 7 tests
 
 **Special Cases (External Writes):**
 - `test_push_live.py` - Writes to **HuggingFace** (not local cache) ✅ Allowed
@@ -1411,12 +1415,12 @@ pytest -m live_e2e --collect-only  # Should work without errors
 2. **TestChatCompletionsBatch** - Non-streaming chat (parametrized)
    - `test_chat_completions_batch[text_XX]` - OpenAI-compatible batch responses
    - Validates: Response structure, stop token filtering (Issue #32)
-   - **23 tests** (one per text model in portfolio)
+   - (one test per text model in portfolio)
 
 3. **TestChatCompletionsStreaming** - SSE streaming chat (parametrized)
    - `test_chat_completions_streaming[text_XX]` - Server-Sent Events format
    - Validates: SSE format, chunk structure, stop token filtering, completion
-   - **23 tests** (one per text model in portfolio)
+   - (one test per text model in portfolio)
 
 4. **TestCompletionsBatch** - Non-streaming text completion
    - `test_completions_batch_basic` - Basic `/v1/completions` endpoint
@@ -1451,25 +1455,25 @@ pytest -m live_e2e --collect-only  # Should work without errors
    - Multimodal chat with Base64 image data
    - Validates: Vision model describes image correctly
    - OpenAI Vision API format: `content: [{"type": "text"}, {"type": "image_url"}]`
-   - **3 tests** (one per vision model in portfolio)
+   - (one test per vision model in portfolio)
 
 2. **test_streaming_graceful_degradation[vision_XX]** (parametrized)
    - Vision request with `stream=True`
    - Validates: SSE emulation (mlx-vlm doesn't support true streaming)
    - Returns HTTP 200 with SSE events (not HTTP 400 rejection)
-   - **3 tests** (one per vision model in portfolio)
+   - (one test per vision model in portfolio)
 
 3. **test_text_request_still_works_on_vision_model[vision_XX]** (parametrized)
    - Text-only request on vision model server
    - Validates: Vision models handle pure text requests
    - No image data, just string content
-   - **3 tests** (one per vision model in portfolio)
+   - (one test per vision model in portfolio)
 
 4. **test_vision_to_text_model_switch_filters_images** (special integration test)
    - Tests Vision→Text model switching with conversation history
    - Server filters `image_url` content for text models
    - Validates: Multimodal history filtering
-   - **1 test** (uses both portfolios)
+   - (uses both portfolios)
 
 **RAM Gating:**
 - Uses `calculate_vision_model_ram_gb()` (0.70 threshold, no multiplier)
@@ -1743,6 +1747,7 @@ tests_2.0/
 │   ├── test_cli_e2e.py                         # CLI integration E2E tests (ADR-011, parametrized)
 │   ├── test_cli_pipe_live.py                   # Pipe-mode E2E (stdin '-', JSON interactive error, list→run pipe) using first eligible model
 │   ├── test_clone_live.py                      # Live clone flow (requires MLXK2_LIVE_CLONE, HF_TOKEN)
+│   ├── test_content_hash_v2_live.py            # content_hash v2 live tests (ADR-025, marker: live_chv2; v2 sentinel format + file_index + repair-index Issue #52 regression; tmp_path_factory + mlxk-test-chv2- prefix + _safe_rmtree; bf16/fp16/fp32 hard-gated)
 │   ├── test_list_human_live.py                 # Live list/health against user cache (requires HF_HOME)
 │   ├── test_pipe_vision_geo.py                 # Vision→Geo pipe integration tests (marker: live_vision_pipe: batch processing, complete pipe, chunk isolation)
 │   ├── test_portfolio_fixtures.py              # Portfolio separation validation tests (fixture behavior, disjoint check)
@@ -1803,6 +1808,7 @@ tests_2.0/
 ├── test_vision_adapter.py             # Vision HTTP adapter unit tests (Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
 ├── test_vision_chunk_streaming.py     # Vision chunk streaming tests (SSE format, multi-chunk streaming, single-chunk routing, generator integration)
 ├── test_vision_exif.py                # EXIF extraction tests (GPS, DateTime, Camera, collapsible table, privacy controls)
+├── test_workspace_hash_v2.py          # content_hash v2 algorithm unit tests (ADR-025, closes Issue #52: per-class hashing strategies, file_index, aggregate, exclude patterns, transport invariance, path validation)
 ├── test_workspace_sentinel.py         # Workspace infrastructure tests (ADR-018 Phase 0a: sentinel primitives, atomic write, managed/unmanaged detection, health checks, CLI integration)
 └── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
 ```

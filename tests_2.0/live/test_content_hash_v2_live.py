@@ -1,19 +1,21 @@
-"""Live tests for content_hash v2 (ADR-025) — replaces SMOKE-TEST-2.0.6.md §A1–A10 + §B1–B6.
+"""Live tests for content_hash v2 (ADR-025).
 
-Migrates manual smoke tests for the content_hash v2 algorithm + sentinel format
-into automated pytest. Opt-in via MLXK2_LIVE_CHV2=1.
+Validates the v2 sentinel format, file_index completeness, and the closing
+condition for Issue #52 (repair-index produces a content_hash distinct from
+the source's). Opt-in via MLXK2_LIVE_CHV2=1.
 
 Required env (for opt-in):
 - MLXK2_LIVE_CHV2=1                     enable
 - HF_TOKEN                              for HF access (or models pre-cached)
 - MLXK2_LIVE_CHV2_TEXT_MODEL            default: mlx-community/Llama-3.2-1B-Instruct-4bit
 - MLXK2_LIVE_CHV2_VISION_MODEL          default: mlx-community/Llama-3.2-11B-Vision-Instruct-4bit
-                                        (only for §A5/§B; quantized 4bit ~6 GB, multi-shard)
+                                        (quantized 4bit ~6 GB, multi-shard;
+                                        only consumed by repair-index tests)
 
 The vision fixture is gated against full-precision (bf16/fp16/fp32) targets to
-avoid accidental multi-tens-of-GB downloads — those models are smoke-test-only
-material, not routine CI fodder. The lightweight A1–A4 / A8–A10 set runs without
-the vision model.
+avoid accidental multi-tens-of-GB downloads — those should stay manual review
+material, not routine CI fodder. The lightweight test set runs without the
+vision model entirely.
 
 Cleanup-on-Ctrl-C / re-runnability:
 - All test workspaces live inside a per-session tmp dir (pytest's auto-rotated

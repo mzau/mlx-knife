@@ -118,6 +118,14 @@
   content_hash) marked shipped in 2.0.5; Phase 3 delegated to
   ADR-025; Phase 4 `--repair` unified detection-driven design added
   (2.0.6 P2).
+- **`live_chv2` pytest marker** (`tests_2.0/live/test_content_hash_v2_live.py`) —
+  opt-in live tests for content_hash v2 (ADR-025): v2 sentinel format,
+  file_index completeness, repair-index hash divergence (Issue #52
+  regression). Per-session `tmp_path_factory` + `mlxk-test-chv2-` prefix
+  guards keep the suite Ctrl-C-restartable; full-precision vision models
+  (bf16/fp16/fp32) are hard-gated to skip. Run with
+  `MLXK2_LIVE_CHV2=1 HF_TOKEN=… pytest -m live_chv2 -v`. See
+  TESTING-DETAILS.md for env vars and defaults.
 
 ### Changed
 
