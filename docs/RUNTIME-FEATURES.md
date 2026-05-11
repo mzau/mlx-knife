@@ -347,11 +347,13 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 → Hypothesis: mlx-lm text-only is loadable iff `model_type ∈ MLX_LM_TEXT_LOADER_TYPES` (auto-discovered) AND `audio_config` is not a truthy dict. `vision_config`-truthy alone does not break the loader.
 
-**Affected.** All VLMs whose text-tower mlx-lm cannot extract. Generalises to mllama (per CLAUDE.md ADR-024 stub) which fails text-only outright.
+**Affected.** All VLMs whose text-tower mlx-lm cannot extract. Generalises to mllama (per [ADR-024](ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md)) which fails text-only outright.
 
 **Fix path.** Implement reachability layer 2 as a probe that combines an auto-discovered `model_type` allowlist with config-shape filters. Use the same probe as the single source of truth for: (a) routing in `run.py`, (b) the health-aggregator's text-load gate in `common.py:645`, (c) the `text` capability label.
 
-ADR-024 is the implementation decision record for this. Originally scoped to Vision-only routing; scope must extend to multimodal-only routing and to capability-label derivation.
+[ADR-024](ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) is the implementation decision record for this. The Class A instantiation (STT / Embedding pre-execution-reject) shipped in 2.0.6 (`2de2f21`, smoke §P). Class C extends the same pattern with the `MLX_LM_TEXT_LOADER_TYPES` allowlist + show/run alignment in `common.py:645-647`.
+
+**Slot:** DEFER 2.1 (tracking: [Issue #53](https://github.com/mzau/mlx-knife/issues/53)).
 
 ### Class D — Invocation gap (base + media-input is unreachable)
 
@@ -365,6 +367,8 @@ ADR-024 is the implementation decision record for this. Originally scoped to Vis
 **Affected.** Any base variant of a multimodal architecture: `gemma-3n-E2B-4bit`, `gemma-4-31b-bf16` (for media inputs; text-only is fine for 31b), other future base+vision/audio combinations.
 
 **Fix path.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` or `audio-in` as reachable. The result for base+multimodal is: text-only reachable (if loader passes), media-in not reachable. The `-it` sibling variant remains reachable for media.
+
+**Slot:** DEFER 2.1 (tied to RUNTIME-FEATURES-ITERATIONS Iter 2/3 — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet, design lives in Iter 2/3 plan).
 
 ---
 

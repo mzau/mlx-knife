@@ -25,13 +25,13 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | ADR-015 | Embeddings API | Planned | (not committed) |
 | [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2b; Phase 3 deferred) | 2026-01-29 |
 | ADR-017 | Image Metadata Extraction (EXIF) | Implemented (Phase 1) | (not committed) |
-| [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented (Phase 0-1; Phase 2 `--repair` update planned for 2.0.6) | 2025-12-18 |
+| [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented through Phase 3 (Phase 1 `--repair-index` 2.0.4-beta.5, Phase 2 `--quantize` 2.0.5, Phase 3 content_hash v2 via ADR-025 2.0.6; Phase 4 `--repair` deferred 2.1) | 2025-12-18 |
 | [ADR-019](ADR-019-Audio-Input-Support-beta8.md) | Audio Input Support (beta.8) | Obsolete (→ ADR-020) | 2026-01-20 |
 | [ADR-020](ADR-020-Audio-Backend-Architecture.md) | Audio Backend Architecture (beta.9) | Implemented | 2026-01-31 |
-| ADR-021 | MCP Integration | Brainstorm | (not committed) |
+| ADR-021 | MCP Integration | Brainstorm (Option-D rewrite pending, target 2.0.7 experimental / 2.1 stable) | (not committed) |
 | [ADR-022](ADR-022-Workspace-First-Paradigm.md) | Workspace-First Paradigm | Implemented (2.0.5) | 2026-02-06 |
 | [ADR-023](ADR-023-Text-First-Verified-Multimodal.md) | Text-First CLI + Verified Multimodal List | Accepted (Implemented in 2.0.5) | 2026-04-17 |
-| ADR-024 | Vision-only Pre-Execution Routing & Capability Detection | Proposed (stub — refresh planned with 2.0.6 reachability refactor; see `docs/RUNTIME-FEATURES.md`) | (not committed) |
+| [ADR-024](ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) | Pre-Execution Capability-Mismatch Reject | Partially Implemented (Class A STT/Embedding shipped 2.0.6; Class C Loader-Gap + Class D Invocation-Gap deferred 2.1) | 2026-04-19 |
 | [ADR-025](ADR-025-content-hash-v2.md) | content_hash v2 Algorithm + Sentinel Migration | Accepted (Implemented in 2.0.6; real-world smoke pending) | 2026-04-20 |
 
 ## ADR Format

@@ -1,8 +1,8 @@
 # ADR-018: Convert Operation
 
-**Status:** Implemented through Phase 2 (shipped in 2.0.5); Phase 3 (content_hash v2 via ADR-025) + Phase 4 (`--repair` unified detection-driven) planned for 2.0.6
+**Status:** Implemented through Phase 3 (Phase 2 shipped in 2.0.5; Phase 3 content_hash v2 shipped in 2.0.6 via ADR-025); Phase 4 (`--repair` unified detection-driven) deferred to 2.0.7
 **Created:** 2025-12-18
-**Updated:** 2026-04-20 (Phase 2 shipped 2.0.5; Phase 3 delegated to ADR-025; Phase 4 `--repair` unified design added from session)
+**Updated:** 2026-05-11 (Phase 3 shipped 2.0.6; Phase 4 deferred 2.0.6→2.0.7 — not implemented in main, see SMOKE-TEST-2.0.6 Section J DEFER 2.0.7); 2026-04-20 (Phase 2 shipped 2.0.5; Phase 3 delegated to ADR-025; Phase 4 `--repair` unified design added from session)
 **Context:** Users need to (a) quantize MLX workspaces locally without polluting the HF cache and (b) repair MLX/HF compliance issues (notably safetensors index/shard mismatches and known config defects) in a deterministic way.
 
 **Phase Status:**
@@ -11,8 +11,8 @@
 - **Phase 0c:** Workspace run/show/server support — ✅ Implemented (2.0.4-beta.6)
 - **Phase 1:** `--repair-index` — ✅ Implemented (2.0.4-beta.5)
 - **Phase 2:** `--quantize` (text + vision) + v1 content_hash — ✅ Shipped (2.0.5)
-- **Phase 3:** content_hash v2 algorithm — 🚧 Planned (2.0.6), design in [ADR-025](ADR-025-content-hash-v2.md)
-- **Phase 4:** `--repair` unified detection-driven repair — 🚧 Planned (2.0.6 P2)
+- **Phase 3:** content_hash v2 algorithm — ✅ Shipped (2.0.6), design in [ADR-025](ADR-025-content-hash-v2.md)
+- **Phase 4:** `--repair` unified detection-driven repair — 🚧 Planned (deferred 2.0.6→2.0.7)
 
 **Feature Gates:**
 - `clone`, `push`: **Production** (no gate required)
@@ -478,11 +478,11 @@ These defects can be fixed from the MLX model alone, without access to the origi
 |----|--------|-----------------|-----------|--------|--------|
 | A1 | **Index/Shard Mismatch** | mlx-vlm converted models (7+) | `health` → index mismatch | `--repair-index` | ✅ Phase 1 |
 | A2 | **Tokenizer PreTokenizer Regex** | EuroLLM, Mistral (transformers 4.39-4.57.2) | garbled output (Ġ, UTF-8 corruption) | Runtime fix in runner | ✅ Implemented |
-| A3 | **weights.npz → safetensors** | Whisper legacy | `health` → .npz detected | `--repair-weights` | ❌ Planned |
-| A4 | **eos_token_id=null** | Various | config.json check | `--repair` (detect+warn) | 🚧 2.0.6 Phase 4 detection |
-| A5 | **video_processor=null** | Qwen2-VL, MiMo-VL, Qwen3-Omni | config.json check | `--repair` (detect+warn) | 🚧 2.0.6 Phase 4 detection |
+| A3 | **weights.npz → safetensors** | Whisper legacy | `health` → .npz detected | `--repair-weights` | ❌ Planned (2.0.7) |
+| A4 | **eos_token_id=null** | Various | config.json check | `--repair` (detect+warn) | 🚧 2.0.7 Phase 4 detection |
+| A5 | **video_processor=null** | Qwen2-VL, MiMo-VL, Qwen3-Omni | config.json check | `--repair` (detect+warn) | 🚧 2.0.7 Phase 4 detection |
 | A6 | **Missing preprocessor_config.json** | mlx-community Whisper models | mlx-audio warning | `convert --add-preprocessor-config` | ❌ Future |
-| A7 | **spatial_merge_size wrong/missing** | Pixtral/Mistral3 models (mlx-vlm 0.1.19 era) | processor_config.json vs config.json | `--repair` (auto-fix) | 🚧 2.0.6 Phase 4 auto-fix |
+| A7 | **spatial_merge_size wrong/missing** | Pixtral/Mistral3 models (mlx-vlm 0.1.19 era) | processor_config.json vs config.json | `--repair` (auto-fix) | 🚧 2.0.7 Phase 4 auto-fix |
 
 #### Category B: Requires Original Model or Manual Intervention
 
@@ -610,7 +610,7 @@ if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
 ```
 
 **Repair:** `mlxk convert ./ws ./ws-fixed --repair`
-- Auto-fix (Phase 4, 2.0.6 P2): copy `spatial_merge_size` from `config.json` to `processor_config.json`
+- Auto-fix (Phase 4, 2.0.7): copy `spatial_merge_size` from `config.json` to `processor_config.json`
 - Deterministic — value is derivable from `config.json`, no heuristics needed
 
 **Upstream:**
@@ -655,7 +655,7 @@ if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
 |--------|------------|--------------------------|---------------|----------|
 | Index Mismatch | ✅ | ✅ | `--repair-index` | ✅ Done |
 | Tokenizer Regex | ⚠️ Runtime only | ✅ | Runtime workaround | ✅ Done |
-| spatial_merge_size | ✅ | ✅ | `--repair` auto-fix | **2.0.6 Phase 4 (P2)** |
+| spatial_merge_size | ✅ | ✅ | `--repair` auto-fix | **2.0.7 Phase 4** |
 | weights.npz | ✅ | ✅ | `--repair-weights` | Medium (future, separate mode) |
 | eos_token_id=null | ✅ | ⚠️ Needs heuristics | `--repair` detect+warn | Low (manual fix required) |
 | video_processor=null | ✅ | ⚠️ Model-specific | `--repair` detect+warn | Low (manual fix required) |
@@ -663,7 +663,7 @@ if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
 | Missing tokenizer.json | ✅ | ❌ | Re-convert | N/A |
 | chat_template | ⚠️ Runtime | ⚠️ Complex | Manual | N/A |
 
-### `--repair` Unified Detection-Driven Repair (Phase 4, 2.0.6 P2)
+### `--repair` Unified Detection-Driven Repair (Phase 4, deferred 2.0.6→2.0.7)
 
 **Session design 2026-04-20.** The earlier per-defect `--repair-config` /
 `--repair-weights` / `--repair-all` placeholders are consolidated into one

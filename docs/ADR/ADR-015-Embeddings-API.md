@@ -1,10 +1,10 @@
 # ADR-015 — Embeddings API
 
-- **Status:** Draft (consolidated 2026-04-07)
+- **Status:** Draft (consolidated 2026-04-07; 2.0.7 implementation slot confirmed 2026-05-11)
 - **Authors:** mlx-knife maintainers
 - **Date:** 2025-11-16
-- **Updated:** 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
-- **Target:** Post-2.0.6 (after upstream dependency consolidation)
+- **Updated:** 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
+- **Target:** 2.0.7 experimental (gated), 2.1 stable promotion
 - **Related:** Issue #26, ADR-014 (Pipe Integration, fulfilled), ADR-021 (MCP), ADR-022 (Workspace-First)
 
 ## Context
