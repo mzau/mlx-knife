@@ -177,9 +177,10 @@ def detect_framework(hf_name: str, model_root: Path, selected_path: Optional[Pat
         if _has_any(root, ("**/*.gguf",)):
             return "GGUF"
 
-        # Look under snapshots for common formats
-        snapshots_dir = model_root / "snapshots"
-        if _has_any(snapshots_dir, ("**/*.safetensors", "**/pytorch_model.bin")):
+        # PyTorch fallback: recursive glob handles both layouts —
+        # workspace (flat) and HF cache (under snapshots/<rev>/).
+        # Sharded weights use pytorch_model-NNNNN-of-NNNNN.bin, so match prefix.
+        if _has_any(root, ("**/*.safetensors", "**/pytorch_model*.bin")):
             return "PyTorch"
     except Exception:
         pass
