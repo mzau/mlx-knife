@@ -1,6 +1,6 @@
 venv/
 venv39/
-venv31?/
+venv31*/
 venv_*/
 venv-*/
 test_env*/

@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.4 stable (server API unchanged in 2.0.5)
+**Version:** 2.0.6 stable (server endpoint surface unchanged since 2.0.4)
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-04-14
+**Last Updated:** 2026-05-12
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -22,11 +22,15 @@ mlxk serve --port 8000 --log-json
 mlxk serve --host 0.0.0.0 --port 8000
 ```
 
-**Requirements:**
-- Python 3.10-3.12 (Text, Vision, Audio)
-- mlx-lm ≥0.30.5
-- mlx-vlm ≥0.3.10 (PyPI) for Vision
-- mlx-audio ≥0.3.1 (PyPI) for Audio STT (`pip install mlx-knife[audio]`)
+**Requirements (2.0.6):**
+- Python 3.10-3.13 (Text + Vision); 3.10-3.12 only for Audio (miniaudio wheel missing on 3.13/macOS-ARM)
+- `mlx-lm==0.31.3` (text backend)
+- `mlx-vlm==0.4.4` (vision + multimodal audio; `pip install mlx-knife[vision]`)
+- `mlx-audio==0.4.3` (Whisper / Voxtral STT; `pip install mlx-knife[audio]`)
+- `transformers==5.5.4` (driven by mlx-audio 0.4.3)
+- `torch>=2.0`, `torchvision>=0.15` — temporary base deps for Pixtral / Llama-Vision / Mistral-Small-3.1 (`sunset-by mlx-vlm#1011`, see ADR-023 Workaround-Sunset Policy)
+
+Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
 
 ---
 
@@ -108,7 +112,21 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 }
 ```
 
-**Error types:** `validation_error`, `model_not_found`, `internal_error`, `server_shutdown`, `insufficient_memory`, `access_denied`
+**Error types** (full `ErrorType` enum, `mlxk2/errors.py`):
+
+| Type | HTTP | Meaning |
+|------|------|---------|
+| `validation_error` | 400 | Invalid request payload (e.g. too many images, malformed audio) |
+| `access_denied` | 403 | File / cache permission denied |
+| `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
+| `ambiguous_match` | 400 | Model spec matches multiple cached models — disambiguate |
+| `download_failed` | 503 | HF download failed mid-stream |
+| `push_operation_failed` | 500 | `/v1/push`-style operation failed (CLI-only path; not user-reachable on the server today) |
+| `server_shutdown` | 503 | Lifespan shutdown in progress; new requests are rejected |
+| `insufficient_memory` | 507 | Model exceeds the memory threshold (ADR-016) |
+| `not_implemented` | 501 | Known capability class, but the feature is not yet implemented (e.g. STT quantization) |
+| `unsupported_multimodal` | 501 | Model uses a multimodal class outside the verified-multimodal list (ADR-023) |
+| `internal_error` | 500 | Unexpected backend failure |
 
 ---
 
@@ -437,8 +455,10 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 - ✅ Temperature 0.0 (greedy sampling for transcription consistency)
 
 **Limits (both methods):**
-- **Per-audio:** 50 MB max for transcriptions endpoint, 5 MB for chat
+- **Per-audio:** 50 MB max (`MAX_AUDIO_SIZE_BYTES` in `mlxk2/tools/vision_adapter.py`; same limit on both endpoints)
 - **Count:** 1 audio per request
+
+> **Caveat — multimodal chat audio.** STT-dedicated models (Whisper, Voxtral) have natural stop tokens and process long audio reliably; the `/v1/audio/transcriptions` endpoint is robust against runaway inference. Multimodal chat audio (Gemma-3n in `/v1/chat/completions` with `input_audio`) lacks robust EOS-detection and can hallucinate without converging — `max_tokens` (default 2048) is currently the only inference bound. Keep chat audio short (a few seconds) for now; model-specific bounds are an open engineering item.
 
 **Models:** Gemma-3n (Vision + Audio + Text)
 
@@ -613,17 +633,19 @@ python -m mlxk2.core.server_base
 
 ### Success
 - **200 OK:** Request successful
-- **201 Created:** Resource created (future)
 
 ### Client Errors (4xx)
-- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures)
-- **404 Not Found:** Model not found in cache
+- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures, ambiguous model spec)
+- **403 Forbidden:** File or cache permission denied (`access_denied`)
+- **404 Not Found:** Model not found in cache or workspace
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
-- **501 Not Implemented:** Feature not supported (e.g., vision on Python 3.9)
-- **503 Service Unavailable:** Server shutting down
-- **507 Insufficient Storage:** Memory constraints violated (vision model >70% RAM)
+- **501 Not Implemented:** Feature not supported. Two distinct sub-causes (ADR-023):
+  - `not_implemented` — known capability class, feature missing (e.g. STT quantization)
+  - `unsupported_multimodal` — model uses a multimodal class outside the verified-multimodal list
+- **503 Service Unavailable:** Server shutting down (`server_shutdown`) or HF download failed (`download_failed`)
+- **507 Insufficient Storage:** Memory constraints violated (vision/audio model >70% RAM, ADR-016)
 
 ---
 
@@ -715,10 +737,10 @@ pip install mlx-knife[all]
 #### Audio Request Fails (HTTP 400)
 
 **Common causes:**
-- Audio size > 5 MB
+- Audio size > 50 MB (hard limit, both endpoints — `MAX_AUDIO_SIZE_BYTES`)
 - More than 1 audio per request (multi-audio not supported)
-- Unsupported format (use WAV or MP3)
-- Invalid Base64 encoding
+- Unsupported format (use WAV or MP3 for chat `input_audio`; WAV/MP3/M4A/FLAC/OGG for `/v1/audio/transcriptions`)
+- Invalid Base64 encoding (chat endpoint only)
 
 **Solution:** Compress audio, ensure single audio per request, use supported format
 
@@ -784,8 +806,7 @@ pip install mlx-knife[audio]
 | Image size | 20 MB | Metal OOM prevention |
 | Total image size | 50 MB | Metal OOM prevention |
 | **Audio per request (chat)** | **1** | **mlx-vlm limitation** |
-| **Audio size (chat)** | **5 MB** | **Token count constraint** |
-| **Audio size (transcriptions)** | **50 MB** | **~15 min @ 16kHz mono** |
+| **Audio size (both endpoints)** | **50 MB** | **`MAX_AUDIO_SIZE_BYTES` — measured in raw bytes, codec-agnostic. WAV @ 16 kHz mono caps at ~26 min; compressed formats fit much more (verified: 55 min MP3 transcription via Whisper stays under the limit). Whisper handles long audio robustly; multimodal chat audio is bounded by `max_tokens` only (see Audio Support caveat).** |
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
 | Vision max_tokens | 2048 (default) | Stateless, slow inference |
@@ -831,15 +852,74 @@ pip install mlx-knife[audio]
 - Multimodal chat: Use `/v1/chat/completions` with `input_audio`
 - Test Vision/Audio workflows on Python 3.10+
 
+### From 2.0.4 → 2.0.5
+
+**Endpoint surface:** unchanged.
+
+**Dependency bumps (auto-installed):**
+
+| Package | 2.0.4 | 2.0.5 |
+|---------|-------|-------|
+| `mlx-lm` | `>=0.30.5` | `>=0.31.1,<0.32` |
+| `mlx-vlm` | `==0.3.10` | `>=0.3.10,<0.4` |
+| `mlx-audio` | `==0.3.1` | `>=0.4.1,<0.5` |
+| `transformers` | (transitive only) | `==5.0.0` (now explicit) |
+
+**Behavior changes:**
+
+| Change | Effect on operators |
+|--------|---------------------|
+| ADR-023 Text-First + Verified Multimodal | Multimodal models outside the verified list now reject with HTTP 501 `unsupported_multimodal`. Previously ran with risk of silent fallback. |
+| Workspace model spec (CLI) | `--model <path-to-workspace-dir>` accepted by `mlxk serve --model` (path-based; transparent to API consumers). |
+
+**Client-visible:**
+- Models that previously partially-worked may now return 501. Clients should surface the new `unsupported_multimodal` type from the error envelope.
+
+### From 2.0.5 → 2.0.6
+
+**Endpoint surface:** unchanged.
+
+**Dependency bumps (auto-installed):**
+
+| Package | 2.0.5 | 2.0.6 |
+|---------|-------|-------|
+| `mlx-lm` | `>=0.31.1,<0.32` | `==0.31.3` |
+| `mlx-vlm` | `>=0.3.10,<0.4` | `==0.4.4` |
+| `mlx-audio` | `>=0.4.1,<0.5` | `==0.4.3` |
+| `transformers` | `==5.0.0` | `==5.5.4` |
+| `torch` | (optional via mlx-vlm) | `>=2.0` (**new base dep**) |
+| `torchvision` | (optional via mlx-vlm) | `>=0.15` (**new base dep**) |
+
+**Why `torch` + `torchvision` as base deps:** `transformers >=5.5` made the torchvision-backed Fast image processor the default for Pixtral / Llama-Vision / Mistral-Small-3.1. Without these, `mlx-vlm`'s `AutoProcessor.from_pretrained(..., use_fast=True)` fails with `requires_backends ImportError`. Marked `sunset-by mlx-vlm#1011` (ADR-023 Workaround-Sunset Policy) — drops on `mlx-vlm` providing a `use_fast=False` fallback.
+
+**Install size impact:** `torch>=2.0` + `torchvision>=0.15` add ~1 GB to the base install. Operators on size-constrained images (containers, embedded systems) should plan for this.
+
+**Behavior changes:**
+
+| Change | Effect on operators |
+|--------|---------------------|
+| `gemma4` vision convert | New `mlxk convert --quantize` target (CLI; no server-side change). |
+| Capability label fixes | `/v1/models` listing is more accurate for STT-only and Gemma 4 models — no API contract change, may shift which models clients see. |
+
+**Client updates required:** none.
+
 ---
 
 ## References
 
-- **API Schema:** `docs/json-api-specification.md`
 - **Architecture Principles:** `docs/ARCHITECTURE.md`
-- **Testing Details:** `TESTING-DETAILS.md`
-- **ADR-012:** Vision Support (development decisions)
-- **ADR-016:** Memory-Aware Loading (development decisions)
+- **Testing Details:** `docs/TESTING-DETAILS.md`
+- **Verified Multimodal Coverage:** `docs/MODEL-COVERAGE.md` (per-release operation × model_type matrix)
+
+### ADRs (development decisions)
+
+- **ADR-012:** Vision Support
+- **ADR-016:** Memory-Aware Loading (HTTP 507 rationale)
+- **ADR-020:** Audio Backend Architecture (STT routing, MLX_AUDIO vs MLX_VLM)
+- **ADR-022:** Workspace-First Paradigm (background; surface-transparent on the server)
+- **ADR-023:** Text-First + Verified Multimodal (HTTP 501 `unsupported_multimodal` policy + Workaround-Sunset Policy for `torch` / `torchvision`)
+- **ADR-024:** Pre-Execution Capability-Mismatch Reject (Class A — CLI-side; surface-transparent on the server today)
+- **ADR-025:** content_hash v2 (background; surface-transparent on the server)
 
 ---
 
@@ -1104,6 +1184,19 @@ When switching from Vision or Audio to Text model mid-conversation:
 ---
 
 ## Changelog
+
+- **2026-05-12:** 2.0.6 stable (handbook sync)
+  - Endpoint surface unchanged.
+  - Dep-wave: `mlx-lm==0.31.3`, `mlx-vlm==0.4.4`, `mlx-audio==0.4.3`, `transformers==5.5.4`.
+  - **NEW base deps** `torch>=2.0`, `torchvision>=0.15` (Pixtral / Llama-Vision / Mistral-Small-3.1; `sunset-by mlx-vlm#1011`, ADR-023 Workaround-Sunset Policy). Adds ~1 GB to base install.
+  - `/v1/models` listing accuracy improved for STT-only and Gemma 4 (capability label fixes; no schema change).
+  - Documentation: full Error-Type table; HTTP 501 split into `not_implemented` vs `unsupported_multimodal` (ADR-023); migration blocks 2.0.4 → 2.0.5 → 2.0.6; audio-size limit corrected to 50 MB unified (both endpoints).
+
+- **2026-04-18:** 2.0.5 stable
+  - Endpoint surface unchanged.
+  - ADR-023 enforced: multimodal models outside the verified list reject with HTTP 501 `unsupported_multimodal` (was: silent fallback risk).
+  - Dep-wave: `mlx-lm==0.31.1`, `mlx-audio==0.4.1`, `transformers>=5.0.0,<5.5.0`.
+  - CLI: workspace clone (`mlxk clone`) introduced; workspace paths accepted by `mlxk serve --model <path>` (transparent to API consumers).
 
 - **2026-01-31:** 2.0.4-beta.9
   - **NEW:** `/v1/audio/transcriptions` endpoint (OpenAI Whisper API compatible)

@@ -1,8 +1,75 @@
 # MLX Knife Architecture
 
+**Stand: 2.0.6 (May 2026)**
+
 ## Core Principles
 
 This document defines the architectural principles and design patterns for MLX Knife 2.0+.
+
+---
+
+## Workspace Model
+
+mlx-knife 2.0.5 introduced workspaces as the primary store for managed models; 2.0.6 hardens the integrity story with content_hash v2 (ADR-025). A workspace is any directory whose root contains a `.mlxk_workspace.json` sentinel.
+
+### Sentinel: `.mlxk_workspace.json`
+
+Written atomically (`tmp + rename`) by `clone` and `convert`; the operation that wrote it owns its provenance fields. Schema in 2.0.6:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `mlxk_version` | string | mlx-knife version that produced the sentinel |
+| `created_at` | ISO-8601 | UTC timestamp at write time |
+| `source_repo` | string | HF repo of origin (e.g. `mlx-community/whisper-large-v3-mlx`) |
+| `source_revision` | string | Git revision pinned at clone time |
+| `managed` | bool | Always `true` for mlxk-created workspaces |
+| `operation` | string | `"clone"` or `"convert"` |
+| `content_hash` | `"sha256:<64-hex>"` | Aggregate digest of the workspace recipe (ADR-025 §3) |
+| `hash_algorithm` | `"v2"` | Algorithm tag — readers gate behaviour on this (ADR-025 §9) |
+| `file_index` | array | Per-file records (`{path, size, mtime_ns, sha}`) — the portable recipe |
+| `exclude_patterns` | array | Exclude list **frozen** at write time (transport-invariant verification) |
+
+ADR-022 makes the workspace the recommended unit of work; ADR-025 makes its clean state trustworthy across repairs, transports, and future algorithm bumps.
+
+### Managed vs. External Paths
+
+mlx-knife distinguishes three on-disk forms:
+
+- **Managed workspace.** Directory + sentinel with `managed=true`. Origin known; integrity tracked; `Clean: ✓ / ✗ / —` rendered in `mlxk show`.
+- **External workspace path.** Directory that looks like a model snapshot (has `config.json`) but lacks the sentinel. `mlxk` commands run against it; integrity is not tracked.
+- **HF cache entry.** A snapshot under `$HF_HOME/hub/models--…/snapshots/<rev>/`. No `Clean` column applies (rendered as `—`).
+
+The HF-cache path stays a first-class store for `pull` and `run`; the workspace path is preferred for repair workflows, multi-variant convert outputs, and any offline / archive use case.
+
+### HF_HOME Bootstrap (`cli.py:109-140`)
+
+When `mlxk run` or `mlxk serve --model` receives a workspace path, mlx-knife reroutes `HF_HOME` to `<workspace>/.hf_cache` **before any other import**. The bootstrap (`_bootstrap_hf_home()`) inspects `sys.argv` and calls `os.environ["HF_HOME"] = ...` before `huggingface_hub` is imported by any transitive dependency (huggingface_hub reads `HF_HOME` once at import time). Workspace isolation takes priority even over a user-set `HF_HOME` — CoW snapshots and archives stay self-contained. Non-workspace runs respect the user's `HF_HOME` or fall back to the HF default.
+
+The `_resolve_workspace_for_bootstrap()` helper accepts explicit paths (`./`, `../`, `/`) and `MLXK_WORKSPACE_HOME` fuzzy matches; it intentionally performs no imports so the resolution stays inside the pre-import window.
+
+### content_hash: v1 vs. v2
+
+| Aspect | v1 (pre-2.0.6) | v2 (ADR-025, 2.0.6) |
+|---|---|---|
+| Coverage | `config.json` full + safetensors name/size/4 KB + tokenizer name/size | Include-by-default; every file under the workspace except `exclude_patterns` |
+| Safetensors | Filename + size + 4 KB tail sample | JSON header bytes only (parses 8-byte LE length prefix, max 100 MiB; tensor data never read) |
+| Size cap | n/a | Non-safetensors files > `CATCHALL_FULL_READ_CAP` (1 GiB) fall back to `sha256(name‖0x00‖size)` |
+| Recipe storage | None (algorithm lived only in code) | `file_index` + `exclude_patterns` frozen in sentinel — portable across future readers |
+| `mlxk ls` hot path | Recompute every time | `stat()` only with mtime self-heal; ~50 ms over 50 workspaces |
+| Issue #52 (`convert --repair-index` invisible) | Affected | Fixed |
+
+The hot-path read flow (`is_workspace_clean()` at `workspace.py:734`): if `hash_algorithm != "v2"` → `clean: None` plus the migration hint *"run `mlxk show <name> --recalc-hash` to upgrade"*. Otherwise stat-walk filtered by the sentinel's stored `exclude_patterns` (not current code defaults), with self-heal on `mtime_ns` drift that silently writes back to the sentinel. Symlinks inside the workspace become path fingerprints; outside or broken targets refuse.
+
+### Clean-State Visibility
+
+- `mlxk list` — `Source` column: `ws` (clean), `ws*` (modified), `ws?` (state unknown — typically v1 sentinels awaiting `--recalc-hash`), `cache` (HF cache entry).
+- `mlxk show` — workspace block includes `Clean: ✓ / ✗ / —` and surfaces `content_hash` as `sha256:<7-prefix><16-hex>` (23 chars).
+- Migration — one-time `mlxk show <name> --recalc-hash` rewrites the sentinel in-place with `hash_algorithm: "v2"`, fresh `file_index`, frozen `exclude_patterns`.
+
+### Related ADRs
+
+- **ADR-022** — workspace-first paradigm; `.hf_cache/` isolation; clone vs. pull positioning.
+- **ADR-025** — content_hash v2 algorithm, sentinel migration, the recipe-storage principle that decouples future readers from current code.
 
 ---
 
@@ -56,6 +123,7 @@ probe/
 | `detect_vision_capability()` | `common.py` | vision_config, preprocessor_config |
 | `detect_audio_capability()` | `common.py` | audio_config, WhisperFeatureExtractor |
 | `detect_audio_backend()` | `common.py` | MLX_AUDIO (STT) vs MLX_VLM (multimodal) |
+| `is_workspace_clean()` | `operations/workspace.py` | content_hash v2 clean-check (stat-only hot path) |
 | `check_runtime_compatibility()` | `health.py` | Backend supports model_type |
 
 **Probe vs Config:**
@@ -133,6 +201,8 @@ runtime_compatible?
 If all gates pass → True (runtime_compatible)
 ```
 
+> **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `run.py:462-486`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
+
 **Gate Priority:**
 
 | Priority | Gate | Checked For |
@@ -144,7 +214,7 @@ If all gates pass → True (runtime_compatible)
 | 5 | Embeddings | Embedding models |
 | 6 | Text/LLM | Text-only models |
 
-**Implementation:** `build_model_object()` in `common.py:599-634`
+**Implementation:** `build_model_object()` in `common.py:582-706`
 
 ### 2. No Silent Fallbacks
 
@@ -219,9 +289,10 @@ Server endpoints return standardized HTTP status codes:
 
 New features may be gated behind environment variables during alpha/beta:
 
-- Example: `MLXK2_ENABLE_PIPES=1` (ADR-014 Phase 1) - prevents unexpected stdin blocking
-- Gates are **documented** in ADRs and `--help` output
-- Gates are **removed** when features reach stable status
+- `MLXK2_ENABLE_PIPES=1` (ADR-014 Phase 1) — required for `-` / stdin input on `mlxk run`. Prevents unexpected stdin blocking in non-piped invocations. Active in 2.0.6 (`cli.py:647`).
+- `MLXK2_ENABLE_ALPHA_FEATURES=1` — introduced in 2.0.7 for experimental surfaces (Embeddings per ADR-015, MCP per ADR-021). Not yet active in the 2.0.6 codebase; mentioned here for forward visibility per the ADR-015 2026-05-11 update.
+- Gates are **documented** in ADRs and `--help` output.
+- Gates are **removed** when features reach stable status.
 
 **Rationale:** Gates allow incremental rollout and protect against breaking changes in production workflows.
 
@@ -235,7 +306,7 @@ Current backends:
 - **Audio:** `mlx_audio` (speech-to-text transcription)
 
 Future backends:
-- **Embeddings:** Planned (ADR-015)
+- **Embeddings:** Slated for 2.0.7 experimental, gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` (ADR-015); stable promotion in 2.1.
 
 API:
 - `probe_model_capabilities()`: Returns capability dictionary (text, vision, audio, embeddings)
@@ -250,10 +321,34 @@ API:
 
 The core probe/policy implementation lives in `mlxk2/core/capabilities.py`:
 
-- `probe_model_capabilities(model_path)` → Capability detection
-- `select_backend_policy(capabilities, context)` → Backend selection
+- `probe_model_capabilities(model_path)` → Capability detection (`capabilities.py:429`)
+- `select_backend_policy(capabilities, context)` → Backend selection (`capabilities.py:564`)
+- `classify_convert_target(config)` → Single-dispatcher for `convert --quantize` (`capabilities.py:164`)
 
-See module docstring for detailed API documentation.
+Workspace Model implementation (ADR-022, ADR-025):
+
+| Concern | Symbol | File |
+|---|---|---|
+| Sentinel I/O | `write_workspace_sentinel`, `read_workspace_metadata` | `operations/workspace.py:118, 195` |
+| HF_HOME bootstrap | `_bootstrap_hf_home`, `_resolve_workspace_for_bootstrap` | `cli.py:109-140` |
+| content_hash v2 compute | `compute_workspace_hash_v2` | `operations/workspace.py:550` |
+| Clean-check hot path | `is_workspace_clean` | `operations/workspace.py:734` |
+| Algorithm constants | `HASH_ALGORITHM_V2`, `CATCHALL_FULL_READ_CAP`, `SAFETENSORS_HEADER_MAX`, `DEFAULT_EXCLUDE_PATTERNS` | `operations/workspace.py:43-76` |
+
+Dependency stack (`pyproject.toml:41-55`):
+
+| Package | Pin (2.0.6) | Note |
+|---|---|---|
+| `mlx` | `>=0.30.0,<0.32` | Apple Silicon ML framework |
+| `mlx-lm` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |
+| `mlx-audio` | `==0.4.3` | STT backend; Voxtral tokenizer fixes (drives `transformers >=5.5.0` floor) |
+| `mlx-vlm` | `==0.4.4` | VLM backend; adds `gemma4` vision convert support |
+| `transformers` | `==5.5.4` | Required by `mlx-audio 0.4.3` |
+| `torch>=2.0`, `torchvision>=0.15` | Temporary | Pixtral / Llama-Vision / Mistral-Small-3.1; `sunset-by mlx-vlm#1011` |
+
+Upper bounds are hygiene per ADR-023: every upstream minor bump requires an explicit mlx-knife release with re-verified integration. The `torch` / `torchvision` lines carry a sunset marker (ADR-023 Workaround-Sunset Policy) and drop when `mlx-vlm` ships a `use_fast=False` fallback.
+
+See module docstrings for detailed per-symbol API documentation.
 
 ---
 
@@ -304,18 +399,44 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 
 ## References
 
-- **ADR-012:** Vision Support (backend selection for vision models)
-- **ADR-014:** Unix Pipe Integration (feature gates)
-- **ADR-016:** Memory-Aware Model Loading (pre-load memory checks)
-- **ADR-020:** Audio Backend Architecture (speech-to-text transcription)
-- **Code:** `mlxk2/core/capabilities.py` (probe/policy implementation)
-- **Code:** `mlxk2/core/server/model_manager.py` (model lifecycle)
-- **Original Discussion:** `docs/vision_server_leitplanken.md` (German, historical)
+### Architecture Decision Records
+
+- **ADR-012** — Vision Support Roadmap (backend selection for vision models; batching lifecycle behind §5)
+- **ADR-014** — Unix Pipe Integration (`MLXK2_ENABLE_PIPES` gate behind §7)
+- **ADR-015** — Embeddings API (2.0.7 experimental gated, 2.1 stable; cited by §7 and §8)
+- **ADR-016** — Memory-Aware Model Loading (pre-load memory thresholds behind §4)
+- **ADR-018** — Convert Operation (workspace sentinel infrastructure; v1 deprecated by ADR-025)
+- **ADR-020** — Audio Backend Architecture (STT routing via `detect_audio_backend`; MLX_AUDIO vs MLX_VLM split behind decision-tree gate [3])
+- **ADR-022** — Workspace-First Paradigm (workspace as primary store; `.hf_cache/` isolation; sentinel philosophy behind the Workspace Model section)
+- **ADR-023** — Text-First + Verified Multimodal (no-silent-degradation policy reinforces §2; Workaround-Sunset Policy governs the `torch` / `torchvision` temporary dep)
+- **ADR-024** — Pre-Execution Capability-Mismatch Reject (Class A shipped 2.0.6 — STT/embedding text-only invocation; Class C + D deferred 2.1; behind the §1 decision-tree note)
+- **ADR-025** — content_hash v2 (algorithm + portable-recipe storage in sentinel; behind the Workspace Model content_hash subsection)
+
+### Companion Documents
+
+- `docs/RUNTIME-FEATURES.md` — §5 four-bug-class catalog (A shipped, B detection fix shipped, C+D deferred 2.1); shared vocabulary for ADR-024.
+- `docs/MODEL-COVERAGE.md` — per-release operation-vs-model_type verification matrix; living document.
+- `docs/TESTING-DETAILS.md` — operational test-execution details and env vars (including `MLXK2_LIVE_CHV2=1` for content_hash v2 live tests).
+- `docs/SERVER-HANDBOOK.md` — user-facing server documentation.
+- `docs/json-api-specification.md` + `docs/json-api-schema.json` — JSON API contract (0.2.2 documents `content_hash` as `sha256:<64-hex>` per ADR-025).
+
+### Code Anchors
+
+- `mlxk2/core/capabilities.py` — probe/policy implementation
+- `mlxk2/operations/common.py` — detection helpers + `build_model_object` (line 582)
+- `mlxk2/operations/workspace.py` — sentinel + content_hash v2
+- `mlxk2/core/server/model_manager.py` — model lifecycle (line 146)
+- `mlxk2/cli.py` — HF_HOME bootstrap (line 109)
+
+### Historical
+
+- `docs/vision_server_leitplanken.md` (German, historical pre-2.0 discussion)
 
 ---
 
 ## Changelog
 
+- **2026-05-12 (2.0.6 sync):** Added Workspace Model section (sentinel schema, managed-vs-external distinction, HF_HOME bootstrap, content_hash v1↔v2, clean-state visibility). Annotated decision-tree with ADR-024 Class A pre-execution reject. Extended probe-function table with `is_workspace_clean()`. Updated `build_model_object()` line reference (599-634 → 582-706). Extended §7 Feature Gates with `MLXK2_ENABLE_ALPHA_FEATURES` (forthcoming 2.0.7). Updated §8 Embeddings status to slated-2.0.7-experimental. Expanded Implementation with workspace pointer map and dep-pin table (mlx-lm 0.31.3, mlx-audio 0.4.3, mlx-vlm 0.4.4, transformers 5.5.4, torch+torchvision temporary). Rebuilt References (ADR-012/014/015/016/018/020/022/023/024/025, RUNTIME-FEATURES, MODEL-COVERAGE, TESTING-DETAILS, SERVER-HANDBOOK, json-api-specification). ModelManager state machine verified unchanged.
 - **2026-02-11:** Added ModelManager State Machine documentation (Phase 2 refactoring)
 - **2026-02-03:** Modality-agnostic update (audio backend added, examples generalized)
 - **2025-12-07:** Initial version
