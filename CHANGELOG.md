@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.6] - Unreleased
+## [2.0.6] - 2026-05-12
 
 > **content_hash v2 closes Issue #52 coverage gap.** v1 only hashed
 > `config.json` plus safetensors name+size+4 KB and tokenizer
@@ -113,11 +113,29 @@
   indicator (existence check, no I/O beyond stat). Previously only
   `chat_template.json` was checked, leaving 11 of 27 sampled
   workspaces relying on the name heuristic.
-- **ADR-025** (Accepted) — content_hash v2 algorithm + sentinel
-  migration. **ADR-018** extended: Phase 2 (quantize + v1
-  content_hash) marked shipped in 2.0.5; Phase 3 delegated to
-  ADR-025; Phase 4 `--repair` unified detection-driven design added
-  (2.0.6 P2).
+- **ADRs synchronised to 2.0.6 reality.**
+  - **[ADR-025](docs/ADR/ADR-025-content-hash-v2.md)** (Accepted) —
+    content_hash v2 algorithm + sentinel migration.
+  - **[ADR-018](docs/ADR/ADR-018-Convert-Operation.md)** Phase status
+    updated: Phase 2 (quantize + v1 content_hash) shipped 2.0.5,
+    Phase 3 (content_hash v2 via ADR-025) shipped 2.0.6, Phase 4
+    (`--repair` unified detection-driven) deferred 2.1.
+  - **[ADR-024](docs/ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md)**
+    (Partially Implemented) — Pre-Execution Capability-Mismatch
+    Reject pattern; Class A (STT / Embedding) shipped 2.0.6 (the
+    `mlxk run` pre-execution gate documented above), Class C
+    (Loader Gap, [#53](https://github.com/mzau/mlx-knife/issues/53))
+    + Class D (base + media Invocation Gap) deferred 2.1. Title
+    widened from the original "Vision-only Pre-Execution Routing"
+    stub to reflect actual pattern scope.
+  - **[ADR-015](docs/ADR/ADR-015-Embeddings-API.md)** target pinned
+    to 2.0.7 experimental (gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`),
+    2.1 stable promotion.
+  - **[`docs/RUNTIME-FEATURES.md`](docs/RUNTIME-FEATURES.md)** §5
+    Class C + Class D fix-paths tagged with `Slot: DEFER 2.1`;
+    ADR-024 link target updated to the renamed file.
+  - **[`docs/ADR/README.md`](docs/ADR/README.md)** index rows for
+    ADR-018, ADR-021, ADR-024 synchronised.
 - **`live_chv2` pytest marker** (`tests_2.0/live/test_content_hash_v2_live.py`) —
   opt-in live tests for content_hash v2 (ADR-025): v2 sentinel format,
   file_index completeness, repair-index hash divergence (Issue #52
@@ -194,17 +212,6 @@
   hiding the migration-pending state. `mlxk show` Workspace-block
   now includes a `Clean:` line (✓/✗/— with hint) so the v1→v2
   migration prompt is visible without inspecting the sentinel.
-
-### Fixed
-
-- **`mlxk list` showed literal `sha256:` for v2 workspaces.** The
-  hash column renderer (`fmt_hash7` in `mlxk2/output/human.py`) sliced
-  the first 7 characters of the v2 `content_hash`, but the `sha256:`
-  prefix is exactly 7 characters — so the slice returned the prefix
-  only, with no digest. Fixed by stripping the algorithm prefix
-  before slicing. Cache-models (git commit hashes, no prefix) were
-  unaffected. Surfaced during the §A smoke test for fresh-cloned
-  workspaces.
 
 ### Removed
 

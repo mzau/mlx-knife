@@ -67,6 +67,8 @@ Phase 2-4 (live operations): 3+3+3 passed
 
 **Safety:** Live tests that create workspace directories use `mlxk-test-` prefix. `_safe_rmtree()` refuses to delete directories without this prefix, preventing accidental deletion of real models in MLXK_WORKSPACE_HOME.
 
+> **Pre-Test Setup — required models per marker:** See [Appendix A6 → Required Models for Live Tests](#a6-required-models-for-live-tests) for the pre-cache / workspace / HF-remote checklist before running live markers.
+
 ---
 
 ## Verified Model Coverage
@@ -1579,6 +1581,33 @@ pytest -m live_e2e --collect-only  # Should work without errors
 
 ---
 
+## Known Model Quality Issues
+
+Models with documented quality issues discovered during testing. Tests **will fail** when these issues occur (no workarounds).
+
+### Multiple EOS Token Generation
+
+| Model | Token IDs | Status | Evidence Date |
+|-------|-----------|--------|---------------|
+| Phi-3-mini-4k-instruct-4bit | 32007=`<\|end\|>`, 32000=`<\|endoftext\|>` | Fixed 2.0.2 | 2025-11-13 |
+
+**Issue:** Model generates multiple EOS tokens instead of stopping at first.
+**Detection:** Use `mlxk run --verbose` to see token generation details.
+**Fix:** MLX-Knife 2.0.2+ filters by earliest position in text (not list order).
+
+**Example usage:**
+```bash
+# Manual debugging with verbose mode
+mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cats." --verbose
+
+# Look for:
+# [DEBUG] Token generation analysis:
+# [DEBUG]   Last 3 tokens: ["29889='.'", "32007='<|end|>'", "32000='<|endoftext|>'"]
+# [DEBUG]   ⚠️ WARNING: Multiple EOS tokens detected (2) - model quality issue
+```
+
+---
+
 ## Appendix
 
 ### A1. Portfolio Discovery Fixture Compatibility
@@ -1813,40 +1842,34 @@ tests_2.0/
 └── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
 ```
 
----
+### A6. Required Models for Live Tests
 
-## Known Model Quality Issues
+Pre-test checklist: where each `live_*` marker expects to find its model(s). Markers using Portfolio Discovery (auto-select from cache, skip if no match) are listed in the footnote below.
 
-Models with documented quality issues discovered during testing. Tests **will fail** when these issues occur (no workarounds).
+| Marker | Source | Required Model(s) | Override Env-Var | Approx. Size | Notes |
+|---|---|---|---|---|---|
+| `live_chv2` | **Cache** (or auto-download with `HF_TOKEN`) | Text: `mlx-community/Llama-3.2-1B-Instruct-4bit`<br>Vision: `mlx-community/Llama-3.2-11B-Vision-Instruct-4bit` | `MLXK2_LIVE_CHV2_TEXT_MODEL`<br>`MLXK2_LIVE_CHV2_VISION_MODEL` | ~0.7GB + ~6.5GB | `mlxk clone` from cache → fresh tmp workspace. Vision must be quantized (4bit); bf16/fp16/fp32 variants hard-gated → skip. |
+| `live_clone` | **HF remote** (fresh per run) | User-supplied (no default) | `MLXK2_LIVE_CLONE_MODEL` (**required**) | Depends on supplied model | Pull→temp cache→clone→workspace. Target always `mlxk-test-clone` in `MLXK_WORKSPACE_HOME`. Example: `mlx-community/bge-small-en-v1.5-4bit`. |
+| `live_pull` | **HF remote** (fresh per run) | `mlx-community/Phi-3-mini-4k-instruct-4bit` (hardcoded in `test_resumable_pull.py:68`) | — (not overridable) | ~2.15GB | Downloads into isolated test cache; no impact on user cache. |
+| `live_vision_pipe` | **Cache** (Portfolio Discovery, cache-filtered) | Vision: any `pixtral`-substring match (e.g. `mlx-community/pixtral-12b-bf16`)<br>Text: first eligible from text portfolio | — (Portfolio-driven; skips if no pixtral-family model found) | Vision ~12.6GB<br>Text varies | Vision hard-filtered to pixtral-family; text picks first eligible from cache. |
+| `live_push` | **Workspace** (`MLXK_WORKSPACE_HOME`) | User-supplied workspace + HF repo | `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` (**both required**) | Depends on workspace | Workspace itself is the push source. Test SKIPs on error (diagnostic). |
+| `live_run` (#37) | **Cache** (`HF_HOME`) | Any `Phi-3-mini`-substring model in cache | — | ~2.15GB | Private/org MLX model framework detection. |
+| `issue27` | **Cache** (read-only user cache) | User-supplied | `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL` (optional) | Depends | Copies cache models into isolated test cache for strict health policy validation. |
 
-### Multiple EOS Token Generation
+**Markers using Portfolio Discovery** (no required model — auto-select from `mlxk list --json` cache-filtered results, skip cleanly when no eligible model found): `live_e2e`, `live_stop_tokens`, `live_list`, `live_cross_volume`, `show_model_portfolio`. See "Portfolio Discovery" note in the marker overview above.
 
-| Model | Token IDs | Status | Evidence Date |
-|-------|-----------|--------|---------------|
-| Phi-3-mini-4k-instruct-4bit | 32007=`<\|end\|>`, 32000=`<\|endoftext\|>` | Fixed 2.0.2 | 2025-11-13 |
-
-**Issue:** Model generates multiple EOS tokens instead of stopping at first.
-**Detection:** Use `mlxk run --verbose` to see token generation details.
-**Fix:** MLX-Knife 2.0.2+ filters by earliest position in text (not list order).
-
-**Example usage:**
-```bash
-# Manual debugging with verbose mode
-mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cats." --verbose
-
-# Look for:
-# [DEBUG] Token generation analysis:
-# [DEBUG]   Last 3 tokens: ["29889='.'", "32007='<|end|>'", "32000='<|endoftext|>'"]
-# [DEBUG]   ⚠️ WARNING: Multiple EOS tokens detected (2) - model quality issue
-```
+**Source legend:**
+- **Cache** — model must exist in (or be auto-downloadable to) `HF_HOME`; test reads from there.
+- **HF remote** — model is downloaded fresh per test run into an isolated cache; no pre-caching needed.
+- **Workspace** — model lives in `MLXK_WORKSPACE_HOME` as a managed workspace; test reads/pushes from there.
 
 ---
 
-### A6. Manual Release Validation: Cross-Volume & Network Filesystems
+### A7. Manual Release Validation: Cross-Volume & Network Filesystems
 
 **Context:** Unit tests mock cross-volume behavior (EXDEV errors, warnings). This appendix covers manual validation on real hardware that cannot be automated in CI.
 
-#### A6.1 Why Manual Testing is Required
+#### A7.1 Why Manual Testing is Required
 
 | Aspect | Unit Tests (Automated) | Manual Validation |
 |--------|------------------------|-------------------|
@@ -1856,7 +1879,7 @@ mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cat
 | Performance | ❌ Mocked (instant) | ✅ Actual copy times |
 | Space Requirements | ❌ Trivial test data | ✅ Real model sizes |
 
-#### A6.2 Pre-Release Checklist
+#### A7.2 Pre-Release Checklist
 
 **Requirements:**
 - [ ] Two APFS volumes (internal SSD + external drive)
@@ -1892,7 +1915,7 @@ mlxk convert "$SOURCE_VOL/llama-1b-clone" "$TARGET_VOL/llama-1b-4bit" --quantize
 # Expected: No CoW warning (mlx-lm does its own copy)
 ```
 
-#### A6.3 Expected Output
+#### A7.3 Expected Output
 
 All scenarios produce the same user-visible output — CoW fallback is silent:
 ```
@@ -1901,7 +1924,7 @@ clone: mlx-community/Llama-3.2-1B-Instruct-4bit → /path/to/target (✓ healthy
 
 Difference is only in speed: same-volume CoW is instant, cross-volume/non-APFS takes longer (regular copy).
 
-#### A6.4 Failure Modes (Fixed in 2.0.5-beta.2)
+#### A7.4 Failure Modes (Fixed in 2.0.5-beta.2)
 
 | Scenario | Previous Behavior (2.0.4) | Current Behavior (2.0.5) |
 |----------|---------------------------|--------------------------|
@@ -1911,7 +1934,7 @@ Difference is only in speed: same-volume CoW is instant, cross-volume/non-APFS t
 | Convert cross-volume | `FileSystemError: APFS required` | Silent fallback copy |
 | `/Users` path on macOS | False "Non-APFS" (firmlink bug) | Correct APFS detection (st_dev) |
 
-#### A6.5 Cleanup
+#### A7.5 Cleanup
 
 ```bash
 # Remove test artifacts
@@ -1923,4 +1946,8 @@ rm -rf "$SMB_TARGET/llama-1b-clone"
 
 ---
 
+
+---
+
 *MLX-Knife 2.0 Testing Details*
+

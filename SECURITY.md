@@ -149,13 +149,13 @@ The 2.0 alpha introduces an alpha upload capability. Treat it as opt‑in, with 
 
 ## Supported Versions
 
-We provide security updates for these versions:
+We provide security updates for the versions below. **Upgrading to 2.0.6 is strongly recommended** — it closes a workspace-integrity coverage gap in `content_hash` and corrects long-standing capability labels for multimodal models.
 
-| Version | Security Support   |
-| ------- | ------------------ |
-| 2.0.5   | :white_check_mark: Current stable |
-| 2.0.4   | :white_check_mark: Supported |
-| < 2.0.4 | :x: Upgrade recommended |
+| Version | Security Support |
+| ------- | ---------------- |
+| 2.0.6   | :white_check_mark: Recommended — current stable |
+| 2.0.5   | :warning: Supported — upgrade to 2.0.6 strongly recommended |
+| < 2.0.5 | :x: Upgrade recommended |
 
 ## Additional Resources
 

@@ -74,6 +74,7 @@ _FULL_PRECISION_PATTERN = re.compile(r"-(bf16|fp16|fp32)\b", re.IGNORECASE)
 pytestmark = [
     pytest.mark.live,
     pytest.mark.live_chv2,
+    pytest.mark.wet,  # Picked up by wet-umbrella Phase 1; env-skipif gates execution.
     pytest.mark.skipif(
         not (live_enabled and hf_token_present),
         reason="Live chv2 tests disabled. Set MLXK2_LIVE_CHV2=1 + HF_TOKEN.",

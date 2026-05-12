@@ -1,12 +1,14 @@
 # <img src="https://github.com/mzau/mlx-knife/raw/main/broke-logo.png" alt="BROKE Logo" width="60" align="middle"> MLX-Knife 2.0
 
 <p align="center">
-  <img src="https://github.com/mzau/mlx-knife/raw/main/mlxk-demo.gif" alt="MLX Knife Demo" width="900">
+  <img src="https://github.com/mzau/mlx-knife/raw/main/mlx-knife-overview.jpg" alt="MLX-Knife: HuggingFace model management for MLX on Apple Silicon" width="900">
 </p>
 
-**Current Version: 2.0.5** (stable)
+<p align="center"><i>What mlx-knife is — at a glance. Release notes: <a href="CHANGELOG.md">CHANGELOG.md</a>.</i></p>
 
-[![GitHub Release](https://img.shields.io/badge/stable-2.0.5-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+**Current Version: 2.0.6** (stable)
+
+[![GitHub Release](https://img.shields.io/badge/stable-2.0.6-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -36,16 +38,7 @@ silently converted (which would destroy the multimodal config and
 produce a broken workspace).
 
 
-## Features
-
-### What's New in 2.0.5
-- **Workspace-First Paradigm** - Isolated model workspaces with HF cache separation (runtime downloads stay local)
-- **Model Quantization** - `mlxk convert --quantize <bits>` for text and vision models (2, 3, 4, 6, 8 bit)
-- **Cross-Volume Support** - Clone and convert work across volumes and filesystems
-- **Content Hash Tracking** - Detect workspace modifications; `--recalc-hash` pins current state
-- **`MLXK_WORKSPACE_HOME`** - Central workspace directory for portfolio discovery
-
-### Core Functionality
+## Core Functionality
 - **Run Models** - Native MLX execution with streaming, chat modes, vision, and audio
 - **Audio Transcription (STT)** - Whisper speech-to-text via `--audio` flag
 - **Vision with EXIF Metadata** - Image analysis with automatic GPS/date/camera extraction
@@ -57,7 +50,38 @@ produce a broken workspace).
 - **Unix Pipes (Beta)** - Chain models without temp files (`cat | mlx-run model -`)
 - **Privacy** - No background network or telemetry; explicit HuggingFace interactions only
 
-### Unix Pipe Integration (Beta)
+## What's New in 2.0.6
+
+Two focused improvements:
+
+- **`content_hash` now actually covers the workspace.** v1 sampled only
+  `config.json`, safetensor name+size+4 KB, and tokenizer name+size —
+  `Clean: ✓` could quietly miss changes to the safetensors index,
+  processor / preprocessor / generation configs, chat templates, custom
+  Python, or anything in subdirectories. v2 is include-by-default with
+  a portable recipe stored in the sentinel. Existing workspaces migrate
+  in place with one `mlxk show <name> --recalc-hash`.
+- **Capability labels are now correct.** STT model types had been
+  showing as `base+audio`, and Gemma 4 text variants carried a spurious
+  `audio` tag — both go back to the introduction of multimodal support.
+  Detection now uses truthy-dict predicates and matches the STT family
+  as a substring.
+
+Along for the ride:
+
+- `mlxk list` is roughly 85 % faster on a sampled portfolio
+  (~8 s → under 2 s).
+- MLX-stack refresh — mlx-lm 0.31.3 / mlx-vlm 0.4.4 / mlx-audio 0.4.3 /
+  transformers 5.5.4. Gemma 4 (text and vision) is now supported in the
+  runtime portfolio, and `mlxk convert --quantize` accepts Gemma 4
+  vision.
+- `torch + torchvision` are bundled by default so Pixtral /
+  Llama-Vision / Mistral-Small-3.1 work out of the box (lean-stack
+  opt-out documented in CHANGELOG).
+- `mlxk run M "prompt"` against an STT or embedding model now gives a
+  pre-execution hint instead of a cryptic loader trace.
+
+## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
 ```bash
 export MLXK2_ENABLE_PIPES=1
@@ -70,7 +94,7 @@ mlx-run chat_model "explain quicksort" | tee explanation.txt | head -20
 ```
 Robust handling of SIGPIPE and early pipe termination (`| head`, `| grep -m1`).
 
-### Requirements
+## Requirements
 - macOS with Apple Silicon
 - Python 3.10-3.12 (see Python Compatibility below)
 - 8GB+ RAM recommended + RAM to run LLM
@@ -110,7 +134,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ```bash
 pip install mlx-knife
-mlxk --version  # → mlxk 2.0.5
+mlxk --version  # → mlxk 2.0.6
 ```
 
 **Requirements:** macOS Apple Silicon, Python 3.10-3.12
@@ -123,7 +147,7 @@ git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 pip install -e ".[dev,test]"
 
-mlxk --version  # → mlxk 2.0.5
+mlxk --version  # → mlxk 2.0.6
 pytest -v
 ```
 
@@ -329,7 +353,7 @@ Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+. S
 #### Requirements
 
 - **Python 3.10+** (mlx-vlm dependency)
-- **Backend:** mlx-vlm 0.3.10+ (included in base install)
+- **Backend:** mlx-vlm 0.4+ (included in base install)
 
 #### Usage
 
@@ -465,41 +489,13 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 
 #### Model Compatibility
 
-**⚠️ Important:** Vision support relies on mlx-vlm (upstream), which has known stability issues. While `mlxk health` verifies file integrity, **runtime failures may occur** with certain model architectures due to upstream bugs.
+Vision support routes through mlx-vlm upstream. File integrity is verified by `mlxk health`, but runtime behavior depends on the per-model upstream state.
 
-> **For the authoritative per-release status of every supported `model_type`, see [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md).** The tables here are curated recommendations, not an exhaustive support list.
+> **For the authoritative per-release status of every supported `model_type`, see [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md).**
 
-**✅ Tested & Working Models:**
+A reasonable starting point: **Pixtral 12B 8-bit** (`mlx-community/pixtral-12b-8bit`, ~13.5 GB) — multi-image capable, strong text recognition, verified across recent releases. Other verified model families, repair workflows for legacy conversions, and known runtime issues are tracked release-by-release in the coverage matrix.
 
-| Model | Size | Notes |
-|-------|------|-------|
-| `mlx-community/pixtral-12b-8bit` | ~13.5GB | **⭐ Recommended:** Excellent text recognition, multi-image support (5+ images on M2 Max 64GB); 2.0.4+ for text-only via MLXRunner (ADR-020 three-tier routing) |
-| `mlx-community/Llama-3.2-11B-Vision-Instruct-4bit` | ~6.5GB | Reliable, good quality; single-image only |
-| `Devstral-Small-2-24B-Instruct-2512-6bit` | ~14GB | Single-image only on 64GB RAM; requires `--repair-index` (mlx-vlm #624); better for Mac Studio/Ultra |
-
-**🔧 Works after repair workflow:**
-
-| Model | Repair needed | Status |
-|-------|---------------|--------|
-| `Mistral-Small-3.1-24B-Instruct-2503-4bit` | Two-step fix: (1) `mlxk convert <src> <dst> --repair-index`, (2) add `"spatial_merge_size": 2` manually to `processor_config.json` | Vision + text-only verified after repair; auto-repair planned for 2.0.6 via `--repair-config` |
-| `gemma-3n-E2B-it-4bit` | `mlxk convert <src> <dst> --repair-index` | Multimodal (vision + audio). Not part of the verified set for 2.0.5 — runtime status depends on upstream mlx-vlm. |
-
-**❌ Known Issues** (as of 2026-01-03):
-
-| Model | Issue | Workaround |
-|-------|-------|------------|
-| `MiMo-VL-7B-RL-bf16` | NoneType iteration error | mlx-vlm processor bug, no workaround |
-| `DeepSeek-OCR-8bit` | Runs but hallucinates details | Quality issue, not recommended |
-
-**Models affected by mlx-vlm #624** (index/shard mismatch) can be repaired:
-
-```bash
-mlxk convert <model> <output> --repair-index
-```
-
-**Recommendation:** Test models with real images before production use. The vision ecosystem is evolving rapidly — this list will be updated as mlx-vlm matures.
-
-**Reporting Issues:** If you encounter vision model failures, please report with model name and error message to help improve compatibility tracking.
+Some legacy mlx-vlm conversions need a one-time index repair before they load — use `mlxk convert <src> <dst> --repair-index`. The coverage matrix lists which families still need this and which are clean since mlx-vlm 0.4+.
 
 ### Audio Transcription (Speech-to-Text)
 
@@ -509,21 +505,13 @@ mlxk convert <model> <output> --repair-index
 - **Python 3.10+** (mlx-audio dependency, included in base install)
 - **No system dependencies:** MP3/WAV decoding via embedded libsndfile (no ffmpeg or Homebrew required)
 
-**✅ Recommended Models:**
-
-> See also [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md) for the per-release test evidence behind these entries.
-
-| Model | Backend | Size | Duration | Notes |
-|-------|---------|------|----------|-------|
-| `whisper-large-v3-turbo-4bit` | mlx-audio | ~464MB | >10 min | **⭐ Recommended** — Best accuracy/speed balance; 4bit + 8bit variants both verified in 2.0.5 |
-| `whisper-tiny` | mlx-audio | ~74MB | >10 min | Fast, lower accuracy |
-| `gemma-3n-E2B-it-4bit` | mlx-vlm | ~2.1GB | ~30s | Multimodal (vision+audio). See **Works after repair workflow** under *Vision Model Compatibility* — not part of the verified set for 2.0.5; runtime status depends on upstream mlx-vlm. |
+**Reference model:** `mlx-community/whisper-large-v3-turbo-4bit` (~464 MB, supports >10 min audio, 4bit + 8bit variants both verified). See [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md) for the full per-release verified list.
 
 **🔧 Backend Architecture:**
 
 mlx-knife automatically routes audio models to the optimal backend:
-- **Whisper/Voxtral** → mlx-audio (dedicated STT, >10min duration, best accuracy)
-- **Gemma-3n** → mlx-vlm (multimodal audio, ~30s limit, backward compatible)
+- **Dedicated STT (Whisper / Voxtral family)** → mlx-audio (long-form, best accuracy)
+- **Multimodal LLMs with audio input** → mlx-vlm (token-limited duration, secondary path)
 
 **⚙️ Audio Defaults:**
 
@@ -549,14 +537,12 @@ mlxk run whisper-large --audio speech.mp3 --language en
 mlxk run whisper-large --audio podcast.wav
 ```
 
-**⚠️ Known Limitations:**
+**⚠️ Limitations:**
 
-| Limitation | Whisper Models | Gemma-3n (Multimodal) | Workaround |
-|------------|----------------|------------------------|------------|
-| **Duration** | >10 minutes ✅ | ~30 seconds (token limit) | Use Whisper for long audio |
-| **File size** | 50MB max | 50MB max | Split larger files |
-| **Formats** | WAV, MP3, M4A (macOS native, Linux needs ffmpeg) | WAV | M4A uses Core Audio on macOS |
-| **Legacy models** | Some use old `weights.npz` format | - | Use models with `.safetensors` |
+- **Duration:** depends on model architecture — dedicated STT models (Whisper) support >10 min; multimodal LLMs with audio are typically token-limited to ~30 s
+- **File size:** 50 MB max per request (configurable)
+- **Formats:** WAV, MP3, M4A on macOS (M4A via Core Audio); Linux needs ffmpeg for non-WAV
+- **Legacy weights:** `.npz`-only models are not supported — use `.safetensors` variants
 
 **🎯 Advanced Usage:**
 
@@ -570,20 +556,6 @@ mlxk run whisper-large --audio german.mp3 --language de
 # Segment metadata (MLXK2_AUDIO_SEGMENTS=1 for timestamps)
 MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
 ```
-
-**🔄 Gemma-3n Multimodal (Backward Compatibility):**
-
-> **Note:** Gemma-3n requires workspace repair due to mlx-vlm #624. Use Whisper for production STT.
-
-```bash
-# One-time setup (if using Gemma-3n)
-mlxk clone mlx-community/gemma-3n-E2B-it-4bit
-mlxk convert gemma-3n-E2B-it-4bit gemma-3n-audio-FIXED --repair-index
-
-# Run (30s limit, multimodal audio)
-mlxk run gemma-3n-audio-FIXED --audio short-clip.wav
-```
-
 
 ## JSON API
 
@@ -787,54 +759,73 @@ mlxk pull "model-name" --force-resume
 - `list --all`: Shows all frameworks (MLX, GGUF, PyTorch)
 - Flags are combinable: `--all --verbose`, `--all --health`, `--verbose --health`
 
-### Health Status Display (--health flag)
+### `mlxk list` Output Columns
 
-The `--health` flag adds health status information to the output:
+`mlxk list` shows workspace and cache models in one portfolio view. Output expands by mode; `--health` is a modular extension on top of the base columns.
 
-**Compact mode** (default, `--all`):
-- Shows single "Health" column with values:
-  - `healthy` - File integrity OK and MLX runtime compatible
-  - `healthy*` - File integrity OK but not MLX runtime compatible (use `--verbose` for details)
-  - `unhealthy` - File integrity failed or unknown format
+**Default columns** (compact mode):
 
-**Verbose mode** (`--verbose --health`):
-- Splits into "Integrity" and "Runtime" columns:
-  - **Integrity:** `healthy` / `unhealthy`
-  - **Runtime:** `yes` / `no` / `-` (dash = gate blocked by failed integrity)
-  - **Reason:** Explanation when problems detected (wrapped at 26 chars for readability)
+| Column | Meaning |
+|--------|---------|
+| `Name` | Model identifier (compact form; workspaces use `display_name`) |
+| `Hash` | First 7 chars of content hash |
+| `Size` | Combined weights + config size |
+| `Modified` | Last filesystem modification |
+| `Src` | `cache` · `ws` (clean workspace) · `ws*` (modified) · `ws?` (v1 legacy — run `mlxk show <name> --recalc-hash` to migrate) |
+| `Type` | Capability label (e.g. `chat`, `chat+vision`, `audio`) |
 
-**Examples:**
+**`--verbose` (or `--all`) adds** the `Clean` column (workspace integrity: `✓` clean · `✗` modified · `—` cache or migration-pending) and the `Framework` column (`MLX` / `PyTorch` / `GGUF`).
+
+**`--health` adds** health diagnostics. In compact mode this is a single `Health` column; in verbose mode it splits into `Integrity`, `Runtime`, and `Reason`.
+
+| Health value | Meaning |
+|--------------|---------|
+| `healthy`    | file integrity OK and MLX runtime compatible |
+| `healthy*`   | files intact but MLX runtime can't execute (wrong framework, incompatible `model_type`, or mlx-lm too old) |
+| `unhealthy`  | file integrity failed or unknown format |
+
+**Default** — workspace + cache models, MLX-only, healthy + runnable:
 
 ```bash
-# Compact health view
-mlxk list --health
-# Output:
-# Name                    | Hash    | Size   | Modified | Type | Health
-# Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | chat | healthy
-# Qwen2-7B-Instruct       | 1a2b3c4 | 4.8GB  | 3d ago   | chat | healthy*
-
-# Verbose health view with details
-mlxk list --verbose --health
-# Output:
-# Name                    | Hash    | Size   | Modified | Framework | Type | Integrity | Runtime | Reason
-# Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | MLX       | chat | healthy   | yes     | -
-# Qwen2-7B-Instruct       | 1a2b3c4 | 4.8GB  | 3d ago   | PyTorch   | chat | healthy   | no      | Incompatible: PyTorch
-
-# All frameworks with health status
-mlxk list --all --health
-# Output:
-# Name                    | Hash    | Size   | Modified | Framework | Type    | Health
-# Llama-3.2-3B-Instruct   | a1b2c3d | 2.1GB  | 2d ago   | MLX       | chat    | healthy
-# llama-3.2-gguf-q4       | b2c3d4e | 1.8GB  | 3d ago   | GGUF      | unknown | healthy*
-# broken-download         | -       | 500MB  | 1h ago   | Unknown   | unknown | unhealthy
+mlxk list
 ```
 
-**Design Philosophy:**
-- `unhealthy` is a catch-all for anything not understood/supported (broken downloads, unknown formats, creative HuggingFace structures)
-- `healthy` guarantees the model will work with `mlxk2 run`
-- `healthy*` means files are intact but MLX runtime can't execute them (e.g., GGUF/PyTorch models, incompatible model_type, or mlx-lm version too old)
+```
+Name                  | Hash    | Size  | Modified | Src   | Type
+----------------------+---------+-------+----------+-------+-----
+Llama-3.2-3B-Instruct | a1b2c3d | 2.1GB | 2d ago   | cache | chat
+my-llama-workspace    | 9f8e7d6 | 2.1GB | 1h ago   | ws    | chat
+legacy-workspace      | 7a6b5c4 | 4.8GB | 5d ago   | ws?   | chat
+```
 
-Note: JSON output is unaffected by these human-only filters and always includes full health/runtime data.
+**`--verbose`** — adds `Clean` and `Framework` columns:
+
+```bash
+mlxk list --verbose
+```
+
+```
+Name                  | Hash    | Size  | Modified | Src   | Clean | Framework | Type
+----------------------+---------+-------+----------+-------+-------+-----------+-----
+Llama-3.2-3B-Instruct | a1b2c3d | 2.1GB | 2d ago   | cache | —     | MLX       | chat
+my-llama-workspace    | 9f8e7d6 | 2.1GB | 1h ago   | ws    | ✓     | MLX       | chat
+edited-workspace      | 9f8e7d6 | 2.1GB | 5m ago   | ws*   | ✗     | MLX       | chat
+```
+
+**`--verbose --health`** — verbose mode splits health into three columns:
+
+```bash
+mlxk list --verbose --health
+```
+
+```
+Name                  | Hash    | Size  | Modified | Src   | Clean | Framework | Type | Integrity | Runtime | Reason
+----------------------+---------+-------+----------+-------+-------+-----------+------+-----------+---------+-------
+Llama-3.2-3B-Instruct | a1b2c3d | 2.1GB | 2d ago   | cache | —     | MLX       | chat | healthy   | yes     | -
+my-llama-workspace    | 9f8e7d6 | 2.1GB | 1h ago   | ws    | ✓     | MLX       | chat | healthy   | yes     | -
+```
+
+`--json` is unaffected by the human-mode `healthy + runtime_compatible` filter and always returns the full model list with health/runtime fields.
 
 
 ## Logging & Debugging
@@ -1305,7 +1296,8 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.5 | April 2026</i><br>
+  <i>Version 2.0.6 | May 2026</i><br>
+  <i>Supported by Anthropic Claude Code</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>
 </p>

@@ -20,6 +20,7 @@ dist/
 *.egg-info/
 CLAUDE.md
 TODO_REAL_TESTS.md
+docs/MODEL-NOTES.md
 server.log
 install_*.log
 .gitignore
