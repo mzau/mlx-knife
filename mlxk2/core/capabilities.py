@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -28,6 +29,35 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 _CHAT_TEMPLATE_KEY_BYTES = b'"chat_template"'
+
+# Whisper-derived architectures that support the `<|translate|>` task token
+# (Whisper translate-to-English; RUNTIME-FEATURES.md §4.5 / §6). Non-Whisper
+# STT models (Voxtral, VibeVoice, Qwen3-ASR) do not implement Whisper's
+# translate task even when they share audio-in capability.
+WHISPER_DERIVED_TRANSLATE_TYPES = frozenset({
+    "whisper",
+})
+
+# OpenAI's English-only Whisper checkpoints lack `<|translate|>` in their
+# vocabulary and cannot perform translation. Matches the standard naming
+# `whisper-{tiny,base,small,medium}.en` with optional quantization/mlx
+# suffix (e.g. `whisper-tiny.en-4bit`, `whisper-base.en-mlx`).
+_WHISPER_EN_ONLY_PATTERN = re.compile(
+    r"whisper-(?:tiny|base|small|medium)\.en(?:[-_./]|$)",
+    re.IGNORECASE,
+)
+
+# Whisper-Turbo variants have a reduced 4-layer decoder (vs 32 in large-v3)
+# that is fine-tuned for transcribe-speed. Empirically, translate-task
+# output on non-English source is degraded to garbage (German output
+# instead of English, decoder fallback failures). See docs/MODEL-NOTES.md
+# "Whisper-large-v3-turbo" entry for the full empirical record (2026-05-14).
+# Matches `whisper-large-v3-turbo*`, `whisper-turbo*` (legacy pre-large-v3),
+# and any other Whisper variant carrying the `turbo` token in its name.
+_WHISPER_TURBO_PATTERN = re.compile(
+    r"whisper-[a-z0-9.-]*turbo(?:[-_./]|$)",
+    re.IGNORECASE,
+)
 
 
 def extract_chat_template(path: Path) -> Optional[str]:
@@ -71,6 +101,7 @@ class Capability(str, Enum):
     EMBEDDINGS = "embeddings"
     VISION = "vision"
     AUDIO = "audio"
+    AUDIO_TRANSLATE_EN = "audio-translate-en"
 
 
 # Convenience set for validation/iteration
@@ -202,6 +233,48 @@ def classify_convert_target(config: Dict[str, Any]) -> str:
     return "text"
 
 
+def detect_audio_translate_en_capability(
+    model_name: str,
+    config: Optional[Dict[str, Any]],
+) -> bool:
+    """Detect Whisper audio-translate-en capability (RUNTIME-FEATURES.md §6).
+
+    Reachable iff:
+        1. `config.model_type` matches a Whisper-derived architecture
+           (WHISPER_DERIVED_TRANSLATE_TYPES), AND
+        2. the model is not an English-only variant (whisper-*.en).
+
+    Whisper's translate task always emits English output regardless of source
+    language. English-only variants lack the `<|translate|>` special token
+    and cannot translate. Non-Whisper STT models (Voxtral, VibeVoice,
+    Qwen3-ASR) do not implement Whisper's translate task and are rejected
+    here even if they expose audio-in.
+
+    mlx-community Whisper checkpoints do not ship HF tokenizer JSON files
+    (only `config.json` + weights, sometimes `multilingual.tiktoken`), so a
+    byte-scan over tokenizer files is not load-bearing on the current
+    portfolio. The `model_type` + name heuristic is the primary signal.
+    Extend `WHISPER_DERIVED_TRANSLATE_TYPES` if upstream support widens.
+    """
+    if not isinstance(config, dict):
+        return False
+    mt = config.get("model_type")
+    if not isinstance(mt, str):
+        return False
+    if mt.lower() not in WHISPER_DERIVED_TRANSLATE_TYPES:
+        return False
+    if model_name:
+        # English-only variants lack the <|translate|> special token (architectural).
+        if _WHISPER_EN_ONLY_PATTERN.search(model_name):
+            return False
+        # Turbo variants have decoder-capacity insufficient for translate task
+        # (functional, not architectural — token is present but model cannot
+        # reliably emit English output). See docs/MODEL-NOTES.md.
+        if _WHISPER_TURBO_PATTERN.search(model_name):
+            return False
+    return True
+
+
 @dataclass
 class ModelCapabilities:
     """Probed model capabilities and runtime information.
@@ -217,6 +290,7 @@ class ModelCapabilities:
     is_chat: bool = False
     is_embedding: bool = False
     is_audio: bool = False
+    is_audio_translate_en: bool = False  # Whisper translate-to-English task (sub-capability of audio)
 
     # Audio backend routing (ADR-020)
     # MLX_AUDIO for STT (Whisper, Voxtral), MLX_VLM for multimodal (Gemma-3n)
@@ -516,6 +590,13 @@ def probe_model_capabilities(
         caps.is_audio = False
         caps.audio_backend = None
 
+    # Detect Whisper audio-translate-en sub-capability (RUNTIME-FEATURES.md §6)
+    if caps.is_audio and caps.audio_backend == Backend.MLX_AUDIO:
+        try:
+            caps.is_audio_translate_en = detect_audio_translate_en_capability(model_name, caps.config)
+        except Exception:
+            caps.is_audio_translate_en = False
+
     # Build capabilities list (for JSON API compatibility)
     if caps.is_embedding:
         caps.capabilities_list = [Capability.EMBEDDINGS.value]
@@ -527,6 +608,8 @@ def probe_model_capabilities(
             caps.capabilities_list.append(Capability.VISION.value)
         if caps.is_audio:
             caps.capabilities_list.append(Capability.AUDIO.value)
+            if caps.is_audio_translate_en:
+                caps.capabilities_list.append(Capability.AUDIO_TRANSLATE_EN.value)
 
     # Check runtime availability
     caps.python_version = sys.version_info[:3]

@@ -262,6 +262,7 @@ def run_model(
     verbose: bool = False,
     hide_reasoning: bool = False,
     language: Optional[str] = None,
+    translate: Optional[str] = None,
 ) -> Optional[str]:
     """Execute model with prompt - supports both single-shot and interactive modes.
 
@@ -459,6 +460,40 @@ def run_model(
             print(error_result, file=sys.stderr)
         return error_result
 
+    # --translate validation (Issue #54, RUNTIME-FEATURES.md §3.2)
+    # Pre-execution reject before any model load. Three checks:
+    #   1. target != 'en' → reject (Whisper architecture: translate-task is always-to-English)
+    #   2. --translate without --audio → reject (semantically requires audio input)
+    #   3. model not audio-translate-en capable → reject (whisper.en variants, non-Whisper STT)
+    if translate is not None:
+        if translate.lower() != "en":
+            error_result = (
+                f"Error: --translate only supports English target ('en'); got '{translate}'. "
+                f"Other target languages would need a transcribe + LLM-translate pipeline "
+                f"(planned separately)."
+            )
+            if not json_output:
+                print(error_result, file=sys.stderr)
+            return error_result
+        if not audio:
+            error_result = "Error: --translate requires --audio FILE."
+            if not json_output:
+                print(error_result, file=sys.stderr)
+            return error_result
+        if resolved_name and cfg is not None:
+            from ..core.capabilities import detect_audio_translate_en_capability
+            if not detect_audio_translate_en_capability(resolved_name, cfg):
+                error_result = (
+                    f"Error: Model '{model_spec}' does not support speech translation "
+                    f"(audio-translate-en). Try a multilingual non-turbo Whisper "
+                    f"variant (e.g. mlx-community/whisper-large-v3-4bit). "
+                    f"Whisper-turbo variants have a reduced decoder that cannot "
+                    f"reliably perform translation."
+                )
+                if not json_output:
+                    print(error_result, file=sys.stderr)
+                return error_result
+
     # Pre-execution-reject text-only invocation against models without text-generation
     # capability. Without this gate the request reaches mlx-lm which fails late with a
     # cryptic "Model type 'X' not supported" loader error. Covers STT-only (Whisper,
@@ -498,8 +533,25 @@ def run_model(
                     print(error_result, file=sys.stderr)
                 return error_result
 
-            if prompt is None:
-                prompt = "Transcribe this audio."
+            # TEMPORARY (#54 implementation, pending pure-audio prompt-UX issue):
+            # No synthetic default prompt for pure-audio backend. Whisper's
+            # initial_prompt is documented as a vocabulary/context bias hint,
+            # not a chat/task instruction (Whisper docstring: "prompt-engineer
+            # a context for transcription, e.g. custom vocabularies"). The
+            # previous defaults `"Transcribe this audio."` / `"Translate this
+            # audio to English."` were silently routed there and caused
+            # decoder confusion on translate+non-English-source paths.
+            #
+            # Keeping the slot empty unless the user explicitly supplies a
+            # positional prompt lets us smoke-test Whisper's behavior with
+            # and without bias-hint and characterize the right long-term UX
+            # (reject the positional / dedicate a --initial-prompt flag /
+            # warn). User-supplied prompt continues to thread to
+            # audio_runner.transcribe() and lands as initial_prompt — that is
+            # an informed override for vocab-bias use cases.
+            #
+            # Multimodal-audio chat (Gemma-3n via mlx-vlm path below) is
+            # unaffected and still gets its chat-default prompt.
 
             try:
                 from ..core.audio_runner import AudioRunner
@@ -511,6 +563,7 @@ def run_model(
                         max_tokens=max_tokens or 4096,
                         temperature=temperature,
                         language=language,
+                        task="translate" if translate else None,
                     )
 
             except Exception as e:
@@ -838,6 +891,7 @@ def run_model_enhanced(
     system_prompt: Optional[str] = None,
     hide_reasoning: bool = False,
     language: Optional[str] = None,
+    translate: Optional[str] = None,
 ) -> Optional[str]:
     """Enhanced run with additional parameters for future features.
     
@@ -883,4 +937,5 @@ def run_model_enhanced(
         verbose=verbose,
         hide_reasoning=hide_reasoning,
         language=language,
+        translate=translate,
     )

@@ -18,7 +18,11 @@ import importlib.util
 import sys
 
 # Import from unified capabilities module (ARCHITECTURE.md)
-from ..core.capabilities import VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES, Capability, Backend, extract_chat_template
+from ..core.capabilities import (
+    VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES,
+    Capability, Backend, extract_chat_template,
+    detect_audio_translate_en_capability,
+)
 
 
 @dataclass
@@ -427,7 +431,10 @@ def detect_capabilities(
     # STT/Audio-only models (Whisper, Voxtral) - ONLY audio capability
     # These models transcribe audio, they don't generate text or chat
     if model_type == "audio":
-        return [Capability.AUDIO.value]
+        caps = [Capability.AUDIO.value]
+        if detect_audio_translate_en_capability(hf_name, config):
+            caps.append(Capability.AUDIO_TRANSLATE_EN.value)
+        return caps
     caps = [Capability.TEXT_GENERATION.value]
     name = hf_name.lower()
     ct = tok_hints.get("chat_template")

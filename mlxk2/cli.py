@@ -388,6 +388,16 @@ def main():
         help="Audio language code (e.g., 'en', 'de'). Auto-detect if omitted.",
     )
     run_parser.add_argument(
+        "--translate",
+        nargs="?",
+        const="en",
+        default=None,
+        metavar="LANG",
+        help="Translate audio to target language (multilingual Whisper only). "
+             "Only 'en' is supported (Whisper architecture limit); other targets "
+             "would need a separate transcribe + LLM-translate pipeline.",
+    )
+    run_parser.add_argument(
         "--chunk",
         type=int,
         default=1,
@@ -764,6 +774,7 @@ def main():
                 system_prompt=None,  # Not yet implemented
                 hide_reasoning=getattr(args, "no_reasoning", False),
                 language=getattr(args, "language", None),
+                translate=getattr(args, "translate", None),
             )
 
             # Detect errors from run_model_enhanced (returns "Error: ..." string on failure)

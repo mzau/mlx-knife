@@ -26,8 +26,13 @@ from mlxk2.core.capabilities import (
     _detect_vision_from_config,
     _detect_vision_from_files,
 )
+from mlxk2.core.capabilities import (
+    Capability,
+    detect_audio_translate_en_capability,
+)
 from mlxk2.operations.common import (
     detect_audio_capability,
+    detect_capabilities,
     detect_model_type,
     detect_vision_capability,
 )
@@ -139,6 +144,120 @@ class TestDetectAudioCapability:
             json.dumps({"audio_seq_length": 750, "processor_class": "Gemma4Processor"})
         )
         assert detect_audio_capability(tmp_path, config) is False
+
+
+class TestDetectAudioTranslateEnCapability:
+    """audio-translate-en sub-capability detection (RUNTIME-FEATURES.md §6, Issue #54).
+
+    Reachable iff `config.model_type` is Whisper-derived AND the model name
+    is not an English-only variant (`whisper-*.en`).
+    """
+
+    def test_multilingual_whisper_is_translate_capable(self):
+        """whisper-large-v3 (non-turbo, multilingual) supports translate."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-4bit", config) is True
+
+    def test_workspace_path_multilingual(self):
+        """Workspace path with multilingual non-turbo whisper name."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("/Volumes/X/mlx-models/whisper-large-v3-4bit", config) is True
+
+    def test_bare_whisper_name(self):
+        """Bare repo name (no org/) without .en suffix."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("whisper-large-v3-mlx", config) is True
+
+    def test_whisper_tiny_en_rejected(self):
+        """English-only whisper-tiny.en lacks <|translate|> token."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("openai/whisper-tiny.en", config) is False
+
+    def test_whisper_base_en_quantized_rejected(self):
+        """whisper-base.en-4bit (community-quantized en-only) rejected."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-base.en-4bit", config) is False
+
+    def test_whisper_small_en_mlx_rejected(self):
+        """whisper-small.en-mlx (community-converted en-only) rejected."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-small.en-mlx", config) is False
+
+    def test_whisper_medium_en_path_rejected(self):
+        """Workspace path with whisper-medium.en rejected."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("/Volumes/X/whisper-medium.en-4bit", config) is False
+
+    def test_voxtral_rejected(self):
+        """Voxtral is STT but does not implement Whisper's translate task."""
+        config = {"model_type": "voxtral"}
+        assert detect_audio_translate_en_capability("mistralai/Voxtral-Mini", config) is False
+
+    def test_whisper_large_v3_turbo_4bit_rejected(self):
+        """Whisper-turbo decoder (4 layers) is functionally incapable of translate."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-turbo-4bit", config) is False
+
+    def test_whisper_large_v3_turbo_8bit_rejected(self):
+        """Whisper-turbo 8bit also rejected (decoder capacity, not quantization)."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-turbo-8bit", config) is False
+
+    def test_whisper_turbo_legacy_rejected(self):
+        """Pre-large-v3 turbo (mlx-community/whisper-turbo, npz legacy) also rejected."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-turbo", config) is False
+
+    def test_whisper_large_v3_mlx_4bit_accepted(self):
+        """Regression anchor: non-turbo `-mlx-` infix variant (dual-format) is accepted."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-mlx-4bit", config) is True
+
+    def test_vibevoice_rejected(self):
+        """VibeVoice-ASR does not implement Whisper's translate task."""
+        config = {"model_type": "vibevoice_asr"}
+        assert detect_audio_translate_en_capability("microsoft/VibeVoice-ASR-4bit", config) is False
+
+    def test_none_config_rejected(self):
+        """None config is safe-no."""
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-mlx", None) is False
+
+    def test_empty_config_rejected(self):
+        """Empty config has no model_type → safe-no."""
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-mlx", {}) is False
+
+    def test_no_model_type_rejected(self):
+        """Config without model_type field → safe-no."""
+        assert detect_audio_translate_en_capability("mlx-community/whisper-large-v3-mlx", {"some_other_field": "x"}) is False
+
+    def test_empty_model_name_with_valid_config(self):
+        """Empty model name still allows translate if model_type is Whisper (name filter is deferred)."""
+        config = {"model_type": "whisper"}
+        assert detect_audio_translate_en_capability("", config) is True
+
+    def test_capability_emitted_in_detect_capabilities(self, tmp_path):
+        """detect_capabilities() includes audio-translate-en for multilingual non-turbo Whisper."""
+        config = {"model_type": "whisper"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        caps = detect_capabilities("audio", "mlx-community/whisper-large-v3-4bit", {}, config, tmp_path)
+        assert Capability.AUDIO.value in caps
+        assert Capability.AUDIO_TRANSLATE_EN.value in caps
+
+    def test_capability_not_emitted_for_en_variant(self, tmp_path):
+        """detect_capabilities() omits audio-translate-en for .en variants."""
+        config = {"model_type": "whisper"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        caps = detect_capabilities("audio", "openai/whisper-tiny.en", {}, config, tmp_path)
+        assert Capability.AUDIO.value in caps
+        assert Capability.AUDIO_TRANSLATE_EN.value not in caps
+
+    def test_capability_not_emitted_for_voxtral(self, tmp_path):
+        """detect_capabilities() omits audio-translate-en for non-Whisper STT."""
+        config = {"model_type": "voxtral"}
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        caps = detect_capabilities("audio", "mistralai/Voxtral-Mini", {}, config, tmp_path)
+        assert Capability.AUDIO.value in caps
+        assert Capability.AUDIO_TRANSLATE_EN.value not in caps
 
 
 class TestDetectModelTypeSTT:

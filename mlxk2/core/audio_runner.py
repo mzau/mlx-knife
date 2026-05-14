@@ -284,8 +284,9 @@ class AudioRunner:
         max_tokens: int = 4096,  # Ignored (Whisper generates full transcription)
         temperature: float = 0.0,
         language: Optional[str] = None,
+        task: Optional[str] = None,
     ) -> str:
-        """Transcribe audio files to text.
+        """Transcribe (or translate) audio files to text.
 
         Args:
             audio: List of (filename, bytes) tuples for audio files
@@ -293,6 +294,10 @@ class AudioRunner:
             max_tokens: Ignored (Whisper generates full transcription automatically)
             temperature: Sampling temperature (0.0 = deterministic, best for accuracy)
             language: Language code (e.g., 'en', 'de'). Auto-detect if None.
+            task: Whisper task ('transcribe' or 'translate'). None lets mlx-audio
+                default to 'transcribe'. 'translate' produces English output
+                regardless of source language (Whisper architecture limit);
+                only multilingual Whisper variants support it (Issue #54).
 
         Returns:
             Transcription text. If MLXK2_AUDIO_SEGMENTS=1, includes segment table.
@@ -316,6 +321,7 @@ class AudioRunner:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     language=language,
+                    task=task,
                 )
                 all_transcriptions.append(result)
 
@@ -338,11 +344,14 @@ class AudioRunner:
         max_tokens: int = 4096,  # Ignored
         temperature: float = 0.0,
         language: Optional[str] = None,
+        task: Optional[str] = None,
     ) -> str:
-        """Transcribe a single audio file.
+        """Transcribe (or translate) a single audio file.
 
         Uses generate_transcription() with either pre-loaded model (workspace)
-        or model name (HF cache).
+        or model name (HF cache). The `task` kwarg ('transcribe' / 'translate')
+        is filtered through mlx-audio's signature-filter (generate.py:49-50)
+        and reaches Whisper's `Model.generate(task=...)` parameter.
         """
         try:
             # Build kwargs for generate_transcription
@@ -368,6 +377,21 @@ class AudioRunner:
                 gen_kwargs["temperature"] = temperature
             if language:
                 gen_kwargs["language"] = language
+            if task:
+                gen_kwargs["task"] = task
+                # Long-form translate mitigation (Issue #54, empirical 2026-05-14):
+                # Whisper's default `condition_on_previous_text=True` propagates
+                # the previous chunk's output as bias context to the next chunk.
+                # On long-form audio, translate is markedly more susceptible to
+                # repetition-loop failure than transcribe — a chunk that drifts
+                # into a degenerate output contaminates all subsequent chunks
+                # via the propagated context. Disabling context propagation
+                # decouples chunks and breaks the loop reliably. Cost: minor
+                # cross-chunk domain-vocabulary-consistency loss, which matters
+                # less for translate (always-to-English target) than for
+                # transcribe (where proper-noun consistency is desirable).
+                if task == "translate":
+                    gen_kwargs["condition_on_previous_text"] = False
 
             # Optimize for batch STT (not streaming)
             # chunk_duration=30.0: Process 30s chunks (Whisper's max context window)

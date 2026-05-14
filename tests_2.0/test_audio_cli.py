@@ -112,6 +112,71 @@ class TestAudioCapabilityCheck:
         assert "audio" in result.lower() or "not found" in result.lower()
 
 
+class TestTranslateValidation:
+    """Tests for --translate flag validation (Issue #54).
+
+    Pre-execution rejects that do not require a real model:
+    - non-English target language rejected
+    - --translate without --audio rejected
+    Model-dependent capability check (translate-incapable Whisper.en variant
+    or non-Whisper STT) is covered by wet tests in Commit 4.
+    """
+
+    def test_translate_non_en_target_rejected(self):
+        """--translate de (or any non-en target) must reject pre-execution."""
+        from mlxk2.operations.run import run_model
+
+        result = run_model(
+            model_spec="nonexistent-model",
+            prompt="x",
+            translate="de",
+        )
+
+        assert result is not None
+        assert "Error:" in result
+        assert "english" in result.lower() or "'en'" in result.lower()
+
+    def test_translate_non_en_uppercase_also_rejected(self):
+        """Case insensitivity: --translate DE rejected as well."""
+        from mlxk2.operations.run import run_model
+
+        result = run_model(
+            model_spec="nonexistent-model",
+            prompt="x",
+            translate="DE",
+        )
+
+        assert result is not None
+        assert "Error:" in result
+        assert "english" in result.lower() or "'en'" in result.lower()
+
+    def test_translate_without_audio_rejected(self):
+        """--translate without --audio must reject pre-execution."""
+        from mlxk2.operations.run import run_model
+
+        result = run_model(
+            model_spec="nonexistent-model",
+            prompt="x",
+            translate="en",
+        )
+
+        assert result is not None
+        assert "Error:" in result
+        assert "--audio" in result or "audio" in result.lower()
+
+    def test_translate_flag_in_help(self, capsys):
+        """CLI --help should advertise --translate."""
+        from mlxk2.cli import main
+        import sys
+
+        with pytest.raises(SystemExit):
+            with patch.object(sys, 'argv', ['mlxk', 'run', '--help']):
+                main()
+
+        captured = capsys.readouterr()
+        assert "--translate" in captured.out
+
+
 class TestAudioTestAssets:
     """Tests to verify audio test assets are available."""
 
