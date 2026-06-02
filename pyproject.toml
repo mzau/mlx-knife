@@ -41,16 +41,17 @@ dependencies = [
     "mlx>=0.30.0,<0.32",
     "mlx-lm==0.31.3",
     "mlx-audio==0.4.3",
-    "mlx-vlm==0.4.4",
+    "mlx-vlm==0.6.0",
     "transformers==5.5.4",
     "tiktoken>=0.7.0,<1.0",
-    # TEMPORARY (2.0.6): torch+torchvision required for Pixtral / Llama-Vision /
+    # TEMPORARY (2.0.7): torch+torchvision required for Pixtral / Llama-Vision /
     # Mistral-Small-3.1 since transformers >=5.5 made the torchvision-backed
     # "Fast" image processor the default class. Without these, mlx-vlm's
     # AutoProcessor.from_pretrained(..., use_fast=True) fails with
     # requires_backends ImportError on Pixtral-class models.
-    # Sunset-by mlx-vlm#1011 — once upstream provides use_fast=False fallback,
-    # remove these two lines and bump mlx-vlm.
+    # Sunset-by mlx-vlm#1011 — torch stays until upstream provides a use_fast=False
+    # fallback. Verified still required under mlx-vlm 0.6.0 (2026-06-02): the 0.6.0
+    # bump does NOT resolve #1011 (Pixtral still needs torchvision).
     "torch>=2.0",
     "torchvision>=0.15",
 ]

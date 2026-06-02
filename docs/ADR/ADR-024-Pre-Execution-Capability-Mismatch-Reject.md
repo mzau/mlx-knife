@@ -126,7 +126,7 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 **Symptom.** A base model with `vision_config`/`audio_config` truthy lets `--image`/`--audio` through to the runner and either errors late ("0 audio tokens in the text and N tokens from audio embeddings") or produces base-continuation off the metadata header — not a useful answer. Cause: multimodal grounded chat presupposes a chat template emitting media-placeholder tokens; base models lack such templates.
 
-**Implementation sketch (2.1).** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` / `audio-in` as reachable. When the probe fails: pre-execution reject from `mlxk run` with hint to use the `-it` sibling variant; `show`/`list` report media-axes as not reachable. Layer 3 design lives in RUNTIME-FEATURES-ITERATIONS Iter 2/3 (`[POLICY]`-driven reframe per ADR-023 §4 No-Silent-Degradation).
+**Implementation sketch (2.1).** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` / `audio-in` as reachable. When the probe fails: pre-execution reject from `mlxk run` with hint to use the `-it` sibling variant; `show`/`list` report media-axes as not reachable. Layer 3 design lives in the Iter 2/3 reachability plan (`[POLICY]`-driven reframe per ADR-023 §4 No-Silent-Degradation).
 
 ---
 

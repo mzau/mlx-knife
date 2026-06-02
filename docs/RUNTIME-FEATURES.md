@@ -1,6 +1,6 @@
 # Runtime Features — Internal Technical Reference
 
-Status: working draft, 2026-05-05 (Iter 1 landed; see [`RUNTIME-FEATURES-ITERATIONS.md`](RUNTIME-FEATURES-ITERATIONS.md)).
+Status: working draft, 2026-05-05 (Iter 1 landed; the iteration log is kept internally, not in the public tree).
 Captures the conceptual model that informs ADR-024 (extended) and the
 capability-layer refactor planned for 2.0.6 / 2.0.7.
 
@@ -104,7 +104,7 @@ The axes can take any combination. Examples from the current portfolio:
 | `gemma-3n-E2B-it-4bit`               | healthy                         | `{chat, vision-in, audio-in}`   | —                                   |
 | `gemma-4-31b-6bit`                   | healthy                         | `{text}`                        | —                                   |
 | `gemma-4-e4b-it-4bit`                | healthy                         | `{chat, vision-in, audio-in}`   | audio output truncated by mlx-vlm token defaults (separate concern) |
-| `Mistral-Small-3.1-24B` (pre-repair) | unhealthy (index/shards + spatial_merge) | `{}` (loader fails on bit-rot) | — (irrelevant while broken)         |
+| `Mistral-Small-3.1-24B` (pre-repair) | unhealthy (index/shards + spatial_merge) | `{}` (loader fails on `spatial_merge`; the index/shard mismatch alone is glob-survivable — see §3.1) | — (irrelevant while broken)         |
 | `Mistral-Small-3.1-24B` (post-repair)| healthy                         | `{chat, vision-in}`             | —                                   |
 
 ### 1.2 What health is NOT
@@ -187,7 +187,7 @@ per-model reachable set as source of truth.
 Hiding-by-default is a reachability decision, not a health decision. Two
 distinct populations are hidden:
 
-- **Bit-rot population.** `health=unhealthy` → loader fails as a *consequence* → reachable=∅. Remediation: `mlxk convert --repair-index` / `--repair`.
+- **Bit-rot population.** `health=unhealthy`. *Genuine* artefact loss (missing shard data, missing `spatial_merge`) → loader fails → reachable=∅. **But `unhealthy` does not imply reachable=∅:** a stale `model.safetensors.index.json` (mlx-vlm #624) is unhealthy yet **glob-survivable** — mlx-vlm/mlx-lm ignore the index and load the actual shards (empirical 2026-06-02: Qwen2.5-VL-32B loads + runs while `unhealthy`). Such a model is *reachable*; the current health-based default-hide diverges from the `reachable ≠ ∅` filter above and is the over-strict case. Remediation: `mlxk convert --repair-index` / `--repair` (for portability/correctness — not a run prerequisite for #624-only).
 - **Tooling-gap population.** `health=healthy` but no loader / no chat template / no backend → reachable=∅. Remediation: wait for upstream, or use a sibling variant (`-it` chat instead of base) where reachability is non-empty.
 
 Both populations remain accessible via `--all` and via direct path
@@ -368,7 +368,7 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 **Fix path.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` or `audio-in` as reachable. The result for base+multimodal is: text-only reachable (if loader passes), media-in not reachable. The `-it` sibling variant remains reachable for media.
 
-**Slot:** DEFER 2.1 (tied to RUNTIME-FEATURES-ITERATIONS Iter 2/3 — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet, design lives in Iter 2/3 plan).
+**Slot:** DEFER 2.1 (tied to the Iter 2/3 reachability work — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet, design lives in the Iter 2/3 plan).
 
 ---
 
@@ -441,8 +441,7 @@ implementation can pick up exactly where this discussion stops.
 
 2. **31b-bf16 text-only verification skipped.** `gemma-4-31b-bf16` (62.6 GB) was not text-smoked due to RAM constraints (64 GB host). Result inferred from `gemma-4-26b-a4b-it-4bit` (same family, same `audio_config: null`, text works). Architectural inference is solid; the skipped smoke is noted for completeness.
 
-3. **mllama Vision-only smoke pending second-vendor confirmation.** Class C was empirically verified on the gemma family. The original ADR-024 motivation case is mllama (Llama-3.2-Vision). A second-vendor smoke should confirm the discriminator generalises before the reachability probe is wired into routing.
-
+3. **mllama Vision-only smoke pending second-vendor confirmation.** Class C was empirically verified on the gemma family. The original ADR-024 motivation case is mllama (Llama-3.2-Vision). A second-vendor smoke should confirm the discriminator generalises before the reachability probe is wired into routing. **Resolved 2026-06-02** (second-vendor: molmo2 / AllenAI, against mlx-vlm 0.6.0): `mlx_lm._get_classes` rejects `molmo2` exactly as it rejects `mllama`; vision-in is reachable via mlx-vlm, text-only is not — the gemma-derived discriminator (`model_type ∈ MLX_LM_TEXT_LOADER_TYPES` gates text reachability) generalises to a non-gemma/non-llama vendor. mllama-specific smoke remains nominally untaken, but the generalisation concern this question raised is addressed.
 4. **Quality axis structure.** Currently per-feature annotations live free-form in `MODEL-COVERAGE.md`. As the Verified-list grows (ADR-023 trajectory), a more structured form may be required (per-feature `{quality: ok | partial | poor, notes: …}`). Out of scope for the first iteration of this document.
 
 5. **`--healthy` filter flag.** Inverse of `--all`: filter models where `health = healthy` (regardless of reachability). Plausibly useful, but no concrete user request yet. Tracked as opportunistic.
@@ -457,7 +456,7 @@ implementation can pick up exactly where this discussion stops.
 - **Update triggers:** new bug class identified; new audio task class enters mlxk's scope; reachability probe form changes; visibility policy changes.
 - **Implementation triggers (separate sessions):** when the reachability refactor or any of the four bug-class fixes lands, `docs/ARCHITECTURE.md` is updated as part of the same patch series so its description of the live pipeline stays current.
 - **Audience:** maintainers and contributors. Not user-facing. README and SERVER-HANDBOOK remain the user-facing references.
-- **Provisional default:** target-side content in this document (probe forms, discriminator pseudocode, visibility policy, reachability semantics) is provisional pending POC implementation experience. Revision following observation of upstream behaviour and `mlxk`'s user-facing surface is the expected mode, not a regression. The marker convention defined in §0.2 distinguishes `[TARGET]` provisional content from `[CURRENT]` observations and `[POLICY]` ADR-anchored decisions; iteration progress is tracked in [`RUNTIME-FEATURES-ITERATIONS.md`](RUNTIME-FEATURES-ITERATIONS.md).
+- **Provisional default:** target-side content in this document (probe forms, discriminator pseudocode, visibility policy, reachability semantics) is provisional pending POC implementation experience. Revision following observation of upstream behaviour and `mlxk`'s user-facing surface is the expected mode, not a regression. The marker convention defined in §0.2 distinguishes `[TARGET]` provisional content from `[CURRENT]` observations and `[POLICY]` ADR-anchored decisions; iteration progress is tracked in a separate internal iteration log.
 
 ---
 
