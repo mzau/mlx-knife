@@ -69,6 +69,8 @@ Phase 2-4 (live operations): 3+3+3 passed
 
 **Safety:** Live tests that create workspace directories use `mlxk-test-` prefix. `_safe_rmtree()` refuses to delete directories without this prefix, preventing accidental deletion of real models in MLXK_WORKSPACE_HOME.
 
+**Known limitation — single-process wet runs (2026-06-11, structural fix planned):** A full-tree wet run (`pytest -m wet` from the repo root) can die with a fatal nanobind abort (`refusing to add duplicate key "cpu" to enumeration "mlx.core.DeviceType"`) at the first in-process model load, killing the rest of the selection. Marker-based selection imports *every* test module at collection, so the unit-test stub machinery (`tests_2.0/stubs/`, plus the per-module stub/real swap in `_use_real_mlx_modules`) shares one process with the real native MLX stack — and native extensions cannot be re-initialized. Workaround until the harness separates stub and real worlds at process level ("one process = one world", planned together with path-scoping the `scripts/test-wet-umbrella.sh` phases): run the identical selection path-scoped, `pytest -m wet tests_2.0/live -v -o addopts=""` plus `pytest -m wet tests_2.0 --ignore=tests_2.0/live -v -o addopts=""`.
+
 > **Pre-Test Setup — required models per marker:** See [Appendix A6 → Required Models for Live Tests](#a6-required-models-for-live-tests) for the pre-cache / workspace / HF-remote checklist before running live markers.
 
 ---
