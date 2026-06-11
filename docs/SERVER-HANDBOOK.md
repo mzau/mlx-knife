@@ -45,7 +45,7 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/chat/completions` | ✅ Supported | Text, Vision (`image_url`), Audio (`input_audio`) |
 | `/v1/completions` | ✅ Supported | Legacy text completion |
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
-| `/v1/models` | ✅ Supported | Extended with `context_length` field |
+| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field |
 | `/health` | ✅ Custom | MLX Knife extension |
 
 ### Authentication
@@ -315,14 +315,25 @@ A man said to the universe, Sir, I exist.
 
 **List available models.**
 
-Returns all cached models that are healthy and runtime-compatible.
-Models are sorted with preloaded model first (if any), then alphabetically.
+Returns the runnable models — healthy and runtime-compatible — from both the
+HF cache and the workspace home (`MLXK_WORKSPACE_HOME`, ADR-022). This is the
+same set of models as the default human `mlxk list` view (without `--all`);
+a model preloaded from outside the workspace home is included as well.
+The preloaded model (if any) appears exactly once, sorted first; all other
+models follow alphabetically.
 
 **Response:**
 ```json
 {
   "object": "list",
   "data": [
+    {
+      "id": "Mistral-Small-3.1-24B-Instruct-2503-4bit",
+      "object": "model",
+      "owned_by": "workspace",
+      "permission": [],
+      "context_length": 131072
+    },
     {
       "id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
       "object": "model",
@@ -335,9 +346,12 @@ Models are sorted with preloaded model first (if any), then alphabetically.
 ```
 
 **Fields:**
-- `id`: Model identifier (HuggingFace name or workspace path)
+- `id`: Model identifier — HuggingFace name for cache models; directory
+  basename for workspace models (resolves workspace-first at request time,
+  so clients can use it directly as `model` in requests). A model preloaded
+  from an explicit path outside the workspace home keeps its absolute path.
 - `object`: Always `"model"` (OpenAI-compatible)
-- `owned_by`: `"mlx-knife-2.0"` for cached models, `"workspace"` for local directories
+- `owned_by`: `"mlx-knife-2.0"` for cached models, `"workspace"` for workspace models
 - `permission`: Empty array (OpenAI legacy field)
 - `context_length`: Maximum context window in tokens (may be `null` if unavailable)
 

@@ -11,8 +11,17 @@ from fastapi.testclient import TestClient
 from mlxk2.core.server_base import app
 
 
-def test_models_endpoint_minimal_structure():
+def _make_workspace(ws_home, name, config='{"model_type": "llama"}'):
+    """Create a minimal workspace directory (config.json marks it as workspace)."""
+    ws = ws_home / name
+    ws.mkdir(parents=True)
+    (ws / "config.json").write_text(config)
+    return ws
+
+
+def test_models_endpoint_minimal_structure(monkeypatch):
     """/v1/models returns list object with model entries and context_length field."""
+    monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
     client = TestClient(app)
 
     # Note: cache_dir_to_hf/detect_framework/is_model_healthy are imported inside
@@ -63,12 +72,13 @@ def test_unknown_model_maps_to_404():
         assert resp.status_code == 404
 
 
-def test_models_endpoint_filters_unhealthy_and_not_runtime_compatible():
+def test_models_endpoint_filters_unhealthy_and_not_runtime_compatible(monkeypatch):
     """Ensure /v1/models excludes unhealthy and non-runtime-compatible entries.
 
     Filter logic: healthy == True AND runtime_compatible == True
     Uses shared build_model_object from common.py (single source of truth).
     """
+    monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
     client = TestClient(app)
 
     with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
@@ -114,6 +124,177 @@ def test_models_endpoint_filters_unhealthy_and_not_runtime_compatible():
         assert "org/healthy-compatible" in model_ids
         assert "org/unhealthy" not in model_ids
         assert "org/not-compatible" not in model_ids
+
+
+def test_models_endpoint_lists_workspace_models(tmp_path, monkeypatch):
+    """/v1/models lists runnable workspace-home models by basename (Issue #58)."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "ws-model-b")
+    _make_workspace(ws_home, "ws-model-a")
+    (ws_home / "not-a-workspace").mkdir()  # no config.json → skipped
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build:
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = [m["id"] for m in data["data"]]
+        # Basename ids (not absolute paths), alphabetical
+        assert ids == ["ws-model-a", "ws-model-b"]
+        assert all(m["owned_by"] == "workspace" for m in data["data"])
+
+
+def test_models_endpoint_filters_workspace_like_cache(tmp_path, monkeypatch):
+    """Workspace models pass the same runnable filter as cache models (Issue #58)."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "ws-ok")
+    _make_workspace(ws_home, "ws-unhealthy")
+    _make_workspace(ws_home, "ws-not-compatible")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    def build(hf_name, model_root, selected_path):
+        if "ws-unhealthy" in hf_name:
+            return {"health": "unhealthy", "runtime_compatible": True}
+        if "ws-not-compatible" in hf_name:
+            return {"health": "healthy", "runtime_compatible": False}
+        return {"health": "healthy", "runtime_compatible": True}
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build:
+        mock_cache.return_value.exists.return_value = False
+        mock_build.side_effect = build
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json()["data"]]
+        assert ids == ["ws-ok"]
+
+
+def test_models_endpoint_merges_cache_and_workspace(tmp_path, monkeypatch):
+    """/v1/models merges HF-cache and workspace-home models (Issue #58)."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "ws-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.core.cache.cache_dir_to_hf') as mock_cache_to_hf, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build:
+
+        d1 = MagicMock(); d1.name = "models--org--cache-model"
+        snapshot_dir = MagicMock()
+        snapshot_dir.exists.return_value = True
+        snapshot_dir.iterdir.return_value = []
+        d1.__truediv__ = lambda self, x: snapshot_dir
+        mock_cache.return_value.exists.return_value = True
+        mock_cache.return_value.iterdir.return_value = [d1]
+        mock_cache_to_hf.return_value = "org/cache-model"
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        data = resp.json()
+        by_id = {m["id"]: m for m in data["data"]}
+        assert set(by_id) == {"org/cache-model", "ws-model"}
+        assert by_id["ws-model"]["owned_by"] == "workspace"
+        assert by_id["org/cache-model"]["owned_by"] == "mlx-knife-2.0"
+
+
+def test_models_endpoint_preload_workspace_dedup_and_sort_first(tmp_path, monkeypatch):
+    """A preloaded workspace-home model appears once, by basename, sorted first."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "a-model")
+    preload_ws = _make_workspace(ws_home, "z-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build, \
+         patch('mlxk2.core.server_base._preload_model', str(preload_ws)):
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json()["data"]]
+        # No duplicate absolute-path entry; preloaded model first, by basename
+        assert ids == ["z-model", "a-model"]
+
+
+def test_models_endpoint_preload_workspace_outside_home(tmp_path, monkeypatch):
+    """A runnable preloaded workspace outside the workspace home keeps its path id."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "a-model")
+    external = _make_workspace(tmp_path / "elsewhere", "ext-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build, \
+         patch('mlxk2.core.server_base._preload_model', str(external)):
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = [m["id"] for m in data["data"]]
+        # Path id (basename would not resolve via workspace home), sorted first
+        assert ids == [str(external), "a-model"]
+        assert data["data"][0]["owned_by"] == "workspace"
+
+
+def test_models_endpoint_preload_symlinked_workspace_sorts_first(tmp_path, monkeypatch):
+    """A preloaded symlinked workspace keeps its advertised (link) id and sorts first."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "a-plain")
+    target = _make_workspace(tmp_path / "elsewhere", "target-model")
+    (ws_home / "z-link").symlink_to(target)
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build, \
+         patch('mlxk2.core.server_base._preload_model', str(ws_home / "z-link")):
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json()["data"]]
+        # Advertised under the link name (not the target basename), sorted first
+        assert ids == ["z-link", "a-plain"]
+
+
+def test_models_endpoint_preload_not_runnable_stays_hidden(tmp_path, monkeypatch):
+    """Clients only ever see runnable models — even a preloaded one is filtered."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    preload_ws = _make_workspace(ws_home, "sick-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build, \
+         patch('mlxk2.core.server_base._preload_model', str(preload_ws)):
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "unhealthy", "runtime_compatible": False}
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
 
 
 def test_chat_unknown_model_maps_to_404():

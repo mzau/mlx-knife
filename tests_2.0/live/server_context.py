@@ -143,7 +143,7 @@ def _wait_for_memory_release(
 
 @contextmanager
 def LocalServer(
-    model: str,
+    model: Optional[str],
     port: int = 8765,
     timeout: int = 60,
     log_level: str = "warning"
@@ -151,13 +151,14 @@ def LocalServer(
     """Start a local mlx-knife server for E2E testing.
 
     Context manager that:
-    1. Launches server subprocess with pre-loaded model
+    1. Launches server subprocess with pre-loaded model (if given)
     2. Waits for /health endpoint to respond (up to timeout)
     3. Yields server URL for testing
     4. Ensures graceful shutdown (SIGTERM → SIGKILL fallback)
 
     Args:
-        model: Model ID to pre-load (e.g., "mlx-community/Llama-3.2-3B-Instruct-4bit")
+        model: Model ID to pre-load (e.g., "mlx-community/Llama-3.2-3B-Instruct-4bit"),
+               or None to start without preload (e.g. for /v1/models listing tests)
         port: Server port (default 8765, non-standard to avoid conflicts)
         timeout: Startup timeout in seconds (default 60s for model loading)
         log_level: Server log level (default "warning" to reduce noise)
@@ -187,7 +188,11 @@ def LocalServer(
     env["MLXK2_HOST"] = "127.0.0.1"
     env["MLXK2_PORT"] = str(port)
     env["MLXK2_LOG_LEVEL"] = log_level
-    env["MLXK2_PRELOAD_MODEL"] = model
+    if model:
+        env["MLXK2_PRELOAD_MODEL"] = model
+    else:
+        # No preload: make sure nothing leaks in from the caller's environment
+        env.pop("MLXK2_PRELOAD_MODEL", None)
 
     proc = subprocess.Popen(
         [

@@ -113,9 +113,17 @@ class TestServerHealthEndpoints:
             assert isinstance(data["data"], list)
             assert len(data["data"]) > 0
 
-            # Validate loaded model is listed
+            # Validate loaded model is listed.
+            # Workspace models (absolute-path ids in the portfolio) are
+            # advertised by their directory basename since #58; cache models
+            # keep their org/name id.
             model_ids = [m["id"] for m in data["data"]]
-            assert test_model in model_ids
+            expected_id = (
+                test_model.rsplit("/", 1)[-1]
+                if test_model.startswith("/")
+                else test_model
+            )
+            assert expected_id in model_ids
 
 
 class TestChatCompletionsBatch:
