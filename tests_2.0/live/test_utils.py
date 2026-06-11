@@ -45,6 +45,17 @@ finally:
 #
 # Format: Full HuggingFace model ID (org/name) - org matters for filtering!
 # Note: BrokeC/ models are FIXED versions and should NOT be in this list
+#
+# Workspace models have absolute-path ids, so is_known_broken() also matches
+# the directory basename. CAUTION: a bare-basename entry therefore excludes
+# EVERY org/workspace copy with that name — only use one when no fixed
+# same-name conversion exists.
+#
+# SSOT trajectory (Issue #53): this list compensates for runtime_compatible
+# false-positives. Discovery already filters on mlxk's healthy+runnable
+# verdict — once #53 param-reconciliation makes that verdict honest,
+# load-failure entries here become redundant and should be dropped. Only
+# execution-time failures (e.g., non-terminating forwards) stay list-worthy.
 # =============================================================================
 
 KNOWN_BROKEN_MODELS = {
@@ -92,7 +103,28 @@ KNOWN_BROKEN_MODELS = {
     # Strategy: Deferred - use Whisper for STT (works without PyTorch, excellent quality)
     # Watch: transformers upstream for MLX/NumPy tensor support
     "mlx-community/Voxtral-Mini-3B-2507-bf16",
+
+    # mlx-vlm 0.6.x KV-sharing vs stale 0.4.3-era conversion
+    # Root Cause: conversion predates mlx-vlm #1301 KV-sharing; load fails with
+    #   "Received 126 parameters not in model: language_model...k_proj..."
+    # Static health passes (#53 gap), server preload times out (90s) in e2e
+    # Status: off the verified list since the 2.0.7 dep bump (docs/MODEL-COVERAGE.md)
+    # Strategy: recovery = fresh post-0.6.x conversion (different basename)
+    # Note: basename entry — matches the workspace copy and any cache twin
+    "gemma-4-e4b-it-4bit",
 }
+
+
+def is_known_broken(model_id: str) -> bool:
+    """True if a model is on the KNOWN_BROKEN_MODELS list.
+
+    Cache ids (org/name) match exactly; workspace models (absolute-path ids)
+    additionally match by directory basename.
+    """
+    return (
+        model_id in KNOWN_BROKEN_MODELS
+        or model_id.rsplit("/", 1)[-1] in KNOWN_BROKEN_MODELS
+    )
 
 
 # RAM calculation utilities (modularized for different model types)
@@ -298,7 +330,7 @@ def discover_vision_models() -> list[Dict[str, Any]]:
             model_id = model["model_id"]
 
             # Skip known broken models
-            if model_id in KNOWN_BROKEN_MODELS:
+            if is_known_broken(model_id):
                 continue
 
             if model_id in model_info:
@@ -374,7 +406,7 @@ def discover_audio_models() -> list[Dict[str, Any]]:
                 model_name = m["name"]
 
                 # Skip known broken models
-                if model_name in KNOWN_BROKEN_MODELS:
+                if is_known_broken(model_name):
                     continue
 
                 # Calculate RAM using vision formula (conservative)

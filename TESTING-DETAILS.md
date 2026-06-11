@@ -61,7 +61,9 @@ Phase 2-4 (live operations): 3+3+3 passed
 - **Show Portfolio** (`pytest -m show_model_portfolio`) — Display text/vision portfolios separately (requires HF_HOME)
 - **Issue #27** (`pytest -m issue27`) — Real-model health validation (requires HF_HOME or MLXK2_USER_HF_HOME setup)
 
-**Portfolio Discovery** (ADR-009) auto-discovers MLX models using `mlxk list --json` as single source of truth. Since 2.0.5-beta.2, `list` includes both **HuggingFace cache** and **MLXK_WORKSPACE_HOME** workspaces (ADR-022). Portfolio discovery filters to **cache models only** for test parametrization (workspace models are skipped to avoid double-testing when the same model exists in both). No cache-format back-conversion needed — model names from `list --json` are used directly.
+**Portfolio Discovery** (ADR-009) auto-discovers MLX models using `mlxk list --json` as single source of truth. Since 2.0.5-beta.2, `list` includes both **HuggingFace cache** and **MLXK_WORKSPACE_HOME** workspaces (ADR-022). When the same model exists in both, the cache copy wins (`apply_cache_wins_workspace_fallback`) to avoid double-testing; workspace-only models join the portfolio under their absolute-path id. No cache-format back-conversion needed — model names from `list --json` are used directly.
+
+**Known-broken exclusion:** `KNOWN_BROKEN_MODELS` (`tests_2.0/live/test_utils.py`) removes models from portfolio discovery that pass static health checks but consistently fail at runtime due to verified upstream bugs. Policy and per-model rationale live as comments at the list itself and are intentionally not duplicated here. Cache ids match exactly; workspace models also match by directory basename. The list is an interim compensation for [Issue #53](https://github.com/mzau/mlx-knife/issues/53): discovery already filters on mlxk's healthy + runtime-compatible verdict, so once param-reconciliation makes that verdict honest, load-failure entries self-exclude and can be dropped — only execution-time failures (e.g., non-terminating forwards) remain list-worthy.
 
 **Note:** Models requiring workspace repair (e.g., Gemma-3n for audio) must be tested manually.
 
