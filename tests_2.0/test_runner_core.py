@@ -186,6 +186,49 @@ class TestMLXRunnerBasic:
                 assert len(result) > 0
 
 
+class _FakeGemmaStyleTokenizer:
+    """Minimal tokenizer stub: knows <end_of_turn> as a single token (Gemma-style)."""
+    eos_token = "<eos>"
+    pad_token = None
+    additional_special_tokens = None
+    added_tokens_decoder = None
+
+    def __init__(self, single_tokens=None):
+        self.single_tokens = {"<end_of_turn>": 106} if single_tokens is None else single_tokens
+
+    def encode(self, text, add_special_tokens=False):
+        if text in self.single_tokens:
+            return [self.single_tokens[text]]
+        return [1, 2]  # multi-token: probe must reject
+
+    def decode(self, ids):
+        for tok, tid in self.single_tokens.items():
+            if ids == [tid]:
+                return tok
+        return "x"
+
+
+class TestExtractStopTokensCommonProbe:
+    """Common-stop probe: string-level fallback for under-declared conversions."""
+
+    def test_end_of_turn_added_for_gemma_style_tokenizer(self):
+        """<end_of_turn> becomes a stop token when the tokenizer knows it as one token.
+
+        Covers Gemma conversions whose generation_config.json lacks
+        eos_token_id [1, 106] (e.g. translategemma) — without the string-level
+        stop, generation loops on literal '<end_of_turn>' output.
+        """
+        from mlxk2.core.runner.stop_tokens import extract_stop_tokens
+        info = extract_stop_tokens(_FakeGemmaStyleTokenizer())
+        assert "<end_of_turn>" in info.stop_tokens
+
+    def test_end_of_turn_not_added_when_multi_token(self):
+        """Non-Gemma tokenizers (no single-token <end_of_turn>) stay unaffected."""
+        from mlxk2.core.runner.stop_tokens import extract_stop_tokens
+        info = extract_stop_tokens(_FakeGemmaStyleTokenizer(single_tokens={}))
+        assert "<end_of_turn>" not in info.stop_tokens
+
+
 class TestMLXRunnerStopTokens:
     """Test stop token filtering functionality"""
     

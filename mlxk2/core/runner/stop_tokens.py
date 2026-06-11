@@ -63,7 +63,10 @@ def extract_stop_tokens(tokenizer: Any, verbose: bool = False) -> StopTokenInfo:
                         stop_tokens.add(token_content)
 
     # Common stop tokens: add if tokenizer encodes them as a single token and decodes faithfully
-    common_stop_tokens = {'</s>', '<|endoftext|>', '<|im_end|>', '<|eot_id|>'}
+    # <end_of_turn>: Gemma turn terminator — covers conversions whose generation_config.json
+    # lacks eos_token_id [1, 106] (e.g. translategemma), which otherwise loop on literal
+    # '<end_of_turn>' output. Single-token probe keeps this a no-op for non-Gemma models.
+    common_stop_tokens = {'</s>', '<|endoftext|>', '<|im_end|>', '<|eot_id|>', '<end_of_turn>'}
     for token in common_stop_tokens:
         try:
             ids = tokenizer.encode(token, add_special_tokens=False)
