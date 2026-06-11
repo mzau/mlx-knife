@@ -216,6 +216,22 @@ If all gates pass → True (runtime_compatible)
 
 **Implementation:** `build_model_object()` in `common.py:582-706`
 
+#### Capability Presentation — `declared ∩ runnable` (decided 2026-06-10; full form 2.1)
+
+**Decision record:** [ADR-024 §Generalization](ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md). **Bug-class catalog:** [RUNTIME-FEATURES.md §5](RUNTIME-FEATURES.md). **Tracker:** [#53](https://github.com/mzau/mlx-knife/issues/53).
+
+The tree above fails the whole model when any one per-modality gate fails (`AND` over declared modalities) — over-rejecting omni models (vision runnable, audio not → reported wholly not-runnable). The decided direction inverts this to a **filter**:
+
+> A modality is **listed** as a capability iff it is both **declared** (`detect_capabilities`) and **runnable** (its per-modality gate passes, subject to the ADR-023 verified list). The gates **filter** the capability set; `runtime_compatible` is a boolean over the filtered set — `healthy AND effective_capabilities ≠ ∅`.
+
+**Two surfaces.** Diagnostic (`mlxk list --all`, `mlxk show`): declared set + effective set + per-modality drop reason. Consumer (`mlxk list` default, `/v1/models`): effective set only, non-runnable models filtered out (the server already filters `healthy AND runtime_compatible`, `core/server/handlers/models.py:64-68`). The client-facing capability *contract* (`/v1/models` capability emission, client consumption) is **`SERVER-HANDBOOK.md`** terrain and currently **out of scope** — emission + workspace scan unbuilt (#58).
+
+**Invariants.** (1) *No silent fallback* (Principle #2): a dropped modality surfaces its gate reason. (2) *Capability is host-effective, not intrinsic*: the **declared** set is retained in `show`/`--json`. (3) *Integrity precedes capability*: gate [1] health runs before the filter → a false-negative integrity verdict drops a *runnable* model from the consumer surface (see below).
+
+**Open prerequisite (integrity).** The auxiliary-asset check requires `preprocessor_config.json` (Principle #3, Fail Fast), yet the probe layout above marks it *optional*, and mlx-vlm ≥ 0.6 builds the vision processor from an embedded `config.json` (`image_token_id`, `vision_config`). An embedded-processor model is then wrongly `unhealthy` and dropped despite running. ADR-012 already flags this requirement as a "de-facto convention, not formal." Accepting an embedded processor config is a prerequisite for the consumer filter.
+
+**Scope.** The audio-forward-spin reject + the integrity reconciliation land surgically in 2.0.7; the full `MLX_LM_TEXT_LOADER_TYPES`-driven filter is 2.1 (ADR-024 Classes C/D).
+
 ### 2. No Silent Fallbacks
 
 If a model requires a specific capability but the corresponding backend is unavailable, the system **must fail explicitly**. Do not degrade to a lower-capability mode.

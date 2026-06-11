@@ -164,6 +164,7 @@ The requirement for `preprocessor_config.json` is based on HuggingFace de-facto 
 - **Philosophy:** Conservative approach - prefer false negatives (working model marked unhealthy) over false positives (broken model marked healthy that crashes at runtime)
 - **Rationale:** No formal HuggingFace spec exists; mlx-vlm delegates to `AutoProcessor` which handles file loading internally
 - **Future:** Will monitor real-world false negative rate and adjust if necessary
+- **Live false-negative (2026-06):** some vision models ship their processor config embedded in `config.json` (`image_token_id`, `vision_config`) with no separate `preprocessor_config.json`/`processor_config.json`, yet run vision correctly under mlx-vlm ≥ 0.6 (the processor is built from `config.json`). The check marks them `unhealthy`, which drops them from the `/v1/models` consumer surface despite running. Reconciling this — accept an embedded processor config — is a prerequisite for the capability-presentation filter (ARCHITECTURE.md → *Capability Presentation*).
 
 ### Phase 3 — Server Integration
 
