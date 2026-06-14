@@ -203,6 +203,8 @@ If all gates pass → True (runtime_compatible)
 
 > **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `run.py:462-486`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
 
+> **Forthcoming (2.0.7).** Once `mlxk embed` ships, gate [5]'s blanket `False` becomes a verified-encoder-list filter (`bert`/`qwen3` runnable-via-`embed`; non-vendored architectures stay `False`) plus an embed-side pre-execution reject. Spec + scope: [ADR-015](ADR/ADR-015-Embeddings-API.md).
+
 **Gate Priority:**
 
 | Priority | Gate | Checked For |
@@ -222,15 +224,15 @@ If all gates pass → True (runtime_compatible)
 
 The tree above fails the whole model when any one per-modality gate fails (`AND` over declared modalities) — over-rejecting omni models (vision runnable, audio not → reported wholly not-runnable). The decided direction inverts this to a **filter**:
 
-> A modality is **listed** as a capability iff it is both **declared** (`detect_capabilities`) and **runnable** (its per-modality gate passes, subject to the ADR-023 verified list). The gates **filter** the capability set; `runtime_compatible` is a boolean over the filtered set — `healthy AND effective_capabilities ≠ ∅`.
+> A modality is **listed** as a capability iff it is both **declared** (`detect_capabilities`) and **runnable** (its per-modality gate passes — structural availability + known-bad exclusions; the ADR-023 verified list is confidence, not a per-model gate). The gates **filter** the capability set; `runtime_compatible` is a boolean over the filtered set — `healthy AND effective_capabilities ≠ ∅`.
 
 **Two surfaces.** Diagnostic (`mlxk list --all`, `mlxk show`): declared set + effective set + per-modality drop reason. Consumer (`mlxk list` default, `/v1/models`): effective set only, non-runnable models filtered out (the server already filters `healthy AND runtime_compatible`, `core/server/handlers/models.py:64-68`). The client-facing capability *contract* (`/v1/models` capability emission, client consumption) is **`SERVER-HANDBOOK.md`** terrain and currently **out of scope** — emission + workspace scan unbuilt (#58).
 
-**Invariants.** (1) *No silent fallback* (Principle #2): a dropped modality surfaces its gate reason. (2) *Capability is host-effective, not intrinsic*: the **declared** set is retained in `show`/`--json`. (3) *Integrity precedes capability*: gate [1] health runs before the filter → a false-negative integrity verdict drops a *runnable* model from the consumer surface (see below).
+**Invariants.** (1) *No silent fallback* (Principle #2): a dropped modality surfaces its gate reason. (2) *Capability is host-effective, not intrinsic*: the **declared** set is retained in `show`/`--json`. (3) *Integrity precedes capability*: gate [1] health runs before the filter → a false-negative integrity verdict drops a *runnable* model from the consumer surface (see below). (4) *Runnable is a prediction, not a per-model certificate*: a listed-runnable modality's verb is **attempted, never pre-rejected** for a knowable reason; runtime may still fail (unknown / stale-converted model) but **honestly** (Principle #2), never as a `list`↔verb contradiction. Verified sets are class-level (ADR-023 / MODEL-COVERAGE), not per-instance guarantees.
 
 **Open prerequisite (integrity).** The auxiliary-asset check requires `preprocessor_config.json` (Principle #3, Fail Fast), yet the probe layout above marks it *optional*, and mlx-vlm ≥ 0.6 builds the vision processor from an embedded `config.json` (`image_token_id`, `vision_config`). An embedded-processor model is then wrongly `unhealthy` and dropped despite running. ADR-012 already flags this requirement as a "de-facto convention, not formal." Accepting an embedded processor config is a prerequisite for the consumer filter.
 
-**Scope.** The audio-forward-spin reject + the integrity reconciliation land surgically in 2.0.7; the full `MLX_LM_TEXT_LOADER_TYPES`-driven filter is 2.1 (ADR-024 Classes C/D).
+**Scope.** The audio-forward-spin reject + the integrity reconciliation + the **embedding verified-list runnable flagging** (ADR-015, lands with the `embed` verb — see the gate-[5] forward-note above) are the surgical 2.0.7 bites; the full `MLX_LM_TEXT_LOADER_TYPES`-driven filter is 2.1 (ADR-024 Classes C/D).
 
 ### 2. No Silent Fallbacks
 
@@ -452,6 +454,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 
 ## Changelog
 
+- **2026-06-14 (embeddings capability hooks):** Added the gate-[5] forward-note + §Capability Presentation Scope entry for the forthcoming 2.0.7 embedding verified-list runnable flagging (ADR-015), and Invariant (4) (*runnable = prediction, not a per-model certificate*: verbs attempted, never pre-rejected; runtime fails honestly; verified sets are class-level). Clarified the §Capability Presentation filter rule (verified list = confidence, not a per-model runnable gate). No behavior change — `runtime_compatible` semantics unchanged until `mlxk embed` ships.
 - **2026-05-12 (2.0.6 sync):** Added Workspace Model section (sentinel schema, managed-vs-external distinction, HF_HOME bootstrap, content_hash v1↔v2, clean-state visibility). Annotated decision-tree with ADR-024 Class A pre-execution reject. Extended probe-function table with `is_workspace_clean()`. Updated `build_model_object()` line reference (599-634 → 582-706). Extended §7 Feature Gates with `MLXK2_ENABLE_ALPHA_FEATURES` (forthcoming 2.0.7). Updated §8 Embeddings status to slated-2.0.7-experimental. Expanded Implementation with workspace pointer map and dep-pin table (mlx-lm 0.31.3, mlx-audio 0.4.3, mlx-vlm 0.4.4, transformers 5.5.4, torch+torchvision temporary). Rebuilt References (ADR-012/014/015/016/018/020/022/023/024/025, RUNTIME-FEATURES, MODEL-COVERAGE, TESTING-DETAILS, SERVER-HANDBOOK, json-api-specification). ModelManager state machine verified unchanged.
 - **2026-02-11:** Added ModelManager State Machine documentation (Phase 2 refactoring)
 - **2026-02-03:** Modality-agnostic update (audio backend added, examples generalized)

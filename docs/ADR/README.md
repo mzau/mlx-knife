@@ -22,7 +22,7 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-012](ADR-012-Vision-Support-Roadmap.md) | Vision Support Roadmap | Implemented (Phase 1-3) | 2025-11-12 |
 | ADR-013 | Community Model Quality Database | Planned | (not committed) |
 | [ADR-014](ADR-014-Unix-Pipe-Integration.md) | Unix Pipe Integration | Implemented (Phase 1) | 2025-11-16 |
-| ADR-015 | Embeddings API | Planned | (not committed) |
+| [ADR-015](ADR-015-Embeddings-API.md) | Embeddings API | Proposed — ready for 2.0.7 (experimental-gated `MLXK2_ENABLE_ALPHA_FEATURES=1`; 2.1 stable) | 2025-11-16 |
 | [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2b; Phase 3 deferred) | 2026-01-29 |
 | ADR-017 | Image Metadata Extraction (EXIF) | Implemented (Phase 1) | (not committed) |
 | [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented through Phase 3 (Phase 1 `--repair-index` 2.0.4-beta.5, Phase 2 `--quantize` 2.0.5, Phase 3 content_hash v2 via ADR-025 2.0.6; Phase 4 `--repair` deferred 2.1) | 2025-12-18 |
