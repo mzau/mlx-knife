@@ -453,7 +453,27 @@ def main():
     push_parser.add_argument("--check-only", action="store_true", help="Analyze workspace content; do not upload")
     push_parser.add_argument("--dry-run", action="store_true", help="Compute changes against remote; do not upload")
     push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
-    
+
+    # Embed command (ADR-015, experimental — gated by MLXK2_ENABLE_ALPHA_FEATURES=1).
+    # Unlike other commands, embed defaults to JSONL (machine consumer); --human is for inspection.
+    embed_parser = subparsers.add_parser("embed", help="Generate text embeddings (experimental)")
+    embed_parser.add_argument("model", help="Embedding model name, HF ID, or workspace path")
+    embed_parser.add_argument("text", nargs="?", default=None, help="Text to embed, or '-' for stdin")
+    embed_parser.add_argument("--batch", action="store_true",
+                              help="Treat input as JSONL; embed each line's 'text' field (passthrough preserved)")
+    embed_parser.add_argument("--query", action="store_true",
+                              help="Encode as a retrieval query (applies the model's query instruction prefix)")
+    embed_parser.add_argument("--instruct", default=None,
+                              help="Override the query task instruction (implies --query)")
+    embed_parser.add_argument("--cpu", action="store_true",
+                              help="Force CPU execution (fallback for memory / GPU co-residency; "
+                                   "slower than GPU for non-tiny models, and CPU vectors differ "
+                                   "numerically from GPU — do not mix in one store)")
+    embed_parser.add_argument("--human", action="store_true",
+                              help="Human-readable summary instead of JSONL (for inspection, not piping)")
+    embed_parser.add_argument("--output", default=None, help="Write output to file (default: stdout)")
+    embed_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
+
     args = parser.parse_args()
 
     # Note: fd-level stdout suppression is applied locally around convert_operation()
@@ -864,6 +884,43 @@ def main():
             from .output.human import render_push
             print_result(result, render_push, args.json,
                         verbose=getattr(args, "verbose", False))
+        elif args.command == "embed":
+            # Experimental surface (ADR-015) — reject before importing the operation.
+            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+                result = handle_error(
+                    "CommandError",
+                    "embed is experimental and requires MLXK2_ENABLE_ALPHA_FEATURES=1",
+                )
+                print_result(result, None, args.json)
+                sys.exit(1)
+
+            # Resolve text source: positional, '-' (stdin), or --batch JSONL from stdin.
+            text_arg = args.text
+            batch_lines = None
+            if args.batch:
+                batch_lines = sys.stdin.read().splitlines()
+            elif text_arg == "-":
+                text_arg = sys.stdin.read().rstrip("\n")
+            elif text_arg is None:
+                result = handle_error("CommandError", "embed requires <text> or '-' to read stdin")
+                print_result(result, None, args.json)
+                sys.exit(1)
+
+            from .operations.embed import embed_operation, emit_embed_result
+            query_mode = bool(getattr(args, "query", False) or getattr(args, "instruct", None))
+            result = embed_operation(
+                args.model,
+                text=None if args.batch else text_arg,
+                batch=args.batch,
+                batch_lines=batch_lines,
+                input_type="query" if query_mode else "document",
+                instruct=getattr(args, "instruct", None),
+                cpu=getattr(args, "cpu", False),
+                verbose=getattr(args, "verbose", False),
+            )
+            emit_embed_result(result, human=getattr(args, "human", False),
+                              output_file=getattr(args, "output", None))
+            sys.exit(0 if result.get("status") == "success" else 1)
         elif args.command is None:
             # No command specified - show help or JSON error depending on --json flag
             if args.json:

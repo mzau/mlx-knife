@@ -247,6 +247,26 @@ mlxk run ./fixed "Test"
 
 **Disambiguating paths vs cache names:** When a local directory exists with the same name as a cached model, use `./` prefix to force workspace resolution. Otherwise, cache lookup is attempted first.
 
+### Model Identity in Output
+
+Machine-readable output stamps a **portable identity**, never a local filesystem path:
+
+- **`model`** — the `org/name` form. Cache models use the HuggingFace repo ID; workspace models
+  use the sentinel's `source_repo` (recorded at clone time), so a workspace and its cache origin
+  read identically and nothing leaks your directory layout.
+- **`content_hash`** — the model's content fingerprint. Workspace models carry the ADR-025
+  `sha256:…` hash; cache models carry the snapshot revision (git SHA). Its shape also tells a
+  consumer which source a record came from.
+
+**Same-model rule.** Embeddings are only comparable within one model's vector space. A consumer
+compares `(model, content_hash)` across records to detect a mismatch before mixing them.
+
+**Determinism caveat (embeddings).** Embeddings are *not* bit-reproducible across devices or
+library builds: CPU and GPU vectors of the same model and text diverge (≈0.98 cosine on a 4-bit
+model) — small for ranking, but enough to break dedup/threshold logic. Build a vector store with
+**one model and one device**; the embedding metadata stamps `device` (`cpu`/`gpu`) so a mixed
+store is detectable. Less aggressively quantized models are more device-stable.
+
 ---
 
 ## Workspaces

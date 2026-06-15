@@ -3,7 +3,12 @@
 from pathlib import Path
 from typing import Tuple, Optional, List
 from .cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
-from ..operations.workspace import is_workspace_path, is_explicit_path, get_workspace_home
+from ..operations.workspace import (
+    is_workspace_path,
+    is_explicit_path,
+    get_workspace_home,
+    read_workspace_metadata,
+)
 
 
 def expand_model_name(model_name: str) -> str:
@@ -77,6 +82,42 @@ def find_model_by_hash(pattern: str, commit_hash: str) -> Optional[Tuple[Path, s
                 return model_dir, hf_name, snapshot_dir.name
     
     return None
+
+
+def model_display_identity(
+    resolved_name: str, commit_hash: Optional[str] = None
+) -> Tuple[str, Optional[str]]:
+    """Map a resolved model to a ``(display_name, content_hash)`` pair for output stamping.
+
+    ``resolve_model_for_operation`` is the forward rule (caller-spec → location). This is its
+    reverse-safe identity companion, used wherever a model identity is written into machine
+    output (e.g. ``mlxk embed`` JSONL metadata). It **never returns an absolute path**:
+
+    - **Workspace** models surface the sentinel ``source_repo`` (a portable ``org/name``,
+      consistent with cache) + the ADR-025 ``content_hash``. An *unmanaged* workspace (no
+      sentinel) falls back to the directory basename and a ``None`` hash.
+    - **Cache** models surface the HF ``org/name`` + the snapshot revision (40-char git SHA;
+      derived from the latest snapshot when no explicit ``@hash`` was given).
+
+    The hash *shape* (``sha256:…`` vs a 40-char revision) also tells a consumer which source a
+    record came from. Used for the same-model rule: a consumer compares ``(model, content_hash)``
+    to detect that two embeddings share a vector space.
+    """
+    if is_workspace_path(resolved_name):
+        meta = read_workspace_metadata(Path(resolved_name))
+        display = meta.get("source_repo") or Path(resolved_name).name
+        return display, meta.get("content_hash")
+
+    # Cache model: resolved_name is already the canonical org/name.
+    content_hash = commit_hash
+    if not content_hash:
+        base = get_current_model_cache() / hf_to_cache_dir(resolved_name)
+        snapshots = base / "snapshots"
+        if snapshots.exists():
+            dirs = [d for d in snapshots.iterdir() if d.is_dir()]
+            if dirs:
+                content_hash = max(dirs, key=lambda d: d.stat().st_mtime).name
+    return resolved_name, content_hash
 
 
 def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optional[str], Optional[List[str]]]:
