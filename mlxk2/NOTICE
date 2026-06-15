@@ -15,6 +15,12 @@ This product includes software developed by:
 - MLX-VLM (https://github.com/Blaizzy/mlx-vlm)
   Licensed under the MIT License
 
+- MLX Examples — BERT (https://github.com/ml-explore/mlx-examples)
+  Licensed under the MIT License
+  mlx-knife vendors a minimal BERT encoder, adapted from Apple's mlx-examples BERT, in
+  mlxk2/core/encoders/bert.py. It powers `mlxk embed` for encoder embedders (bge/e5 =
+  model_type: bert), which mlx-lm cannot load. See ADR-015 §Decision: Implementation Library.
+
 - MLX-Audio (https://github.com/Blaizzy/mlx-audio)
   Licensed under the MIT License
   Note: mlx-audio transitively depends on soundfile (BSD-3-Clause), which

@@ -104,6 +104,15 @@ def test_mean_pooling_branch():
     assert vec == pytest.approx([0.6, 0.8, 0.0, 0.0], abs=1e-5)
 
 
+def test_cls_pooling_branch():
+    # first row [3,4,0,0] -> normalized [0.6,0.8,0,0]; later rows ignored (encoder CLS pool).
+    hidden = [[[3.0, 4.0, 0.0, 0.0],
+               [9.0, 9.0, 9.0, 9.0]]]
+    r = _make_runner(hidden, pool="cls")
+    (vec,) = r.embed(["xy"])
+    assert vec == pytest.approx([0.6, 0.8, 0.0, 0.0], abs=1e-5)
+
+
 def test_eos_appended_to_model_input():
     hidden = [[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]]
     r = _make_runner(hidden, eos=999)
@@ -156,12 +165,6 @@ def test_dimensions_property():
     hidden = [[[1.0, 0.0, 0.0, 0.0]]]
     r = _make_runner(hidden, hidden_size=4)
     assert r.dimensions == 4
-
-
-def test_embed_encoder_stub_raises():
-    r = EmbeddingRunner("fake")
-    with pytest.raises(NotImplementedError):
-        r.embed_encoder(["x"])
 
 
 def test_embed_before_load_raises():

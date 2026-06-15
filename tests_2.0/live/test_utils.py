@@ -462,6 +462,39 @@ AUDIO_TEST_MODELS = {
     }
 }
 
+# Embedding test models (ADR-015, alpha-gated — set MLXK2_ENABLE_ALPHA_FEATURES=1).
+# Verified-runnable REPRESENTATIVES for 2.0.7 — one per code path / pooling branch. This is a
+# test-fixture set, NOT a capability claim and NOT a closed allowlist: the runnable predicate is
+# class-level (any model_type qwen3/bert embedder is attempted), so the public "which classes are
+# verified" statement lives in docs/MODEL-COVERAGE.md (ADR-023), not here. `id` resolves against
+# the portfolio (HF cache + MLXK_WORKSPACE_HOME); tests skip per-model when absent.
+EMBED_TEST_MODELS = {
+    "qwen3-decoder": {
+        "id": "Qwen3-Embedding-0.6B-4bit-DWQ",
+        "kind": "decoder",
+        "pooling": "last_token",
+        "dims": 1024,
+        "expected_issue": None,
+        "description": "Qwen3-Embedding 0.6B 4bit-DWQ — decoder path (mlx-lm), showcase (workspace)",
+    },
+    "bge-encoder-cls": {
+        "id": "bge-small-en-v1.5-4bit",
+        "kind": "encoder",
+        "pooling": "cls",
+        "dims": 384,
+        "expected_issue": None,
+        "description": "bge-small-en-v1.5 4bit — encoder CLS pool, 4-bit quantized, WordPiece (cache)",
+    },
+    "e5-encoder-mean": {
+        "id": "multilingual-e5-small-mlx",
+        "kind": "encoder",
+        "pooling": "mean",
+        "dims": 384,
+        "expected_issue": None,
+        "description": "multilingual-e5-small — encoder mean pool, float16, XLM-R sentencepiece (workspace)",
+    },
+}
+
 
 # Re-export for convenience
 __all__ = [
@@ -478,6 +511,7 @@ __all__ = [
     "TEST_MODELS",
     "VISION_TEST_MODELS",
     "AUDIO_TEST_MODELS",
+    "EMBED_TEST_MODELS",
     "TEST_PROMPT",
     "MAX_TOKENS",
     "TEST_TEMPERATURE",

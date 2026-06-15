@@ -1,31 +1,34 @@
-"""``mlxk embed`` operation (ADR-015, Slice A: decoder vertical).
+"""``mlxk embed`` operation (ADR-015, Slices A + B).
 
 Generates embeddings via :class:`EmbeddingRunner` and emits JSONL — the default machine
 format (ADR-015 §Output): the typical consumer is another program (cosine-search, index
 builder), not a human at a terminal.
 
 Detection/routing here is intentionally minimal and local to this module; the config-first
-capability rewrite + gate [5] live in Slice C. Slice A runs the decoder path only and
-surfaces encoder embedders honestly as not-yet-runnable.
+capability rewrite + gate [5] live in Slice C. Slice B runs the decoder path plus the vendored
+``bert`` encoder; other declared encoder types (xlm-roberta/modernbert/nomic_bert) are surfaced
+honestly as declared-but-not-runnable.
 """
 
 import json
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.model_resolution import resolve_model_for_operation, model_display_identity
 from ..core.embedding_runner import EmbeddingRunner, resolve_model_dir
 from .common import _load_config_json
 
-# Encoder-only model_types — never causal LMs, so a bare model_type match is safe. These are
-# declared embedders that this decoder-only build does not run yet (vendoring is Slice B+).
+# Encoder-only model_types — never causal LMs, so a bare model_type match is safe.
 # NB: gemma3_text is deliberately NOT here — it is shared with ordinary causal Gemma-3 text LMs,
 # and EmbeddingGemma is distinguished by the sentence-transformers sidecar / bidirectional
-# attention, i.e. the config-first detection of Slice C (ADR-015 §Coupled detection fix). Slice A
+# attention, i.e. the config-first detection of Slice C (ADR-015 §Coupled detection fix). Slice B
 # does not attempt that distinction — a gemma3_text model falls through to "not an embedder".
 _ENCODER_MODEL_TYPES = frozenset(
     {"bert", "xlm-roberta", "modernbert", "nomic_bert"}
 )
+# Of the declared encoders, only bert is vendored/runnable in Slice B (encoders/bert.py). The rest
+# stay declared-but-not-runnable: routed to an honest pre-exec reject, never silently failing.
+_RUNNABLE_ENCODER_TYPES = frozenset({"bert"})
 # Curated decoder embedders whose name may lack an "embed" token (extend in later slices).
 _KNOWN_DECODER_EMBEDDERS = ("qwen3-embedding",)
 
@@ -39,12 +42,19 @@ def _err(command: str, etype: str, message: str) -> Dict[str, Any]:
     }
 
 
-def _route_embedding(resolved_name: str, commit_hash: Optional[str]) -> Optional[str]:
-    """Return ``"decoder"`` | ``"encoder"`` | ``None``. Slice A runs the decoder path only."""
+def _route_embedding(resolved_name: str, commit_hash: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return ``(route, model_type)`` where route is
+    ``"decoder"`` | ``"encoder"`` | ``"encoder_declared"`` | ``None``.
+
+    - ``decoder`` — runnable via mlx-lm (qwen3/mistral causal embedder).
+    - ``encoder`` — runnable via the vendored BERT (``model_type: bert``).
+    - ``encoder_declared`` — a declared encoder embedder this build does not vendor (honest reject).
+    - ``None`` — not recognized as an embedder.
+    """
     try:
         model_dir = resolve_model_dir(resolved_name, commit_hash)
     except FileNotFoundError:
-        return None
+        return None, ""
     config = _load_config_json(model_dir) or {}
     model_type = str(config.get("model_type", "")).lower()
     archs = [str(a).lower() for a in (config.get("architectures") or [])]
@@ -54,10 +64,12 @@ def _route_embedding(resolved_name: str, commit_hash: Optional[str]) -> Optional
     name_says_embed = "embed" in name or "embedding" in name
     on_known_list = any(k in name for k in _KNOWN_DECODER_EMBEDDERS)
     if is_causal and (name_says_embed or on_known_list):
-        return "decoder"
+        return "decoder", model_type
+    if model_type in _RUNNABLE_ENCODER_TYPES:
+        return "encoder", model_type
     if model_type in _ENCODER_MODEL_TYPES:
-        return "encoder"
-    return None
+        return "encoder_declared", model_type
+    return None, model_type
 
 
 def _parse_batch_items(lines: List[str]) -> Any:
@@ -102,12 +114,13 @@ def embed_operation(
     if not resolved_name:
         return _err("embed", "ModelNotFound", f"Model '{model_spec}' not found")
 
-    # 2. Route (Slice A: decoder only).
-    route = _route_embedding(resolved_name, commit_hash)
-    if route == "encoder":
+    # 2. Route (Slice B: decoder + vendored bert encoder; other encoders honest-reject).
+    route, model_type = _route_embedding(resolved_name, commit_hash)
+    if route == "encoder_declared":
         return _err("embed", "NotImplemented",
-                    f"'{resolved_name}' is an encoder embedder, which this build does not run yet "
-                    f"(decoder embedders only). Use a decoder embedder such as Qwen3-Embedding.")
+                    f"'{resolved_name}' is a {model_type} encoder embedder, which this build does "
+                    f"not vendor yet. Use bge/e5 (model_type bert) or a decoder embedder such as "
+                    f"Qwen3-Embedding.")
     if route is None:
         return _err("embed", "NotAnEmbedder",
                     f"Model '{resolved_name}' is not recognized as an embedding model.")

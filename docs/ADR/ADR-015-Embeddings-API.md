@@ -277,17 +277,9 @@ Ships in `examples/cosine-search.py`. No dependencies beyond numpy.
 
 - [x] **Open Q #1 — verified-encoder list** — DECIDED 2026-06-14 → §Decision: Verified-Encoder List & Model Detection.
 
-- [x] **Slice A — Decoder vertical** — landed (alpha-gated `mlxk embed`, decoder path on `mlx-lm`; proves the 3-layer plumbing with no model code).
-  - ✅ **Verified:** `model.model(inputs)` (mlx-lm 0.31.3) returns the pre-LM-head hidden state (post final RMSNorm), bypassing the LM head — last-token pooling is exact; no mlx-lm patch needed.
-  - `core/embedding_runner.py` — `EmbeddingRunner` (4th runner), **decoder path only** (`mlx-lm` forward → last-token/mean pool → L2-normalize + instruction-prefix); encoder path `NotImplementedError` stub.
-  - Minimal detection — route `qwen3` embedder → embedding/decoder via name/known-list (`Qwen3ForCausalLM` is structurally a chat model; only the name/list distinguishes it).
-  - `operations/embed.py` — CLI `mlxk embed <model> [text|-] [--batch] [--cpu]`, JSONL-default (forward-compatible subset of ADR-014 App C; `metadata.model`/`dimensions` stamped) + CLI dispatch wiring.
-  - Smoke `Qwen3-Embedding-0.6B-4bit-DWQ` (workspace) → vector out; decoder unit + pipe tests.
+- [x] **Slice A — Decoder vertical** — `mlxk embed` decoder path on `mlx-lm` (detail → §Decision sections).
 
-- [ ] **Slice B — Encoder path** (vendored, identity-defining; on the proven runner/op skeleton).
-  - Vendor minimal MIT BERT impl (mlx-examples, `mlxk2/NOTICE` attribution) + pooling CLS/mean (inferred per model — mlx-community strips `1_Pooling/config.json`) + L2-normalize + E5/bge prompt-prefixes.
-  - Default model `bge-small` (cache) live; `multilingual-e5-small` exercises the mean-pool branch. Encoder unit tests.
-  - `xlm-roberta` stays **declared-but-not-runnable** for 2.0.7 — the fast-follow (see §Deferred), not part of this v1 cut.
+- [x] **Slice B — Encoder path** — vendored MIT BERT (`encoders/bert.py`); `bert` runnable, other encoder types declared-but-not-runnable (detail → §Decision: Verified-Encoder List).
 
 - [ ] **Slice C — Capability honesty** (**must precede gate-removal / release** — ARCHITECTURE Invariant 4).
   - Full config-first detection (§Decision: Coupled detection fix) — `model_type ∈ {bert, xlm-roberta, modernbert, nomic_bert}` + sentence-transformers sidecar (and `gemma3_text` **only** with that sidecar / a bidirectional signal — never from `model_type` alone); fixes the `"embed" in name` heuristic that mislabels bge-small as `base`.
