@@ -427,8 +427,17 @@ def run_model(
                                     # Fallback: unknown audio model
                                     compatible, reason = False, "Unknown audio backend"
                             else:
-                                # Text/LLM models: use standard mlx-lm check
-                                compatible, reason = check_runtime_compatibility(model_path, framework)
+                                # Text/LLM compat. For an MLX embedding model, skip this check so it
+                                # reaches the honest Class-A reject below (points to `mlxk embed`)
+                                # instead of mlx-lm's cryptic "Model type X not supported". A non-MLX
+                                # model still gets the framework-incompatibility error here — mlxk can
+                                # neither run nor embed it, so "use mlxk embed" would mislead. Interim
+                                # local fix; the full path-uniform pre-flight = run.py split (ADR-026).
+                                tok = read_tokenizer_hints(model_path)
+                                if framework == "MLX" and detect_model_type(resolved_name, config, tok, model_path) == "embedding":
+                                    compatible, reason = True, None
+                                else:
+                                    compatible, reason = check_runtime_compatibility(model_path, framework)
 
                             if not compatible:
                                 error_msg = f"Model '{resolved_name}' is not compatible: {reason}"
@@ -514,7 +523,7 @@ def run_model(
         if mt == "embedding":
             error_result = (
                 f"Error: Model '{model_spec}' is an embedding model — "
-                f"`mlxk run` does not support embeddings."
+                f"`mlxk run` does not support embeddings; use `mlxk embed` instead."
             )
             if not json_output:
                 print(error_result, file=sys.stderr)

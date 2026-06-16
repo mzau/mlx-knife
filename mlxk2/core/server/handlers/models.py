@@ -47,9 +47,18 @@ async def handle_list_models(
         Dict with "object": "list", "data": [...models...]
     """
     from ...cache import cache_dir_to_hf
+    from ...capabilities import Capability
     from ....operations.common import build_model_object
     from ....operations.list import _latest_snapshot
     from ....operations.workspace import get_workspace_home, is_workspace_path
+
+    def _is_embedder(model_obj: Dict[str, Any]) -> bool:
+        # ADR-015 §2.0.7-scope: serve's /v1/models does NOT advertise embedders. The embed
+        # backend's /v1/models merge is deferred to 2.1, and the chat-surface response carries
+        # no capability field — listing a runnable embedder here would be a list↔verb
+        # contradiction (Invariant 4). `mlxk list` DOES show them (the honesty win); serve hides
+        # them until the merge lands.
+        return Capability.EMBEDDINGS.value in (model_obj.get("capabilities") or [])
 
     logger = _get_logger()
     model_list = []
@@ -66,10 +75,12 @@ async def handle_list_models(
             try:
                 model_obj = build_model_object(str(ws_dir), ws_dir, ws_dir)
 
-                # Filter: healthy AND runtime_compatible
+                # Filter: healthy AND runtime_compatible, and not an embedder (ADR-015)
                 if model_obj.get("health") != "healthy":
                     continue
                 if not model_obj.get("runtime_compatible"):
+                    continue
+                if _is_embedder(model_obj):
                     continue
 
                 model_list.append({
@@ -111,10 +122,12 @@ async def handle_list_models(
                 selected_path if selected_path is not None else model_dir,
             )
 
-            # Filter: healthy AND runtime_compatible
+            # Filter: healthy AND runtime_compatible, and not an embedder (ADR-015)
             if model_obj.get("health") != "healthy":
                 continue
             if not model_obj.get("runtime_compatible"):
+                continue
+            if _is_embedder(model_obj):
                 continue
 
             # Get model context length (best effort)
@@ -150,6 +163,7 @@ async def handle_list_models(
                 runnable = (
                     model_obj.get("health") == "healthy"
                     and bool(model_obj.get("runtime_compatible"))
+                    and not _is_embedder(model_obj)  # ADR-015: serve /v1/models hides embedders
                 )
                 if not runnable:
                     not_runnable_reason = model_obj.get("reason") or "health check failed"

@@ -14,6 +14,8 @@ import pytest
 
 from mlxk2.core.capabilities import (
     AUDIO_MODEL_TYPES,
+    EMBEDDER_ENCODER_TYPES,
+    RUNNABLE_EMBEDDER_ENCODER_TYPES,
     STT_MODEL_TYPES,
     VISION_MODEL_TYPES,
     VISION_QUANTIZE_TYPES,
@@ -29,6 +31,7 @@ class TestFrozensetHygiene:
         ("VISION_QUANTIZE_TYPES", VISION_QUANTIZE_TYPES),
         ("STT_MODEL_TYPES", STT_MODEL_TYPES),
         ("AUDIO_MODEL_TYPES", AUDIO_MODEL_TYPES),
+        ("EMBEDDER_ENCODER_TYPES", EMBEDDER_ENCODER_TYPES),
     ])
     def test_all_entries_are_lowercase_ascii(self, name, frozen):
         for entry in frozen:
@@ -40,6 +43,12 @@ class TestFrozensetHygiene:
         """A model_type cannot be both a quantize-vision and an STT type."""
         overlap = VISION_QUANTIZE_TYPES & STT_MODEL_TYPES
         assert not overlap, f"VISION_QUANTIZE_TYPES overlaps STT_MODEL_TYPES: {overlap}"
+
+    def test_runnable_embedder_encoders_are_a_subset_of_declared(self):
+        """ADR-015: the vendored/runnable encoders must be a subset of the declared encoders."""
+        assert RUNNABLE_EMBEDDER_ENCODER_TYPES <= EMBEDDER_ENCODER_TYPES, (
+            f"runnable encoders not declared: {RUNNABLE_EMBEDDER_ENCODER_TYPES - EMBEDDER_ENCODER_TYPES}"
+        )
 
     def test_stt_known_substring_tokens_present(self):
         """Class A (2.0.6): STT_MODEL_TYPES must cover the active STT portfolio.

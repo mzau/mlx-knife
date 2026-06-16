@@ -21,7 +21,7 @@ import sys
 from ..core.capabilities import (
     VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES,
     Capability, Backend, extract_chat_template,
-    detect_audio_translate_en_capability,
+    detect_audio_translate_en_capability, classify_embedder,
 )
 
 
@@ -193,7 +193,10 @@ def detect_framework(hf_name: str, model_root: Path, selected_path: Optional[Pat
 
 def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints: Dict[str, Any], probe: Optional[Path] = None) -> str:
     name = hf_name.lower()
-    if "embed" in name:
+    # Config-first embedder detection (ADR-015 Slice C) — replaces the old `"embed" in name`
+    # heuristic that mislabelled bge-small (model_type bert, no "embed" substring) as `base`.
+    route, _ = classify_embedder(config, hf_name, probe)
+    if route is not None:
         return "embedding"
     model_type = (config or {}).get("model_type")
     if isinstance(model_type, str):
@@ -660,9 +663,18 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
             # Prefer text_reason as it's more specific (model_type not supported)
             runtime_reason = text_reason or vision_reason
     elif Capability.EMBEDDINGS.value in capabilities:
-        # Embedding models: mlxk run doesn't support embeddings (future: mlxk embed)
-        runtime_compatible = False
-        runtime_reason = "Embedding models not supported by mlxk run (use mlxk embed)"
+        # Gate [5] (ADR-015 Slice C): an embedding model is runnable iff it is on the
+        # verified-runnable subset — the vendored `bert` encoder or a decoder embedder that
+        # rides mlx-lm. Non-vendored encoder types (xlm-roberta/modernbert/nomic_bert) declare
+        # embeddings but are not runnable → honest reason, never a silent failure. The runnable
+        # verb is `mlxk embed`, not `mlxk run` (run rejects embedders pre-exec, ADR-024 Class A).
+        route, mt = classify_embedder(config, hf_name, probe)
+        if route in ("decoder", "encoder"):
+            runtime_compatible = True
+            runtime_reason = None
+        else:  # encoder_declared
+            runtime_compatible = False
+            runtime_reason = f"Embedding encoder not vendored: {mt} — use bge/e5 or Qwen3-Embedding"
     else:
         runtime_compatible, runtime_reason = check_runtime_compatibility(probe, framework)
 

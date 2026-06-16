@@ -162,6 +162,61 @@ AUDIO_MODEL_TYPES = frozenset({
     "audio",          # Generic audio/STT models - mlx-audio backend
 })
 
+# Embedding model types (ADR-015). Encoders are identified config-first by model_type
+# (these are never causal LMs); decoders (Qwen3-Embedding) are structurally identical to
+# their chat counterparts, so a decoder embedder is only distinguished by name / known-list.
+# gemma3_text is deliberately ABSENT: it is shared with ordinary causal Gemma-3 text LMs, and
+# EmbeddingGemma needs an extra signal (sentence-transformers sidecar / bidirectional attention)
+# that is deferred — it must never be reclassified from model_type alone.
+EMBEDDER_ENCODER_TYPES = frozenset({"bert", "xlm-roberta", "modernbert", "nomic_bert"})
+# Of the declared encoders, only bert is vendored/runnable (encoders/bert.py). The rest are
+# declared-but-not-runnable: honest pre-exec reject, never a silent failure.
+RUNNABLE_EMBEDDER_ENCODER_TYPES = frozenset({"bert"})
+# Curated decoder embedders whose name may lack an "embed" token (extend in later slices).
+KNOWN_DECODER_EMBEDDERS = ("qwen3-embedding",)
+
+
+def classify_embedder(
+    config: Optional[Dict[str, Any]],
+    name: str,
+    probe: Optional[Path] = None,
+) -> Tuple[Optional[str], str]:
+    """Classify a model as an embedder, config-first (ADR-015 §Coupled detection fix).
+
+    Single source of truth for embedder detection across the CLI (``embed``), the list/show
+    metadata path (``detect_model_type`` / gate [5]), and the serve-load probe
+    (``probe_model_capabilities``). Replaces the fragile ``"embed" in name`` heuristic that
+    mislabelled bge-small (``model_type: bert``, no "embed" substring) as a plain text model.
+
+    Returns ``(route, model_type)`` where ``route`` is:
+
+    - ``"decoder"`` — runnable via mlx-lm (a causal embedder, e.g. qwen3/mistral, distinguished
+      by an "embed" name or the known-list, since it is structurally a chat model).
+    - ``"encoder"`` — runnable via the vendored BERT (``model_type: bert``).
+    - ``"encoder_declared"`` — a declared encoder embedder this build does not vendor
+      (xlm-roberta/modernbert/nomic_bert) → honest reject, never a silent failure.
+    - ``None`` — not recognized as an embedder.
+
+    ``probe`` is RESERVED for the deferred sentence-transformers sidecar / EmbeddingGemma signal
+    and is intentionally NOT read in this slice (so ``gemma3_text`` is never reclassified from
+    ``model_type`` alone).
+    """
+    cfg = config or {}
+    model_type = str(cfg.get("model_type", "")).lower()
+    archs = [str(a).lower() for a in (cfg.get("architectures") or [])]
+    n = (name or "").lower()
+
+    is_causal = any("forcausallm" in a for a in archs) or model_type in ("qwen3", "mistral")
+    name_says_embed = "embed" in n or "embedding" in n
+    on_known_list = any(k in n for k in KNOWN_DECODER_EMBEDDERS)
+    if is_causal and (name_says_embed or on_known_list):
+        return "decoder", model_type
+    if model_type in RUNNABLE_EMBEDDER_ENCODER_TYPES:
+        return "encoder", model_type
+    if model_type in EMBEDDER_ENCODER_TYPES:
+        return "encoder_declared", model_type
+    return None, model_type
+
 
 # Vision model types verified for convert --quantize dispatch (ADR-023).
 #
@@ -576,8 +631,11 @@ def probe_model_capabilities(
     if "instruct" in name_lower or "chat" in name_lower:
         caps.is_chat = True
 
-    # Detect embedding capability
-    if "embed" in name_lower:
+    # Detect embedding capability (ADR-015 Slice C: config-first, single source of truth).
+    # Replaces the old `"embed" in name` heuristic that mislabelled bge-small (model_type bert,
+    # no "embed" substring) as a text model.
+    _embed_route, _ = classify_embedder(caps.config, model_name)
+    if _embed_route is not None:
         caps.is_embedding = True
 
     # Detect audio capability and backend (ADR-019, ADR-020)

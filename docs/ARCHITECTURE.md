@@ -186,7 +186,12 @@ runtime_compatible?
 │               └─→ False ("Model type '{x}' not supported")
 │
 ├─[5] "embeddings" in capabilities?
-│     └─→ False ("Embedding models not supported by mlxk run")
+│     │
+│     ├─ runnable embedder (vendored `bert` encoder, or `qwen3` decoder via mlx-lm)?
+│     │  └─→ True  (runnable via `mlxk embed`; `mlxk run` still rejects pre-exec, ADR-024 Class A)
+│     │
+│     └─ declared-but-not-vendored encoder (xlm-roberta/modernbert/nomic_bert)?
+│        └─→ False ("Embedding encoder not vendored: {x} — use bge/e5 or Qwen3-Embedding")
 │
 └─[6] else (text-only models):
       │
@@ -203,7 +208,7 @@ If all gates pass → True (runtime_compatible)
 
 > **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `run.py:462-486`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
 
-> **Forthcoming (2.0.7).** Once `mlxk embed` ships, gate [5]'s blanket `False` becomes a verified-encoder-list filter (`bert`/`qwen3` runnable-via-`embed`; non-vendored architectures stay `False`) plus an embed-side pre-execution reject. Spec + scope: [ADR-015](ADR/ADR-015-Embeddings-API.md).
+> **Shipped (2.0.7, ADR-015 Slice C).** `mlxk embed` ships with config-first embedder detection (`classify_embedder()`, the single source of truth shared by `detect_model_type`, gate [5] and the serve-load probe — replacing the `"embed" in name` heuristic that mislabelled bge-small as `base`). Gate [5]'s blanket `False` is now a verified-encoder-list filter: `bert`/`qwen3` are runnable-via-`embed` (`runtime_compatible=True`); non-vendored encoder types (xlm-roberta/modernbert/nomic_bert) stay `False` with a "not vendored" reason; plus an embed-side pre-execution reject (`operations/embed.py`). **Surface asymmetry (deliberate):** `mlxk list` shows runnable embedders (the honesty win); serve's `/v1/models` deliberately *hides* them (`handlers/models.py`) — the embed-backend `/v1/models` merge is deferred to 2.1 and the chat-surface response carries no capability field, so advertising an embedder there would be a list↔verb contradiction (Invariant 4). Spec + scope: [ADR-015](ADR/ADR-015-Embeddings-API.md).
 
 **Gate Priority:**
 
@@ -232,7 +237,7 @@ The tree above fails the whole model when any one per-modality gate fails (`AND`
 
 **Open prerequisite (integrity).** The auxiliary-asset check requires `preprocessor_config.json` (Principle #3, Fail Fast), yet the probe layout above marks it *optional*, and mlx-vlm ≥ 0.6 builds the vision processor from an embedded `config.json` (`image_token_id`, `vision_config`). An embedded-processor model is then wrongly `unhealthy` and dropped despite running. ADR-012 already flags this requirement as a "de-facto convention, not formal." Accepting an embedded processor config is a prerequisite for the consumer filter.
 
-**Scope.** The audio-forward-spin reject + the integrity reconciliation + the **embedding verified-list runnable flagging** (ADR-015, lands with the `embed` verb — see the gate-[5] forward-note above) are the surgical 2.0.7 bites; the full `MLX_LM_TEXT_LOADER_TYPES`-driven filter is 2.1 (ADR-024 Classes C/D).
+**Scope.** The **embedding verified-list runnable flagging is shipped** (ADR-015 Slice C, with the `embed` verb — see the gate-[5] note above): one config-first predicate gates list/show *and* embed-side execution. The audio-forward-spin reject + the integrity reconciliation remain the surgical 2.0.7 bites; the full `MLX_LM_TEXT_LOADER_TYPES`-driven filter is 2.1 (ADR-024 Classes C/D).
 
 ### 2. No Silent Fallbacks
 
@@ -454,6 +459,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 
 ## Changelog
 
+- **2026-06-16 (embeddings capability honesty — ADR-015 Slice C):** Promoted the gate-[5] forward-note + §Capability Presentation Scope from *forthcoming* to *shipped*. Config-first embedder detection (`classify_embedder()`) is now the single source of truth shared by `embed`, `detect_model_type`, gate [5] and `probe_model_capabilities` — fixing the `"embed" in name` heuristic that mislabelled bge-small (model_type `bert`) as `base`. Gate [5] is a verified-list runnable filter (`bert`/`qwen3` → `runtime_compatible=True`; non-vendored encoders → honest "not vendored"). Deliberate surface asymmetry: `mlxk list` shows runnable embedders, serve's `/v1/models` hides them (embed-backend merge deferred to 2.1).
 - **2026-06-14 (embeddings capability hooks):** Added the gate-[5] forward-note + §Capability Presentation Scope entry for the forthcoming 2.0.7 embedding verified-list runnable flagging (ADR-015), and Invariant (4) (*runnable = prediction, not a per-model certificate*: verbs attempted, never pre-rejected; runtime fails honestly; verified sets are class-level). Clarified the §Capability Presentation filter rule (verified list = confidence, not a per-model runnable gate). No behavior change — `runtime_compatible` semantics unchanged until `mlxk embed` ships.
 - **2026-05-12 (2.0.6 sync):** Added Workspace Model section (sentinel schema, managed-vs-external distinction, HF_HOME bootstrap, content_hash v1↔v2, clean-state visibility). Annotated decision-tree with ADR-024 Class A pre-execution reject. Extended probe-function table with `is_workspace_clean()`. Updated `build_model_object()` line reference (599-634 → 582-706). Extended §7 Feature Gates with `MLXK2_ENABLE_ALPHA_FEATURES` (forthcoming 2.0.7). Updated §8 Embeddings status to slated-2.0.7-experimental. Expanded Implementation with workspace pointer map and dep-pin table (mlx-lm 0.31.3, mlx-audio 0.4.3, mlx-vlm 0.4.4, transformers 5.5.4, torch+torchvision temporary). Rebuilt References (ADR-012/014/015/016/018/020/022/023/024/025, RUNTIME-FEATURES, MODEL-COVERAGE, TESTING-DETAILS, SERVER-HANDBOOK, json-api-specification). ModelManager state machine verified unchanged.
 - **2026-02-11:** Added ModelManager State Machine documentation (Phase 2 refactoring)

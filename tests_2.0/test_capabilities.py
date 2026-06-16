@@ -20,6 +20,7 @@ from mlxk2.core.capabilities import (
     probe_model_capabilities,
     select_backend_policy,
     probe_and_select,
+    classify_embedder,
     _get_system_memory_bytes,
     _get_model_size_bytes,
     _format_bytes_gb,
@@ -499,7 +500,7 @@ class TestProbeModelCapabilities:
         assert "chat" in caps.capabilities_list
 
     def test_probes_embedding_model(self, tmp_path):
-        """Should detect embedding model from name."""
+        """Should detect an embedding model config-first (model_type bert), not from name (ADR-015)."""
         config = {"model_type": "bert"}
         (tmp_path / "config.json").write_text(json.dumps(config))
 
@@ -806,11 +807,33 @@ class TestMemoryThreshold:
 
 
 class TestEmbeddingGate:
-    """Tests for embedding model runtime compatibility gate (common.py:636-639).
+    """Tests for the embedding-model runtime-compatibility gate [5] (common.py, ADR-015 Slice C).
 
-    Embedding models should be detected but blocked from `mlxk run` with a
-    helpful message pointing to `mlxk embed`.
+    Gate [5] is a verified-list filter: a runnable embedder (vendored `bert` encoder or a decoder
+    embedder riding mlx-lm) is `runtime_compatible=True`; a declared-but-not-vendored encoder
+    (xlm-roberta/modernbert/nomic_bert) is `False` with an honest "not vendored" reason. `mlxk run`
+    still rejects embedders pre-exec (ADR-024 Class A) — the runnable verb is `mlxk embed`.
     """
+
+    @staticmethod
+    def _build_embedding_model(tmp_path, model_type):
+        """Create a minimal MLX workspace model of the given model_type and build its object."""
+        from mlxk2.operations.common import build_model_object
+
+        (tmp_path / "config.json").write_text(json.dumps({"model_type": model_type}))
+        (tmp_path / "model.safetensors").write_bytes(b"x" * 100)
+        # Workspace sentinel so it's treated as a workspace path (ADR-018)
+        (tmp_path / ".mlxk-workspace.json").write_text(
+            json.dumps({"managed_by": "mlxk", "source": "test"})
+        )
+        # README MLX library tag so framework is detected as MLX
+        (tmp_path / "README.md").write_text("---\nlibrary_name: mlx\n---\n# Test Embedding Model\n")
+
+        return build_model_object(
+            hf_name=str(tmp_path),  # Absolute path = workspace
+            model_root=tmp_path,
+            selected_path=tmp_path,
+        )
 
     def test_detect_capabilities_embedding_model_type(self, tmp_path):
         """model_type='embedding' should return only EMBEDDINGS capability."""
@@ -827,38 +850,25 @@ class TestEmbeddingGate:
         assert caps == ["embeddings"]
         assert "text-generation" not in caps
 
-    def test_embedding_model_runtime_incompatible(self, tmp_path):
-        """Embedding models should have runtime_compatible=False with helpful reason."""
-        from mlxk2.operations.common import build_model_object
+    def test_runnable_bert_encoder_is_runtime_compatible(self, tmp_path):
+        """A vendored bert encoder declares embeddings AND is runnable (gate [5] → True)."""
+        result = self._build_embedding_model(tmp_path, "bert")
 
-        # Create minimal embedding model structure with workspace sentinel
-        config = {"model_type": "embedding"}
-        (tmp_path / "config.json").write_text(json.dumps(config))
-        (tmp_path / "model.safetensors").write_bytes(b"x" * 100)
-        # Add workspace sentinel so it's treated as workspace path (ADR-018)
-        sentinel = {"managed_by": "mlxk", "source": "test"}
-        (tmp_path / ".mlxk-workspace.json").write_text(json.dumps(sentinel))
-        # Add README with MLX library tag so framework is detected as MLX
-        readme = """---
-library_name: mlx
----
-# Test Embedding Model
-"""
-        (tmp_path / "README.md").write_text(readme)
-
-        # Use absolute path so it's treated as workspace path
-        result = build_model_object(
-            hf_name=str(tmp_path),  # Absolute path = workspace
-            model_root=tmp_path,
-            selected_path=tmp_path,
-        )
-
-        assert result["runtime_compatible"] is False
-        assert "mlxk embed" in result["reason"]
         assert "embeddings" in result["capabilities"]
+        assert result["runtime_compatible"] is True
+        assert result["reason"] is None
 
-    def test_embedding_model_detected_by_name_heuristic(self, tmp_path):
-        """Models with 'embedding' in name should be detected as embedding models."""
+    def test_declared_not_vendored_encoder_is_runtime_incompatible(self, tmp_path):
+        """A declared-but-not-vendored encoder (xlm-roberta) is honest: not runnable, named reason."""
+        result = self._build_embedding_model(tmp_path, "xlm-roberta")
+
+        assert "embeddings" in result["capabilities"]
+        assert result["runtime_compatible"] is False
+        assert "not vendored" in result["reason"]
+        assert "xlm-roberta" in result["reason"]
+
+    def test_embedding_model_detected_config_first(self, tmp_path):
+        """An encoder is detected config-first via model_type bert — not from the name (ADR-015)."""
         config = {"model_type": "bert"}  # Not explicitly "embedding" type
         (tmp_path / "config.json").write_text(json.dumps(config))
 
@@ -866,3 +876,64 @@ library_name: mlx
 
         assert caps.is_embedding is True
         assert "embeddings" in caps.capabilities_list
+
+
+class TestClassifyEmbedder:
+    """The single config-first classifier (ADR-015 Slice C). Direct unit, no model-dir resolution.
+
+    This is the source of truth that `embed._route_embedding`, `detect_model_type`, gate [5] and
+    `probe_model_capabilities` all delegate to — so its routing must be exact and stable.
+    """
+
+    def test_bert_encoder_runnable(self):
+        # bge-small has NO "embed" substring — the headline bug the config-first rule fixes.
+        assert classify_embedder({"model_type": "bert", "architectures": ["BertModel"]},
+                                 "mlx-community/bge-small-en-v1.5") == ("encoder", "bert")
+
+    def test_qwen3_embedding_decoder(self):
+        cfg = {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}
+        assert classify_embedder(cfg, "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ") == ("decoder", "qwen3")
+
+    def test_plain_qwen3_chat_not_an_embedder(self):
+        cfg = {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}
+        assert classify_embedder(cfg, "mlx-community/Qwen3-4B-Instruct")[0] is None
+
+    @pytest.mark.parametrize("mt", ["xlm-roberta", "modernbert", "nomic_bert"])
+    def test_declared_but_not_vendored_encoders(self, mt):
+        assert classify_embedder({"model_type": mt}, f"some/{mt}-model") == ("encoder_declared", mt)
+
+    def test_plain_gemma3_text_causal_lm_not_an_embedder(self):
+        # gemma3_text must NEVER be reclassified from model_type alone (shared with plain Gemma-3).
+        cfg = {"model_type": "gemma3_text", "architectures": ["Gemma3ForCausalLM"]}
+        assert classify_embedder(cfg, "google/gemma-3-1b-it")[0] is None
+
+    def test_embeddinggemma_deferred(self):
+        # EmbeddingGemma (gemma3_text, non-causal arch) is deferred — needs a bidirectional signal.
+        cfg = {"model_type": "gemma3_text", "architectures": ["Gemma3TextModel"]}
+        assert classify_embedder(cfg, "google/embeddinggemma-300m")[0] is None
+
+    def test_unknown_text_model_not_an_embedder(self):
+        cfg = {"model_type": "llama", "architectures": ["LlamaForCausalLM"]}
+        assert classify_embedder(cfg, "meta-llama/Llama-3.1-8B-Instruct")[0] is None
+
+    def test_encoder_model_type_wins_over_embed_name(self):
+        # A bert model named "...embed..." is still an encoder (structure wins; not a causal decoder).
+        assert classify_embedder({"model_type": "bert"}, "some/bert-embed")[0] == "encoder"
+
+    def test_none_config_is_not_an_embedder(self):
+        assert classify_embedder(None, "whatever") == (None, "")
+
+
+class TestDetectModelTypeEmbedding:
+    """detect_model_type must label encoders 'embedding' config-first (ADR-015 Slice C)."""
+
+    def test_bge_small_detected_as_embedding_despite_no_embed_in_name(self):
+        from mlxk2.operations.common import detect_model_type
+        # The exact bug: bge-small has model_type bert and no "embed" substring.
+        mt = detect_model_type("mlx-community/bge-small-en-v1.5", {"model_type": "bert"}, {})
+        assert mt == "embedding"
+
+    def test_plain_qwen3_chat_not_embedding(self):
+        from mlxk2.operations.common import detect_model_type
+        cfg = {"model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"]}
+        assert detect_model_type("mlx-community/Qwen3-4B-Instruct", cfg, {}) != "embedding"

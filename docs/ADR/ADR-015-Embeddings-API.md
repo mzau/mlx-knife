@@ -231,6 +231,38 @@ mlxk run vision-model --image photo.jpg "describe" \
 
 Note: Vision and embedding run sequentially in this pipeline (separate processes, no Metal contention).
 
+### 4. Server / HTTP embedding consumer (embed-serve — the realistic Slice-D smoke test)
+
+The CLI cases above reload the model per invocation (fine for batch/scripts). A web app, an
+OpenAI-compatible client, or **nChat** needs a **warm** embedding endpoint over HTTP — that is
+`embed-serve`. The consumer points at **one base URL** (`serve`, or broke's gateway in a cluster)
+for both `/v1/embeddings` and `/v1/chat/completions`; it never talks to `embed-serve` directly
+(§Decision: Server Topology).
+
+```bash
+# Node: warm embed backend + the node gateway that proxies it — one OpenAI surface, one port
+mlxk embed-serve bge-small-en-v1.5 --port 8002 &                       # localhost-internal, model stays warm
+mlxk serve --model chat-model --embed-backend http://127.0.0.1:8002   # /v1/embeddings + /v1/chat/completions
+```
+
+```python
+# Consumer — RAG round-trip over HTTP (no shell pipe; client-side retrieval, index is consumer-side):
+from openai import OpenAI
+c = OpenAI(base_url="http://node:8000/v1", api_key="-")
+q    = c.embeddings.create(model="bge-small-en-v1.5", input="how does stop-token detection work?").data[0].embedding
+docs = c.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).data   # batch
+# ... cosine-retrieve top-k client-side ...
+ans  = c.chat.completions.create(model="chat-model", messages=[{"role": "user", "content": prompt_with_context}])
+```
+
+**Why this is a use case, not just an endpoint:** it *is* the realistic embed-serve smoke test
+(Slice D → SMOKE §B). Acceptance asserts: OpenAI-compatible response shape (`data[].embedding`,
+`usage`), `serve`'s `/v1/embeddings` proxy actually reaches the warm `embed-serve` backend, vectors
+**match the CLI path** (same model/text/device → same vector, the same-model rule), and a coherent
+RAG answer end-to-end. It is also the **nChat client-RAG template** — consumer-side; the client itself is
+downstream/consumer terrain, not mlx-knife's. Warm-model + HTTP/OpenAI + one-base-URL is *why* the
+server exists over the CLI.
+
 ## Reference Tool: cosine-search.py
 
 **Purpose:** Complete the RAG loop without vector DB (~100 LOC)
@@ -281,7 +313,7 @@ Ships in `examples/cosine-search.py`. No dependencies beyond numpy.
 
 - [x] **Slice B — Encoder path** — vendored MIT BERT (`encoders/bert.py`); `bert` runnable, other encoder types declared-but-not-runnable (detail → §Decision: Verified-Encoder List).
 
-- [ ] **Slice C — Capability honesty** (**must precede gate-removal / release** — ARCHITECTURE Invariant 4).
+- [x] **Slice C — Capability honesty** (**must precede gate-removal / release** — ARCHITECTURE Invariant 4).
   - Full config-first detection (§Decision: Coupled detection fix) — `model_type ∈ {bert, xlm-roberta, modernbert, nomic_bert}` + sentence-transformers sidecar (and `gemma3_text` **only** with that sidecar / a bidirectional signal — never from `model_type` alone); fixes the `"embed" in name` heuristic that mislabels bge-small as `base`.
   - `runtime_compatible` / ARCHITECTURE §1 gate [5] — verified-list filter (`bert`/`qwen3` runnable-via-`embed`; `modernbert` etc. honest *"encoder not vendored"*) + embed-side pre-exec reject (mirrors run-side ADR-024 Class A); promote the gate-[5] forward-note + §Capability Presentation Scope *forthcoming → shipped*; verified **classes** → `docs/MODEL-COVERAGE.md`.
 

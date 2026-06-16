@@ -126,6 +126,49 @@ def test_models_endpoint_filters_unhealthy_and_not_runtime_compatible(monkeypatc
         assert "org/not-compatible" not in model_ids
 
 
+def test_models_endpoint_excludes_embedders(monkeypatch):
+    """ADR-015 Slice C: serve /v1/models hides runnable embedders.
+
+    bge/qwen3-embedders become runtime_compatible=True (so `mlxk list` shows them), but serve's
+    chat-surface /v1/models must not advertise them — the embed-backend merge is deferred to 2.1
+    and the response carries no capability field, so listing them would be a list↔verb contradiction.
+    """
+    monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
+    client = TestClient(app)
+
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.core.cache.cache_dir_to_hf') as mock_cache_to_hf, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build:
+
+        d1 = MagicMock(); d1.name = "models--org--chat-model"
+        d2 = MagicMock(); d2.name = "models--org--bge-embedder"
+        for d in [d1, d2]:
+            snapshot_dir = MagicMock()
+            snapshot_path = MagicMock()
+            snapshot_dir.exists.return_value = True
+            snapshot_dir.iterdir.return_value = [snapshot_path]
+            snapshot_path.is_dir.return_value = True
+            d.__truediv__ = lambda self, x, snap=snapshot_dir, spath=snapshot_path: snap if x == "snapshots" else spath
+        mock_cache.return_value.iterdir.return_value = [d1, d2]
+
+        def map_name(n):
+            return n.replace("models--", "").replace("--", "/")
+        mock_cache_to_hf.side_effect = map_name
+
+        # Both are healthy + runtime_compatible; only the embedder carries the embeddings capability.
+        def build(model_name, model_dir, selected_path):
+            if "embedder" in model_name:
+                return {"health": "healthy", "runtime_compatible": True, "capabilities": ["embeddings"]}
+            return {"health": "healthy", "runtime_compatible": True, "capabilities": ["text-generation", "chat"]}
+        mock_build.side_effect = build
+
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        ids = [m["id"] for m in resp.json().get("data", [])]
+        assert "org/chat-model" in ids
+        assert "org/bge-embedder" not in ids
+
+
 def test_models_endpoint_lists_workspace_models(tmp_path, monkeypatch):
     """/v1/models lists runnable workspace-home models by basename (Issue #58)."""
     ws_home = tmp_path / "workspaces"
