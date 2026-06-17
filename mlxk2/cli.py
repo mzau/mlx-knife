@@ -438,6 +438,11 @@ def main():
     serve_parser.add_argument("--chunk", type=int, default=1, metavar="N", help="Default batch size for vision requests (default: 1 for maximum safety, max: 5)")
     serve_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
     serve_parser.add_argument("--json", action="store_true", help="Output startup info in JSON format")
+    # ADR-015 D2 (experimental — requires MLXK2_ENABLE_ALPHA_FEATURES=1). Proxy POST /v1/embeddings
+    # to a separately-running embed-serve backend; the embed model is never loaded into serve.
+    serve_parser.add_argument("--embed-backend", metavar="URL", default=None,
+                              help="Proxy POST /v1/embeddings to a separately-running embed-serve "
+                                   "backend at URL (experimental, requires MLXK2_ENABLE_ALPHA_FEATURES=1)")
 
     # Server command (alias for backward compatibility with 1.x)
     _ = subparsers.add_parser(
@@ -864,6 +869,17 @@ def main():
                 # For non-JSON or interactive mode, set success result
                 result = {"status": "success"}
         elif args.command in ["serve", "server"]:  # Handle both serve and server aliases
+            # ADR-015 D2: --embed-backend is experimental. Gate ONLY when the flag is present;
+            # plain `serve` stays ungated (stable).
+            embed_backend = getattr(args, "embed_backend", None)
+            if embed_backend and not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+                result = handle_error(
+                    "CommandError",
+                    "serve --embed-backend is experimental and requires MLXK2_ENABLE_ALPHA_FEATURES=1",
+                )
+                print_result(result, None, args.json)
+                sys.exit(1)
+
             # Handle serve command
             if args.json:
                 # JSON startup info
@@ -875,11 +891,12 @@ def main():
                         "port": args.port,
                         "model": getattr(args, "model", None),
                         "max_tokens": getattr(args, "max_tokens", None),
+                        "embed_backend": embed_backend,
                     },
                     "error": None
                 }
                 print(format_json_output(server_info))
-            
+
             # Set MLXK2_LOG_JSON if --log-json flag is present
             if getattr(args, "log_json", False):
                 os.environ["MLXK2_LOG_JSON"] = "1"
@@ -896,7 +913,8 @@ def main():
                 log_level=getattr(args, "log_level", "info"),
                 chunk=getattr(args, "chunk", 1),
                 verbose=getattr(args, "verbose", False),
-                supervise=True
+                supervise=True,
+                embed_backend=embed_backend,
             )
             
             # Should never reach here (server runs indefinitely)

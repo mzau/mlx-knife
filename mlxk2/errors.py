@@ -22,6 +22,8 @@ class ErrorType(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"  # HTTP 501: Feature not supported
     UNSUPPORTED_MULTIMODAL = "unsupported_multimodal"  # ADR-023: Model type outside verified multimodal list
     INTERNAL_ERROR = "internal_error"
+    BAD_GATEWAY = "bad_gateway"  # HTTP 502: upstream backend unreachable (ADR-015 D2 embed proxy)
+    GATEWAY_TIMEOUT = "gateway_timeout"  # HTTP 504: upstream backend timed out (ADR-015 D2 embed proxy)
 
 
 # HTTP status code mapping (ADR-004 specification)
@@ -37,6 +39,8 @@ ERROR_TYPE_TO_HTTP_STATUS: Dict[ErrorType, int] = {
     ErrorType.NOT_IMPLEMENTED: 501,  # Feature not supported
     ErrorType.UNSUPPORTED_MULTIMODAL: 501,  # ADR-023: Model type outside verified multimodal list
     ErrorType.INTERNAL_ERROR: 500,
+    ErrorType.BAD_GATEWAY: 502,  # ADR-015 D2: embed backend unreachable
+    ErrorType.GATEWAY_TIMEOUT: 504,  # ADR-015 D2: embed backend read-timeout
 }
 
 

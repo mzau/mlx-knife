@@ -114,6 +114,7 @@ def start_server(
     chunk: int = 1,
     verbose: bool = False,
     supervise: bool = True,
+    embed_backend: Optional[str] = None,
 ) -> None:
     """Start OpenAI-compatible API server for MLX models.
 
@@ -129,6 +130,9 @@ def start_server(
         chunk: Default batch size for vision requests (default: 1, max: 5)
         verbose: Show detailed output
         supervise: Run uvicorn in a supervised subprocess for instant Ctrl-C
+        embed_backend: ADR-015 D2 — URL of a separate embed-serve backend. When set,
+               serve proxies POST /v1/embeddings to it (the embed model is never loaded
+               here). The URL is validated fail-fast; the backend is NOT probed at startup.
     """
     # Validate chunk size
     from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
@@ -141,6 +145,22 @@ def start_server(
             f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
             f"This limit is based on empirically tested performance."
         )
+
+    # ADR-015 D2: --embed-backend is the single source of truth for the proxy. Validate the URL
+    # fail-fast, then bridge it to the server subprocess via env (MLXK2_EMBED_BACKEND) —
+    # _run_supervised_uvicorn copies os.environ, so the server_base lifespan reads it directly
+    # (no run_server() signature change needed). When the flag is absent, clear any ambient value
+    # so an exported env var can't silently enable (and thereby un-gate) the proxy.
+    if embed_backend is not None:
+        from urllib.parse import urlparse
+        parsed = urlparse(embed_backend)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                f"--embed-backend must be an http(s) URL with a host (got: {embed_backend!r})"
+            )
+        os.environ["MLXK2_EMBED_BACKEND"] = embed_backend
+    else:
+        os.environ.pop("MLXK2_EMBED_BACKEND", None)
 
     # Set environment variables for server configuration
     # These apply to both supervised and non-supervised modes

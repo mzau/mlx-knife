@@ -1,5 +1,130 @@
 # Changelog
 
+## [2.0.7-beta.1] - 2026-06-17
+
+### Added
+
+- **`mlxk embed <model> [text|-] [--batch] [--query] [--cpu] [--json]`** —
+  text-embedding verb (experimental, gated by
+  `MLXK2_ENABLE_ALPHA_FEATURES=1`;
+  [ADR-015](docs/ADR/ADR-015-Embeddings-API.md)). JSONL output by default
+  (one `{text, embedding, metadata}` record per line — pipe-first), with
+  `metadata.{model, dimensions, content_hash, device}` so a consumer can
+  enforce the same-model rule. `--json` emits the records wrapped in the
+  standard envelope (JSON-API schema 0.2.3). Two runnable paths: a vendored MIT BERT
+  encoder (`model_type: bert` — bge/e5/mxbai, CLS or mean pooling,
+  L2-normalize) and the zero-vendored `mlx-lm` decoder path (`qwen3` —
+  Qwen3-Embedding, last-token pool + instruction prefix). Embedders are
+  detected **config-first** (Slice C): non-vendored encoder types
+  (xlm-roberta/modernbert/nomic_bert) declare the capability but reject
+  pre-execution with an honest "encoder not vendored" message instead of
+  failing silently.
+- **`mlxk embed-serve <model> [--port 8002] [--host] [--cpu] [--log-json]`** —
+  single-model, localhost-internal embeddings backend exposing an
+  OpenAI-compatible `POST /v1/embeddings` (+ `/health`) (experimental, gated by
+  `MLXK2_ENABLE_ALPHA_FEATURES=1`;
+  [ADR-015](docs/ADR/ADR-015-Embeddings-API.md) Slice D1). A **separate process**
+  from `mlxk serve` — the embedding model is never loaded into serve's address
+  space, so serve's memory gates stay intact. `encoding_format` defaults to
+  `base64` (little-endian float32, what the OpenAI SDK decodes) with `float`
+  opt-in; `input` takes a string or a batch array; vectors are L2-normalized;
+  `usage` token counts are best-effort; mlxk extensions `input_type`/`instruct`
+  drive RAG query embedding. One `EmbeddingRunner` is held for the process
+  lifetime behind an inference lock (single model, no swapping); a non-runnable
+  embedder is rejected at startup. Built as a clean three-layer split (handler
+  `core/server/handlers/embeddings.py` · app `core/embed_server_base.py` ·
+  orchestrator `operations/embed_serve.py`), reusing serve's supervised-subprocess
+  and JSON-log machinery via shared seams. Full interface:
+  [docs/SERVER-HANDBOOK.md](docs/SERVER-HANDBOOK.md).
+- **`mlxk serve --embed-backend URL`** — thin proxy that forwards
+  `POST /v1/embeddings` to a separately-running `embed-serve` backend, so a client
+  uses **one base URL** (serve's port) for both `/v1/chat/completions` and
+  `/v1/embeddings` (experimental, gated by `MLXK2_ENABLE_ALPHA_FEATURES=1`;
+  [ADR-015](docs/ADR/ADR-015-Embeddings-API.md) Slice D2). serve forwards bytes
+  only — the embedding model is never loaded into its address space. The backend is
+  not probed at startup (it may start after serve); per-request failures map to
+  ADR-004 gateway errors: **501** when no `--embed-backend` is configured, **502**
+  when the backend is unreachable, **504** on backend read-timeout (502/504 are
+  retryable); backend `4xx/5xx` responses pass through verbatim. `GET /v1/models`
+  does not yet advertise the backend's embedders (discovery merge deferred to 2.1).
+- **`mlxk run <model> --audio FILE --translate [LANG]`** — Whisper
+  translation to English for multilingual audio
+  ([#54](https://github.com/mzau/mlx-knife/issues/54), CLI part).
+  New `audio-translate-en` capability detection: multilingual
+  non-turbo Whisper only — `.en` variants lack the `<|translate|>`
+  token, and turbo's 4-layer decoder is functionally broken for
+  translate even though the token is present. Models without the
+  capability are rejected pre-execution with a clear hint. `LANG` is
+  an optional source-language hint. The server endpoint
+  (`/v1/audio/translations`) follows before the 2.0.7 release.
+
+### Fixed
+
+- **Embedding models are now labelled honestly in `mlxk list`/`show`**
+  (ADR-015 Slice C). Config-first detection (`classify_embedder()`, the
+  single source of truth shared by `embed`, `detect_model_type`, the
+  runtime gate and the serve-load probe) replaces the `"embed" in name`
+  heuristic that mislabelled encoders without an "embed" substring (e.g.
+  `bge-small-en-v1.5`, `model_type: bert`) as plain `base`/text models.
+  Runnable embedders (`bert` encoder, `qwen3` decoder) now report
+  `runtime_compatible=True`; declared-but-not-vendored encoders
+  (`xlm-roberta`/`modernbert`/`nomic_bert`) report `False` with a "not
+  vendored" reason. `mlxk run <embedder>` rejects pre-execution pointing
+  to `mlxk embed`. Serve's `/v1/models` deliberately hides embedders
+  (the embed-backend merge is deferred to 2.1); `mlxk list` shows them.
+- **Server `/v1/models` now lists workspace models**
+  ([#58](https://github.com/mzau/mlx-knife/issues/58), closes an
+  ADR-022 workspace-first gap). The endpoint previously scanned only
+  the HF cache, leaving workspace models invisible to
+  OpenAI-compatible clients unless preloaded — and then only under
+  an absolute-path id. It now returns the runnable (healthy +
+  runtime-compatible) models from both the HF cache and
+  `MLXK_WORKSPACE_HOME` — matching the default `mlxk list` view.
+  Workspace models are advertised by their directory basename (a
+  stable short id that resolves workspace-first at request time)
+  instead of an absolute path. The runnable filter now also applies
+  to preloaded models; the preloaded model still sorts first.
+- **Whisper multi-chunk repetition loop on translate.**
+  `condition_on_previous_text=False` is set for translate tasks —
+  prevents Whisper's repetition loop on long non-English sources
+  (part of the #54 stream).
+- **Pure-audio backend no longer injects synthetic default prompts**
+  into transcribe/translate runs (part of the #54 stream).
+- **Gemma conversions without declared `eos_token_id` no longer loop
+  on `<end_of_turn>`.** The runner's common-stop probe now includes
+  Gemma's turn terminator, so conversions whose
+  `generation_config.json` lacks `eos_token_id: [1, 106]` (e.g.
+  TranslateGemma) stop at string level instead of emitting literal
+  `<end_of_turn>` until max_tokens. The probe adds the token only
+  when the tokenizer encodes it as a single token — a no-op for
+  non-Gemma models.
+
+### Changed
+
+- **mlx-vlm pinned 0.4.4 → 0.6.2, mlx-audio 0.4.3 → 0.4.4** (text-first,
+  upstream-follows). 0.6.2 unblocks Mistral-Small-3.1 repairs and
+  Kimi-VL (mlx-vlm#1309). The stale 0.4.3-era gemma-4-e4b community
+  conversion crashes under 0.6.x KV-sharing and falls off the verified
+  list — recovery is a fresh conversion, see `docs/MODEL-COVERAGE.md`.
+  mlx-vlm#1011 remains unresolved upstream, so the temporary
+  `torch`/`torchvision` base dependencies stay (see 2.0.6 upgrade
+  notes).
+
+### Docs
+
+- **Embeddings documented for users + operators.** `README.md` gains an
+  `## Embeddings (Experimental)` section plus Commands / Workspace-Commands
+  entries; `docs/SERVER-HANDBOOK.md` documents the `embed-serve` backend and the
+  `serve --embed-backend` proxy (topology, flags, and the 501/502/504 error
+  contract) and adds a `2.0.6 → 2.0.7` migration entry; ADR-015 D2 marked landed.
+- `README.md` "What's New" reframed to 2.0.7 (feature-focused, embeddings headline).
+- `docs/MODEL-COVERAGE.md`: molmo2 evaluated under mlx-vlm 0.6.0,
+  not adopted (off-list).
+- `docs/RUNTIME-FEATURES.md`: health-vs-reachable semantics
+  corrected; second-vendor open question resolved.
+- `ARCHITECTURE.md` + `docs/SERVER-HANDBOOK.md` synced to current
+  reality; project infographic refreshed.
+
 ## [2.0.6] - 2026-05-12
 
 > **content_hash v2 closes Issue #52 coverage gap.** v1 only hashed
@@ -499,7 +624,7 @@ Workaround-Sunset policy in full.
 ### Fixed
 
 - **APFS Detection:** Rewritten to use `st_dev` matching instead of path prefix. Fixes false "Non-APFS" on macOS firmlinks (`/Users` was incorrectly detected as non-APFS)
-- **Temp Cache Location:** Created in target parent instead of volume root (fixes Permission denied on volume mount points like `/Volumes/mz-SSD/`)
+- **Temp Cache Location:** Created in target parent instead of volume root (fixes Permission denied on volume mount points like `/Volumes/External/`)
 - **`content_hash` Tuple Bug:** `update_workspace_hash()` return value correctly unpacked (was `[true, "hash"]` in JSON)
 - **Hash Algorithm:** Now samples first 4KB of safetensor files (different quantizations no longer produce identical hashes)
 - **Health Workspace Resolution:** `resolve_model_for_operation()` returning workspace path no longer breaks health check
@@ -1766,7 +1891,7 @@ pip install --upgrade mlx-knife
 ```bash
 # Before (Beta.4): Cryptic mlx-lm error
 $ mlxk2 run TinyLlama-1.1B-Chat-v1.0-4bit "Hello"
-ERROR:root:No safetensors found in /Volumes/.../snapshots/01a7088...
+ERROR:root:No safetensors found in ~/.cache/huggingface/hub/.../snapshots/01a7088...
 
 # After (Beta.5): Clear error message
 $ mlxk2 run TinyLlama-1.1B-Chat-v1.0-4bit "Hello"

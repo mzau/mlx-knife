@@ -50,36 +50,31 @@ produce a broken workspace).
 - **Unix Pipes (Beta)** - Chain models without temp files (`cat | mlx-run model -`)
 - **Privacy** - No background network or telemetry; explicit HuggingFace interactions only
 
-## What's New in 2.0.6
+## What's New in 2.0.7
 
-Two focused improvements:
+The **feature** release (in active development — 2.0.6 was integrity and
+capability-honesty fixes; 2.0.7 adds new capabilities):
 
-- **`content_hash` now actually covers the workspace.** v1 sampled only
-  `config.json`, safetensor name+size+4 KB, and tokenizer name+size —
-  `Clean: ✓` could quietly miss changes to the safetensors index,
-  processor / preprocessor / generation configs, chat templates, custom
-  Python, or anything in subdirectories. v2 is include-by-default with
-  a portable recipe stored in the sentinel. Existing workspaces migrate
-  in place with one `mlxk show <name> --recalc-hash`.
-- **Capability labels are now correct.** STT model types had been
-  showing as `base+audio`, and Gemma 4 text variants carried a spurious
-  `audio` tag — both go back to the introduction of multimodal support.
-  Detection now uses truthy-dict predicates and matches the STT family
-  as a substring.
+- **Embeddings (experimental).** Generate OpenAI-style text-embedding vectors for
+  semantic search and RAG, on-device:
+  - `mlxk embed <model> "text"` — embed a string, stdin (`-`), or a `--batch` JSONL
+    stream; emitted as JSONL (or the standard envelope with `--json`).
+  - `mlxk embed-serve <model>` — a single-model backend exposing an OpenAI-compatible
+    `POST /v1/embeddings`, in its **own process** so the main server's memory gates stay
+    intact.
+  - `mlxk serve --embed-backend URL` — the main server proxies `/v1/embeddings` to that
+    backend, so a client uses **one base URL** for both chat and embeddings.
+  - Gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles. See
+    [Embeddings](#embeddings-experimental); the server side is in the
+    [Server Handbook](docs/SERVER-HANDBOOK.md).
+- **Whisper translation** (`mlxk run … --audio FILE --translate`) — translate
+  multilingual speech to English with a multilingual (non-turbo) Whisper model; models
+  that can't translate are rejected up front with a hint.
 
 Along for the ride:
 
-- `mlxk list` is roughly 85 % faster on a sampled portfolio
-  (~8 s → under 2 s).
-- MLX-stack refresh — mlx-lm 0.31.3 / mlx-vlm 0.4.4 / mlx-audio 0.4.3 /
-  transformers 5.5.4. Gemma 4 (text and vision) is now supported in the
-  runtime portfolio, and `mlxk convert --quantize` accepts Gemma 4
-  vision.
-- `torch + torchvision` are bundled by default so Pixtral /
-  Llama-Vision / Mistral-Small-3.1 work out of the box (lean-stack
-  opt-out documented in CHANGELOG).
-- `mlxk run M "prompt"` against an STT or embedding model now gives a
-  pre-execution hint instead of a cryptic loader trace.
+- MLX-stack refresh — mlx-vlm 0.6.2 / mlx-audio 0.4.4 (re-verified per ADR-023).
+- `mlxk embed … --json` renders embeddings in the standard JSON envelope.
 
 ## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
@@ -199,6 +194,8 @@ mlxk serve --port 8080
 | `clone` | Model workspace cloning - create local editable copy from cache |
 | `push` | Upload to HuggingFace Hub (requires `--private` flag for safety) |
 | `convert` | Workspace transformations: `--repair-index`, `--quantize <bits>` |
+| 🔬 `embed` | **Experimental** - text embeddings (OpenAI-style vectors) for search/RAG; JSONL or `--json`; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
+| 🔬 `embed-serve` | **Experimental** - single-model embeddings HTTP backend (`/v1/embeddings`); pairs with `serve --embed-backend`; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
 | 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
 ## Model References
@@ -331,7 +328,9 @@ mlxk push ./fixed "your-org/model"                  # Optional publish
 | `run` | ✅ Yes | `mlxk run ./workspace "prompt"` |
 | `show` | ✅ Yes | `mlxk show ./workspace --files` |
 | `health` | ✅ Yes | `mlxk health ./workspace` |
-| `server` | ✅ Yes | `mlxk server --model ./workspace` |
+| `server`/`serve` | ✅ Yes | `mlxk serve --model ./workspace` |
+| `embed` | ✅ Yes 🔬 | `mlxk embed ./workspace "text"` (experimental; `MLXK2_ENABLE_ALPHA_FEATURES=1`) |
+| `embed-serve` | ✅ Yes 🔬 | `mlxk embed-serve ./workspace` (experimental; `MLXK2_ENABLE_ALPHA_FEATURES=1`) |
 | `clone` | ✅ Creates | `mlxk clone org/model` (shorthand) or `mlxk clone org/model ./workspace` |
 | `convert` | ✅ Repair/Quantize | `mlxk convert ./in ./out --quantize 4` |
 | `push` | ✅ Yes | `mlxk push ./workspace "org/name"` |
@@ -576,6 +575,44 @@ mlxk run whisper-large --audio german.mp3 --language de
 # Segment metadata (MLXK2_AUDIO_SEGMENTS=1 for timestamps)
 MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
 ```
+
+## Embeddings (Experimental)
+
+> Gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles (ADR-015).
+
+Turn text into vectors for semantic search, clustering, or RAG — on-device, no cloud
+round-trip. mlxk supports both verified encoder models (BERT-family, e.g.
+`bge-small-en-v1.5`) and decoder embedders (e.g. `Qwen3-Embedding`).
+
+```bash
+export MLXK2_ENABLE_ALPHA_FEATURES=1
+
+# One string -> one vector (JSONL: one record per line)
+mlxk embed bge-small-en-v1.5 "machine learning on Apple Silicon"
+
+# Read the text from stdin
+echo "vectors for search" | mlxk embed bge-small-en-v1.5 -
+
+# Batch: a JSONL stream on stdin, one object per line (passthrough fields preserved)
+cat corpus.jsonl | mlxk embed bge-small-en-v1.5 --batch
+
+# Encode a retrieval query (applies the model's query instruction)
+mlxk embed bge-small-en-v1.5 --query "how does stop-token detection work?"
+
+# Standard JSON envelope instead of JSONL
+mlxk embed bge-small-en-v1.5 "text" --json
+```
+
+Each record carries the vector plus a portable `model` + `content_hash` + `device` stamp.
+**Two consumer rules matter:** embeddings are only comparable within one model's vector space,
+and they are *not* bit-reproducible across CPU/GPU — build a store with **one model and one
+device**. See [Model Identity in Output](#model-identity-in-output) for the same-model and
+determinism caveats.
+
+**Serving embeddings over HTTP** (for RAG clients or a cluster) is an operator topic:
+`mlxk embed-serve <model>` plus `mlxk serve --embed-backend URL` give a client one
+OpenAI-compatible base URL for both chat and embeddings. See the
+[Server Handbook](docs/SERVER-HANDBOOK.md) for the topology, flags, and error semantics.
 
 ## JSON API
 

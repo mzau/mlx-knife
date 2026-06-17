@@ -146,7 +146,8 @@ def LocalServer(
     model: Optional[str],
     port: int = 8765,
     timeout: int = 60,
-    log_level: str = "warning"
+    log_level: str = "warning",
+    extra_env: Optional[dict] = None,
 ):
     """Start a local mlx-knife server for E2E testing.
 
@@ -193,6 +194,10 @@ def LocalServer(
     else:
         # No preload: make sure nothing leaks in from the caller's environment
         env.pop("MLXK2_PRELOAD_MODEL", None)
+    # Caller-supplied subprocess env (e.g. ADR-015 D2 MLXK2_EMBED_BACKEND). Applied last so it
+    # overrides anything above. Mirrors operations/serve.py _run_supervised_uvicorn(extra_env=...).
+    if extra_env:
+        env.update(extra_env)
 
     proc = subprocess.Popen(
         [

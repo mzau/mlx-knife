@@ -21,7 +21,9 @@ _STATUS_TO_ERROR_TYPE = {
     404: ErrorType.MODEL_NOT_FOUND,
     500: ErrorType.INTERNAL_ERROR,
     501: ErrorType.NOT_IMPLEMENTED,
+    502: ErrorType.BAD_GATEWAY,  # ADR-015 D2: embed backend unreachable
     503: ErrorType.SERVER_SHUTDOWN,
+    504: ErrorType.GATEWAY_TIMEOUT,  # ADR-015 D2: embed backend read-timeout
     507: ErrorType.INSUFFICIENT_MEMORY,
 }
 
@@ -33,7 +35,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     error = MLXKError(
         type=error_type,
         message=exc.detail,
-        retryable=(exc.status_code == 503),
+        # 503 (shutting down) + 502/504 (ADR-015 D2 embed-backend transient gateway errors)
+        # are all retryable: the client may re-issue the request once capacity returns.
+        retryable=(exc.status_code in (502, 503, 504)),
     )
     envelope = error_envelope(error, request_id=request_id)
     return JSONResponse(status_code=exc.status_code, content=envelope)

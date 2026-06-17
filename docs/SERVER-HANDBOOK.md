@@ -1,6 +1,6 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.6 stable · `/v1/embeddings` backend added for 2.0.7 (experimental)
+**Version:** 2.0.6 stable (PyPI) · 2.0.7 dev: experimental `/v1/embeddings` backend (`embed-serve`) + `serve --embed-backend` proxy
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
 **Last Updated:** 2026-06-17
 
@@ -22,16 +22,16 @@ mlxk serve --port 8000 --log-json
 mlxk serve --host 0.0.0.0 --port 8000
 
 # Embeddings (experimental, 2.0.7) — embed-serve backend + serve gateway = one OpenAI surface
-MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5 --port 8002   # internal embedding backend
-mlxk serve --port 8000 --embed-backend http://127.0.0.1:8002                   # gateway: /v1/embeddings + /v1/chat/completions both on :8000
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5 --port 8002                 # internal embedding backend
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.0.0.1:8002   # gateway: /v1/embeddings + /v1/chat/completions both on :8000
 ```
 
-**Requirements (2.0.6):**
+**Requirements (2.0.7):**
 - Python 3.10-3.13 (Text + Vision); 3.10-3.12 only for Audio (miniaudio wheel missing on 3.13/macOS-ARM)
 - `mlx-lm==0.31.3` (text backend)
-- `mlx-vlm==0.4.4` (vision + multimodal audio; `pip install mlx-knife[vision]`)
-- `mlx-audio==0.4.3` (Whisper / Voxtral STT; `pip install mlx-knife[audio]`)
-- `transformers==5.5.4` (driven by mlx-audio 0.4.3)
+- `mlx-vlm==0.6.2` (vision + multimodal audio; `pip install mlx-knife[vision]`)
+- `mlx-audio==0.4.4` (Whisper / Voxtral STT; `pip install mlx-knife[audio]`)
+- `transformers==5.5.4` (driven by mlx-audio 0.4.4)
 - `torch>=2.0`, `torchvision>=0.15` — temporary base deps for Pixtral / Llama-Vision / Mistral-Small-3.1 (`sunset-by mlx-vlm#1011`, see ADR-023 Workaround-Sunset Policy)
 
 Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
@@ -49,7 +49,7 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/chat/completions` | ✅ Supported | Text, Vision (`image_url`), Audio (`input_audio`) |
 | `/v1/completions` | ✅ Supported | Legacy text completion |
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
-| `/v1/embeddings` | ✅ Supported (2.0.7, experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend` (see [Embeddings Backend](#embeddings-backend-embed-serve)) |
+| `/v1/embeddings` | ✅ Supported (2.0.7, experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend`. Returns **501** on a plain `serve` started without `--embed-backend` (embeddings not enabled). See [Embeddings Backend](#embeddings-backend-embed-serve) |
 | `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field. Does **not** list embedders in 2.0.7 (discovery merge → 2.1) |
 | `/health` | ✅ Custom | MLX Knife extension |
 
@@ -65,6 +65,7 @@ MLX Knife **ignores** authentication headers. The server accepts but does not va
 - `/v1/chat/completions`
 - `/v1/completions`
 - `/v1/audio/transcriptions` (file upload endpoint)
+- `/v1/embeddings` (only active when `--embed-backend` is configured)
 - `/v1/models`
 
 A common mistake is implementing auth for JSON endpoints but forgetting `multipart/form-data` endpoints like audio transcription.
@@ -131,7 +132,11 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 | `insufficient_memory` | 507 | Model exceeds the memory threshold (ADR-016) |
 | `not_implemented` | 501 | Known capability class, but the feature is not yet implemented (e.g. STT quantization) |
 | `unsupported_multimodal` | 501 | Model uses a multimodal class outside the verified-multimodal list (ADR-023) |
+| `bad_gateway` | 502 | Embed backend (`serve --embed-backend`) unreachable / connection failed / connect-timeout (retryable; ADR-015 D2) |
+| `gateway_timeout` | 504 | Embed backend read-timeout on a slow / large batch (retryable; ADR-015 D2) |
 | `internal_error` | 500 | Unexpected backend failure |
+
+(`bad_gateway` / `gateway_timeout` are raised only by the `serve --embed-backend` proxy; a backend's own `4xx`/`5xx` envelopes otherwise pass through verbatim.)
 
 ---
 
@@ -201,6 +206,10 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 
 **mlx-knife Extension Parameters:**
 - `chunk` (integer, optional): Batch size for vision processing (default: 1). Controls how many images are processed per inference session. Higher values may trigger OOM on resource-constrained systems. Maximum: 5 (enforced by server).
+
+**Also honored** (standard OpenAI sampling fields): `top_p` (default `0.9`), `stop` (string or
+list of strings), and `repetition_penalty` (default `1.1`, an mlx-knife-leaning default) in
+addition to `temperature` and `max_tokens`.
 
 **Default chunk size:**
 1. Request parameter `chunk` (highest priority)
@@ -299,11 +308,20 @@ A man said to the universe, Sir, I exist.
 }
 ```
 
+> **Field semantics (differ from OpenAI):** `duration` is the **server-side processing
+> wall-time** in seconds, not the audio clip length. `language` echoes the requested `language`
+> form field, or the literal `"auto"` when none was supplied — it is never a server-detected
+> language code.
+
 **Supported Models:**
 - Whisper: `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`
 - Voxtral: `mlx-community/Voxtral-Mini-3B-2507-bf16` (upstream tokenizer issues)
 
 **Note:** This endpoint requires `mlx-audio` (`pip install mlx-knife[audio]`).
+
+**Translation (2.0.7+):** audio-to-English translation is available via the **CLI**
+(`mlxk run --audio FILE --translate`, multilingual non-turbo Whisper only). An OpenAI-compatible
+`POST /v1/audio/translations` **server** endpoint is planned but **not yet implemented** in 2.0.7.
 
 **vs. `/v1/chat/completions` with `input_audio`:**
 
@@ -395,6 +413,11 @@ a model preloaded from outside the workspace home is included as well.
 The preloaded model (if any) appears exactly once, sorted first; all other
 models follow alphabetically.
 
+> **Embedders are excluded in 2.0.7.** Embedding models (e.g. `bge-*`,
+> `Qwen3-Embedding-*`) are **not** listed here — they are served by the separate
+> `embed-serve` backend, and the discovery merge is deferred to 2.1 (ADR-015). This is the
+> one case where `/v1/models` differs from `mlxk list`, which *does* show embedders.
+
 **Response:**
 ```json
 {
@@ -443,6 +466,12 @@ Note: LM Studio provides similar field as `max_context_length`.
 ### GET /health
 
 **Server health check (200 OK if server is running).**
+
+```json
+{ "status": "healthy", "service": "mlx-knife-server-2.0" }
+```
+
+(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": ...}` and `503` until its model is loaded.)
 
 ---
 
@@ -674,7 +703,9 @@ data: [DONE]
 
 **Experimental (2.0.7).** Text embeddings run in a **separate process**, `mlxk embed-serve` —
 not inside `mlxk serve`. This keeps the main server's memory gates (8 GB vision / 4 GB audio)
-intact: an embedding model is never loaded into serve's address space.
+intact: an embedding model is never loaded into serve's address space. The backend exposes two
+routes: `POST /v1/embeddings` (the OpenAI surface) and `GET /health` (liveness — `200` once the
+model is loaded, `503` before).
 
 **Topology — one OpenAI surface:**
 ```bash
@@ -682,19 +713,33 @@ intact: an embedding model is never loaded into serve's address space.
 MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5 --port 8002
 
 # Main server — proxies /v1/embeddings to the backend; clients use ONE base URL
-mlxk serve --model chat-model --embed-backend http://127.0.0.1:8002
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --model chat-model --embed-backend http://127.0.0.1:8002
 ```
 A RAG client points at `serve` (or, in a cluster, broke's gateway) for both `/v1/embeddings`
 and `/v1/chat/completions` — it never talks to `embed-serve` directly. In standalone use you may
 also call the backend port directly.
 
-> **2.0.7 rollout:** `embed-serve` (the backend + `/v1/embeddings`) ships first (Slice D1); the
-> `serve --embed-backend` proxy is Slice D2 of the same release. Until the proxy lands, point
-> clients at the `embed-serve` port directly. `GET /v1/models` on `serve` does **not** advertise
-> the backend's embedders in 2.0.7 (discovery merge deferred to 2.1) — embeddings still work;
-> only "list → embed" auto-discovery is incomplete.
+> **2.0.7 rollout:** both the `embed-serve` backend (Slice D1) and the `serve --embed-backend`
+> proxy (Slice D2) ship in 2.0.7 (experimental, alpha-gated). `GET /v1/models` on `serve` does
+> **not** advertise the backend's embedders in 2.0.7 (discovery merge deferred to 2.1) — embeddings
+> still work; only "list → embed" auto-discovery is incomplete.
 
-**Flags:** `mlxk embed-serve <model> [--port 8002] [--host 127.0.0.1] [--cpu] [--log-level info] [--log-json]`
+**Proxy behavior (`serve --embed-backend`):** serve forwards the request body to the backend
+**byte-for-byte** and returns the backend's response verbatim — the embed model is never loaded
+into serve's process. The backend is **not** probed at startup, so it may be started after `serve`;
+connection problems surface per request, not at boot.
+
+| Condition | serve returns |
+|-----------|---------------|
+| No `--embed-backend` configured | `501` (`not_implemented`) |
+| Backend unreachable / refused / connect-timeout | `502` (`bad_gateway`, retryable) |
+| Backend read-timeout (slow / large batch) | `504` (`gateway_timeout`, retryable) |
+| Backend returns `4xx`/`5xx` | passed through **verbatim** (status + body) |
+
+Timeouts: connect 3 s (fail fast when the backend is down), read 120 s (large batches).
+
+**Flags:** `mlxk embed-serve <model> [--port 8002] [--host 127.0.0.1] [--cpu] [--log-level info] [--log-json] [--json] [--verbose]`
+(`--json` prints startup info as JSON; `--verbose` shows detailed output.)
 
 **Device:** GPU by default. When co-resident with a GPU-bound `serve`, run the backend with
 `--cpu` — embeddings are 5–50 ms, and CPU keeps the single Metal GPU free for latency-critical
@@ -722,8 +767,13 @@ MLXK2_PORT=8000
 MLXK2_LOG_JSON=1          # JSON logs (production)
 MLXK2_LOG_LEVEL=info      # debug|info|warning|error
 
-# Feature gates (beta features)
-MLXK2_ENABLE_PIPES=1      # Unix pipe integration (2.0.4-beta.1)
+# Feature gates
+MLXK2_ENABLE_PIPES=1              # Unix pipe integration (beta, 2.0.4-beta.1)
+MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha (2.0.7): embed, embed-serve, serve --embed-backend
+
+# Embeddings proxy (ADR-015 D2) — normally set for you by `serve --embed-backend URL`,
+# but can be set directly. When unset, POST /v1/embeddings on serve returns 501.
+MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
 ```
 
 ### Supervised Mode (Default)
@@ -765,10 +815,12 @@ python -m mlxk2.core.server_base
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
-- **501 Not Implemented:** Feature not supported. Two distinct sub-causes (ADR-023):
-  - `not_implemented` — known capability class, feature missing (e.g. STT quantization)
-  - `unsupported_multimodal` — model uses a multimodal class outside the verified-multimodal list
+- **501 Not Implemented:** Feature not supported. Sub-causes:
+  - `not_implemented` — known capability class, feature missing (e.g. STT quantization); also returned by `POST /v1/embeddings` when `serve` has no `--embed-backend` configured (ADR-015 D2)
+  - `unsupported_multimodal` — model uses a multimodal class outside the verified-multimodal list (ADR-023)
+- **502 Bad Gateway:** Embed backend unreachable / connection refused / connect-timeout (`bad_gateway`, **retryable**; `serve --embed-backend` proxy, ADR-015 D2)
 - **503 Service Unavailable:** Server shutting down (`server_shutdown`) or HF download failed (`download_failed`)
+- **504 Gateway Timeout:** Embed backend read-timeout on a slow / large batch (`gateway_timeout`, **retryable**; `serve --embed-backend` proxy, ADR-015 D2)
 - **507 Insufficient Storage:** Memory constraints violated (vision/audio model >70% RAM, ADR-016)
 
 ---
@@ -801,7 +853,11 @@ python -m mlxk2.core.server_base
 
 ## Troubleshooting
 
-### Multimodal Request Fails on Python 3.9
+### Vision/Audio Require Python 3.10+
+
+mlx-knife itself requires Python 3.10+ (`requires-python >=3.10`), so a normal `pip install`
+cannot land on 3.9. This 501 only appears when running from a source checkout on an unsupported
+interpreter.
 
 **Symptom:** HTTP 501 "Vision/Audio models require Python 3.10+"
 
@@ -920,6 +976,27 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 pip install mlx-knife[audio]
 ```
 
+### Embeddings Errors (experimental, 2.0.7)
+
+**Symptom:** `embed` / `embed-serve` / `serve --embed-backend` rejected with
+"requires MLXK2_ENABLE_ALPHA_FEATURES=1".
+**Cause/Fix:** the embeddings surface is alpha-gated — export `MLXK2_ENABLE_ALPHA_FEATURES=1`
+before starting `embed-serve` *and* `serve --embed-backend`.
+
+**Symptom:** `POST /v1/embeddings` on `serve` returns **501** (`not_implemented`,
+"Embeddings are not enabled on this server").
+**Cause/Fix:** `serve` was started without `--embed-backend`. Start `mlxk embed-serve <model>`
+and pass `--embed-backend http://<host>:<port>` to `serve`.
+
+**Symptom:** `POST /v1/embeddings` returns **502** (`bad_gateway`, retryable).
+**Cause/Fix:** the embed-serve backend is unreachable / refused / didn't accept the connection
+within 3 s. Verify the backend process is up and the `--embed-backend` URL/port is correct.
+`serve` does not probe the backend at startup, so this only surfaces per request.
+
+**Symptom:** `POST /v1/embeddings` returns **504** (`gateway_timeout`, retryable).
+**Cause/Fix:** the backend didn't respond within the 120 s read budget — usually a very large
+batch. Reduce the batch size or retry.
+
 ---
 
 ## Limits Summary
@@ -1029,6 +1106,39 @@ pip install mlx-knife[audio]
 
 ---
 
+### From 2.0.6 → 2.0.7
+
+**Endpoint surface:** adds `POST /v1/embeddings` (experimental, gated by
+`MLXK2_ENABLE_ALPHA_FEATURES=1`). It is served by the separate `mlxk embed-serve` backend and
+exposed on `serve` only when started with `--embed-backend URL` (otherwise `POST /v1/embeddings`
+returns **501**). The embed model is never loaded into serve's process. `GET /v1/models` does
+**not** advertise embedders in 2.0.7 (discovery merge deferred to 2.1).
+
+**New error codes:** the proxy adds **502** `bad_gateway` (backend unreachable) and **504**
+`gateway_timeout` (backend read-timeout) — both **retryable** (ADR-015 D2). Backend `4xx/5xx`
+envelopes pass through verbatim.
+
+**Dependency bumps (auto-installed):**
+
+| Package | 2.0.6 | 2.0.7 |
+|---------|-------|-------|
+| `mlx-vlm` | `==0.4.4` | `==0.6.2` |
+| `mlx-audio` | `==0.4.3` | `==0.4.4` |
+
+(`mlx-lm==0.31.3`, `transformers==5.5.4`, `torch`/`torchvision` base deps unchanged.)
+
+**Behavior changes:**
+
+| Change | Effect on operators |
+|--------|---------------------|
+| Audio translation | New CLI flag `mlxk run --audio FILE --translate` (Whisper, multilingual non-turbo). The server endpoint `POST /v1/audio/translations` is **not yet implemented** in 2.0.7. |
+
+**Client updates required:** none for existing chat/audio/models clients. A RAG client can now
+point at one base URL (serve's port) for both `/v1/chat/completions` and `/v1/embeddings` once
+`serve --embed-backend` is configured.
+
+---
+
 ## References
 
 - **Architecture Principles:** `docs/ARCHITECTURE.md`
@@ -1037,7 +1147,9 @@ pip install mlx-knife[audio]
 
 ### ADRs (development decisions)
 
+- **ADR-004:** Enhanced Error Logging (the error-type taxonomy that `bad_gateway`/`gateway_timeout` extend)
 - **ADR-012:** Vision Support
+- **ADR-015:** Embeddings API (`/v1/embeddings` backend, `embed-serve`, `serve --embed-backend` proxy; 502/504 gateway codes)
 - **ADR-016:** Memory-Aware Loading (HTTP 507 rationale)
 - **ADR-020:** Audio Backend Architecture (STT routing, MLX_AUDIO vs MLX_VLM)
 - **ADR-022:** Workspace-First Paradigm (background; surface-transparent on the server)
@@ -1309,14 +1421,19 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ## Changelog
 
-- **2026-06-17:** 2.0.7 (in progress) — embeddings
+- **2026-06-17:** 2.0.7 (in progress) — embeddings + audio translation
   - **NEW:** `/v1/embeddings` (OpenAI Embeddings API), served by the new `mlxk embed-serve`
     backend (separate single-model process; ADR-015). Experimental — requires
     `MLXK2_ENABLE_ALPHA_FEATURES=1`.
   - `encoding_format`: `base64` (default, SDK-compatible) and `float`; batch `input`; L2-normalized
     vectors; mlxk extensions `input_type` / `instruct` for RAG query embedding.
   - Topology: `serve --embed-backend URL` proxies `/v1/embeddings` to the backend (Slice D2, same
-    release). `GET /v1/models` does not yet advertise embedders (discovery merge → 2.1).
+    release). Proxy errors: **501** (no `--embed-backend` configured), **502** `bad_gateway`
+    (backend unreachable), **504** `gateway_timeout` (read-timeout) — 502/504 retryable; backend
+    `4xx/5xx` pass through verbatim. `GET /v1/models` does not yet advertise embedders (merge → 2.1).
+  - **NEW:** `mlxk run --audio FILE --translate` — Whisper audio-to-English translation (CLI;
+    multilingual non-turbo). Server endpoint `POST /v1/audio/translations` still pending.
+  - Dep-wave: `mlx-vlm 0.4.4 → 0.6.2`, `mlx-audio 0.4.3 → 0.4.4` (`mlx-lm`/`transformers` unchanged).
   - Endpoint surface otherwise unchanged.
 
 - **2026-05-12:** 2.0.6 stable (handbook sync)

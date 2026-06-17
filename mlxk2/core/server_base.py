@@ -49,6 +49,8 @@ from .server.handlers.chat import (
 from .server.model_manager import ModelManager
 # Shared ADR-004 exception handlers (also used by embed-serve)
 from .server.error_handlers import register_error_handlers
+# ADR-015 D2: thin /v1/embeddings proxy to a separate embed-serve backend (no runner in-process)
+from .server.handlers.embed_proxy import proxy_embeddings, PROXY_TIMEOUT
 
 # Global configuration
 _default_max_tokens: Optional[int] = None  # Use dynamic model-aware limits by default
@@ -58,6 +60,10 @@ _shutdown_event = threading.Event()
 _preload_model: Optional[str] = None
 # ModelManager singleton (Phase 2 refactoring)
 _model_manager: Optional[ModelManager] = None
+# ADR-015 D2: embed-serve proxy backend URL (set via MLXK2_EMBED_BACKEND) + pooled httpx client.
+# When unset, POST /v1/embeddings returns 501 (embeddings not enabled on this server).
+_embed_backend: Optional[str] = None
+_embed_proxy_client: Optional[Any] = None  # httpx.AsyncClient — httpx is imported lazily in lifespan
 
 # Global logger instance (ADR-004)
 logger = get_logger()
@@ -422,7 +428,7 @@ async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatC
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
-    global _model_manager, _preload_model
+    global _model_manager, _preload_model, _embed_backend, _embed_proxy_client
 
     # Configure log level early (from environment if subprocess mode)
     import os
@@ -467,8 +473,23 @@ async def lifespan(app: FastAPI):
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
+    # ADR-015 D2: enable the /v1/embeddings proxy if an embed backend is configured.
+    # Resilient: we do NOT probe the backend here — it may start after serve; per-request
+    # failures surface as 502/504. The embed model is never loaded into this process.
+    _embed_backend = os.environ.get("MLXK2_EMBED_BACKEND")
+    if _embed_backend:
+        import httpx
+        _embed_proxy_client = httpx.AsyncClient(timeout=PROXY_TIMEOUT)
+        logger.info(f"Embeddings proxy enabled -> {_embed_backend} (POST /v1/embeddings)")
+
     yield
     logger.info("MLX Knife Server 2.0 shutting down...")
+    # ADR-015 D2: close the pooled proxy client (no-op if the proxy was not enabled)
+    if _embed_proxy_client is not None:
+        try:
+            await _embed_proxy_client.aclose()
+        except Exception:
+            pass
     # Ensure shutdown flag is set so any in-flight generations stop quickly
     try:
         _request_global_interrupt()
@@ -554,6 +575,31 @@ async def list_models():
         for m in result["data"]
     ]
     return {"object": "list", "data": model_list}
+
+
+@app.post("/v1/embeddings")
+async def create_embeddings_proxy(request: Request):
+    """Thin proxy to the embed-serve backend (ADR-015 Slice D2).
+
+    serve forwards the raw request body to ``--embed-backend`` and returns the response
+    verbatim — the embed model is never loaded into this process. Returns 501 when no backend
+    is configured (embeddings not enabled on this server).
+    """
+    if _embed_backend is None or _embed_proxy_client is None:
+        raise HTTPException(
+            status_code=501,
+            detail="Embeddings are not enabled on this server; start serve with --embed-backend URL",
+        )
+    if _shutdown_event.is_set():
+        raise HTTPException(status_code=503, detail="Server is shutting down")
+    body = await request.body()
+    return await proxy_embeddings(
+        client=_embed_proxy_client,
+        backend_url=_embed_backend,
+        body=body,
+        request_id=getattr(request.state, "request_id", None),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
 
 
 @app.post("/v1/completions")
