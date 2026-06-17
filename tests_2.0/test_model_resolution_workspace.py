@@ -104,9 +104,13 @@ class TestResolveModelOperationBackwardCompatibility:
 
     def test_resolve_hf_model_id_still_works(self, tmp_path, monkeypatch):
         """Test HF model IDs are not treated as workspace paths."""
-        # Mock cache to return expected result for cache-based resolution
-        from mlxk2.core import cache
-        monkeypatch.setattr(cache, "get_current_model_cache", lambda: tmp_path)
+        # Isolate the cache the RESOLVER uses: model_resolution binds get_current_model_cache
+        # via `from .cache import ...`, so patch THAT reference (patching cache.get_current_model_cache
+        # misses it — the resolver kept scanning the real cache). Clear MLXK_WORKSPACE_HOME so only the
+        # empty tmp cache is seen.
+        from mlxk2.core import model_resolution as _mr
+        monkeypatch.setattr(_mr, "get_current_model_cache", lambda: tmp_path)
+        monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
 
         # HF model ID (not a path) should go through cache logic
         resolved_name, commit_hash, ambiguous = resolve_model_for_operation("mlx-community/Phi-3-mini")
@@ -118,7 +122,7 @@ class TestResolveModelOperationBackwardCompatibility:
 
     def test_resolve_short_name_expansion_still_works(self, tmp_path, monkeypatch):
         """Test short name expansion (existing behavior) still works."""
-        from mlxk2.core import cache
+        from mlxk2.core import model_resolution as _mr
 
         # Create mock cache structure
         cache_dir = tmp_path / "cache"
@@ -129,7 +133,8 @@ class TestResolveModelOperationBackwardCompatibility:
         snapshot_dir.mkdir(parents=True)
         (snapshot_dir / "config.json").write_text('{}')
 
-        monkeypatch.setattr(cache, "get_current_model_cache", lambda: cache_dir)
+        monkeypatch.setattr(_mr, "get_current_model_cache", lambda: cache_dir)
+        monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
 
         # Short name "phi-3" should expand via cache logic
         resolved_name, commit_hash, ambiguous = resolve_model_for_operation("Phi-3")

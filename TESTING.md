@@ -64,14 +64,7 @@ ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
 
 This runs all real tests in the correct order. For details on test categories, see [TESTING-DETAILS.md](TESTING-DETAILS.md).
 
-**Manual execution (advanced):**
-```bash
-# Portfolio-compatible tests
-pytest -m wet -v
-
-# Isolated Cache WRITE tests
-MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_resumable -v
-```
+**Manual execution (advanced):** prefer the umbrella above — it runs the wet selection **path-scoped** across phases. A bare `pytest -m wet` aborts (nanobind single-process limit); see [TESTING-DETAILS → Known limitation](TESTING-DETAILS.md) for the path-scoped phase commands and the reason.
 
 ## Test Categories
 
