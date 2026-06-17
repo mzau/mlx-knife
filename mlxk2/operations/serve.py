@@ -12,11 +12,21 @@ from typing import Optional
 from ..core.server_base import run_server
 
 
-def _run_supervised_uvicorn(host: str, port: int, log_level: str, reload: bool = False) -> int:
-    """Run server as a supervised subprocess and handle Ctrl-C in parent.
+def _run_supervised_uvicorn(
+    host: str,
+    port: int,
+    log_level: str,
+    reload: bool = False,
+    *,
+    module: str = "mlxk2.core.server_base",
+    extra_env: Optional[dict] = None,
+) -> int:
+    """Run a server as a supervised subprocess and handle Ctrl-C in parent.
 
-    Uses the server_base __main__ entrypoint instead of uvicorn CLI directly.
-    This ensures proper JSON log configuration via MLXK2_LOG_JSON env var.
+    Uses the given module's __main__ entrypoint (default ``mlxk2.core.server_base``;
+    embed-serve passes ``mlxk2.core.embed_server_base``) instead of the uvicorn CLI.
+    This ensures proper JSON log configuration via MLXK2_LOG_JSON env var. ``extra_env``
+    carries caller-specific subprocess config (e.g. embed-serve's MLXK2_EMBED_MODEL).
 
     Returns the subprocess' exit code.
     """
@@ -37,10 +47,14 @@ def _run_supervised_uvicorn(host: str, port: int, log_level: str, reload: bool =
 
     # Note: MLXK2_LOG_JSON and MLXK2_PRELOAD_MODEL are already set by start_server()
 
+    # Caller-supplied subprocess env (e.g. embed-serve's MLXK2_EMBED_MODEL / MLXK2_EMBED_CPU).
+    if extra_env:
+        env.update(extra_env)
+
     cmd = [
         sys.executable,
         "-m",
-        "mlxk2.core.server_base",
+        module,
     ]
 
     # Start in a new session so we can signal the whole process group

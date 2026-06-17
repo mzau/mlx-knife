@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.6 stable (server endpoint surface unchanged since 2.0.4)
+**Version:** 2.0.6 stable · `/v1/embeddings` backend added for 2.0.7 (experimental)
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-05-12
+**Last Updated:** 2026-06-17
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -20,6 +20,10 @@ mlxk serve --port 8000 --log-json
 
 # Custom host
 mlxk serve --host 0.0.0.0 --port 8000
+
+# Embeddings (experimental, 2.0.7) — embed-serve backend + serve gateway = one OpenAI surface
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5 --port 8002   # internal embedding backend
+mlxk serve --port 8000 --embed-backend http://127.0.0.1:8002                   # gateway: /v1/embeddings + /v1/chat/completions both on :8000
 ```
 
 **Requirements (2.0.6):**
@@ -45,7 +49,8 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/chat/completions` | ✅ Supported | Text, Vision (`image_url`), Audio (`input_audio`) |
 | `/v1/completions` | ✅ Supported | Legacy text completion |
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
-| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field |
+| `/v1/embeddings` | ✅ Supported (2.0.7, experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend` (see [Embeddings Backend](#embeddings-backend-embed-serve)) |
+| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field. Does **not** list embedders in 2.0.7 (discovery merge → 2.1) |
 | `/health` | ✅ Custom | MLX Knife extension |
 
 ### Authentication
@@ -308,6 +313,74 @@ A man said to the universe, Sir, I exist.
 | Models | STT only (Whisper, Voxtral) | Multimodal (Gemma-3n) |
 | Use case | Pure transcription | Chat with audio context |
 | OpenAI API | Whisper API | Chat Completions API |
+
+---
+
+### POST /v1/embeddings
+
+**OpenAI Embeddings API compatible text embeddings (2.0.7, experimental).**
+
+Served by the **`embed-serve`** backend — a separate, single-model process (see
+[Embeddings Backend](#embeddings-backend-embed-serve) for the topology and why). A client may
+call the backend port directly, or — preferred — go through `serve`'s proxy so one base URL
+serves both `/v1/embeddings` and `/v1/chat/completions`.
+
+**Request:**
+```bash
+# Through the serve gateway (preferred — one base URL for chat + embeddings):
+curl -X POST http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model": "bge-small-en-v1.5", "input": "machine learning tutorial", "encoding_format": "float"}'
+# Standalone, talking to the embed-serve backend directly, swap in its port: http://localhost:8002
+```
+
+**Body Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | String | ✅ | Model ID. The backend serves a **single** model, so this is informational (the loaded model answers regardless) and is echoed back as the canonical `org/name` in the response. |
+| `input` | String or String[] | ✅ | One text, or a batch (one vector per item, in order). |
+| `encoding_format` | String | ❌ | `base64` (**default** — little-endian float32, what the OpenAI SDK decodes) or `float` (raw JSON array, handy for `curl`). |
+| `dimensions` | Integer | ❌ | Accepted only if equal to the model's native width; any other value → **400** (no Matryoshka truncation in 2.0.7). |
+| `user` | String | ❌ | Accepted and ignored (OpenAI passthrough). |
+| `input_type` | String | ❌ | **mlxk extension** (RAG): `document` (default) or `query` (applies the model's query-instruction prefix). Ignored by standard OpenAI clients. |
+| `instruct` | String | ❌ | **mlxk extension**: overrides the query task instruction; implies `input_type: query`. |
+
+**Response (`encoding_format: float`):**
+```json
+{
+  "object": "list",
+  "data": [
+    {"object": "embedding", "index": 0, "embedding": [0.0123, -0.0456, "..."]}
+  ],
+  "model": "mlx-community/bge-small-en-v1.5",
+  "usage": {"prompt_tokens": 4, "total_tokens": 4}
+}
+```
+
+With `encoding_format: base64` (the default) each `embedding` is a base64 string of
+little-endian float32 bytes — the OpenAI Python client decodes it transparently:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="-")   # serve gateway (or :8002 for the backend directly)
+q    = client.embeddings.create(model="bge-small-en-v1.5", input="how does X work?").data[0].embedding
+docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).data
+```
+
+**Notes:**
+- Vectors are **L2-normalized**. `usage` token counts are best-effort.
+- **Same-model / same-device rule:** a single `embed-serve` backend *is* one model on one device by
+  construction (it loads one model at startup; the GPU/`--cpu` choice is fixed for the process), so
+  every vector it returns shares one space — that is why the OpenAI response carries no per-vector
+  `content_hash`/`device` stamp (unlike the CLI JSONL): it needs none. Send a store's query and
+  corpus to the **same backend/gateway**; never mix vectors across backends/models/devices (CPU vs
+  GPU diverge ~0.98 cosine on a 4-bit model), which silently breaks cosine/dedup logic.
+- **Supported models:** the verified embedders (`docs/MODEL-COVERAGE.md`) — decoder
+  (`Qwen3-Embedding-*`, via `mlx-lm`) and encoder (`bge-*`, `*-e5-*`, `mxbai-*`; `model_type: bert`).
+  A declared-but-not-vendored embedder (e.g. `xlm-roberta`/`modernbert`) is rejected at backend
+  **startup**, never silently.
+- **Experimental:** the backend requires `MLXK2_ENABLE_ALPHA_FEATURES=1` (2.0.7).
 
 ---
 
@@ -597,6 +670,43 @@ data: [DONE]
 
 **Note:** `stream_options.include_usage` is not supported.
 
+### Embeddings Backend (embed-serve)
+
+**Experimental (2.0.7).** Text embeddings run in a **separate process**, `mlxk embed-serve` —
+not inside `mlxk serve`. This keeps the main server's memory gates (8 GB vision / 4 GB audio)
+intact: an embedding model is never loaded into serve's address space.
+
+**Topology — one OpenAI surface:**
+```bash
+# Embedding backend — separate process, owns the model, localhost-internal
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5 --port 8002
+
+# Main server — proxies /v1/embeddings to the backend; clients use ONE base URL
+mlxk serve --model chat-model --embed-backend http://127.0.0.1:8002
+```
+A RAG client points at `serve` (or, in a cluster, broke's gateway) for both `/v1/embeddings`
+and `/v1/chat/completions` — it never talks to `embed-serve` directly. In standalone use you may
+also call the backend port directly.
+
+> **2.0.7 rollout:** `embed-serve` (the backend + `/v1/embeddings`) ships first (Slice D1); the
+> `serve --embed-backend` proxy is Slice D2 of the same release. Until the proxy lands, point
+> clients at the `embed-serve` port directly. `GET /v1/models` on `serve` does **not** advertise
+> the backend's embedders in 2.0.7 (discovery merge deferred to 2.1) — embeddings still work;
+> only "list → embed" auto-discovery is incomplete.
+
+**Flags:** `mlxk embed-serve <model> [--port 8002] [--host 127.0.0.1] [--cpu] [--log-level info] [--log-json]`
+
+**Device:** GPU by default. When co-resident with a GPU-bound `serve`, run the backend with
+`--cpu` — embeddings are 5–50 ms, and CPU keeps the single Metal GPU free for latency-critical
+chat (on unified memory this trades GPU contention, not RAM).
+
+**Memory:** an embedding model is small (~300 MB–1 GB) and visible in Activity Monitor. On
+RAM-constrained machines, simply don't start `embed-serve` (explicit choice, not implicit
+degradation).
+
+**Logging:** `--log-json` produces JSON logs on the backend's own stderr (same schema as
+`serve`); each process logs independently.
+
 ---
 
 ## Configuration
@@ -649,7 +759,7 @@ python -m mlxk2.core.server_base
 - **200 OK:** Request successful
 
 ### Client Errors (4xx)
-- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures, ambiguous model spec)
+- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures, ambiguous model spec; for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
 - **403 Forbidden:** File or cache permission denied (`access_denied`)
 - **404 Not Found:** Model not found in cache or workspace
 
@@ -1198,6 +1308,16 @@ When switching from Vision or Audio to Text model mid-conversation:
 ---
 
 ## Changelog
+
+- **2026-06-17:** 2.0.7 (in progress) — embeddings
+  - **NEW:** `/v1/embeddings` (OpenAI Embeddings API), served by the new `mlxk embed-serve`
+    backend (separate single-model process; ADR-015). Experimental — requires
+    `MLXK2_ENABLE_ALPHA_FEATURES=1`.
+  - `encoding_format`: `base64` (default, SDK-compatible) and `float`; batch `input`; L2-normalized
+    vectors; mlxk extensions `input_type` / `instruct` for RAG query embedding.
+  - Topology: `serve --embed-backend URL` proxies `/v1/embeddings` to the backend (Slice D2, same
+    release). `GET /v1/models` does not yet advertise embedders (discovery merge → 2.1).
+  - Endpoint surface otherwise unchanged.
 
 - **2026-05-12:** 2.0.6 stable (handbook sync)
   - Endpoint surface unchanged.

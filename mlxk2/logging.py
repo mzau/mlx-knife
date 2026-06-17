@@ -282,3 +282,41 @@ def set_log_level(level: str):
     root_logger.setLevel(log_level)
     for handler in root_logger.handlers:
         handler.setLevel(log_level)
+
+
+def uvicorn_log_config(log_level: str) -> Optional[Dict[str, Any]]:
+    """Build a uvicorn ``log_config`` dict for JSON logs, or ``None`` for plain text.
+
+    Returns ``None`` unless ``MLXK2_LOG_JSON=1`` (then uvicorn keeps its default text format).
+    In JSON mode, routes uvicorn's default/access/error loggers through :class:`JSONFormatter`
+    so the process' stderr is uniformly machine-parseable. Shared by ``serve`` (run_server) and
+    ``embed-serve`` (its ``__main__``): each process calls this for its **own** uvicorn instance
+    and writes to its **own** stderr — no cross-process logging coupling, identical JSON schema.
+    """
+    if os.environ.get("MLXK2_LOG_JSON", "0") != "1":
+        return None
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {"()": "mlxk2.logging.JSONFormatter"},
+            "access": {"()": "mlxk2.logging.JSONFormatter"},
+        },
+        "handlers": {
+            "default": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+            "access": {
+                "formatter": "access",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": log_level.upper()},
+            "uvicorn.error": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
+            "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+        },
+    }

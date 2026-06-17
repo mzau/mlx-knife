@@ -13,9 +13,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from .cache import get_current_model_cache, hf_to_cache_dir
@@ -25,12 +24,7 @@ from .capabilities import Backend
 from ..operations.common import detect_audio_backend
 from ..tools.vision_adapter import MAX_AUDIO_SIZE_BYTES
 from .. import __version__
-from ..errors import (
-    ErrorType,
-    MLXKError,
-    error_envelope,
-)
-from ..logging import get_logger, set_log_level
+from ..logging import get_logger, set_log_level, uvicorn_log_config
 from ..context import generate_request_id
 
 # Import extracted modules (Phase 1 refactoring)
@@ -53,6 +47,8 @@ from .server.handlers.chat import (
 )
 # Import ModelManager (Phase 2 refactoring)
 from .server.model_manager import ModelManager
+# Shared ADR-004 exception handlers (also used by embed-serve)
+from .server.error_handlers import register_error_handlers
 
 # Global configuration
 _default_max_tokens: Optional[int] = None  # Use dynamic model-aware limits by default
@@ -526,65 +522,8 @@ async def add_request_id_middleware(request: Request, call_next):
     return response
 
 
-# Custom exception handler for MLXKError (ADR-004)
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """Convert HTTPException to error envelope."""
-    request_id = getattr(request.state, "request_id", None)
-
-    # Map HTTP status to error type
-    error_type_map = {
-        400: ErrorType.VALIDATION_ERROR,
-        403: ErrorType.ACCESS_DENIED,
-        404: ErrorType.MODEL_NOT_FOUND,
-        500: ErrorType.INTERNAL_ERROR,
-        501: ErrorType.NOT_IMPLEMENTED,
-        503: ErrorType.SERVER_SHUTDOWN,
-        507: ErrorType.INSUFFICIENT_MEMORY,
-    }
-
-    error_type = error_type_map.get(exc.status_code, ErrorType.INTERNAL_ERROR)
-    error = MLXKError(
-        type=error_type,
-        message=exc.detail,
-        retryable=(exc.status_code == 503)
-    )
-
-    envelope = error_envelope(error, request_id=request_id)
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=envelope
-    )
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Convert FastAPI validation errors (422) to ADR-004 envelope (400).
-
-    FastAPI returns 422 Unprocessable Entity for validation errors by default.
-    We convert to 400 Bad Request with ADR-004 envelope for API consistency.
-    """
-    request_id = getattr(request.state, "request_id", None)
-
-    # Format validation errors for detail field
-    errors = exc.errors()
-    detail = "; ".join(
-        f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-        for e in errors
-    )
-
-    error = MLXKError(
-        type=ErrorType.VALIDATION_ERROR,
-        message="Request validation failed",
-        detail=detail,
-        retryable=False
-    )
-
-    envelope = error_envelope(error, request_id=request_id)
-    return JSONResponse(
-        status_code=400,
-        content=envelope
-    )
+# ADR-004 exception handlers — shared with embed-serve via core/server/error_handlers.py.
+register_error_handlers(app)
 
 
 @app.get("/health")
@@ -1149,40 +1088,8 @@ def run_server(
     # Enable access logs only at debug/info level (reduces noise at warning/error)
     access_log_enabled = log_level.lower() in ["debug", "info"]
 
-    # Configure Uvicorn log format (JSON if MLXK2_LOG_JSON=1)
-    json_mode = os.environ.get("MLXK2_LOG_JSON", "0") == "1"
-    log_config = None
-    if json_mode:
-        # Use custom log config for JSON formatting
-        log_config = {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "()": "mlxk2.logging.JSONFormatter",
-                },
-                "access": {
-                    "()": "mlxk2.logging.JSONFormatter",
-                },
-            },
-            "handlers": {
-                "default": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                },
-                "access": {
-                    "formatter": "access",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                },
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["default"], "level": log_level.upper()},
-                "uvicorn.error": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
-                "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
-            },
-        }
+    # Configure Uvicorn log format (JSON if MLXK2_LOG_JSON=1) — shared with embed-serve.
+    log_config = uvicorn_log_config(log_level)
 
     try:
         uvicorn.run(

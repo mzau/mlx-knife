@@ -1,9 +1,9 @@
 # ADR-015 — Embeddings API
 
-- **Status:** Proposed — ready for 2.0.7 implementation (2026-06-14; implementation-library + server-topology + code-structure + 2.0.7-scope + verified-encoder-list + config-first detection all decided — see the §Decision sections below). (Consolidated 2026-04-07; 2.0.7 implementation slot confirmed 2026-05-11)
+- **Status:** Accepted — Partially Implemented (Slices A–C + D1 embed-serve landed in 2.0.7; D2 serve-proxy + Slice E examples pending). Key decisions settled 2026-06-14 (implementation-library + server-topology + code-structure + 2.0.7-scope + verified-encoder-list + config-first detection — see the §Decision sections below). (Consolidated 2026-04-07; 2.0.7 implementation slot confirmed 2026-05-11)
 - **Authors:** mlx-knife maintainers
 - **Date:** 2025-11-16
-- **Updated:** 2026-06-15 (Slice-A landed — JSONL envelope finalized to `{model, dimensions, content_hash, device}` with Model-Identity/same-model + device-determinism rules; detection corrected so `gemma3_text` needs an EmbeddingGemma signal, not `model_type` alone; Slice B scoped to BERT-only with `xlm-roberta` deferred; `serve`'s `GET /v1/models` merge deferred to 2.1); 2026-06-14 (Open Q #1 resolved — verified-encoder list = one vendored BERT file + zero-vendored `mlx-lm` decoder path; config-first `declared ∩ runnable` detection; showcase `Qwen3-Embedding-0.6B-4bit-DWQ`; see §Decision: Verified-Encoder List & Model Detection); 2026-06-13 (implementation-library resolved — direct/vendored MIT, no turnkey lib; vision/multimodal embeddings deferred to BEYOND; CLI `embed`-verb confirmed; **server topology resolved (Open Q #3): separate processes, `serve` proxies `/v1/embeddings`; three-layer runner/op/handler structure with `EmbeddingRunner` as the 4th runner; CLI + server both minimal in 2.0.7**); 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
+- **Updated:** 2026-06-17 (Slices B + C landed [vendored BERT encoder; config-first `declared ∩ runnable` capability honesty + gate [5]]; **Slice D1 embed-serve landed** — `/v1/embeddings` backend + transport-agnostic handler + `mlxk embed-serve` CLI; interface: `encoding_format` default `base64`, lenient `request.model`, single runner + lock (no ModelManager), alpha-gated — see §2.0.7 Scope + `docs/SERVER-HANDBOOK.md`); 2026-06-15 (Slice-A landed — JSONL envelope finalized to `{model, dimensions, content_hash, device}` with Model-Identity/same-model + device-determinism rules; detection corrected so `gemma3_text` needs an EmbeddingGemma signal, not `model_type` alone; Slice B scoped to BERT-only with `xlm-roberta` deferred; `serve`'s `GET /v1/models` merge deferred to 2.1); 2026-06-14 (Open Q #1 resolved — verified-encoder list = one vendored BERT file + zero-vendored `mlx-lm` decoder path; config-first `declared ∩ runnable` detection; showcase `Qwen3-Embedding-0.6B-4bit-DWQ`; see §Decision: Verified-Encoder List & Model Detection); 2026-06-13 (implementation-library resolved — direct/vendored MIT, no turnkey lib; vision/multimodal embeddings deferred to BEYOND; CLI `embed`-verb confirmed; **server topology resolved (Open Q #3): separate processes, `serve` proxies `/v1/embeddings`; three-layer runner/op/handler structure with `EmbeddingRunner` as the 4th runner; CLI + server both minimal in 2.0.7**); 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
 - **Target:** 2.0.7 experimental (gated), 2.1 stable promotion
 - **Related:** Issue #26, ADR-014 (Pipe Integration, fulfilled), ADR-021 (MCP), ADR-022 (Workspace-First)
 
@@ -314,7 +314,7 @@ Ships in `examples/cosine-search.py`. No dependencies beyond numpy.
   - Full config-first detection (§Decision: Coupled detection fix) — `model_type ∈ {bert, xlm-roberta, modernbert, nomic_bert}` + sentence-transformers sidecar (and `gemma3_text` **only** with that sidecar / a bidirectional signal — never from `model_type` alone); fixes the `"embed" in name` heuristic that mislabels bge-small as `base`.
   - `runtime_compatible` / ARCHITECTURE §1 gate [5] — verified-list filter (`bert`/`qwen3` runnable-via-`embed`; `modernbert` etc. honest *"encoder not vendored"*) + embed-side pre-exec reject (mirrors run-side ADR-024 Class A); promote the gate-[5] forward-note + §Capability Presentation Scope *forthcoming → shipped*; verified **classes** → `docs/MODEL-COVERAGE.md`.
 
-- [ ] **Slice D1 — embed-serve.** `core/server/handlers/embeddings.py` + `mlxk embed-serve <model>` (single-model backend, owns the runner, `/v1/embeddings` OpenAI-compatible, localhost-internal; no embed model in serve's process).
+- [x] **Slice D1 — embed-serve.** `core/server/handlers/embeddings.py` + `mlxk embed-serve <model>` (single-model backend, owns the runner, `/v1/embeddings` OpenAI-compatible, localhost-internal; no embed model in serve's process). **Landed 2026-06-17** (uncommitted at write time) — see `docs/SERVER-HANDBOOK.md` for the interface.
 - [ ] **Slice D2 — serve proxy.** `serve --embed-backend URL` thin proxy of `POST /v1/embeddings` to the D1 backend. The `GET /v1/models` **merge** (serve *advertising* the backend's embedders) stays deferred to 2.1 (§Decision: 2.0.7 Scope) — so a 2.0.7 `serve` **serves** embeddings (D2) but does not **list** embedders under `/v1/models`.
 
 - [ ] **Slice E — Examples + docs** (publish with the release). `examples/cosine-search.py` + RAG examples (`examples/rag-server`, `examples/photo-rag`); RAG-workflow end-to-end test; README section + help text.
@@ -412,6 +412,20 @@ Both surfaces ship in 2.0.7 — they share `embedding_runner.py`, and the CLI is
 - `mlxk embed-serve <model> [--port 8002] [--cpu]` — single-model backend.
 - `mlxk serve … --embed-backend URL` — proxy `POST /v1/embeddings`.
 
+**embed-serve interface (Slice D1, 2026-06-17):** the concrete `/v1/embeddings` request/response
+contract (flags, fields, `encoding_format`, `usage`, errors) lives in `docs/SERVER-HANDBOOK.md`
+(the client-developer reference); the code's Pydantic models are the source of truth. Interface
+decisions taken during implementation:
+- **`encoding_format` defaults to `base64`** (strict OpenAI fidelity — the SDK's own default; a raw
+  `curl` may request `float`). `/v1/embeddings` is an HTTP/OpenAI surface, not the CLI's JSONL-float
+  surface, so it follows the OpenAI default rather than the `embed` verb's.
+- **`request.model` is lenient** — the single-model backend serves its loaded model regardless and
+  stamps the response `model` with the canonical `org/name` identity.
+- **`embed-serve` is alpha-gated** (`MLXK2_ENABLE_ALPHA_FEATURES=1`), consistent with `embed`.
+- **No ModelManager** in embed-serve: one `EmbeddingRunner` held for the process lifetime + an
+  inference `Lock` (single model, no swapping); serve's swap/memory-gate machinery is calibrated for
+  the multi-GB main-serve process and does not apply to the isolated embed process.
+
 **Deferred → point-release / 2.1:**
 - `GET /v1/models` merge in `serve` (embeddings *work* without it; only "list→embed" discovery is incomplete — documented gap).
 - Variant B (`serve` spawns/manages `embed-serve` as a child subprocess — one-command UX).
@@ -472,14 +486,18 @@ The current heuristic is `"embed" in name_lower` (`capabilities.py`), which misl
 
 ## Success Criteria
 
-- [ ] `mlxk embed model "text"` generates JSONL embedding
-- [ ] `echo "text" | mlxk embed model -` works (stdin)
-- [ ] `mlxk embed ./workspace/model "text"` works (workspace path)
-- [ ] `mlxk embed-serve --port 8002` serves `/v1/embeddings` (separate process)
-- [ ] `cosine-search.py` finds similar embeddings (top-k)
-- [ ] **Photo Search POC:** Vision describe → embed → search works end-to-end
-- [ ] **Full RAG workflow:** embed → cosine-search → mlxk run chain works
-- [ ] Main server (`mlxk serve`) memory gates unaffected by embedding workload
+One acceptance check per shipped capability across every slice that produces observable behavior — A (decoder) · B (encoder) · C (capability honesty) · D1 (backend) · D2 (proxy) · E (examples). All `[ ]` until ticked at the release smoke. (Open Q #1 = a decision, not a capability — no check.)
+
+- [ ] `mlxk embed <model> "text"` → JSONL embedding — **decoder** path (Slice A, `Qwen3-Embedding-*` via mlx-lm) **and encoder** path (Slice B, `bge`/`e5`, vendored BERT)
+- [ ] `echo "text" | mlxk embed <model> -` (stdin) and `mlxk embed <model> --batch` (JSONL passthrough) work
+- [ ] `mlxk embed ./workspace/model "text"` works (workspace path, ADR-022)
+- [ ] **Capability honesty (Slice C):** a non-vendored embedder (`modernbert`/`xlm-roberta`) is rejected with an honest *"encoder not vendored"* error; `mlxk list`/`show` label embedders as `embedding` (bge no longer mislabeled `base`) — gate [5] / ARCHITECTURE Invariant 4
+- [ ] `mlxk embed-serve model --port 8002` serves `/v1/embeddings` (D1 — separate backend process)
+- [ ] `mlxk serve --embed-backend http://127.0.0.1:8002` proxies `/v1/embeddings` (D2 — one base URL: chat + embeddings on the serve port)
+- [ ] `cosine-search.py` finds similar embeddings (top-k) — Slice E
+- [ ] **Photo Search POC (Slice E):** Vision describe → embed → search works end-to-end
+- [ ] **Full RAG workflow (Slice E):** embed → cosine-search → mlxk run chain works
+- [ ] Main server (`mlxk serve`) memory gates unaffected by embedding workload (cross-cutting; D1/D2 memory-safety)
 
 ---
 

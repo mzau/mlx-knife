@@ -82,6 +82,10 @@ test = [
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.5.0",
+    # OpenAI Python client for the embed-serve /v1/embeddings round-trip live test (ADR-015
+    # Use Case 4). Developer-only: the SDK test is live (needs a running backend), kept out of
+    # the lean [test] extra; the live test guards with pytest.importorskip("openai").
+    "openai>=1.0",
 ]
 
 [tool.ruff.lint.per-file-ignores]

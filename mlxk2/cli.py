@@ -486,6 +486,27 @@ def main():
                               help="Render the standard JSON envelope instead of JSONL")
     embed_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
 
+    # Embed-serve command (ADR-015 Slice D1, experimental — gated by MLXK2_ENABLE_ALPHA_FEATURES=1).
+    # Single-model, localhost-internal embeddings backend exposing OpenAI-compatible /v1/embeddings.
+    embed_serve_parser = subparsers.add_parser(
+        "embed-serve", help="Start single-model embeddings backend (experimental)"
+    )
+    embed_serve_parser.add_argument("model", help="Embedding model name, HF ID, or workspace path")
+    embed_serve_parser.add_argument("--port", type=int, default=8002,
+                                    help="Port to bind server to (default: 8002)")
+    embed_serve_parser.add_argument("--host", default="127.0.0.1",
+                                    help="Host address to bind to (default: 127.0.0.1)")
+    embed_serve_parser.add_argument("--cpu", action="store_true",
+                                    help="Force CPU execution (recommended when co-resident "
+                                         "with a GPU-bound serve; keeps the GPU for chat)")
+    embed_serve_parser.add_argument("--log-level", default="info",
+                                    help="Logging level (debug/info/warning/error, default: info)")
+    embed_serve_parser.add_argument("--log-json", action="store_true",
+                                    help="Output logs in JSON format (for log aggregation)")
+    embed_serve_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
+    embed_serve_parser.add_argument("--json", action="store_true",
+                                    help="Output startup info in JSON format")
+
     args = parser.parse_args()
 
     # Note: fd-level stdout suppression is applied locally around convert_operation()
@@ -934,6 +955,48 @@ def main():
             # or by default the records as JSONL via format_embed_jsonl.
             print_result(result, format_embed_jsonl, args.json)
             sys.exit(0 if result.get("status") == "success" else 1)
+        elif args.command == "embed-serve":
+            # Experimental surface (ADR-015 Slice D1) — reject before importing the operation.
+            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+                result = handle_error(
+                    "CommandError",
+                    "embed-serve is experimental and requires MLXK2_ENABLE_ALPHA_FEATURES=1",
+                )
+                print_result(result, None, args.json)
+                sys.exit(1)
+
+            # Set MLXK2_LOG_JSON if --log-json flag is present (mirrors serve).
+            if getattr(args, "log_json", False):
+                os.environ["MLXK2_LOG_JSON"] = "1"
+
+            if args.json:
+                server_info = {
+                    "status": "starting",
+                    "command": "embed-serve",
+                    "data": {
+                        "host": args.host,
+                        "port": args.port,
+                        "model": args.model,
+                        "device": "cpu" if getattr(args, "cpu", False) else "gpu",
+                    },
+                    "error": None,
+                }
+                print(format_json_output(server_info))
+
+            # Lazy import to avoid hard dependency on FastAPI/uvicorn at import time.
+            from .operations.embed_serve import start_embed_serve
+            start_embed_serve(
+                model=args.model,
+                port=args.port,
+                host=args.host,
+                cpu=getattr(args, "cpu", False),
+                log_level=getattr(args, "log_level", "info"),
+                verbose=getattr(args, "verbose", False),
+                supervise=True,
+            )
+
+            # Should never reach here (server runs indefinitely)
+            result = {"status": "success"}
         elif args.command is None:
             # No command specified - show help or JSON error depending on --json flag
             if args.json:
