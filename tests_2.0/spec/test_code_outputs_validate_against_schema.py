@@ -277,6 +277,70 @@ def test_run_output_matches_schema():
     assert not errors, f"run output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
 
 
+@pytest.mark.spec
+def test_embed_output_matches_schema():
+    """embed --json envelope validates against the schema (0.2.3).
+
+    The schema recognizes embed via the command enum and leaves data.records unconstrained;
+    these static envelopes confirm the envelope is structurally valid for a single record, a
+    --batch record with passthrough fields, and the error envelope.
+    """
+    validator = _get_validator()
+
+    single = {
+        "status": "success",
+        "command": "embed",
+        "error": None,
+        "data": {
+            "records": [
+                {
+                    "text": "machine learning tutorial",
+                    "embedding": [0.0123, -0.0456, 0.0789, -0.0102],
+                    "metadata": {
+                        "model": "mlx-community/bge-small-en-v1.5",
+                        "dimensions": 384,
+                        "content_hash": "sha256:0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
+                        "device": "gpu",
+                    },
+                }
+            ]
+        },
+    }
+
+    # --batch: extra fields are preserved per record; cache models stamp a 40-char content_hash.
+    batch = {
+        "status": "success",
+        "command": "embed",
+        "error": None,
+        "data": {
+            "records": [
+                {
+                    "id": 7,
+                    "text": "doc one",
+                    "embedding": [0.1, 0.2, 0.3],
+                    "metadata": {
+                        "model": "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+                        "dimensions": 1024,
+                        "content_hash": "abcdef0123456789abcdef0123456789abcdef01",
+                        "device": "cpu",
+                    },
+                }
+            ]
+        },
+    }
+
+    error_env = {
+        "status": "error",
+        "command": "embed",
+        "error": {"type": "NotAnEmbedder", "message": "Model 'X' is not recognized as an embedding model."},
+        "data": None,
+    }
+
+    for label, payload in ("single", single), ("batch", batch), ("error", error_env):
+        errors = sorted(validator.iter_errors(payload), key=lambda e: e.path)
+        assert not errors, f"embed ({label}) output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+
+
 # NOTE: serve/server commands don't produce JSON output - they run as server processes
 # Only error cases would produce JSON, which are covered by general error handling
 

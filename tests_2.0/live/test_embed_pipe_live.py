@@ -2,7 +2,7 @@
 
 Opt-in / env-gated — skipped unless MLXK2_ENABLE_ALPHA_FEATURES=1 and an embedding model
 is resolvable. Drives the CLI as a subprocess (real mlx, no conftest stub) and asserts the
-JSONL contract, L2-normalization, dimensions, batch passthrough, human mode, and the
+JSONL contract, L2-normalization, dimensions, batch passthrough, the --json envelope, and the
 end-to-end semantic sanity (related > unrelated cosine; query ≠ document).
 
 Configure the model via MLXK_EMBED_MODEL (default: the ADR showcase
@@ -81,12 +81,21 @@ def test_batch_passthrough_and_cosine(model_available):
     assert _cos(e["a"], e["b"]) > _cos(e["a"], e["c"])  # related > unrelated
 
 
-def test_human_mode_is_not_json(model_available):
-    p = _run(["-", "--human"], stdin="hello world")
+def test_json_envelope(model_available):
+    # --json renders ONE standard envelope (not JSONL); records ride under data.records.
+    p = _run(["-", "--json"], stdin="machine learning tutorial")
     assert p.returncode == 0, p.stderr
-    out = p.stdout.strip()
-    assert out and not out.startswith("{")
-    assert "-dim" in out
+    env = json.loads(p.stdout)  # single envelope object, parseable as a whole
+    assert env["status"] == "success"
+    assert env["command"] == "embed"
+    assert env["error"] is None
+    recs = env["data"]["records"]
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["text"] == "machine learning tutorial"
+    meta = rec["metadata"]
+    assert len(rec["embedding"]) == meta["dimensions"]
+    assert {"model", "dimensions", "content_hash", "device"} <= set(meta)
 
 
 def test_query_differs_from_document(model_available):

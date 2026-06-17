@@ -80,10 +80,7 @@ mlxk embed bge-small "text" --cpu
 - `<text>` or `-`: Text to embed (stdin if `-`)
 - `--cpu`: Force CPU execution (default: GPU via MLX)
 - `--batch`: Process JSONL input (multiple embeddings). Reads `"text"` field from each line, passes through all other fields to output
-- `--output <file>`: Write to file (default: stdout)
-- `--human`: Human-readable summary instead of JSONL (for inspection, not piping)
-
-**Note on output default:** Unlike other mlxk commands (where human-readable is default and `--json` switches to machine output), `mlxk embed` defaults to JSONL. Rationale: the typical consumer of embedding output is another program (cosine-search, index builder), not a human reading a terminal. This avoids requiring `--json` in every pipe.
+- `--json`: Render the standard JSON-API envelope instead of JSONL (records under `data.records`)
 
 ### Output Format (JSONL)
 
@@ -317,7 +314,8 @@ Ships in `examples/cosine-search.py`. No dependencies beyond numpy.
   - Full config-first detection (§Decision: Coupled detection fix) — `model_type ∈ {bert, xlm-roberta, modernbert, nomic_bert}` + sentence-transformers sidecar (and `gemma3_text` **only** with that sidecar / a bidirectional signal — never from `model_type` alone); fixes the `"embed" in name` heuristic that mislabels bge-small as `base`.
   - `runtime_compatible` / ARCHITECTURE §1 gate [5] — verified-list filter (`bert`/`qwen3` runnable-via-`embed`; `modernbert` etc. honest *"encoder not vendored"*) + embed-side pre-exec reject (mirrors run-side ADR-024 Class A); promote the gate-[5] forward-note + §Capability Presentation Scope *forthcoming → shipped*; verified **classes** → `docs/MODEL-COVERAGE.md`.
 
-- [ ] **Slice D — Server.** `core/server/handlers/embeddings.py` + `mlxk embed-serve <model>` (single-model backend, owns the runner, `/v1/embeddings` OpenAI-compatible, localhost-internal); `serve --embed-backend URL` thin proxy of `POST /v1/embeddings` (no embed model in serve's process).
+- [ ] **Slice D1 — embed-serve.** `core/server/handlers/embeddings.py` + `mlxk embed-serve <model>` (single-model backend, owns the runner, `/v1/embeddings` OpenAI-compatible, localhost-internal; no embed model in serve's process).
+- [ ] **Slice D2 — serve proxy.** `serve --embed-backend URL` thin proxy of `POST /v1/embeddings` to the D1 backend. The `GET /v1/models` **merge** (serve *advertising* the backend's embedders) stays deferred to 2.1 (§Decision: 2.0.7 Scope) — so a 2.0.7 `serve` **serves** embeddings (D2) but does not **list** embedders under `/v1/models`.
 
 - [ ] **Slice E — Examples + docs** (publish with the release). `examples/cosine-search.py` + RAG examples (`examples/rag-server`, `examples/photo-rag`); RAG-workflow end-to-end test; README section + help text.
 

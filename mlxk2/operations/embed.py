@@ -11,7 +11,6 @@ encoder types (xlm-roberta/modernbert/nomic_bert) are surfaced honestly as decla
 """
 
 import json
-import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.model_resolution import resolve_model_for_operation, model_display_identity
@@ -142,30 +141,3 @@ def embed_operation(
         records.append(rec)
 
     return {"status": "success", "command": "embed", "data": {"records": records}, "error": None}
-
-
-def emit_embed_result(result: Dict[str, Any], *, human: bool = False, output_file: Optional[str] = None) -> None:
-    """Emit JSONL (default) or a human summary. Errors go to stderr; stdout stays clean."""
-    if result.get("status") == "error":
-        print(json.dumps(result.get("error", {}), ensure_ascii=False), file=sys.stderr)
-        return
-
-    records = result["data"]["records"]
-    stream = open(output_file, "w", encoding="utf-8") if output_file else sys.stdout
-    try:
-        if human:
-            for rec in records:
-                vec = rec["embedding"]
-                meta = rec["metadata"]
-                preview = ", ".join(f"{x:.4f}" for x in vec[:4])
-                text = str(rec.get("text", ""))
-                if len(text) > 60:
-                    text = text[:57] + "..."
-                print(f"{text!r} -> {meta['dimensions']}-dim [{preview}, ...] "
-                      f"(model: {meta['model']})", file=stream)
-        else:
-            for rec in records:
-                print(json.dumps(rec, ensure_ascii=False), file=stream)
-    finally:
-        if output_file:
-            stream.close()

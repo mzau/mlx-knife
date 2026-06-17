@@ -4,6 +4,7 @@ Subprocess-level, no model required: the gate must reject without
 MLXK2_ENABLE_ALPHA_FEATURES=1 and pass through to the operation with it.
 """
 
+import json
 import os
 import sys
 import subprocess
@@ -41,3 +42,15 @@ def test_gate_passes_with_alpha_env_then_model_error():
     assert "MLXK2_ENABLE_ALPHA_FEATURES" not in combined
     assert ("ModelNotFound" in combined or "NotAnEmbedder" in combined
             or "not found" in combined.lower())
+
+
+def test_json_flag_renders_error_envelope():
+    # With the gate open, a bogus model + --json renders the standard envelope on stdout
+    # (status=error, command=embed) — model-free, exercises the --json wiring.
+    p = _run(["embed", "__definitely_no_such_model__", "hello", "--json"],
+             env_overrides={"MLXK2_ENABLE_ALPHA_FEATURES": "1"})
+    assert p.returncode == 1
+    env = json.loads(p.stdout)
+    assert env["status"] == "error"
+    assert env["command"] == "embed"
+    assert env["error"]["type"]

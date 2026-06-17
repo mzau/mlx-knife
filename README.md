@@ -583,6 +583,8 @@ MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
 
 All commands support both human-readable and JSON output (`--json` flag) for automation and scripting, enabling seamless integration with CI/CD pipelines and cluster management systems.
 
+> **Experimental:** `mlxk embed` (gated by `MLXK2_ENABLE_ALPHA_FEATURES=1`) renders embedding records as JSONL by default; `--json` wraps them in the standard envelope.
+
 ### Command Structure
 
 All commands support JSON output via `--json` flag:

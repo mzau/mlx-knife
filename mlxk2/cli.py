@@ -175,6 +175,18 @@ def format_json_output(data: Dict[str, Any]) -> str:
     return json.dumps(data, indent=2)
 
 
+def format_embed_jsonl(result: Dict[str, Any]) -> str:
+    """Render embed's default surface: the envelope payload (``data.records``) as JSONL.
+
+    Like every command, ``embed`` builds the standard 0.2.3 envelope; ``--json`` renders it
+    in full via ``format_json_output``, and the default surface renders the payload — for
+    embed that payload is records, emitted one per line (the consumer is a program). JSON
+    serialization stays in this layer, not ``output/human.py`` (which is prose-only).
+    """
+    records = result.get("data", {}).get("records", [])
+    return "\n".join(json.dumps(rec, ensure_ascii=False) for rec in records)
+
+
 def _get_system_memory_bytes() -> Optional[int]:
     """Get total system memory in bytes via sysctl (macOS only).
 
@@ -455,7 +467,8 @@ def main():
     push_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
     # Embed command (ADR-015, experimental — gated by MLXK2_ENABLE_ALPHA_FEATURES=1).
-    # Unlike other commands, embed defaults to JSONL (machine consumer); --human is for inspection.
+    # Like every command it builds the standard envelope; --json renders it. The default surface
+    # renders the records as JSONL (the consumer is a program, not a terminal).
     embed_parser = subparsers.add_parser("embed", help="Generate text embeddings (experimental)")
     embed_parser.add_argument("model", help="Embedding model name, HF ID, or workspace path")
     embed_parser.add_argument("text", nargs="?", default=None, help="Text to embed, or '-' for stdin")
@@ -469,9 +482,8 @@ def main():
                               help="Force CPU execution (fallback for memory / GPU co-residency; "
                                    "slower than GPU for non-tiny models, and CPU vectors differ "
                                    "numerically from GPU — do not mix in one store)")
-    embed_parser.add_argument("--human", action="store_true",
-                              help="Human-readable summary instead of JSONL (for inspection, not piping)")
-    embed_parser.add_argument("--output", default=None, help="Write output to file (default: stdout)")
+    embed_parser.add_argument("--json", action="store_true",
+                              help="Render the standard JSON envelope instead of JSONL")
     embed_parser.add_argument("--verbose", action="store_true", help="Show detailed output")
 
     args = parser.parse_args()
@@ -906,7 +918,7 @@ def main():
                 print_result(result, None, args.json)
                 sys.exit(1)
 
-            from .operations.embed import embed_operation, emit_embed_result
+            from .operations.embed import embed_operation
             query_mode = bool(getattr(args, "query", False) or getattr(args, "instruct", None))
             result = embed_operation(
                 args.model,
@@ -918,8 +930,9 @@ def main():
                 cpu=getattr(args, "cpu", False),
                 verbose=getattr(args, "verbose", False),
             )
-            emit_embed_result(result, human=getattr(args, "human", False),
-                              output_file=getattr(args, "output", None))
+            # Same mechanic as every command (cf. push): print_result renders the --json envelope,
+            # or by default the records as JSONL via format_embed_jsonl.
+            print_result(result, format_embed_jsonl, args.json)
             sys.exit(0 if result.get("status") == "success" else 1)
         elif args.command is None:
             # No command specified - show help or JSON error depending on --json flag

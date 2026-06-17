@@ -1,6 +1,6 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.2.2
+**Specification Version:** 0.2.3
 **Status:** Stable (backward-compatible)
 **Released:** MLX-Knife 2.0.6
 
@@ -129,7 +129,7 @@ All commands support consistent JSON output with standardized error handling and
 ```jsonc
 {
   "status": "success" | "error",
-  "command": "list" | "show" | "health" | "pull" | "rm" | "clone" | "version" | "push" | "run" | "server",
+  "command": "list" | "show" | "health" | "pull" | "rm" | "clone" | "version" | "push" | "run" | "server" | "embed",
   "data": { /* command-specific data */ },
   "error": null | { "type": "string", "message": "string" }
 }
@@ -173,6 +173,7 @@ Notes:
 | `push` | Upload a local folder to Hugging Face |
 | `run` | Execute model inference |
 | `serve`/`server` | OpenAI-compatible API server |
+| `embed` | Generate text embeddings (experimental, requires `MLXK2_ENABLE_ALPHA_FEATURES=1`) |
 
 All commands support `--json` for machine-readable output. Commands that accept model names also accept workspace paths (`./workspace`, `/absolute/path`). Workspace models return `"cached": false`.
 
@@ -195,6 +196,8 @@ All commands support `--json` for machine-readable output. Commands that accept 
 - `"embeddings"` - Can generate embeddings (mutually exclusive with text-generation)
 - `"vision"` - Accepts image inputs (detected via `model_type` in vision families or presence of `preprocessor_config.json`)
 - `"audio"` - Accepts audio inputs (detected via `audio_config` or `model_type` in audio families)
+
+**Embedding models.** A model with `model_type: "embedding"` / `capabilities: ["embeddings"]` is an embedder. Its output dimension is reported by `show --json` as `data.metadata.hidden_size` (config-derived — the same value `mlxk embed` stamps as each record's `metadata.dimensions`). Use `mlxk embed` to produce vectors.
 
 **Vision Example (Phase 1a, ADR-012):**
 ```json
@@ -1103,6 +1106,45 @@ Missing Token:
 }
 ```
 
+### `mlxk embed <model> [<text>] [--json] [--batch]`
+
+**Experimental** — requires `MLXK2_ENABLE_ALPHA_FEATURES=1`.
+
+Behavior:
+- Default output is JSONL — one record per line on stdout.
+- `--json` renders the standard envelope (records under `data.records`).
+- `--batch` reads JSONL on stdin and embeds each line's `text` field, preserving any extra fields per record.
+
+**Default output (JSONL, one record per line):**
+```
+{"text": "machine learning tutorial", "embedding": [0.0123, -0.0456, ...], "metadata": {"model": "mlx-community/bge-small-en-v1.5", "dimensions": 384, "content_hash": "sha256:...", "device": "gpu"}}
+```
+
+**`--json` (standard envelope):**
+```json
+{
+  "status": "success",
+  "command": "embed",
+  "data": {
+    "records": [
+      {
+        "text": "machine learning tutorial",
+        "embedding": [0.0123, -0.0456, 0.0789, -0.0102],
+        "metadata": {
+          "model": "mlx-community/bge-small-en-v1.5",
+          "dimensions": 384,
+          "content_hash": "sha256:0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
+          "device": "gpu"
+        }
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+The `embedding` array is abbreviated (`bge-small-en-v1.5` emits 384 floats).
+
 ## Error Handling
 
 **All errors follow consistent format with detailed error types:**
@@ -1252,6 +1294,7 @@ All commands use consistent exit codes for scripting:
 
 ## Version History
 
+- **0.2.3** (2.0.7): Added `embed` to the `command` enum so `mlxk embed --json` renders the standard envelope (records under `data.records`). embed's default JSONL rendering is unchanged. Experimental (gated by `MLXK2_ENABLE_ALPHA_FEATURES=1`). Additive; no breaking changes.
 - **0.2.2** (2.0.6): Additive tightening — `content_hash` format documented (was: prose-only "SHA256 hash"); `pattern` constraint added to schema accepting both v2 (`sha256:<64-hex>`) and legacy v1 (`<64-hex>`) formats during the migration window. Reflects the v1→v2 format change introduced by ADR-025 (content_hash v2 algorithm) where the `sha256:` prefix entered the API output. Pre-2.0.6 (v1) workspaces continue to surface their legacy raw-hex value until migrated via `mlxk show <name> --recalc-hash`. No new fields, no breaking changes for consumers that treat `content_hash` as an opaque string.
 - **0.2.1** (2.0.5-beta.3): Added `data` schema definitions for `clone` and `convert` commands (if/then blocks with required fields)
 - **0.2.0** (2.0.5-beta.1): Workspace-first fields: `origin`, `content_hash`, `hash_modified`, `clean`, `display_name` on modelObject. `convert` added to command enum.
