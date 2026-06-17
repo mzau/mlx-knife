@@ -120,6 +120,45 @@ def model_display_identity(
     return resolved_name, content_hash
 
 
+def _short_content_hash(content_hash: Optional[str], hash_len: int = 8) -> str:
+    """Normalize a content hash to a short, stable token for the embed ``system_fingerprint``.
+
+    Drops a ``sha256:`` prefix (workspace ADR-025 hashes) so cache (40-char git revision) and workspace
+    (``sha256:…``) hashes share one shape, then keeps the first ``hash_len`` hex chars — enough to
+    distinguish revisions of the *same* model for change-detection (not adversarial collision resistance).
+    ``None`` (an unmanaged workspace with no sentinel) becomes ``nohash`` so the slot is never empty.
+    """
+    if not content_hash:
+        return "nohash"
+    h = content_hash.split(":", 1)[1] if content_hash.startswith("sha256:") else content_hash
+    return h[:hash_len] or "nohash"
+
+
+def embed_system_fingerprint(
+    resolved_name: str,
+    commit_hash: Optional[str] = None,
+    *,
+    cpu: bool = False,
+    hash_len: int = 8,
+) -> str:
+    """OpenAI ``system_fingerprint`` token for the embeddings response — a change-detection signal.
+
+    An embedding vector space is fixed by the model, its content fingerprint (revision / quant), and the
+    device (CPU vs GPU diverge ~0.98 cosine on a 4-bit model). The model name already rides in the response
+    ``model`` field — the clean, re-sendable selector. This token carries the two remaining discriminators —
+    ``{short_hash}.{device}`` — so a consumer detects a revision / device swap (and, via the hash, a
+    different model) by plain equality on **one** field across an ``embed-serve`` restart.
+
+    Mirrors OpenAI's own ``system_fingerprint`` semantics ("the backend configuration changed"); on the
+    embeddings response it is an additive mlxk extension (the field is standard on chat/completions, not
+    embeddings). Shape ``a1b2c3d4.gpu`` — short content hash + ``.`` + device (``gpu`` | ``cpu``); the ``.``
+    is unambiguous (pure ``hex.device``). Opaque: compare it, don't parse it.
+    """
+    _, content_hash = model_display_identity(resolved_name, commit_hash)
+    device = "cpu" if cpu else "gpu"
+    return f"{_short_content_hash(content_hash, hash_len)}.{device}"
+
+
 def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optional[str], Optional[List[str]]]:
     """Resolve model specification for operations.
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`/v1/embeddings` + `embed-serve` `/health` carry `system_fingerprint`**
+  (`hash.device`, e.g. `a1b2c3d4.gpu`) — a change-detection token so a RAG
+  client detects a model / revision / device swap and re-indexes instead of
+  silently mixing incomparable vectors. `model` stays the clean `org/name`
+  selector (= `/v1/models` id); the fingerprint is an additive field
+  (standard on OpenAI chat/completions). Experimental, alpha-gated — extends
+  the embeddings backend shipped in 2.0.7-beta.1.
+  ([ADR-015](docs/ADR/ADR-015-Embeddings-API.md) §Model Identity & the
+  Same-Model Rule.)
+
 ## [2.0.7-beta.1] - 2026-06-17
 
 ### Added

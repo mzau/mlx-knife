@@ -3,7 +3,7 @@
 - **Status:** Accepted — Partially Implemented (Slices A–C + D1 embed-serve + D2 serve-proxy landed in 2.0.7; Slice E examples pending). Key decisions settled 2026-06-14 (implementation-library + server-topology + code-structure + 2.0.7-scope + verified-encoder-list + config-first detection — see the §Decision sections below). (Consolidated 2026-04-07; 2.0.7 implementation slot confirmed 2026-05-11)
 - **Authors:** mlx-knife maintainers
 - **Date:** 2025-11-16
-- **Updated:** 2026-06-17 (Slices B + C landed [vendored BERT encoder; config-first `declared ∩ runnable` capability honesty + gate [5]]; **Slice D1 embed-serve landed** — `/v1/embeddings` backend + transport-agnostic handler + `mlxk embed-serve` CLI; interface: `encoding_format` default `base64`, lenient `request.model`, single runner + lock (no ModelManager), alpha-gated — see §2.0.7 Scope + `docs/SERVER-HANDBOOK.md`); 2026-06-15 (Slice-A landed — JSONL envelope finalized to `{model, dimensions, content_hash, device}` with Model-Identity/same-model + device-determinism rules; detection corrected so `gemma3_text` needs an EmbeddingGemma signal, not `model_type` alone; Slice B scoped to BERT-only with `xlm-roberta` deferred; `serve`'s `GET /v1/models` merge deferred to 2.1); 2026-06-14 (Open Q #1 resolved — verified-encoder list = one vendored BERT file + zero-vendored `mlx-lm` decoder path; config-first `declared ∩ runnable` detection; showcase `Qwen3-Embedding-0.6B-4bit-DWQ`; see §Decision: Verified-Encoder List & Model Detection); 2026-06-13 (implementation-library resolved — direct/vendored MIT, no turnkey lib; vision/multimodal embeddings deferred to BEYOND; CLI `embed`-verb confirmed; **server topology resolved (Open Q #3): separate processes, `serve` proxies `/v1/embeddings`; three-layer runner/op/handler structure with `EmbeddingRunner` as the 4th runner; CLI + server both minimal in 2.0.7**); 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
+- **Updated:** 2026-06-18 (**Model-Identity decision** — embed identity split into two response fields: `model` stays the clean `org/name` **selector** (= `/v1/models` id, re-sendable), and a new `system_fingerprint` realization token (`hash.device`) carries the change-detection signal; HTTP response format specified in the ADR for the first time — see §HTTP Response Format + §Decision: Model Identity & the Same-Model Rule); 2026-06-17 (Slices B + C landed [vendored BERT encoder; config-first `declared ∩ runnable` capability honesty + gate [5]]; **Slice D1 embed-serve landed** — `/v1/embeddings` backend + transport-agnostic handler + `mlxk embed-serve` CLI; interface: `encoding_format` default `base64`, lenient `request.model`, single runner + lock (no ModelManager), alpha-gated — see §2.0.7 Scope + `docs/SERVER-HANDBOOK.md`); 2026-06-15 (Slice-A landed — JSONL envelope finalized to `{model, dimensions, content_hash, device}` with Model-Identity/same-model + device-determinism rules; detection corrected so `gemma3_text` needs an EmbeddingGemma signal, not `model_type` alone; Slice B scoped to BERT-only with `xlm-roberta` deferred; `serve`'s `GET /v1/models` merge deferred to 2.1); 2026-06-14 (Open Q #1 resolved — verified-encoder list = one vendored BERT file + zero-vendored `mlx-lm` decoder path; config-first `declared ∩ runnable` detection; showcase `Qwen3-Embedding-0.6B-4bit-DWQ`; see §Decision: Verified-Encoder List & Model Detection); 2026-06-13 (implementation-library resolved — direct/vendored MIT, no turnkey lib; vision/multimodal embeddings deferred to BEYOND; CLI `embed`-verb confirmed; **server topology resolved (Open Q #3): separate processes, `serve` proxies `/v1/embeddings`; three-layer runner/op/handler structure with `EmbeddingRunner` as the 4th runner; CLI + server both minimal in 2.0.7**); 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
 - **Target:** 2.0.7 experimental (gated), 2.1 stable promotion
 - **Related:** Issue #26, ADR-014 (Pipe Integration, fulfilled), ADR-021 (MCP), ADR-022 (Workspace-First)
 
@@ -102,6 +102,35 @@ mlxk embed bge-small "text" --cpu
 - `device` — `cpu` | `gpu`. Embeddings are **not** bit-reproducible across devices (CPU vs GPU diverge ≈0.98 cosine on a 4-bit model — enough to break dedup/threshold logic), so a consumer can detect a mixed-device store. Build a vector store with **one model + one device**.
 
 **Why JSONL:** Pipe-friendly (one object per line), jq-queryable, git-diffable, no binary formats needed.
+
+### HTTP Response Format (`/v1/embeddings`)
+
+The server path (`embed-serve`, and `serve`'s proxy to it) is the **OpenAI** surface — it returns the
+standard OpenAI embeddings response, **not** the CLI JSONL envelope above:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"object": "embedding", "index": 0, "embedding": "<base64-string | float[]>"}
+  ],
+  "model": "mlx-community/bge-small-en-v1.5",
+  "system_fingerprint": "a1b2c3d4.gpu",
+  "usage": {"prompt_tokens": 4, "total_tokens": 4}
+}
+```
+
+- `data[].embedding` — base64 little-endian float32 by **default** (`encoding_format: base64`, what the
+  OpenAI SDK decodes), or a raw float array (`encoding_format: float`). One object per input, `index`-ordered.
+- `model` — the clean, re-sendable **selector** (`org/name`), identical to the `/v1/models` catalog id.
+- `system_fingerprint` — the **realization token** `hash.device`; the change-detection signal (see
+  §Decision: Model Identity & the Same-Model Rule). An additive mlxk extension on the embeddings response
+  (the field is standard on chat/completions). `embed-serve`'s `GET /health` returns the same
+  `model` + `system_fingerprint` pair.
+- `usage` — best-effort prompt-token counts (precision is not contractual).
+
+The field-level request/response reference (every body field, both encodings, the error map) lives in
+`docs/SERVER-HANDBOOK.md`; the code's Pydantic models (`core/embed_server_base.py`) are the source of truth.
 
 ### Model Detection
 
@@ -420,7 +449,9 @@ decisions taken during implementation:
   `curl` may request `float`). `/v1/embeddings` is an HTTP/OpenAI surface, not the CLI's JSONL-float
   surface, so it follows the OpenAI default rather than the `embed` verb's.
 - **`request.model` is lenient** — the single-model backend serves its loaded model regardless and
-  stamps the response `model` with the canonical `org/name` identity.
+  stamps the response `model` with the canonical `org/name` identity (the selector), plus a
+  `system_fingerprint` realization token (`hash.device`) for change-detection (see §Decision: Model
+  Identity & the Same-Model Rule).
 - **`embed-serve` is alpha-gated** (`MLXK2_ENABLE_ALPHA_FEATURES=1`), consistent with `embed`.
 - **No ModelManager** in embed-serve: one `EmbeddingRunner` held for the process lifetime + an
   inference `Lock` (single model, no swapping); serve's swap/memory-gate machinery is calibrated for
@@ -433,6 +464,54 @@ decisions taken during implementation:
 - Full **typed-JSON envelope** (ADR-014 Appendix C).
 
 **Output forward-compatibility:** the `embed` JSONL is a **forward-compatible subset** of the ADR-014 Appendix C typed-JSON envelope — vector as typed structured data (not a media artifact), payload inline (vectors are small) without precluding a future `inline | file-ref | content-addressed handle` locator, metadata field names aligned with the JSON-API (`model`, `dimensions`). The full envelope is deferred to the dedicated JSON-Pipes/exec session; shipping the subset now avoids migration debt while keeping `embed` identical across pipe · HTTP · (future) MCP transports.
+
+## Decision: Model Identity & the Same-Model Rule (2026-06-18)
+
+**Decision:** embed identity is split across **two** response fields, each with one role:
+
+- **`model` — the selector.** The canonical, re-sendable `org/name` (cache → HF name; workspace →
+  sentinel `source_repo` / basename). Identical across `/v1/models` (catalog id), `request.model`, and
+  `response.model`. It resolves; it is shaped like every other catalog entry.
+- **`system_fingerprint` — the realization token.** `{short_hash}.{device}` (e.g. `a1b2c3d4.gpu`),
+  from `embed_system_fingerprint()` (`core/model_resolution.py`). On the `/v1/embeddings` response and
+  `embed-serve`'s `/health`; **never** in `/v1/models`. Compare-only.
+
+### Why a fingerprint is needed
+
+An embedding **vector space** is fixed by the model (`org/name`), its content fingerprint (revision /
+quant), and the device (CPU vs GPU diverge ~0.98 cosine on a 4-bit model). The OpenAI HTTP response carries
+only `model`, so a re-quant under the same name or a CPU↔GPU swap on a restarted `embed-serve` leaves
+`model` identical while the vectors change. A consumer (e.g. **nChat**) detects that change from
+`system_fingerprint` alone.
+
+### Why two fields, not a composite `model`
+
+`model` carries **one** role — the selector (what a client sends; resolves at `/v1/models`). Folding the
+hash + device into it would overload it with a conflicting second role (a fingerprint), break the
+`/v1/models` selector contract (the catalog advertises "a stable short id that resolves at request time",
+`handlers/models.py`), and leak device (deployment state) into a selection token. The fingerprint lives in
+its own field — `system_fingerprint`, which OpenAI already defines (chat/completions) as *"the backend
+configuration the model runs with … to understand when backend changes have been made"*: change-detection,
+exactly the same-model rule. On the embeddings response it is an additive mlxk extension (standard on chat,
+not embeddings) — non-breaking, recognized, OpenAI-shaped (`hash.device`; short, opaque; the model name
+stays in `model`).
+
+### Consumer logic
+
+```python
+fp = resp["system_fingerprint"]          # "a1b2c3d4.gpu"
+if fp != stored_fp:                       # revision and/or device changed -> different vector space
+    reset_embedding_store()               # (a different model also changes the hash -> also flips fp)
+```
+
+One field, plain equality, catches all three change types; `model` gives the human-readable selector.
+
+### Consistency
+
+`model` is the same clean selector on `/v1/models`, `request`, and `response`. `system_fingerprint` appears
+only where a realization exists (response, `/health`), never in the catalog — OpenAI's own
+alias ⊂ realization split (`gpt-4o` selector; `gpt-4o-2024-08-06` + `system_fingerprint` realization).
+Single source: `embed_system_fingerprint()` produces the token wherever it appears.
 
 ## Decision: Verified-Encoder List & Model Detection (Open Question #1 — Resolved 2026-06-14)
 

@@ -23,15 +23,22 @@ from .. import __version__
 from ..context import generate_request_id
 from ..logging import get_logger, set_log_level, uvicorn_log_config
 from .embedding_runner import EmbeddingRunner
-from .model_resolution import model_display_identity, resolve_model_for_operation
+from .model_resolution import (
+    embed_system_fingerprint,
+    model_display_identity,
+    resolve_model_for_operation,
+)
 from .server.error_handlers import register_error_handlers
 from .server.handlers.embeddings import handle_embeddings
 
 logger = get_logger()
 
-# Single held runner + its portable identity + an inference lock (set by lifespan).
+# Single held runner + its identity (selector) + realization fingerprint + an inference lock (set by
+# lifespan). `_model_identity` = clean `org/name` selector; `_system_fingerprint` = `hash.device`
+# change-detection token (ADR-015 §Decision: Model Identity).
 _runner: Optional[EmbeddingRunner] = None
 _model_identity: str = ""
+_system_fingerprint: str = ""
 _infer_lock = threading.Lock()
 
 
@@ -61,7 +68,8 @@ class EmbeddingUsage(BaseModel):
 class EmbeddingResponse(BaseModel):
     object: str = "list"
     data: List[EmbeddingData]
-    model: str
+    model: str                                  # clean org/name selector (= /v1/models id)
+    system_fingerprint: Optional[str] = None    # hash.device change-detection token (additive, ADR-015)
     usage: EmbeddingUsage
 
 
@@ -69,7 +77,7 @@ class EmbeddingResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Resolve + route + load the single embedding model; hold it for the process lifetime."""
-    global _runner, _model_identity
+    global _runner, _model_identity, _system_fingerprint
 
     set_log_level(os.environ.get("MLXK2_LOG_LEVEL", "info"))
 
@@ -117,8 +125,13 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(f"Failed to load embedding model '{resolved_name}': {e}") from e
 
     _runner = runner
+    # model = clean org/name selector; system_fingerprint = hash.device realization token
+    # (ADR-015 §Decision: Model Identity). Both stamped from here so response + /health agree.
     _model_identity = model_display_identity(resolved_name, commit_hash)[0]
-    logger.info(f"embed-serve ready: {_model_identity} ({runner.dimensions} dims)")
+    _system_fingerprint = embed_system_fingerprint(resolved_name, commit_hash, cpu=cpu)
+    logger.info(
+        f"embed-serve ready: {_model_identity} [{_system_fingerprint}] ({runner.dimensions} dims)"
+    )
 
     yield
 
@@ -137,6 +150,7 @@ async def lifespan(app: FastAPI):
             _infer_lock.release()
     _runner = None
     _model_identity = ""
+    _system_fingerprint = ""
 
 
 app = FastAPI(
@@ -173,7 +187,7 @@ async def health():
     """Liveness check (200 once the model is loaded)."""
     if _runner is None:
         raise HTTPException(status_code=503, detail="Server not ready - model not loaded")
-    return {"status": "ok", "model": _model_identity}
+    return {"status": "ok", "model": _model_identity, "system_fingerprint": _system_fingerprint}
 
 
 @app.post("/v1/embeddings")
@@ -190,6 +204,7 @@ def create_embeddings(request: EmbeddingRequest):
     result = handle_embeddings(
         runner=_runner,
         model_identity=_model_identity or request.model,
+        system_fingerprint=_system_fingerprint or None,
         inputs=inputs,
         encoding_format=request.encoding_format or "base64",
         dimensions=request.dimensions,

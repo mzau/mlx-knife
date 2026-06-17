@@ -218,3 +218,41 @@ def test_identity_cache_uses_name_and_explicit_revision():
         disp, ch = mr.model_display_identity("mlx-community/Qwen3-Embedding-4B-4bit-DWQ", "b5d88f1fe49b")
     assert disp == "mlx-community/Qwen3-Embedding-4B-4bit-DWQ"
     assert ch == "b5d88f1fe49b"
+
+
+# --- embed_system_fingerprint: hash.device change-detection token (ADR-015 §Model Identity) ---
+# The response `model` stays the clean selector; this token carries revision+device so a consumer
+# detects a model/revision/device swap by plain equality on one field.
+
+def test_system_fingerprint_cache_gpu():
+    with patch.object(mr, "is_workspace_path", return_value=False):
+        fp = mr.embed_system_fingerprint("mlx-community/bge-small-en-v1.5", "b5d88f1fe49bc0de", cpu=False)
+    assert fp == "b5d88f1f.gpu"                    # short hash + .device, no model name (that's in `model`)
+
+
+def test_system_fingerprint_cpu_flag():
+    with patch.object(mr, "is_workspace_path", return_value=False):
+        fp = mr.embed_system_fingerprint("mlx-community/bge-small-en-v1.5", "b5d88f1fe49b", cpu=True)
+    assert fp.endswith(".cpu")                     # device flips the token (CPU≠GPU vector space)
+
+
+def test_system_fingerprint_changes_on_revision():
+    with patch.object(mr, "is_workspace_path", return_value=False):
+        a = mr.embed_system_fingerprint("mlx-community/bge-small-en-v1.5", "aaaaaaaa1111", cpu=False)
+        b = mr.embed_system_fingerprint("mlx-community/bge-small-en-v1.5", "bbbbbbbb2222", cpu=False)
+    assert a != b                                  # a re-quant must be detectable
+
+
+def test_system_fingerprint_workspace_strips_sha256_prefix():
+    meta = {"source_repo": "mlx-community/bge-small-en-v1.5", "content_hash": "sha256:2827abcdef01"}
+    with patch.object(mr, "is_workspace_path", return_value=True), \
+         patch.object(mr, "read_workspace_metadata", return_value=meta):
+        fp = mr.embed_system_fingerprint("/ws/bge-small", None, cpu=False)
+    assert fp == "2827abcd.gpu"                     # sha256: dropped, then shortened
+
+
+def test_system_fingerprint_unmanaged_workspace_nohash():
+    with patch.object(mr, "is_workspace_path", return_value=True), \
+         patch.object(mr, "read_workspace_metadata", return_value={}):
+        fp = mr.embed_system_fingerprint("/abs/path/My-Local-Model", None, cpu=False)
+    assert fp == "nohash.gpu"                       # never an empty slot

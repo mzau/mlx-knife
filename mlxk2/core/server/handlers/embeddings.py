@@ -64,6 +64,7 @@ def handle_embeddings(
     *,
     runner: Any,
     model_identity: str,
+    system_fingerprint: Optional[str] = None,
     inputs: List[str],
     encoding_format: str = "base64",
     dimensions: Optional[int] = None,
@@ -142,5 +143,6 @@ def handle_embeddings(
         "object": "list",
         "data": data,
         "model": model_identity,
+        "system_fingerprint": system_fingerprint,
         "usage": {"prompt_tokens": n_tokens, "total_tokens": n_tokens},
     }

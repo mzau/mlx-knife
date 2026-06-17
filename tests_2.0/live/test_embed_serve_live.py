@@ -148,7 +148,10 @@ def test_float_single(embed_backend):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["object"] == "list"
-    assert body["model"] and not body["model"].startswith("/")     # org/name, never a path
+    # `model` is the clean org/name selector; `system_fingerprint` is the hash.device realization token.
+    assert body["model"] and not body["model"].startswith("/")     # clean org/name selector, never a path
+    assert "@" not in body["model"]                                # a selector, not a composite fingerprint
+    assert body["system_fingerprint"].endswith((".gpu", ".cpu"))   # hash.device change-detection token
     assert len(body["data"]) == 1
     emb = body["data"][0]["embedding"]
     assert isinstance(emb, list) and len(emb) == dims

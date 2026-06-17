@@ -160,6 +160,20 @@ def test_to_wire_float_passthrough():
     assert _to_wire([1.0, 2.0], "float") == [1.0, 2.0]
 
 
+def test_system_fingerprint_echoed():
+    r = _FakeRunner()
+    res = handle_embeddings(runner=r, model_identity="org/m", system_fingerprint="a1b2c3d4.gpu",
+                            inputs=["x"], encoding_format="float")
+    assert res["model"] == "org/m"                       # clean selector
+    assert res["system_fingerprint"] == "a1b2c3d4.gpu"   # realization token, opaque passthrough
+
+
+def test_system_fingerprint_defaults_none():
+    r = _FakeRunner()
+    res = handle_embeddings(runner=r, model_identity="org/m", inputs=["x"], encoding_format="float")
+    assert res["system_fingerprint"] is None             # absent unless the backend supplies it
+
+
 def test_usage_fallback_without_tokenizer():
     # No tokenizer + no count_tokens_fn -> whitespace estimate, never raises.
     class _NoTok(_FakeRunner):

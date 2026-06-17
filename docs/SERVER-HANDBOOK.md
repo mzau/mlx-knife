@@ -356,7 +356,7 @@ curl -X POST http://localhost:8000/v1/embeddings \
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | String | ✅ | Model ID. The backend serves a **single** model, so this is informational (the loaded model answers regardless) and is echoed back as the canonical `org/name` in the response. |
+| `model` | String | ✅ | Model ID. The backend serves a **single** model, so this is informational (the loaded model answers regardless). The response echoes the canonical `org/name` **selector** (and adds a `system_fingerprint` realization token — see Notes). |
 | `input` | String or String[] | ✅ | One text, or a batch (one vector per item, in order). |
 | `encoding_format` | String | ❌ | `base64` (**default** — little-endian float32, what the OpenAI SDK decodes) or `float` (raw JSON array, handy for `curl`). |
 | `dimensions` | Integer | ❌ | Accepted only if equal to the model's native width; any other value → **400** (no Matryoshka truncation in 2.0.7). |
@@ -372,6 +372,7 @@ curl -X POST http://localhost:8000/v1/embeddings \
     {"object": "embedding", "index": 0, "embedding": [0.0123, -0.0456, "..."]}
   ],
   "model": "mlx-community/bge-small-en-v1.5",
+  "system_fingerprint": "a1b2c3d4.gpu",
   "usage": {"prompt_tokens": 4, "total_tokens": 4}
 }
 ```
@@ -388,12 +389,21 @@ docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).
 
 **Notes:**
 - Vectors are **L2-normalized**. `usage` token counts are best-effort.
-- **Same-model / same-device rule:** a single `embed-serve` backend *is* one model on one device by
-  construction (it loads one model at startup; the GPU/`--cpu` choice is fixed for the process), so
-  every vector it returns shares one space — that is why the OpenAI response carries no per-vector
-  `content_hash`/`device` stamp (unlike the CLI JSONL): it needs none. Send a store's query and
-  corpus to the **same backend/gateway**; never mix vectors across backends/models/devices (CPU vs
-  GPU diverge ~0.98 cosine on a 4-bit model), which silently breaks cosine/dedup logic.
+- **`model` vs `system_fingerprint` (the same-model rule).** `model` is the clean, re-sendable
+  **selector** (`org/name`, identical to the `/v1/models` id). `system_fingerprint` is the
+  **realization token** `hash.device` (e.g. `a1b2c3d4.gpu`) — the change-detection signal. A vector
+  space is fixed by the model, its revision/quant **and** the device (CPU vs GPU diverge ~0.98 cosine
+  on a 4-bit model); any of those changing — the backend restarted on a different model, a re-quant
+  under the same name, or a `--cpu` flip — flips `system_fingerprint`. **Compare it by equality:** pin
+  a vector store to one `system_fingerprint`, and re-index the instant it differs instead of silently
+  mixing incomparable vectors. `embed-serve`'s `GET /health` returns the same `model` +
+  `system_fingerprint`, so you can poll for a swap without embedding. Treat the token as **opaque**
+  (don't parse it). You still send a store's query and corpus to the **same backend/gateway** — the
+  token lets you *detect* a mismatch, it doesn't reconcile one.
+- **`system_fingerprint` is an additive extension.** It is a standard OpenAI field on
+  chat/completions; on the embeddings response it is an mlxk addition carrying the same documented
+  meaning ("the backend configuration changed"). Generic OpenAI clients ignore it; a RAG client reads
+  it for change-detection.
 - **Supported models:** the verified embedders (`docs/MODEL-COVERAGE.md`) — decoder
   (`Qwen3-Embedding-*`, via `mlx-lm`) and encoder (`bge-*`, `*-e5-*`, `mxbai-*`; `model_type: bert`).
   A declared-but-not-vendored embedder (e.g. `xlm-roberta`/`modernbert`) is rejected at backend
@@ -471,7 +481,7 @@ Note: LM Studio provides similar field as `max_context_length`.
 { "status": "healthy", "service": "mlx-knife-server-2.0" }
 ```
 
-(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": ...}` and `503` until its model is loaded.)
+(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}` and `503` until its model is loaded. The `system_fingerprint` matches the `/v1/embeddings` response, so a client can poll `/health` to detect a backend model/device swap without sending an embed request.)
 
 ---
 
@@ -1135,7 +1145,9 @@ envelopes pass through verbatim.
 
 **Client updates required:** none for existing chat/audio/models clients. A RAG client can now
 point at one base URL (serve's port) for both `/v1/chat/completions` and `/v1/embeddings` once
-`serve --embed-backend` is configured.
+`serve --embed-backend` is configured. A RAG client persisting a vector store must honor the
+same-model rule — pin the store to the response `system_fingerprint` and re-index when it changes
+(see [Appendix: Embeddings](#embeddings-model-identity--change-detection)).
 
 ---
 
@@ -1399,6 +1411,42 @@ Hello world.
 - Maximum file size: 50 MB (~15 min @ 16kHz mono)
 - Requires `mlx-audio` on server (`pip install mlx-knife[audio]`)
 
+### Embeddings: Model Identity & Change Detection
+
+Embedding clients (RAG) use the OpenAI **Embeddings** API (`POST /v1/embeddings`). One requirement is
+non-obvious and, if ignored, corrupts a vector store **silently** (no error): a stored vector is only
+comparable to another from the **same model, revision, and device**.
+
+The response carries two identity fields:
+
+```json
+{
+  "object": "list",
+  "data": [{"object": "embedding", "index": 0, "embedding": "..."}],
+  "model": "mlx-community/bge-small-en-v1.5",
+  "system_fingerprint": "a1b2c3d4.gpu",
+  "usage": {"prompt_tokens": 4, "total_tokens": 4}
+}
+```
+
+- `model` — the **selector** (`org/name`): what you send, what `/v1/models` lists. Stable, re-sendable.
+- `system_fingerprint` — the **realization token** `hash.device`: the change-detection signal. It flips
+  when the backend's model, its revision/quant, or its device (`--cpu` vs GPU) changes — the three
+  things that change the vector space. Additive mlxk field (standard on OpenAI chat/completions).
+
+**Client MUST, for any persisted vector store:**
+
+- **Stamp the store with the `system_fingerprint` it was built under, and compare on every use.** When
+  the served value differs, the vector space changed → **re-index** (or refuse to mix), never silently
+  append. `embed-serve`'s `GET /health` returns the same `model` + `system_fingerprint`, so a client
+  can detect a swap by polling — without sending an embed request.
+- **Build a store with one backend** (= one model + one device): send its query and corpus to the same
+  `serve` / gateway URL. The token *detects* a mismatch; it does not reconcile one.
+- Treat `system_fingerprint` as **opaque** — compare by equality, never parse the segments.
+
+The RAG extension fields (`input_type: "document" | "query"`, `instruct`) and `encoding_format`
+(`base64` default / `float`) are documented under [POST /v1/embeddings](#post-v1embeddings).
+
 ### Cross-Model Workflows (Vision/Audio → Text)
 
 When switching from Vision or Audio to Text model mid-conversation:
@@ -1420,6 +1468,12 @@ When switching from Vision or Audio to Text model mid-conversation:
 ---
 
 ## Changelog
+
+- **2026-06-18:** 2.0.7 (in progress) — embeddings model identity
+  - **NEW:** the `/v1/embeddings` response (and `embed-serve` `/health`) carries
+    `system_fingerprint` = `hash.device` — a change-detection token so a RAG client detects a
+    model/revision/device swap; `model` stays the clean `org/name` selector (= `/v1/models` id).
+    Additive field (standard on OpenAI chat/completions). ADR-015 §Model Identity.
 
 - **2026-06-17:** 2.0.7 (in progress) — embeddings + audio translation
   - **NEW:** `/v1/embeddings` (OpenAI Embeddings API), served by the new `mlxk embed-serve`
