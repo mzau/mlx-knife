@@ -119,9 +119,10 @@ probe/
 |----------|----------|---------|
 | `detect_framework()` | `common.py` | MLX vs PyTorch vs GGUF |
 | `detect_model_type()` | `common.py` | chat, base, audio, embedding |
-| `detect_capabilities()` | `common.py` | text-generation, vision, audio, embeddings |
+| `detect_capabilities()` | `common.py` | text-generation, vision, audio, audio-translate-en, embeddings |
 | `detect_vision_capability()` | `common.py` | vision_config, preprocessor_config |
 | `detect_audio_capability()` | `common.py` | audio_config, WhisperFeatureExtractor |
+| `detect_audio_translate_en_capability()` | `capabilities.py` | Whisper translate→English sub-capability (#54): multilingual non-turbo only |
 | `detect_audio_backend()` | `common.py` | MLX_AUDIO (STT) vs MLX_VLM (multimodal) |
 | `is_workspace_clean()` | `operations/workspace.py` | content_hash v2 clean-check (stat-only hot path) |
 | `check_runtime_compatibility()` | `health.py` | Backend supports model_type |

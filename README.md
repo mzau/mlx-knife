@@ -67,9 +67,12 @@ capability-honesty fixes; 2.0.7 adds new capabilities):
   - Gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles. See
     [Embeddings](#embeddings-experimental); the server side is in the
     [Server Handbook](docs/SERVER-HANDBOOK.md).
-- **Whisper translation** (`mlxk run … --audio FILE --translate`) — translate
-  multilingual speech to English with a multilingual (non-turbo) Whisper model; models
-  that can't translate are rejected up front with a hint.
+- **Whisper translation** — translate multilingual speech to English with a
+  multilingual (non-turbo) Whisper model, on the CLI
+  (`mlxk run … --audio FILE --translate`) or the server
+  (`POST /v1/audio/translations`, OpenAI-compatible). Models that can't translate
+  (whisper-turbo, `.en`, non-Whisper STT) are rejected up front with a hint —
+  never a silent transcription.
 
 Along for the ride:
 
@@ -575,6 +578,44 @@ mlxk run whisper-large --audio german.mp3 --language de
 # Segment metadata (MLXK2_AUDIO_SEGMENTS=1 for timestamps)
 MLXK2_AUDIO_SEGMENTS=1 mlxk run whisper-large --audio meeting.wav
 ```
+
+**🌍 Speech Translation (→ English):**
+
+Whisper can translate non-English speech directly to English text. This is a
+fixed-target feature of the architecture — output is always English, regardless
+of source language. Only **multilingual, non-turbo** Whisper variants support it
+(e.g. `whisper-large-v3-4bit`); `.en` variants lack the translate token and turbo
+variants have a reduced decoder that cannot translate reliably. Such models are
+rejected up front with a hint — mlxk never silently falls back to transcription.
+
+```bash
+# CLI: translate German (or any language) speech to English
+mlxk run whisper-large-v3-4bit --audio german-news.mp3 --translate
+# → English text   (--translate and --translate en are equivalent)
+
+# Optional explicit source-language hint
+mlxk run whisper-large-v3-4bit --audio news.mp3 --translate --language de
+```
+
+```bash
+# Server: OpenAI-compatible POST /v1/audio/translations
+curl http://localhost:8000/v1/audio/translations \
+  -F file=@german-news.mp3 \
+  -F model=mlx-community/whisper-large-v3-4bit
+# → {"text": "..."}   (English)
+```
+
+```python
+# Server: OpenAI SDK (drop-in)
+client.audio.translations.create(
+    model="mlx-community/whisper-large-v3-4bit",
+    file=open("german-news.mp3", "rb"),
+)
+```
+
+A non-audio model returns HTTP 400; an audio model that can't translate returns
+HTTP 422. See the [Server Handbook](docs/SERVER-HANDBOOK.md) for the full
+endpoint contract.
 
 ## Embeddings (Experimental)
 

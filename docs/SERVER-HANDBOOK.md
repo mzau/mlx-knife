@@ -49,6 +49,7 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/chat/completions` | ✅ Supported | Text, Vision (`image_url`), Audio (`input_audio`) |
 | `/v1/completions` | ✅ Supported | Legacy text completion |
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
+| `/v1/audio/translations` | ✅ Supported (2.0.7+) | OpenAI Whisper translations API — speech→English (multilingual non-turbo Whisper; non-capable models → 400/422). See [POST /v1/audio/translations](#post-v1audiotranslations) |
 | `/v1/embeddings` | ✅ Supported (2.0.7, experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend`. Returns **501** on a plain `serve` started without `--embed-backend` (embeddings not enabled). See [Embeddings Backend](#embeddings-backend-embed-serve) |
 | `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field. Does **not** list embedders in 2.0.7 (discovery merge → 2.1) |
 | `/health` | ✅ Custom | MLX Knife extension |
@@ -319,9 +320,9 @@ A man said to the universe, Sir, I exist.
 
 **Note:** This endpoint requires `mlx-audio` (`pip install mlx-knife[audio]`).
 
-**Translation (2.0.7+):** audio-to-English translation is available via the **CLI**
-(`mlxk run --audio FILE --translate`, multilingual non-turbo Whisper only). An OpenAI-compatible
-`POST /v1/audio/translations` **server** endpoint is planned but **not yet implemented** in 2.0.7.
+**Translation:** for audio-to-English translation, use the dedicated
+[`POST /v1/audio/translations`](#post-v1audiotranslations) endpoint (or the CLI
+`mlxk run --audio FILE --translate`). Both require a multilingual non-turbo Whisper model.
 
 **vs. `/v1/chat/completions` with `input_audio`:**
 
@@ -331,6 +332,75 @@ A man said to the universe, Sir, I exist.
 | Models | STT only (Whisper, Voxtral) | Multimodal (Gemma-3n) |
 | Use case | Pure transcription | Chat with audio context |
 | OpenAI API | Whisper API | Chat Completions API |
+
+---
+
+### POST /v1/audio/translations
+
+**OpenAI Whisper API compatible speech-to-English translation (2.0.7+, Issue #54).**
+
+Translate non-English speech directly to **English** text. This mirrors
+`/v1/audio/transcriptions` but hardcodes Whisper's `translate` task, so existing
+OpenAI SDKs work unchanged (`client.audio.translations.create(...)`). Output is
+**always English** — a Whisper architectural constraint, there is no free target
+language. Only **multilingual, non-turbo** Whisper variants support it.
+
+**Request (multipart/form-data):**
+```bash
+curl -X POST http://localhost:8080/v1/audio/translations \
+  -F "file=@german-news.mp3" \
+  -F "model=mlx-community/whisper-large-v3-4bit"
+```
+
+```python
+# OpenAI SDK (drop-in)
+client.audio.translations.create(
+    model="mlx-community/whisper-large-v3-4bit",
+    file=open("german-news.mp3", "rb"),
+)
+```
+
+**Form Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | File | ✅ | Audio file (WAV, MP3, M4A, FLAC, OGG) |
+| `model` | String | ✅ | Multilingual non-turbo Whisper model (e.g. `mlx-community/whisper-large-v3-4bit`) |
+| `language` | String | ❌ | **Source**-language hint (e.g. `de`). Auto-detected if omitted. Never sets the output language — output is always English. A documented superset of the OpenAI translations spec (which has no `language` field). |
+| `prompt` | String | ❌ | Optional vocabulary/context bias hint (no synthetic default is injected on the translate path) |
+| `response_format` | String | ❌ | `json` (default), `text`, `verbose_json` |
+| `temperature` | Float | ❌ | Sampling temperature (default: 0.0 for greedy) |
+
+**Response (JSON - default):**
+```json
+{
+  "text": "Pioneers of the Frankfurt Aviation Association turn one hundred ..."
+}
+```
+
+**Response (verbose_json):** identical shape to transcriptions, with `task` set to `"translate"`:
+```json
+{
+  "task": "translate",
+  "language": "de",
+  "duration": 119.5,
+  "text": "Pioneers of the Frankfurt Aviation Association turn one hundred ..."
+}
+```
+
+> **Field semantics (same as transcriptions):** `duration` is the server-side processing
+> wall-time in seconds, not the clip length. `language` echoes the requested source-language
+> hint (or `"auto"`); it is **not** the output language (always English) and is never a
+> server-detected code.
+
+**Incompatible models are rejected up front — never a silent transcription:**
+
+| Condition | Status | Example |
+|-----------|--------|---------|
+| Not an audio model at all | **400** | a text or vision model |
+| Audio model that cannot translate | **422** | whisper-turbo (reduced decoder), `whisper-*.en` (no `<\|translate\|>` token), non-Whisper STT (Voxtral, VibeVoice) |
+
+**Note:** This endpoint requires `mlx-audio` (`pip install mlx-knife[audio]`).
 
 ---
 
@@ -1141,7 +1211,7 @@ envelopes pass through verbatim.
 
 | Change | Effect on operators |
 |--------|---------------------|
-| Audio translation | New CLI flag `mlxk run --audio FILE --translate` (Whisper, multilingual non-turbo). The server endpoint `POST /v1/audio/translations` is **not yet implemented** in 2.0.7. |
+| Audio translation | New CLI flag `mlxk run --audio FILE --translate` and server endpoint `POST /v1/audio/translations` (Whisper, multilingual non-turbo; non-capable models rejected 400/422, never silently transcribed). See [POST /v1/audio/translations](#post-v1audiotranslations). |
 
 **Client updates required:** none for existing chat/audio/models clients. A RAG client can now
 point at one base URL (serve's port) for both `/v1/chat/completions` and `/v1/embeddings` once
@@ -1485,8 +1555,9 @@ When switching from Vision or Audio to Text model mid-conversation:
     release). Proxy errors: **501** (no `--embed-backend` configured), **502** `bad_gateway`
     (backend unreachable), **504** `gateway_timeout` (read-timeout) — 502/504 retryable; backend
     `4xx/5xx` pass through verbatim. `GET /v1/models` does not yet advertise embedders (merge → 2.1).
-  - **NEW:** `mlxk run --audio FILE --translate` — Whisper audio-to-English translation (CLI;
-    multilingual non-turbo). Server endpoint `POST /v1/audio/translations` still pending.
+  - **NEW:** Whisper audio-to-English translation — CLI `mlxk run --audio FILE --translate`
+    and server `POST /v1/audio/translations` (multilingual non-turbo; OpenAI-compatible
+    translations endpoint, hardcoded `task=translate`; non-capable models rejected 400/422).
   - Dep-wave: `mlx-vlm 0.4.4 → 0.6.2`, `mlx-audio 0.4.3 → 0.4.4` (`mlx-lm`/`transformers` unchanged).
   - Endpoint surface otherwise unchanged.
 

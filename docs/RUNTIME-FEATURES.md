@@ -250,7 +250,7 @@ audio task classes that are conceptually distinct, with portfolio status:
 |----------------------------|-----------------------------------------------------------------------|-------------|------------|--------------------------------------------------------------------------------------------------------------------|
 | ASR (Speech-to-Text)       | Audio → verbatim transcription                                        | mlx-audio   | ✅         | Whisper. ASR is *only* transcription — speaker info is not part of the definition.                                |
 | ASR + Diarisation          | ASR + anonymous speaker clustering ("Speaker 1", "Speaker 2")         | mlx-audio   | ✅         | VibeVoice-ASR.                                                                                                     |
-| ASR + Speech Translation (English-only target) | Audio in any source language → text in **English** (fixed target — Whisper architectural constraint, no free target-language argument) | mlx-audio   | 🟡        | Token plumbing in `whisper_tokenizer.py` exists (`<\|translate\|>` token, `task` parameter); `audio_runner.py:transcribe()` does not expose `task` yet. CLI add: `--translate` (boolean, English target). Reachability is per-model: multilingual Whisper variants have it; `whisper.en` variants and STT models without `<\|translate\|>` token do not. `--translate` on a non-capable model rejects pre-execution per §3.2 — never silently falls back to transcribe. |
+| ASR + Speech Translation (English-only target) | Audio in any source language → text in **English** (fixed target — Whisper architectural constraint, no free target-language argument) | mlx-audio   | ✅        | Shipped 2.0.7 (#54): CLI `mlxk run --audio FILE --translate [en]` and server `POST /v1/audio/translations` (OpenAI-compatible, hardcoded `task=translate`). `task` is threaded through `audio_runner.transcribe()`; mlxk additionally sets `condition_on_previous_text=False` on translate to break Whisper's long-form repetition loop. Reachability is per-model (`detect_audio_translate_en_capability`): multilingual non-turbo Whisper has it; `whisper.en` variants (no `<\|translate\|>` token) and turbo variants (reduced decoder, non-English garbage) do not, nor do non-Whisper STT models. Non-capable models reject pre-execution per §3.2 (CLI error / server HTTP 422) — never a silent transcribe fallback. |
 | ASR + Free-target Speech-to-Text Translation | Audio in language A → text in arbitrary language B                    | —           | ⚫         | Not in mlxk portfolio. Requires Seamless-M4T-class S2TT models; not in mlx-audio. Distinct task class from English-only Whisper translation, often conflated. |
 | Grounded Audio-Chat        | Audio + question text → text answer *about* the audio                 | mlx-vlm     | ✅         | Gemma3n-it, Gemma4-e4b-it. Distinct from ASR: model can answer questions, not only transcribe.                     |
 | Audio Classification       | Audio → label (language, emotion, scene, instrument)                  | mlx-audio   | ⚫         | No model in portfolio.                                                                                             |
@@ -400,18 +400,28 @@ For the reachability probe of feature `audio-translate-en` (Whisper-architecture
 translate task — produces English output regardless of source language):
 
 ```
-reachable(M, "audio-translate-en") =
-    tokenizer_has_special_token(M, "<|translate|>")       # layer 1 (architecture)
-    AND M.model_type matches WHISPER_DERIVED_TRANSLATE_TYPES # layer 2 (loader, allowlist)
-    AND audio_in_invocation_pathway_works(M)              # layer 3 (trivially true for STT)
-    AND mlx_audio_available() AND mlx_audio_passes_task_kwarg # layer 4 (backend, verify before implementation)
+reachable(M, "audio-translate-en") =                      # detect_audio_translate_en_capability(name, config)
+    M.model_type in WHISPER_DERIVED_TRANSLATE_TYPES       # layer 1+2 — PRIMARY signal (architecture + loader allowlist)
+    AND NOT english_only_variant(M.name)                  # whisper-*.en lack the <|translate|> token (architectural)
+    AND NOT turbo_variant(M.name)                          # turbo: token present but reduced decoder cannot translate (functional)
+    AND audio_in_invocation_pathway_works(M)              # layer 3 — trivially true for STT
+    AND mlx_audio_available()                              # layer 4 — verified to accept task='translate' (shipped 2.0.7)
 ```
 
-A `whisper.en` variant fails at layer 1 (no `<|translate|>` token in
-its english-only vocabulary). A non-Whisper STT or non-STT model fails at
-layer 1 or 2. Per §3.2, a `mlxk run M --translate` call against any of
-those rejects pre-execution with a hint, never silently transcribes
-instead.
+Implementation note (shipped 2.0.7, #54): the discriminator is **config-first** —
+`model_type` plus a name-pattern, not a tokenizer byte-scan. mlx-community Whisper
+checkpoints ship only `config.json` + weights (sometimes `multilingual.tiktoken`),
+no HF tokenizer JSON, so a `<|translate|>`-token scan is **not load-bearing** on the
+current portfolio (Finding 7-A/7-B). A `whisper.en` variant is excluded on the
+architectural basis (its english-only vocabulary lacks the token); a **turbo**
+variant is excluded on a **functional** basis — the `<|translate|>` token is present
+but the reduced 4-layer decoder emits non-English garbage (Finding 7-C). A non-Whisper
+STT or non-STT model fails at layer 1+2. On the translate path mlxk additionally
+applies a quality-relevant invocation default — `condition_on_previous_text=False` —
+to break Whisper's long-form repetition loop (Finding 7-D). Per §3.2, a
+`mlxk run M --translate` call (or `POST /v1/audio/translations`) against any
+non-capable model rejects pre-execution with a hint (CLI error / server HTTP 422),
+never silently transcribes instead.
 
 Symmetric forms apply for `vision-in`, `audio-out` (when added), etc.
 

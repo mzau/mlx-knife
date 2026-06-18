@@ -144,22 +144,26 @@ async def handle_transcription(
     temperature: float,
     get_audio_model_fn: Callable[[str, bool], "AudioRunner"],
     max_audio_size_bytes: int,
+    task: Optional[str] = None,
 ) -> Union[Dict[str, Any], PlainTextResponse]:
-    """Create an audio transcription (OpenAI-compatible Whisper API).
+    """Create an audio transcription or translation (OpenAI-compatible Whisper API).
 
-    Accepts audio files and returns transcribed text.
+    Accepts audio files and returns transcribed (or translated-to-English) text.
     Supports Whisper and Voxtral STT models via mlx-audio backend.
 
     Args:
         content: Audio file content bytes
         filename: Original filename
         model: Model ID
-        language: Optional language code
+        language: Optional language code (source-language hint)
         prompt: Optional prompt to guide transcription
         response_format: Output format (json, text, verbose_json)
         temperature: Sampling temperature
         get_audio_model_fn: Function to load audio model
         max_audio_size_bytes: Maximum allowed audio file size
+        task: Whisper task — None/"transcribe" transcribes; "translate" emits
+            English regardless of source language (Issue #54). The translate
+            path serves the `/v1/audio/translations` endpoint.
 
     Returns:
         TranscriptionResponse, VerboseTranscriptionResponse, or PlainTextResponse
@@ -184,13 +188,21 @@ async def handle_transcription(
 
         start_time = time.time()
 
+        # Synthetic default prompt is applied for transcription only. On the
+        # translate path an injected "Transcribe this audio." biases Whisper's
+        # decoder on non-English source (documented in run.py:545-563 — the CLI
+        # dropped the synthetic default for the same reason); pass the user
+        # prompt as-is (None when absent) instead.
+        effective_prompt = prompt if task == "translate" else (prompt or "Transcribe this audio.")
+
         # Transcribe audio - runner.transcribe() expects List[(filename, bytes)]
         transcription = runner.transcribe(
             audio=[(filename, content)],
-            prompt=prompt or "Transcribe this audio.",
+            prompt=effective_prompt,
             max_tokens=4096,
             temperature=temperature,
             language=language,
+            task=task,
         )
 
         duration = time.time() - start_time
@@ -203,11 +215,12 @@ async def handle_transcription(
         )
 
         # Return response based on format
+        report_task = task or "transcribe"
         if response_format == "text":
             return PlainTextResponse(content=transcription)
         elif response_format == "verbose_json":
             return {
-                "task": "transcribe",
+                "task": report_task,
                 "language": language or "auto",
                 "duration": duration,
                 "text": transcription

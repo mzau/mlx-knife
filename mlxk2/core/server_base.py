@@ -403,6 +403,54 @@ def _detect_audio_backend_for_model(model_spec: str) -> Optional[Backend]:
         return None
 
 
+def _detect_audio_translate_capable_for_model(model_spec: str) -> bool:
+    """Whether an audio model supports Whisper audio-translate-en (Issue #54).
+
+    Mirrors _detect_audio_backend_for_model's resolve + load-config logic, then
+    delegates the verdict to detect_audio_translate_en_capability(name, config).
+    Callers gate on Backend.MLX_AUDIO first, so a False return here means
+    "audio model, but not translate-capable" (whisper-turbo, whisper-*.en, or
+    non-Whisper STT like Voxtral). Returns False on any resolution/parse failure.
+    """
+    import json as _json
+    from ..operations.workspace import is_workspace_path
+    from .capabilities import detect_audio_translate_en_capability
+
+    try:
+        resolved_name, _, _ = resolve_model_for_operation(model_spec)
+        model_path = None
+
+        # Resolve model path (same precedence as _detect_audio_backend_for_model)
+        if resolved_name and is_workspace_path(resolved_name):
+            model_path = Path(resolved_name)
+        elif resolved_name:
+            cache_root = get_current_model_cache()
+            cache_dir = cache_root / hf_to_cache_dir(resolved_name)
+            snapshots_dir = cache_dir / "snapshots"
+            if snapshots_dir.exists():
+                snapshots = [d for d in snapshots_dir.iterdir() if d.is_dir()]
+                if snapshots:
+                    model_path = max(snapshots, key=lambda x: x.stat().st_mtime)
+        elif is_workspace_path(model_spec):
+            model_path = Path(model_spec).resolve()
+
+        if model_path is None or not model_path.exists():
+            return False
+
+        config_path = model_path / "config.json"
+        if not config_path.exists():
+            return False
+
+        config = _json.loads(config_path.read_text(encoding="utf-8", errors="ignore"))
+        if not isinstance(config, dict):
+            return False
+
+        return detect_audio_translate_en_capability(resolved_name or model_spec, config)
+
+    except Exception:
+        return False
+
+
 async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatCompletionResponse:
     """Handle audio STT chat completion with AudioRunner (ADR-020).
 
@@ -1039,6 +1087,77 @@ async def create_transcription(
     )
 
     # Convert dict results to Pydantic models
+    if isinstance(result, PlainTextResponse):
+        return result
+    if response_format == "verbose_json":
+        return VerboseTranscriptionResponse(**result)
+    return TranscriptionResponse(**result)
+
+
+@app.post("/v1/audio/translations")
+async def create_translation(
+    file: UploadFile = File(...),
+    model: str = Form(...),
+    language: Optional[str] = Form(None),
+    prompt: Optional[str] = Form(None),
+    response_format: Optional[str] = Form("json"),
+    temperature: Optional[float] = Form(0.0),
+):
+    """Create an English translation of audio (OpenAI-compatible Whisper API).
+
+    Whisper's translate task always emits English regardless of source language;
+    only multilingual non-turbo Whisper variants support it (Issue #54). The
+    `language` field is an optional source-language hint (a documented superset
+    of the OpenAI translations spec, which has no language parameter).
+
+    Incompatible models are rejected up front — never a silent transcription:
+      * non-audio model            -> HTTP 400
+      * audio but not translate-able (turbo / .en / non-Whisper STT) -> HTTP 422
+    """
+    # Routing gate: must be an STT/audio model at all.
+    audio_backend = _detect_audio_backend_for_model(model)
+    if audio_backend != Backend.MLX_AUDIO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model}' is not an audio model. Use a multilingual Whisper model."
+        )
+
+    # Capability gate: audio, but can it translate? Reject loudly, do not fall
+    # back to transcription (Issue #54 acceptance).
+    if not _detect_audio_translate_capable_for_model(model):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Model '{model}' does not support speech translation "
+                f"(audio-translate-en). Use a multilingual non-turbo Whisper variant "
+                f"(e.g. mlx-community/whisper-large-v3-4bit). Whisper-turbo and "
+                f"English-only (.en) variants cannot translate."
+            ),
+        )
+
+    # Read uploaded file
+    try:
+        content = await file.read()
+        filename = file.filename or "audio.wav"
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read audio file: {str(e)}")
+
+    # Delegate to the shared audio handler with the translate task
+    result = await _handle_transcription_impl(
+        content=content,
+        filename=filename,
+        model=model,
+        language=language,
+        prompt=prompt,
+        response_format=response_format or "json",
+        temperature=temperature or 0.0,
+        get_audio_model_fn=get_or_load_audio_model,
+        max_audio_size_bytes=MAX_AUDIO_SIZE_BYTES,
+        task="translate",
+    )
+
+    # Convert dict results to Pydantic models (schema identical to transcription;
+    # the verbose model's `task` field is set to "translate" by the result dict).
     if isinstance(result, PlainTextResponse):
         return result
     if response_format == "verbose_json":

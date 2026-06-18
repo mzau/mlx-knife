@@ -4,6 +4,20 @@
 
 ### Added
 
+- **`POST /v1/audio/translations`** — server endpoint for Whisper
+  speech→English translation, completing
+  [#54](https://github.com/mzau/mlx-knife/issues/54) (the CLI `--translate`
+  shipped in 2.0.7-beta.1). OpenAI-compatible
+  (`client.audio.translations.create(...)`); mirrors
+  `/v1/audio/transcriptions` with the task hardcoded to `translate`.
+  Incompatible models are rejected up front — never a silent transcription:
+  a non-audio model → **HTTP 400**, an audio model that cannot translate
+  (whisper-turbo, `.en`, or non-Whisper STT such as Voxtral/VibeVoice) →
+  **HTTP 422**. The optional `language` form field is an OpenAI-superset
+  source-language hint. The translate path does not inject the synthetic
+  `"Transcribe this audio."` prompt (it biases Whisper's decoder on
+  non-English source). Full interface:
+  [docs/SERVER-HANDBOOK.md](docs/SERVER-HANDBOOK.md).
 - **`/v1/embeddings` + `embed-serve` `/health` carry `system_fingerprint`**
   (`hash.device`, e.g. `a1b2c3d4.gpu`) — a change-detection token so a RAG
   client detects a model / revision / device swap and re-indexes instead of

@@ -499,3 +499,166 @@ class TestAudioTranscriptionsServer:
                 f"Expected 413 for oversized file, got {response.status_code}: {response.text}"
             assert "50 MB" in response.text or "limit" in response.text.lower(), \
                 f"Expected size limit message in error: {response.text}"
+
+
+class TestAudioTranslationsServer:
+    """E2E tests for the /v1/audio/translations server endpoint (Issue #54).
+
+    Whisper's translate task emits English regardless of source language; only
+    multilingual non-turbo Whisper variants support it. Each test gates on the
+    portfolio model's *real* translate capability (no mocks) via
+    _detect_audio_translate_capable_for_model, so the right assertion runs for
+    the right model and skips for the others.
+
+    The meaningful non-English -> English assertion needs a non-English source
+    fixture, which is not shipped (copyright). Point MLXK_TRANSLATE_FIXTURE_DE at
+    a local audio file (and optionally MLXK_TRANSLATE_FIXTURE_DE_EXPECT at an
+    English substring to assert) to run the end-to-end check; otherwise it skips.
+    """
+
+    @staticmethod
+    def _translate_capable(model_id):
+        from mlxk2.core.server_base import _detect_audio_translate_capable_for_model
+        return _detect_audio_translate_capable_for_model(model_id)
+
+    @pytest.mark.skipif(httpx is None, reason="httpx required for server E2E tests")
+    @pytest.mark.live_e2e
+    def test_translation_rejects_incapable_model_422(self, audio_model_info, audio_model_key):
+        """Real capability gate: a turbo/.en model is rejected 422, never transcribed."""
+        if audio_model_key == "_skipped":
+            pytest.skip("Run with -m live_e2e or -m wet")
+        if audio_model_key == "_no_audio_models":
+            pytest.skip("No audio models found in cache")
+
+        model_id = audio_model_info["id"]
+        if self._translate_capable(model_id):
+            pytest.skip(f"{model_id} is translate-capable; this test needs a turbo/.en model")
+
+        from .server_context import LocalServer
+
+        audio_file = AUDIO_ASSETS / "A MAN SAID TO THE UNIVERSE SIR I EXIST.wav"
+        if not audio_file.exists():
+            pytest.skip(f"Audio asset not found: {audio_file}")
+
+        # No preload: the capability gate resolves config from disk and rejects
+        # before any model is loaded.
+        with LocalServer(None, port=8777, timeout=60) as server_url:
+            with open(audio_file, "rb") as f:
+                response = httpx.post(
+                    f"{server_url}/v1/audio/translations",
+                    files={"file": (audio_file.name, f, "audio/wav")},
+                    data={"model": model_id},
+                    timeout=60,
+                )
+
+        assert response.status_code == 422, \
+            f"Expected 422 for non-translate-capable {model_id}: {response.status_code} {response.text}"
+        assert "speech translation" in response.text.lower(), \
+            f"Expected a clear translate-rejection message: {response.text}"
+
+    @pytest.mark.skipif(httpx is None, reason="httpx required for server E2E tests")
+    @pytest.mark.live_e2e
+    def test_translation_verbose_task_is_translate(self, audio_model_info, audio_model_key):
+        """Capable model: endpoint runs and reports task == 'translate' (verbose_json)."""
+        if audio_model_key == "_skipped":
+            pytest.skip("Run with -m live_e2e or -m wet")
+        if audio_model_key == "_no_audio_models":
+            pytest.skip("No audio models found in cache")
+
+        model_id = audio_model_info["id"]
+        if not self._translate_capable(model_id):
+            pytest.skip(f"{model_id} is not translate-capable (turbo/.en)")
+
+        from .server_context import LocalServer
+
+        # English clip is fine here: we assert the task field + non-empty text,
+        # not translation content (English -> English is still English).
+        audio_file = AUDIO_ASSETS / "A MAN SAID TO THE UNIVERSE SIR I EXIST.wav"
+        if not audio_file.exists():
+            pytest.skip(f"Audio asset not found: {audio_file}")
+
+        with LocalServer(model_id, port=8778, timeout=120) as server_url:
+            with open(audio_file, "rb") as f:
+                response = httpx.post(
+                    f"{server_url}/v1/audio/translations",
+                    files={"file": (audio_file.name, f, "audio/wav")},
+                    data={"model": model_id, "response_format": "verbose_json"},
+                    timeout=180,
+                )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        result = response.json()
+        assert result.get("task") == "translate", f"Expected task='translate': {result}"
+        assert len(result.get("text", "")) > 0, f"Empty translation: {result}"
+
+    @pytest.mark.skipif(httpx is None, reason="httpx required for server E2E tests")
+    @pytest.mark.live_e2e
+    def test_translation_german_fixture_to_english(self, audio_model_info, audio_model_key):
+        """End-to-end non-English speech -> English. Env-gated (no fixture shipped)."""
+        if audio_model_key == "_skipped":
+            pytest.skip("Run with -m live_e2e or -m wet")
+        if audio_model_key == "_no_audio_models":
+            pytest.skip("No audio models found in cache")
+
+        fixture_path = os.environ.get("MLXK_TRANSLATE_FIXTURE_DE")
+        if not fixture_path:
+            pytest.skip("Set MLXK_TRANSLATE_FIXTURE_DE to a local non-English audio file to run")
+
+        model_id = audio_model_info["id"]
+        if not self._translate_capable(model_id):
+            pytest.skip(f"{model_id} is not translate-capable (turbo/.en)")
+
+        fixture = Path(fixture_path)
+        if not fixture.exists():
+            pytest.skip(f"Fixture not found: {fixture}")
+        content_type = "audio/mpeg" if fixture.suffix.lower() in (".mp3", ".mpeg") else "audio/wav"
+
+        from .server_context import LocalServer
+
+        with LocalServer(model_id, port=8779, timeout=180) as server_url:
+            with open(fixture, "rb") as f:
+                response = httpx.post(
+                    f"{server_url}/v1/audio/translations",
+                    files={"file": (fixture.name, f, content_type)},
+                    data={"model": model_id},
+                    timeout=600,
+                )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        text = response.json().get("text", "")
+        assert len(text) > 0, "Empty translation output"
+        expect = os.environ.get("MLXK_TRANSLATE_FIXTURE_DE_EXPECT")
+        if expect:
+            assert expect.lower() in text.lower(), \
+                f"Expected '{expect}' in English translation output: {text!r}"
+
+    @pytest.mark.skipif(httpx is None, reason="httpx required for server E2E tests")
+    @pytest.mark.live_e2e
+    def test_translation_openai_sdk(self, audio_model_info, audio_model_key):
+        """OpenAI SDK client.audio.translations.create works (acceptance). Env-gated."""
+        if audio_model_key == "_skipped":
+            pytest.skip("Run with -m live_e2e or -m wet")
+        if audio_model_key == "_no_audio_models":
+            pytest.skip("No audio models found in cache")
+
+        fixture_path = os.environ.get("MLXK_TRANSLATE_FIXTURE_DE")
+        if not fixture_path:
+            pytest.skip("Set MLXK_TRANSLATE_FIXTURE_DE to a local non-English audio file to run")
+
+        model_id = audio_model_info["id"]
+        if not self._translate_capable(model_id):
+            pytest.skip(f"{model_id} is not translate-capable (turbo/.en)")
+
+        fixture = Path(fixture_path)
+        if not fixture.exists():
+            pytest.skip(f"Fixture not found: {fixture}")
+        openai = pytest.importorskip("openai")
+
+        from .server_context import LocalServer
+
+        with LocalServer(model_id, port=8780, timeout=180) as server_url:
+            client = openai.OpenAI(base_url=f"{server_url}/v1", api_key="not-needed")
+            with open(fixture, "rb") as f:
+                result = client.audio.translations.create(model=model_id, file=f)
+
+        assert getattr(result, "text", ""), f"Empty translation via OpenAI SDK: {result}"
