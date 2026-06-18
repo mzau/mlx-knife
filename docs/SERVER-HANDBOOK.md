@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.6 stable (PyPI) · 2.0.7 dev: experimental `/v1/embeddings` backend (`embed-serve`) + `serve --embed-backend` proxy
+**Version:** 2.0.6 stable (PyPI) · 2.0.7 dev: `POST /v1/audio/translations` (#54) + experimental `/v1/embeddings` backend (`embed-serve`) + `serve --embed-backend` proxy
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-18
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -70,6 +70,44 @@ MLX Knife **ignores** authentication headers. The server accepts but does not va
 - `/v1/models`
 
 A common mistake is implementing auth for JSON endpoints but forgetting `multipart/form-data` endpoints like audio transcription.
+
+**Browser clients:** if a fronting proxy enforces auth, send `Authorization: Bearer <key>` — it passes the CORS preflight (see [CORS](#cors-browser-clients)). `serve` / `embed-serve` themselves accept and ignore it.
+
+### CORS (Browser Clients)
+
+Both `serve` and the `embed-serve` backend send permissive CORS headers, so the
+OpenAI surface (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`,
+`/v1/audio/*`) is callable **directly from a browser**. Behavior verified against
+`serve` and `embed-serve` (mlx-knife 2.0.7):
+
+Preflight (`OPTIONS`) → `200`:
+```
+Access-Control-Allow-Origin:      <the request's Origin, reflected>
+Access-Control-Allow-Methods:     DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT
+Access-Control-Allow-Headers:     <reflects Access-Control-Request-Headers>
+Access-Control-Allow-Credentials: true
+Access-Control-Max-Age:           600
+Vary:                             Origin
+```
+Actual responses carry `Access-Control-Allow-Origin: <reflected Origin>`,
+`Access-Control-Allow-Credentials: true`, `Vary: Origin`.
+
+Notes for client implementers:
+- **The Origin is reflected, not `*`.** The server is configured to allow all
+  origins, but because credentials are enabled it echoes the caller's `Origin`
+  (and sets `Vary: Origin`) instead of a literal `*`. Effectively any origin is
+  accepted — **including `null`** (pages opened via `file://`) — and you may use
+  `credentials: 'include'`.
+- **`Content-Type` and `Authorization` pass preflight** (request headers are
+  reflected), so a proxy-enforced bearer token works at the transport layer (mlxk
+  itself ignores it — see [Authentication](#authentication)).
+- **Through the proxy**, a browser talks only to `serve`'s port; the
+  `serve → embed-serve` hop is server-to-server (no browser CORS). Talking
+  directly to the `embed-serve` port uses its own, identical policy.
+- This is a wide-open, **local / trusted-network** posture — origins are not
+  restricted and not currently configurable. For exposure to untrusted origins,
+  front the server with a reverse proxy. *(A configurable origin allow-list may
+  change in a future release.)*
 
 ### Request Headers
 
@@ -466,8 +504,10 @@ docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).
   on a 4-bit model); any of those changing — the backend restarted on a different model, a re-quant
   under the same name, or a `--cpu` flip — flips `system_fingerprint`. **Compare it by equality:** pin
   a vector store to one `system_fingerprint`, and re-index the instant it differs instead of silently
-  mixing incomparable vectors. `embed-serve`'s `GET /health` returns the same `model` +
-  `system_fingerprint`, so you can poll for a swap without embedding. Treat the token as **opaque**
+  mixing incomparable vectors. `embed-serve`'s `GET /health` carries the same `model` +
+  `system_fingerprint`, so — **talking directly to the backend port** — you can poll for a swap without
+  embedding; **through the `serve` gateway the backend's `/health` is not exposed**, so detection is
+  reactive (from the next response — see [Embeddings Backend](#embeddings-backend-embed-serve)). Treat the token as **opaque**
   (don't parse it). You still send a store's query and corpus to the **same backend/gateway** — the
   token lets you *detect* a mismatch, it doesn't reconcile one.
 - **`system_fingerprint` is an additive extension.** It is a standard OpenAI field on
@@ -497,6 +537,13 @@ models follow alphabetically.
 > `Qwen3-Embedding-*`) are **not** listed here — they are served by the separate
 > `embed-serve` backend, and the discovery merge is deferred to 2.1 (ADR-015). This is the
 > one case where `/v1/models` differs from `mlxk list`, which *does* show embedders.
+
+> **No per-model capability label or `dimensions` field (2.0.7).** Entries carry no
+> capability label (e.g. `chat` / `+vision` / `+audio`) — an unsupported modality is
+> signalled at **request** time with HTTP **501**, not advertised here — and no embedding
+> `dimensions` (read it from the first `/v1/embeddings` response: the returned vector's
+> length). Surfacing capability labels and embedder `dimensions` on `/v1/models` is under
+> consideration for a future release.
 
 **Response:**
 ```json
@@ -551,7 +598,7 @@ Note: LM Studio provides similar field as `max_context_length`.
 { "status": "healthy", "service": "mlx-knife-server-2.0" }
 ```
 
-(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}` and `503` until its model is loaded. The `system_fingerprint` matches the `/v1/embeddings` response, so a client can poll `/health` to detect a backend model/device swap without sending an embed request.)
+(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}` and `503` until its model is loaded. The `system_fingerprint` matches the `/v1/embeddings` response, so a client **talking directly to the backend port** can poll that `/health` to detect a model/device swap without an embed request. **Through the `serve` gateway the backend's `/health` is not exposed** — a gateway client detects swaps reactively, from the next `/v1/embeddings` response.)
 
 ---
 
@@ -784,8 +831,8 @@ data: [DONE]
 **Experimental (2.0.7).** Text embeddings run in a **separate process**, `mlxk embed-serve` —
 not inside `mlxk serve`. This keeps the main server's memory gates (8 GB vision / 4 GB audio)
 intact: an embedding model is never loaded into serve's address space. The backend exposes two
-routes: `POST /v1/embeddings` (the OpenAI surface) and `GET /health` (liveness — `200` once the
-model is loaded, `503` before).
+routes: `POST /v1/embeddings` (the OpenAI surface) and `GET /health` (liveness **+ identity** —
+`200` with `{status, model, system_fingerprint}` once the model is loaded, `503` before).
 
 **Topology — one OpenAI surface:**
 ```bash
@@ -817,6 +864,15 @@ connection problems surface per request, not at boot.
 | Backend returns `4xx`/`5xx` | passed through **verbatim** (status + body) |
 
 Timeouts: connect 3 s (fail fast when the backend is down), read 120 s (large batches).
+
+**Model identity & reachability.** Every `/v1/embeddings` response carries `model` +
+`system_fingerprint` (the change-detection token; client store-discipline in
+[Embeddings: Model Identity](#embeddings-model-identity--change-detection)). How a client reaches it
+**proactively** depends on topology: talking **directly** to the backend port it can poll
+`GET /health` (same `model` + `system_fingerprint`, no embed request); **through the `serve` gateway**
+only `/v1/embeddings` is proxied — the backend's `/health` is not exposed — so a gateway client detects
+a model/revision/device swap **reactively**, from the next embeddings response. Proactive identity
+through the gateway is under consideration for a future release.
 
 **Flags:** `mlxk embed-serve <model> [--port 8002] [--host 127.0.0.1] [--cpu] [--log-level info] [--log-json] [--json] [--verbose]`
 (`--json` prints startup info as JSON; `--verbose` shows detailed output.)
@@ -1508,8 +1564,8 @@ The response carries two identity fields:
 
 - **Stamp the store with the `system_fingerprint` it was built under, and compare on every use.** When
   the served value differs, the vector space changed → **re-index** (or refuse to mix), never silently
-  append. `embed-serve`'s `GET /health` returns the same `model` + `system_fingerprint`, so a client
-  can detect a swap by polling — without sending an embed request.
+  append. (Reaching identity proactively — direct-backend `/health` poll vs. reactive-via-response
+  through the gateway — is covered under [Embeddings Backend](#embeddings-backend-embed-serve).)
 - **Build a store with one backend** (= one model + one device): send its query and corpus to the same
   `serve` / gateway URL. The token *detects* a mismatch; it does not reconcile one.
 - Treat `system_fingerprint` as **opaque** — compare by equality, never parse the segments.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.0.7-beta.2] - 2026-06-19
+
 ### Added
 
 - **`POST /v1/audio/translations`** — server endpoint for Whisper
@@ -27,6 +29,27 @@
   the embeddings backend shipped in 2.0.7-beta.1.
   ([ADR-015](docs/ADR/ADR-015-Embeddings-API.md) §Model Identity & the
   Same-Model Rule.)
+
+### Documentation
+
+- **SERVER-HANDBOOK.md documents the browser-client transport contract.** New
+  "CORS (Browser Clients)" section (origin reflected with `allow_credentials`, all
+  methods/headers, `null`-origin allowed; honestly flagged as a local/trusted-network
+  posture), a browser-auth note, and `embed-serve`'s `/health` identity payload
+  (`{status, model, system_fingerprint}`) with its gateway-vs-direct reachability.
+  **No behavior change** — this documents the existing 2.0.7 server so a browser RAG
+  client can be built from the handbook alone. Resolves the 2026-06-18 browser-client
+  conformance review.
+- **README embeddings section compacted** — one canonical example
+  (`mlx-community/bge-small-en-v1.5-4bit`) plus pointers to `mlxk embed --help`,
+  [examples/rag-server](examples/rag-server/), and the Server Handbook, instead of
+  five inline snippets; drops the ambiguous bare `bge-small-en-v1.5` reference
+  (resolved to a PyTorch, non-MLX checkpoint). No behavior change.
+- **`examples/` consumer demos published.** The `examples/` catalog plus
+  `pipes/`, `model-routing/`, and `rag-server/` (pipe-based RAG toolbox +
+  OpenAI-compatible RAG server) are now tracked. `rag-server/` is the consumer-side
+  RAG template the README links to, runnable against `mlxk embed` (experimental,
+  alpha-gated).
 
 ## [2.0.7-beta.1] - 2026-06-17
 

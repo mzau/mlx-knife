@@ -622,38 +622,27 @@ endpoint contract.
 > Gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles (ADR-015).
 
 Turn text into vectors for semantic search, clustering, or RAG — on-device, no cloud
-round-trip. mlxk supports both verified encoder models (BERT-family, e.g.
-`bge-small-en-v1.5`) and decoder embedders (e.g. `Qwen3-Embedding`).
+round-trip. mlxk supports verified encoder models (BERT-family, e.g.
+`mlx-community/bge-small-en-v1.5-4bit`) and decoder embedders (e.g. `Qwen3-Embedding`).
 
 ```bash
 export MLXK2_ENABLE_ALPHA_FEATURES=1
 
-# One string -> one vector (JSONL: one record per line)
-mlxk embed bge-small-en-v1.5 "machine learning on Apple Silicon"
-
-# Read the text from stdin
-echo "vectors for search" | mlxk embed bge-small-en-v1.5 -
-
-# Batch: a JSONL stream on stdin, one object per line (passthrough fields preserved)
-cat corpus.jsonl | mlxk embed bge-small-en-v1.5 --batch
-
-# Encode a retrieval query (applies the model's query instruction)
-mlxk embed bge-small-en-v1.5 --query "how does stop-token detection work?"
-
-# Standard JSON envelope instead of JSONL
-mlxk embed bge-small-en-v1.5 "text" --json
+# One string -> one JSONL record (vector + portable model/content_hash/device stamp)
+mlxk embed mlx-community/bge-small-en-v1.5-4bit "machine learning on Apple Silicon"
 ```
 
-Each record carries the vector plus a portable `model` + `content_hash` + `device` stamp.
-**Two consumer rules matter:** embeddings are only comparable within one model's vector space,
-and they are *not* bit-reproducible across CPU/GPU — build a store with **one model and one
-device**. See [Model Identity in Output](#model-identity-in-output) for the same-model and
-determinism caveats.
+Also reads stdin (`-`), a `--batch` JSONL stream, a retrieval `--query`, or the standard
+envelope with `--json` — see `mlxk embed --help`. A worked end-to-end RAG loop
+(index → search → retrieve) lives in [examples/rag-server](examples/rag-server/).
 
-**Serving embeddings over HTTP** (for RAG clients or a cluster) is an operator topic:
-`mlxk embed-serve <model>` plus `mlxk serve --embed-backend URL` give a client one
-OpenAI-compatible base URL for both chat and embeddings. See the
-[Server Handbook](docs/SERVER-HANDBOOK.md) for the topology, flags, and error semantics.
+**Two consumer rules matter:** embeddings are only comparable within one model's vector
+space, and they are *not* bit-reproducible across CPU/GPU — build a store with **one model
+and one device** (see [Model Identity in Output](#model-identity-in-output)).
+
+**Serving over HTTP:** `mlxk embed-serve <model>` + `mlxk serve --embed-backend URL` give a
+client one OpenAI-compatible base URL for both chat and embeddings — see the
+[Server Handbook](docs/SERVER-HANDBOOK.md).
 
 ## JSON API
 

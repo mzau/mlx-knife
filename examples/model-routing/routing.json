@@ -1,0 +1,19 @@
+{
+  "_comment": "Declarative task -> model routing for the single-node POC. NO learned classifier (see README + broke ADR-016). 'task_capability' maps a task category to a required mlx-knife capability (deterministic). 'defaults' is your remembered preferred model per category -- edit these to names from your own `mlxk list`. If a default is missing or not runtime_compatible, route.py falls back to the first runnable capability-matching model.",
+
+  "task_capability": {
+    "chat": "chat",
+    "coding": "chat",
+    "vision": "vision",
+    "audio": "audio",
+    "embed": "embeddings"
+  },
+
+  "defaults": {
+    "chat": "",
+    "coding": "",
+    "vision": "",
+    "audio": "",
+    "embed": ""
+  }
+}

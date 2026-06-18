@@ -33,6 +33,7 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-023](ADR-023-Text-First-Verified-Multimodal.md) | Text-First CLI + Verified Multimodal List | Accepted (Implemented in 2.0.5) | 2026-04-17 |
 | [ADR-024](ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) | Pre-Execution Capability-Mismatch Reject | Partially Implemented (Class A STT/Embedding shipped 2.0.6; Class C Loader-Gap + Class D Invocation-Gap deferred 2.1) | 2026-04-19 |
 | [ADR-025](ADR-025-content-hash-v2.md) | content_hash v2 Algorithm + Sentinel Migration | Accepted (Implemented in 2.0.6; real-world smoke pending) | 2026-04-20 |
+| [ADR-026](ADR-026-Model-Location-Dispatcher.md) | Unified Model Resolution — Model-Location-Dispatcher | Draft (full design deferred 2.1; interim seed shipped — `run.py` embed pre-flight, Slice C) | 2026-06-16 |
 
 ## ADR Format
 
