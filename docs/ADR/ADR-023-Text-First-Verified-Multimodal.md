@@ -162,6 +162,14 @@ distribution, and not a fix-everything fork. If `mlx-vlm` cannot
 quantize a type, `mlxk convert --quantize` cannot either — and says so
 clearly.
 
+> **2026-06 pointer (non-normative).** The same logic rejects two ideas
+> floated for a hypothetical future LoRA-surface: a cross-tool
+> `lora convert` (no upstream MLX wrapee — mlx-knife would have to
+> *originate* and maintain the layer-map matrix itself) and a
+> training-config `validate-flow` lint. Both are missing-feature-shim /
+> fix-everything-fork territory → out of scope as core verbs; they belong
+> as `examples/` recipes or consumer-side.
+
 ---
 
 ## Consequences
@@ -173,7 +181,6 @@ mlx-knife maintainer backlog can refocus on features that only live in
 mlx-knife:
 
 - Embeddings (ADR-015, #26)
-- MCP Integration (ADR-021)
 - Reasoning API (#40)
 
 ### Visible trade-offs

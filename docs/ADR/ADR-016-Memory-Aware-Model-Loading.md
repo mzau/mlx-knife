@@ -1,7 +1,8 @@
 # ADR-016: Memory-Aware Model Loading
 
-**Status:** Accepted (Phase 1-2 Complete)
+**Status:** Accepted — Phase 1+2 (2.0.4-beta.1) and Phase 2b (2.0.4-beta.9) implemented. Phase 3 deferred → Issue #46.
 **Created:** 2025-12-05
+**Updated:** 2026-07-14 — audited against the tree. Three decisions had been taken *in code* and never recorded here (switch-gate thresholds, two-indicator polling, `inactive` exclusion); they are written up below. One item goes the other way: the JSON-API surface is narrower than this ADR intended and is now marked `[TARGET]` for 2.0.8 rather than downgraded to match the code.
 **Context:** Vision models crash with Metal OOM without warning
 
 ## Problem
@@ -32,7 +33,7 @@ A 49.9GB Vision model on a 68.7GB system (73%) crashed, while similar-sized text
 
 ### JSON-API 0.1.6
 
-Add `system.memory_total_bytes` to API responses:
+Add `system.memory_total_bytes` to API responses. This is a **hardware fact** (from `sysctl -n hw.memsize`), not a heuristic.
 
 ```json
 {
@@ -43,7 +44,7 @@ Add `system.memory_total_bytes` to API responses:
 }
 ```
 
-This is a **hardware fact** (from `sysctl -n hw.memsize`), not a heuristic.
+**`[TARGET]` — not yet true (2.0.8).** As shipped, the field is carried by the **`version` command only** (`mlxk --version --json`). `list` and `health` do not emit it. That makes the node's self-description incomplete in the way that matters: a consumer building a roster gets *model sizes* from `list --json`, but must make a second call to learn the *node's RAM* — so "does this model fit on this node?" cannot be answered from one response. The intent above (system info alongside the model list) is the right target; carrying it on `list`/`health --json` is an additive JSON-API change and belongs in 2.0.8, not in a release under smoke-test.
 
 ### Memory Thresholds (mlx-knife internal)
 
@@ -75,19 +76,22 @@ This is a **hardware fact** (from `sysctl -n hw.memsize`), not a heuristic.
 
 ### Implementation Location
 
-- `run.py`: Pre-load check before `VisionRunner` or `MLXRunner` instantiation
-- Uses `size_bytes` from `build_model_object()` (already available)
-- Compares against `memory_total_bytes * 0.70`
+The check ships on **two independent paths**, which the original text (one check in `run.py`) did not anticipate:
+
+- **CLI** — `operations/run.py::check_memory_before_load()`, called immediately before the vision runner loads. Vision-only by construction: it returns `None` for text models, so text is never blocked.
+- **Server** — `core/capabilities.py::probe_and_select()`, reached from the server's `ModelManager`. Memory is two of its policy gates: vision >70 % → `BLOCK` with `http_status=507`; text >70 % → `WARN`, and the load proceeds.
+
+The server path is the better home (the policy layer is where every other pre-execution gate lives), so the code is right and this ADR was describing an earlier, simpler world.
 
 **Messages:**
 
 **CLI:**
-- Vision >70%: `[ERROR] Model size (XX.X GB) exceeds 70% of system memory (YY.Y GB). Vision models crash with Metal OOM due to Vision Encoder overhead. Aborting.` → stderr, exit 1
+- Vision >70%: `Model size (XX.X GB) exceeds 70% of system memory (YY.Y GB). Vision models crash with Metal OOM due to Vision Encoder overhead. Aborting.` → prefixed with `Error: ` by the caller, stderr, abort
 - Text >70%: No user-facing message (backwards compatible)
 
 **Server:**
-- Vision >70%: HTTP 507 Insufficient Storage + JSON error response
-- Text >70%: `logger.warning("Model size XX.X GB exceeds 70% of YY.Y GB system memory. Expect extreme slowness due to swapping.")` → visible via `--log-level warning` (default) and `--log-json` if enabled
+- Vision >70%: HTTP 507 Insufficient Storage + ADR-004 JSON error envelope
+- Text >70%: `logger.warning("Model size (XX.X GB) exceeds 70% of YY.Y GB system memory. Expect extreme slowness due to swapping.")` → visible via `--log-level warning` (default) and `--log-json` if enabled
 
 ## Status
 
@@ -151,46 +155,38 @@ def estimate_vision_memory(config, num_images):
 **Problem:** Metal GPU cache is released asynchronously. During model switching, the new model may start loading before memory from the old model is actually freed → OOM / "Broken pipe" crashes.
 
 **Root Cause Analysis:**
-- `mx.metal.clear_cache()` releases the cache, but **asynchronously**
+- `mx.clear_cache()` releases the Metal cache, but **asynchronously**
 - macOS needs time to return memory to the system
 - Pre-load check (Phase 1-2) validates `model_size / total_memory` → looks OK
 - But **available memory** is still occupied by the previous model
 
-**Solution: Active Polling for Available Memory**
+**Solution: after unloading, poll until memory is actually back — then load. Fail soft.**
 
-```python
-def _wait_for_memory_release(required_bytes, timeout_seconds=10.0):
-    """Wait for memory to be released after model unload."""
-    while time.time() - start < timeout_seconds:
-        available = _get_available_memory_bytes()  # free + speculative
-        if available >= required_bytes:
-            return True
-        time.sleep(0.5)
-    return False  # Timeout - continue with warning
-```
+The gate lives in `core/server/model_manager.py` (module-level, stateless: `get_available_memory_bytes()`, `get_memory_pressure()`, `wait_for_memory_release()`), and the whole switch — evict → `mx.clear_cache()` → poll → load — runs under the `ModelManager` lock. The live test harness carries its own copy for teardown between tests.
 
-**Thresholds:**
+Three decisions below were taken during implementation (beta.9) and are recorded here for the first time.
 
-| Context | Min Available | Timeout | Rationale |
-|---------|---------------|---------|-----------|
-| Vision Model Switch | 20 GB | 10s | Pixtral-8bit = 13.5 GB + overhead |
-| Audio Model Switch | 10 GB | 10s | Whisper ~1.5 GB, Voxtral ~10 GB |
-| Test Infrastructure | 20 GB | 15s | Between-test cleanup, larger buffer |
+**Decision: poll two indicators, not one.** A single "is enough free?" reading produced false positives that still OOM'd — macOS reports pages as reclaimable that Metal is in fact still holding. The gate therefore proceeds only when **both** hold: the kernel reports memory pressure NORMAL (`sysctl vm.memory_pressure == 0`) **and** enough pages are available.
 
-**Implementation:**
+**Decision: count free + speculative, exclude `inactive`.** `inactive` is the page class macOS calls reclaimable but the GPU cache may still own. Excluding it is what made the gate honest.
 
-| Location | Function |
-|----------|----------|
-| `server_base.py` | `_get_available_memory_bytes()`, `_wait_for_memory_release()` |
-| `server_base.py` | `get_or_load_model()` - 20 GB gate after cleanup |
-| `server_base.py` | `get_or_load_audio_model()` - 10 GB gate after cleanup |
-| `server_context.py` | `LocalServer` cleanup - 20 GB gate between tests |
+**Decision: 8 GB / 4 GB, not 20 GB / 10 GB.**
+
+| Context | Min available | Timeout | Constant |
+|---------|---------------|---------|----------|
+| Text **and** vision model switch | **8 GB** | 10 s | `ModelManager.MIN_FREE_BYTES_VISION` |
+| Audio model switch | **4 GB** | 10 s | `ModelManager.MIN_FREE_BYTES_AUDIO` |
+| Live-test teardown | **8 GB** | 10 s | `tests_2.0/live/server_context.py` |
+
+The 20 GB / 10 GB pair in the original draft was never shipped: on a working desktop it would have timed out on nearly every switch. 8 GB was calibrated against `wet-memmon` measurements (≈10.5 GB free with a browser running) and is the value that has always been in the code. The threshold is a **constant floor, not sized to the incoming model** — it is a proxy for "has the async release completed", not a fit check; the fit check is Phase 1-2's 70 % gate.
+
+> Naming wart: `MIN_FREE_BYTES_VISION` gates the **text and vision** path alike — `get_or_load_model()` does not branch on modality. Only audio has its own, lower gate.
 
 **Key Difference from Phase 1-2:**
 
 | Aspect | Phase 1-2 (Pre-load) | Phase 2b (Model Switch) |
 |--------|---------------------|------------------------|
-| Measures | `total_memory` | `available_memory` |
+| Measures | `total_memory` | `available_memory` + memory pressure |
 | Timing | Before first load | After unload, before new load |
 | Method | Static check | Active polling with timeout |
 | Failure | HTTP 507 (hard block) | Warning + continue (soft) |
@@ -199,6 +195,14 @@ def _wait_for_memory_release(required_bytes, timeout_seconds=10.0):
 - Log warning with actual available memory
 - Continue anyway (probe/policy check will catch real OOM)
 - Prevents indefinite blocking on edge cases
+
+### Consequence: the gate arbitrates one process, not the machine
+
+State and lever are **per-process** — each server process has its own `ModelManager`, its own lock, its own single-model slot; no process can evict another's model. The signal, however, is **machine-wide**: `vm_stat` and `vm.memory_pressure` both report the whole system.
+
+Two mlx-knife processes therefore mean two independent gates reading one shared meter. Both can observe the same free memory, both can pass, both can load — the reading is a check, not a reservation — and because the timeout path continues anyway, the gate degrades to advisory under co-residency.
+
+This is a property of the topology, not an oversight. `embed-serve` (ADR-015) is deliberately a second process holding a second model warm, and it carries **no** ModelManager and no gate at all, on the grounds that an embedder is small next to the multi-GB serve process. The gate is calibrated for *one* multi-GB model-swapping process; it does not arbitrate between processes and was never meant to. Anything that would put a second GB-scale model-swapping process on the same box has to reckon with that itself.
 
 ## Empirical Data
 

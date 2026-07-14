@@ -981,3 +981,17 @@ def _format_conversation(messages: List[dict]) -> str:
 - Consider: `--out` if `tee` proves insufficient
 
 **This appendix serves as design documentation, not implementation commitment.**
+
+---
+
+## Appendix C: Typed JSON-Pipes Direction (2026-06 brainstorming, non-normative)
+
+**Not a decision — a forward-pointer.** Revisits "Alternative 5: JSON-by-default in pipes" (deferred above) in light of a 2026-06 multinode/exec scoping discussion.
+
+- **What:** an optional *typed* pipe envelope so a stage can carry a non-text artifact (image, audio, vector), not just raw text. Solves the two structural limits a raw-byte pipe cannot: untyped (no JSON contract between stages) and text-only (no multimodal artifacts).
+- **How (upward-compatible):** define it as an **additive extension of the JSON-API** (`docs/json-api-specification.md` + `docs/json-api-schema.json`) — *not* a new parallel format. The JSON-API already evolves additively (optional fields, `additionalProperties: true`) and names "broke-cluster compatibility" as a motivation. Two candidate shapes (TBD in its own session): a new top-level message-type (`oneOf` with the command-response envelope) vs. an artifact descriptor inside `run`/`imagine` `data`. Legacy plain-text pipes (Phase 1) stay valid and remain the default.
+- **Make-or-break:** the **payload-locator must be abstracted** from day one — `inline | file-ref | content-addressed handle`. A `/tmp` file-ref is fine shell-locally but does not travel; the content-addressed variant is what lets the *same* envelope serve both a shell pipe and a future cross-node `mlxk exec` / broke delegation.
+- **Schema shape — two orthogonal axes.** `type` (`text`/`image`/`audio`) + `mimeType` say *what* the artifact is; the locator (`inline | file-ref | content-addressed handle`, above) says *where it lives*. Keep them orthogonal — collapsing "it has a URI" into a content *type* is a category error and forecloses the handle. Nothing exotic otherwise; this is how media envelopes are built. **Decide deliberately:** an embedding **vector is typed structured data, not a media artifact** — it has no mime type and does not belong in a media block at all. Carry it as typed JSON so `embed` looks identical on every surface.
+- **Hard constraint from the execution surface — `serve` is inline-only.** `mlxk serve` accepts an image *only* as an inline base64 `data:` URL; `http(s)` URLs and file paths are rejected (`tools/vision_adapter.py`). That restriction is deliberate and worth keeping — a server that dereferences URIs or reads paths on the caller's behalf is a file-fetcher (SSRF), and it breaks the rule that `serve` exposes model *outputs*, not *files*. Consequence for the envelope: **the requirement is byte-lossless *resolvability*, not structure-preserving projection.** The record is a superset; the wire form is its inline projection; dereferencing a locator to bytes is the job of whoever executes, and must always remain possible. A record format forced to project losslessly onto the wire would collapse to inline-only — destroying the content-addressed handle, which is the one part that travels across nodes.
+- **Adjacent open issue:** interactive-mode + pipe-input UX (`cat file | mlxk run model` without `-` is read as REPL) belongs in the same session — an ADR-014 Phase-2 stabilisation question.
+- **Scope:** belongs to a dedicated JSON-Pipes/`exec` architecture session — **not implemented here.**

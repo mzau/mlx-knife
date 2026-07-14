@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Documentation
+
+- **[ADR-021](docs/ADR/ADR-021-MCP-Integration.md): MCP is `Rejected` — not planned, for any
+  release.** mlx-knife ships no MCP surface; an MCP server over mlx-knife is a consumer of
+  `serve`. [#56](https://github.com/mzau/mlx-knife/issues/56) closed as *not planned*.
+  MCP references removed from ADR-014, ADR-015, ADR-023 and `docs/ARCHITECTURE.md`.
+- **[ADR-016](docs/ADR/ADR-016-Memory-Aware-Model-Loading.md) reconciled with the code.** The
+  model-switch gate is 8 GB (text/vision) / 4 GB (audio) — not the 20/10 GB the document
+  claimed; it polls memory pressure *and* free pages, and excludes `inactive` pages. The
+  gate arbitrates one process, not the machine.
+- **[ADR-014](docs/ADR/ADR-014-Unix-Pipe-Integration.md) Appendix C:** the artifact-locator
+  requirement is byte-lossless *resolvability*, not lossless projection — `serve` accepts
+  media only as inline `data:` URLs.
+- **`docs/ARCHITECTURE.md` §7:** `MLXK2_ENABLE_ALPHA_FEATURES=1` gates the Embeddings surface
+  only (`embed`, `embed-serve`, `serve --embed-backend`), active since 2.0.7. It never gated
+  MCP, and the document said it did.
+- **[ADR-024](docs/ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md):** the
+  `/v1/models` capability contract is [#51](https://github.com/mzau/mlx-knife/issues/51),
+  not #58 (a different, closed bug).
+- **ADR index:** ADR-014 and ADR-015 status rows synced with their files.
+
 ## [2.0.7-beta.2] - 2026-06-19
 
 ### Added

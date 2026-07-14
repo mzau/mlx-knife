@@ -17,18 +17,18 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-007](ADR-007-Clone-Implementation-Fixed.md) | Clone Implementation Fixed Strategy | Accepted | 2025-09-18 |
 | ADR-008 | MLXModel Package Format | Proposed | (not committed) |
 | [ADR-009](ADR-009-Stop-Token-Detection-Fix.md) | Stop Token Detection Fix | Implemented | 2025-10-21 |
-| ADR-010 | Reasoning Content API | Superseded by Issue #40 (2026-04-30 refresh) | (not committed) |
+| ADR-010 | Reasoning Content Schema & Template-Derived Segmentation (#40) | Accepted — scoped, target 2.1 (`reasoning_content` + template vocab); 2.0.8 detection-bite split out | (not committed) |
 | [ADR-011](ADR-011-E2E-Live-Test-Architecture.md) | E2E Live Test Architecture | Implemented | 2025-10-21 |
 | [ADR-012](ADR-012-Vision-Support-Roadmap.md) | Vision Support Roadmap | Implemented (Phase 1-3) | 2025-11-12 |
 | ADR-013 | Community Model Quality Database | Planned | (not committed) |
-| [ADR-014](ADR-014-Unix-Pipe-Integration.md) | Unix Pipe Integration | Implemented (Phase 1) | 2025-11-16 |
-| [ADR-015](ADR-015-Embeddings-API.md) | Embeddings API | Proposed — ready for 2.0.7 (experimental-gated `MLXK2_ENABLE_ALPHA_FEATURES=1`; 2.1 stable) | 2025-11-16 |
+| [ADR-014](ADR-014-Unix-Pipe-Integration.md) | Unix Pipe Integration | Beta (Phase 1 feature complete, gated via `MLXK2_ENABLE_PIPES=1`) | 2025-11-16 |
+| [ADR-015](ADR-015-Embeddings-API.md) | Embeddings API | Accepted — Partially Implemented (Slices A–C + D1 `embed-serve` + D2 serve-proxy landed in 2.0.7, experimental-gated `MLXK2_ENABLE_ALPHA_FEATURES=1`; Slice E pending) | 2025-11-16 |
 | [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2b; Phase 3 deferred) | 2026-01-29 |
 | ADR-017 | Image Metadata Extraction (EXIF) | Implemented (Phase 1) | (not committed) |
 | [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented through Phase 3 (Phase 1 `--repair-index` 2.0.4-beta.5, Phase 2 `--quantize` 2.0.5, Phase 3 content_hash v2 via ADR-025 2.0.6; Phase 4 `--repair` deferred 2.1) | 2025-12-18 |
 | [ADR-019](ADR-019-Audio-Input-Support-beta8.md) | Audio Input Support (beta.8) | Obsolete (→ ADR-020) | 2026-01-20 |
 | [ADR-020](ADR-020-Audio-Backend-Architecture.md) | Audio Backend Architecture (beta.9) | Implemented | 2026-01-31 |
-| ADR-021 | MCP Integration | Brainstorm (Option-D rewrite pending, target 2.0.7 experimental / 2.1 stable) | (not committed) |
+| [ADR-021](ADR-021-MCP-Integration.md) | MCP Integration | **Rejected — not planned.** MCP is a consumer of `serve`, not part of mlx-knife (Issue #56 closed as not-planned) | 2026-07-14 |
 | [ADR-022](ADR-022-Workspace-First-Paradigm.md) | Workspace-First Paradigm | Implemented (2.0.5) | 2026-02-06 |
 | [ADR-023](ADR-023-Text-First-Verified-Multimodal.md) | Text-First CLI + Verified Multimodal List | Accepted (Implemented in 2.0.5) | 2026-04-17 |
 | [ADR-024](ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) | Pre-Execution Capability-Mismatch Reject | Partially Implemented (Class A STT/Embedding shipped 2.0.6; Class C Loader-Gap + Class D Invocation-Gap deferred 2.1) | 2026-04-19 |
