@@ -18,6 +18,11 @@
 - **`docs/ARCHITECTURE.md` §7:** `MLXK2_ENABLE_ALPHA_FEATURES=1` gates the Embeddings surface
   only (`embed`, `embed-serve`, `serve --embed-backend`), active since 2.0.7. It never gated
   MCP, and the document said it did.
+- **[ADR-015](docs/ADR/ADR-015-Embeddings-API.md) §Non-Goals:** multi-vector / late-interaction
+  embedders (ColPali/ColQwen) are outside this contract, not a deferral. The surface returns
+  exactly one vector per input — `dimensions` is a scalar and each `/v1/embeddings` data item
+  carries a single `embedding`. Single-vector vision encoders (CLIP/SigLIP) are unaffected and
+  remain deferred.
 - **[ADR-024](docs/ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md):** the
   `/v1/models` capability contract is [#51](https://github.com/mzau/mlx-knife/issues/51),
   not #58 (a different, closed bug).

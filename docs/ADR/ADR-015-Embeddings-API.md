@@ -38,6 +38,7 @@ Enable local RAG workflows with minimal dependencies. CLI + standalone server, f
 - LangChain/LlamaIndex integration — external, composable via pipes
 - Production-grade indexing (multi-TB datasets)
 - **Vision/multimodal embeddings** (CLIP/SigLIP/ColQwen — image↔text shared vector space) — out of 2.0.7 scope — deferred to a later release. 2.0.7 ships **text** embeddings only. (Note: the photo-search use case below embeds the VLM's *text description*, not the image — it needs no vision embedder.)
+- **Multi-vector / late-interaction embedders** (ColPali/ColQwen) — **outside this contract, and not a deferral.** The surface returns exactly **one vector per input**: `dimensions` is a scalar, and each `/v1/embeddings` data item carries a single `embedding`. Late-interaction models return a *matrix* per image — carrying them would **replace** the envelope on both surfaces (CLI JSONL + HTTP), not extend it. Single-vector vision encoders (CLIP/SigLIP) fit the envelope as-is; whether they ship is the deferral above. Adopting multi-vector is a separate decision and needs its own ADR.
 - **Standing boundary (permanent, not a Phase-N todo):** retrieval, chunking, indexing, reranking, vector storage stay **consumer-side forever**. Embeddings ships the `text→vector` primitive only; the RAG *orchestration* is the user's (or broke's). This is the line Goal 7 ("Unix pipes > LangChain") draws — and the one embeddings will pressure hardest post-ship (see §Philosophy Fit + the Phase 2 wedge-watch).
 
 ## Philosophy Fit & Named Tensions
