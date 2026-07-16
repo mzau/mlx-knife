@@ -359,15 +359,15 @@ Workspace Model implementation (ADR-022, ADR-025):
 | Clean-check hot path | `is_workspace_clean` | `operations/workspace.py:734` |
 | Algorithm constants | `HASH_ALGORITHM_V2`, `CATCHALL_FULL_READ_CAP`, `SAFETENSORS_HEADER_MAX`, `DEFAULT_EXCLUDE_PATTERNS` | `operations/workspace.py:43-76` |
 
-Dependency stack (`pyproject.toml:41-55`):
+Dependency stack (`pyproject.toml:41-56`):
 
-| Package | Pin (2.0.6) | Note |
+| Package | Pin (2.0.7) | Note |
 |---|---|---|
 | `mlx` | `>=0.30.0,<0.32` | Apple Silicon ML framework |
 | `mlx-lm` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |
-| `mlx-audio` | `==0.4.3` | STT backend; Voxtral tokenizer fixes (drives `transformers >=5.5.0` floor) |
-| `mlx-vlm` | `==0.4.4` | VLM backend; adds `gemma4` vision convert support |
-| `transformers` | `==5.5.4` | Required by `mlx-audio 0.4.3` |
+| `mlx-audio` | `==0.4.4` | STT backend (Whisper, VibeVoice); drives the `transformers >=5.5.0` floor |
+| `mlx-vlm` | `==0.6.2` | VLM backend; fixes the Mistral `multi_modal_projector` crash + Kimi projector (#1309) |
+| `transformers` | `==5.5.4` | Required by `mlx-audio 0.4.4` |
 | `torch>=2.0`, `torchvision>=0.15` | Temporary | Pixtral / Llama-Vision / Mistral-Small-3.1; `sunset-by mlx-vlm#1011` |
 
 Upper bounds are hygiene per ADR-023: every upstream minor bump requires an explicit mlx-knife release with re-verified integration. The `torch` / `torchvision` lines carry a sunset marker (ADR-023 Workaround-Sunset Policy) and drop when `mlx-vlm` ships a `use_fast=False` fallback.

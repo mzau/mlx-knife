@@ -4,6 +4,17 @@
 
 ### Documentation
 
+- **`docs/MODEL-COVERAGE.md`: Voxtral's off-list rationale corrected.** mlx-audio #450 is a
+  *pull request*, closed unmerged on 2026-01-29 — not an open issue; no upstream issue tracks
+  the `tekken.json` tokenizer at all. The row claimed #450 was "still open upstream" and told
+  readers to re-evaluate when it closes. Voxtral stays off the verified list for two
+  independent reasons: the `tekken.json` conversion, and transformers 5.5.x `VoxtralProcessor`
+  hardcoding `return_tensors="pt"` (a torch dependency). mlx-audio #677 — the Voxtral
+  `eos_token_ids` crash fix, a different problem — shipped in 0.4.3 and is in the current pin.
+- **`docs/ARCHITECTURE.md`: the dependency-stack table matches `pyproject.toml` again.** It
+  still carried the 2.0.6 pins — `mlx-audio ==0.4.3` (actual `==0.4.4`) and `mlx-vlm ==0.4.4`
+  (actual `==0.6.2`) — under a "Pin (2.0.6)" heading, and sourced the `transformers` pin to
+  `mlx-audio 0.4.3`.
 - **[ADR-021](docs/ADR/ADR-021-MCP-Integration.md): MCP is `Rejected` — not planned, for any
   release.** mlx-knife ships no MCP surface; an MCP server over mlx-knife is a consumer of
   `serve`. [#56](https://github.com/mzau/mlx-knife/issues/56) closed as *not planned*.
