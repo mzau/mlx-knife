@@ -29,6 +29,8 @@ Example:
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import subprocess
 import os
@@ -39,6 +41,15 @@ app = FastAPI(
     title="RAG Server",
     description="OpenAI-compatible API with RAG support",
     version="1.0.0"
+)
+
+# CORS so browser clients (e.g. nChat) can reach this server — mirrors `mlxk serve`.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Configuration
@@ -77,7 +88,8 @@ async def chat_completions(request: ChatRequest):
     """
     query = request.messages[-1].content
 
-    # Run RAG pipeline if enabled
+    # Run RAG pipeline if enabled. Fail loudly: a broken pipeline must surface as an
+    # error, not silently return a context-less answer that looks like RAG worked.
     context = ""
     if request.enable_rag and INDEX_FILE:
         try:
@@ -87,46 +99,72 @@ async def chat_completions(request: ChatRequest):
                 text=True,
                 timeout=30
             )
-
-            if result.returncode == 0:
-                context = result.stdout
-            else:
-                # Log error but continue without context
-                print(f"RAG pipeline failed: {result.stderr}", flush=True)
         except subprocess.TimeoutExpired:
-            print("RAG pipeline timeout", flush=True)
-        except Exception as e:
-            print(f"RAG pipeline error: {e}", flush=True)
+            raise HTTPException(status_code=504, detail="RAG pipeline timed out")
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"RAG pipeline failed: {result.stderr.strip()}"
+            )
+        context = result.stdout
 
-    # Build augmented messages
-    messages = request.messages
+    # Build augmented messages (normalize to dicts so injected + original items are uniform)
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
     if context:
         messages = messages[:-1] + [
             {"role": "system", "content": f"# Relevant Context\n\n{context}"},
             {"role": "user", "content": query}
         ]
 
-    # Forward to mlxk serve
+    # Forward to mlxk serve. Streaming (stream=true — what chat UIs like nChat default to)
+    # must be passed through as SSE; response.json() would choke on text/event-stream.
+    payload = {"model": request.model, "messages": messages, "stream": request.stream}
+
+    if request.stream:
+        client = httpx.AsyncClient(timeout=None)
+        try:
+            upstream = await client.send(
+                client.build_request("POST", f"{MLXK_URL}/v1/chat/completions", json=payload),
+                stream=True,
+            )
+        except httpx.ConnectError:
+            await client.aclose()
+            raise HTTPException(status_code=503, detail=f"Cannot connect to mlxk serve at {MLXK_URL}")
+        if upstream.status_code != 200:
+            body = await upstream.aread()
+            await upstream.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=upstream.status_code, detail=body.decode(errors="replace"))
+
+        async def sse():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+
+        return StreamingResponse(sse(), media_type="text/event-stream")
+
+    # Non-streaming: read the full JSON response.
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{MLXK_URL}/v1/chat/completions",
-                json={
-                    "model": request.model,
-                    "messages": [{"role": m.role, "content": m.content} for m in messages],
-                    "stream": request.stream
-                },
-                timeout=60.0
+                f"{MLXK_URL}/v1/chat/completions", json=payload, timeout=60.0
             )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail=f"Cannot connect to mlxk serve at {MLXK_URL}")
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+    return response.json()
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=response.text
-            )
-
+@app.get("/v1/models")
+async def list_models():
+    """Proxy the backend's model list so OpenAI clients (model picker) work."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{MLXK_URL}/v1/models", timeout=10.0)
         return response.json()
-
     except httpx.ConnectError:
         raise HTTPException(
             status_code=503,
@@ -147,6 +185,7 @@ async def health():
 
     return {
         "status": "healthy",
+        "service": "mlx-knife-server-2.0",  # SERVER-HANDBOOK /health contract
         "mlxk_backend": {
             "url": MLXK_URL,
             "status": mlxk_status
@@ -192,7 +231,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    INDEX_FILE = args.index
+    # Resolve to an absolute path so the pipeline subprocess finds it regardless of
+    # its working directory, and fail loudly at startup if it does not exist.
+    INDEX_FILE = os.path.abspath(args.index)
+    if not os.path.isfile(INDEX_FILE):
+        parser.error(f"index not found: {INDEX_FILE} — build one with "
+                     f"./index-files.py <files> -o <index>.jsonl")
 
     print(f"Starting RAG Server on {args.host}:{args.port}")
     print(f"Backend: mlxk serve at {MLXK_URL}")

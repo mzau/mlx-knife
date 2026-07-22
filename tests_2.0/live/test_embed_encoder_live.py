@@ -100,4 +100,4 @@ def test_query_differs_from_document(model, dims):
     dv = json.loads(doc.stdout.splitlines()[0])["embedding"]
     qv = json.loads(qry.stdout.splitlines()[0])["embedding"]
     # bge prefixes only the query side; e5 uses query:/passage: — either way the vectors differ.
-    assert _cos(dv, qv) < 0.9999
+    assert _cos(dv, qv) < 0.99  # prefix must shift the query vector (real: bge ~0.965, e5 ~0.945; 0.9999 was too loose to catch a dead prefix)

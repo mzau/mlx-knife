@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [2.0.7-beta.3] - 2026-07-23
+
+### Fixed
+
+- **`examples/rag-server/`: the RAG server example — published in 2.0.7-beta.2 — now works
+  end-to-end with a real, browser-based OpenAI chat client.** `rag-server.py` gained CORS, a `/v1/models` proxy, and
+  streaming (SSE) passthrough; its `enable_rag` request path (which mixed Pydantic message
+  objects with plain dicts) no longer returns 500. A failing RAG pipeline and a missing or
+  relative `--index` now fail loudly (HTTP 500/504, or a startup error) instead of silently
+  answering without context; `/health` carries the `service` field. The README documents the
+  transparent-RAG port layout — point the client at the RAG server and move the backend aside
+  via `MLXK_PORT` — plus a one-base-URL alternative that needs no middleware.
+- **`examples/pipes/vision_pipe.sh` is now executable**, so the README's `./vision_pipe.sh` runs.
+
+### Tests
+
+- **Embeddings live-test assertions sharpened.** The `--query` ≠ document checks (decoder and
+  encoder) now assert a meaningful cosine shift (`< 0.98` / `< 0.99`) instead of the
+  near-tautological `< 0.9999`, and a new `--cpu` device-stamp + determinism test was added.
+
 ### Documentation
 
 - **`docs/MODEL-COVERAGE.md`: Voxtral's off-list rationale corrected.** mlx-audio #450 is a

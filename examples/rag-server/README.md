@@ -65,20 +65,26 @@ mlxk pull mlx-community/bge-small-en-v1.5-4bit
 ### 4. Start Server
 
 ```bash
-# Terminal 1: Start mlxk serve
-mlxk serve --port 8000
+# The RAG server is a transparent middleware: it has no model of its own — it
+# retrieves context and forwards chat to a real `mlxk serve`. Put it on the port
+# your client talks to (many chat UIs, e.g. nChat, are pinned to 8000) and move the
+# backend aside with MLXK_PORT so they do not collide. CORS is built in, so browser
+# clients can reach it.
 
-# Terminal 2: Start RAG server
-./rag-server.py --index project-index.jsonl --port 8001
+# Terminal 1: real LLM backend on any free port (here 8001)
+mlxk serve --port 8001
 
-# Terminal 3: Query
-curl http://localhost:8001/v1/chat/completions \
+# Terminal 2: transparent RAG server on 8000 — point your client here.
+#   MLXK_PORT=8001 tells it where the backend is (default 8000 would self-forward).
+MLXK2_ENABLE_ALPHA_FEATURES=1 MLXK_PORT=8001 ./rag-server.py --index project-index.jsonl --port 8000
+
+# Terminal 3: any OpenAI client (curl, SDK, or a chat UI like nChat) -> localhost:8000.
+# A vanilla call gets RAG transparently (enable_rag defaults on); override per request if needed.
+curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3",
-    "messages": [{"role": "user", "content": "How does login work?"}],
-    "enable_rag": true,
-    "top_k": 5
+    "model": "<a-chat-model-in-your-cache>",
+    "messages": [{"role": "user", "content": "How does login work?"}]
   }'
 ```
 
@@ -288,9 +294,13 @@ mlxk run vision-model --image screenshot.png "Extract text" \
 
 ### Web Client (nChat) Integration
 
+Many chat UIs (e.g. nChat) are pinned to a fixed port (often **8000**) and cannot be
+re-pointed. Because the RAG server is transparent you don't touch the client — run
+`rag-server.py` on that port and move `mlxk serve` aside with `MLXK_PORT` (Quick Start §4).
+
 **Architecture:**
 ```
-nChat (Web) → rag-server.py (Port 8001) → mlxk serve (Port 8000)
+nChat (Web, :8000) → rag-server.py (:8000) → mlxk serve (:8001)
                     ↓
               rag-pipeline.sh
 ```
@@ -298,17 +308,16 @@ nChat (Web) → rag-server.py (Port 8001) → mlxk serve (Port 8000)
 **nChat Configuration:**
 
 ```javascript
-// Change API endpoint from 8000 to 8001
-const API_URL = 'http://localhost:8001'
+// nChat keeps its usual endpoint — no change needed (rag-server runs on this port).
+const API_URL = 'http://localhost:8000'
 
 // Standard OpenAI API calls work transparently
 fetch(API_URL + '/v1/chat/completions', {
   method: 'POST',
   body: JSON.stringify({
-    model: 'qwen3',
-    messages: [{role: 'user', content: 'Fix the login bug'}],
-    enable_rag: true,  // Automatic context retrieval
-    top_k: 5
+    // RAG happens server-side (enable_rag defaults on) — no client changes.
+    model: '<a-chat-model-in-your-cache>',
+    messages: [{role: 'user', content: 'Fix the login bug'}]
   })
 })
 ```
@@ -317,6 +326,55 @@ fetch(API_URL + '/v1/chat/completions', {
 - Token savings: 50k → 8k (83% reduction)
 - Faster responses (less tokens to process)
 - Focused context (only relevant files)
+
+---
+
+### One base URL: embeddings + chat via `mlxk serve --embed-backend` (no middleware)
+
+Instead of the `rag-server.py` middleware, a client can point an OpenAI SDK at a
+**single** `mlxk serve` for *both* embeddings and chat — the "one base URL"
+contract (ADR-015 §4). Retrieval stays client-side; no extra server process.
+
+```bash
+# Terminal 1 — embedding backend (alpha-gated, like all embed surfaces in 2.0.7)
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5-4bit --port 8002
+
+# Terminal 2 — one serve exposes /v1/embeddings (proxied) AND /v1/chat/completions (local)
+MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --embed-backend http://127.0.0.1:8002 --port 8000
+```
+
+```python
+from openai import OpenAI
+import numpy as np
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="-")  # one base URL for both
+query = "how does auth work?"
+docs = ["...doc A...", "...doc B...", "...doc C..."]
+
+# 1) embed query + documents (same client)
+qv = client.embeddings.create(model="bge-small-en-v1.5-4bit", input=query).data[0].embedding
+dvs = [d.embedding for d in client.embeddings.create(model="bge-small-en-v1.5-4bit", input=docs).data]
+
+# 2) retrieve top-k client-side (embeddings are L2-normalized → cosine == dot product)
+top = sorted(range(len(docs)), key=lambda i: float(np.dot(qv, dvs[i])), reverse=True)[:3]
+context = "\n\n".join(docs[i] for i in top)
+
+# 3) chat with the retrieved context (same client, same base URL)
+answer = client.chat.completions.create(
+    model="<a-chat-model-in-your-cache>",
+    messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}],
+)
+print(answer.choices[0].message.content)
+```
+
+`mlxk serve` lazy-loads the chat model named in the request; the OpenAI SDK sends
+`encoding_format` for you and returns float vectors in `.data[i].embedding`.
+
+A consumer that does its **own** retrieval (like the snippet above) needs only this
+one base URL — RAG lives in the client. A plain chat UI that doesn't retrieve keeps
+the `rag-server.py` hop instead, where RAG is **transparent**: the client makes a
+normal OpenAI call (`model` + `messages`, no RAG parameters) and the server retrieves
+and injects the context underneath — the client never sees that RAG happened.
 
 ---
 

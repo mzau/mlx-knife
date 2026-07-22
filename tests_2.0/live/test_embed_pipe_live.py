@@ -104,4 +104,21 @@ def test_query_differs_from_document(model_available):
     assert doc.returncode == 0 and qry.returncode == 0
     dv = json.loads(doc.stdout.splitlines()[0])["embedding"]
     qv = json.loads(qry.stdout.splitlines()[0])["embedding"]
-    assert _cos(dv, qv) < 0.9999  # instruction prefix shifts the query vector
+    assert _cos(dv, qv) < 0.98  # instruction prefix must shift the query vector (real ~0.94; 0.9999 was too loose to catch a dead prefix)
+
+
+def test_cpu_device_stamp_and_determinism(model_available):
+    """--cpu stamps device=cpu, is bit-deterministic, and agrees closely with (but is
+    not identical to) the gpu backend — the README 'don't mix cpu/gpu vectors' caveat."""
+    cpu1 = _run(["-", "--cpu"], stdin="what is machine learning")
+    cpu2 = _run(["-", "--cpu"], stdin="what is machine learning")
+    gpu = _run(["-"], stdin="what is machine learning")
+    assert cpu1.returncode == 0 and cpu2.returncode == 0 and gpu.returncode == 0
+    r1 = json.loads(cpu1.stdout.splitlines()[0])
+    r2 = json.loads(cpu2.stdout.splitlines()[0])
+    rg = json.loads(gpu.stdout.splitlines()[0])
+    assert r1["metadata"]["device"] == "cpu"   # --cpu stamps the device
+    assert rg["metadata"]["device"] == "gpu"   # default stays gpu
+    v1, v2, vg = r1["embedding"], r2["embedding"], rg["embedding"]
+    assert _cos(v1, v2) > 0.99999              # cpu is deterministic (real: bit-identical)
+    assert 0.95 < _cos(v1, vg) < 0.999         # cpu≈gpu but distinct backends (real ~0.986; don't mix)
