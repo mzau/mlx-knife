@@ -16,6 +16,7 @@ Some drift is expected; each example states what it is runnable against.
 | [pipes/](pipes/)         | ✅ Runnable | mlxk ≥ 2.0.4 (pipe beta) | Broadcast stdin to N models in parallel; vision → text archive pipeline |
 | [model-routing/](model-routing/) | ✅ Runnable | mlxk 2.0.6 (`list --json` capabilities) | Single-node task → model selection (POC for broke-cluster's model-routing dimension) |
 | [rag-server/](rag-server/) | ✅ Runnable | mlxk ≥ 2.0.7 (`embed` experimental, alpha-gated) | Pipe-based RAG toolbox + OpenAI-compatible RAG server |
+| [photo-rag/](photo-rag/) | 📋 Planned (target 2.0.8) | — design record only | Resumable multi-day vision batch over a private photo library |
 
 **Status legend**
 - ✅ **Runnable** — runs today against the named released mlxk.
@@ -38,7 +39,9 @@ Some drift is expected; each example states what it is runnable against.
 
 3. **Private data stays out of the tree.** Inputs (photos, documents) are read
    from an external directory and outputs are written to an external directory —
-   never into `examples/`. `examples/.gitignore` is only a defensive backstop.
+   never into `examples/`. There is no in-tree backstop and none is relied on:
+   the rule is that nothing private is ever *in* the tree to begin with, so
+   external paths are required rather than defaulted.
 4. **English only.** Track files with explicit paths (never `git add -A`).
 5. Examples are not part of mlxk core and carry no stability guarantee.
 
@@ -54,6 +57,9 @@ Examples are published as their underlying feature ships:
   broke-cluster's model-routing dimension.
 - **rag-server/** is live as of 2.0.7 — `mlxk embed` ships experimental
   (alpha-gated); the embeddings work doubled as its dogfooding / acceptance artifact.
+- **photo-rag/** is a design record until 2.0.8. Its scripts land there because a
+  real multi-day vision batch is a load test the unit suite cannot provide, and
+  because it is the groundwork for image embeddings.
 
 ---
 
