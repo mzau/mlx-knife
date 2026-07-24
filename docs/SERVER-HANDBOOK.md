@@ -1,8 +1,8 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.6 stable (PyPI) · 2.0.7 dev: `POST /v1/audio/translations` (#54) + experimental `/v1/embeddings` backend (`embed-serve`) + `serve --embed-backend` proxy
+**Version:** 2.0.7 stable — includes `POST /v1/audio/translations` (#54) and the experimental `/v1/embeddings` backend (`embed-serve`) + `serve --embed-backend` proxy
 **Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-07-24
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)

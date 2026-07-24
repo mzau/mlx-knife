@@ -1,6 +1,6 @@
 # MLX Knife Architecture
 
-**Stand: 2.0.6 (May 2026)**
+**Stand: 2.0.7 (July 2026)**
 
 ## Core Principles
 

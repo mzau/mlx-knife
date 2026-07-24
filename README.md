@@ -6,13 +6,12 @@
 
 <p align="center"><i>What mlx-knife is — at a glance. Release notes: <a href="CHANGELOG.md">CHANGELOG.md</a>.</i></p>
 
-**Current Version: 2.0.6** (stable)
+**Current Version: 2.0.7** (stable)
 
-[![GitHub Release](https://img.shields.io/badge/stable-2.0.6-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/stable-2.0.7-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
-[![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
 
 **Release Notes:** See [CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md) for detailed changes, fixes, and migration guides.
 
@@ -52,32 +51,25 @@ produce a broken workspace).
 
 ## What's New in 2.0.7
 
-The **feature** release (in active development — 2.0.6 was integrity and
-capability-honesty fixes; 2.0.7 adds new capabilities):
+The **feature** release (2.0.6 was integrity and capability-honesty fixes; 2.0.7 adds new capabilities):
 
-- **Embeddings (experimental).** Generate OpenAI-style text-embedding vectors for
-  semantic search and RAG, on-device:
-  - `mlxk embed <model> "text"` — embed a string, stdin (`-`), or a `--batch` JSONL
-    stream; emitted as JSONL (or the standard envelope with `--json`).
-  - `mlxk embed-serve <model>` — a single-model backend exposing an OpenAI-compatible
-    `POST /v1/embeddings`, in its **own process** so the main server's memory gates stay
-    intact.
-  - `mlxk serve --embed-backend URL` — the main server proxies `/v1/embeddings` to that
-    backend, so a client uses **one base URL** for both chat and embeddings.
-  - Gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles. See
-    [Embeddings](#embeddings-experimental); the server side is in the
-    [Server Handbook](https://github.com/mzau/mlx-knife/blob/main/docs/SERVER-HANDBOOK.md).
-- **Whisper translation** — translate multilingual speech to English with a
-  multilingual (non-turbo) Whisper model, on the CLI
-  (`mlxk run … --audio FILE --translate`) or the server
-  (`POST /v1/audio/translations`, OpenAI-compatible). Models that can't translate
-  (whisper-turbo, `.en`, non-Whisper STT) are rejected up front with a hint —
-  never a silent transcription.
+- **Embeddings (experimental)** — vectors for semantic search and RAG, on-device:
+  `mlxk embed` (JSONL, pipe-first), `mlxk embed-serve` (OpenAI-compatible
+  `POST /v1/embeddings`, in its own process), and `mlxk serve --embed-backend URL`
+  so a client uses **one base URL** for chat and embeddings. Gated by
+  `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles — see
+  [Embeddings](#embeddings-experimental).
+- **Whisper translation** — multilingual speech → English, via
+  `mlxk run … --audio FILE --translate` or `POST /v1/audio/translations`. Models
+  that can't translate (whisper-turbo, `.en`, non-Whisper STT) are rejected up
+  front — never a silent transcription.
+- **Runnable examples** —
+  [`examples/`](https://github.com/mzau/mlx-knife/tree/main/examples/) ships pipe
+  chains, model routing, and a RAG server you can point a browser chat client at.
 
-Along for the ride:
-
-- MLX-stack refresh — mlx-vlm 0.6.2 / mlx-audio 0.4.4 (re-verified per ADR-023).
-- `mlxk embed … --json` renders embeddings in the standard JSON envelope.
+Plus: embedding models are labelled correctly in `mlxk list` / `show`; the MLX stack
+moves to mlx-vlm 0.6.2 / mlx-audio 0.4.4. Full detail:
+[CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md).
 
 ## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
@@ -132,7 +124,7 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ```bash
 pip install mlx-knife
-mlxk --version  # → mlxk 2.0.6
+mlxk --version  # → mlxk 2.0.7
 ```
 
 **Requirements:** macOS Apple Silicon, Python 3.10-3.12
@@ -145,7 +137,7 @@ git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 pip install -e ".[dev,test]"
 
-mlxk --version  # → mlxk 2.0.6
+mlxk --version  # → mlxk 2.0.7
 pytest -v
 ```
 
@@ -1385,7 +1377,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.6 | May 2026</i><br>
+  <i>Version 2.0.7 | July 2026</i><br>
   <i>Supported by Anthropic Claude Code</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>

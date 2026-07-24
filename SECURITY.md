@@ -19,7 +19,9 @@ MLX Knife is designed to run locally on your Apple Silicon Mac. It prioritizes u
 ### What MLX Knife Itself Doesn't Do
 - ❌ No model outputs are logged or transmitted
 - ❌ No user tracking or analytics
-- ❌ mlx-knife code does not initiate network requests during `run`, `server`, or `show`
+- ❌ mlx-knife code does not initiate network requests during `run`, `server`, or `show` —
+  the one exception is `serve --embed-backend URL` (2.0.7, experimental), which forwards
+  `/v1/embeddings` to the address you configure
 
 ### Third-Party Libraries
 
@@ -81,6 +83,16 @@ mlxk server --host 0.0.0.0 --port 8000
 - Implement firewall rules
 - Never expose directly to the internet
 - Consider VPN-only access
+
+### Embeddings Backend (`mlxk embed-serve`, experimental)
+
+2.0.7 adds a second listening surface, gated by `MLXK2_ENABLE_ALPHA_FEATURES=1`:
+
+- `mlxk embed-serve` binds `127.0.0.1` by default. The `--host` warning above applies
+  unchanged — it has no authentication or rate limiting either.
+- `mlxk serve --embed-backend URL` turns the main server into an HTTP client of that
+  URL: the bodies of `/v1/embeddings` requests are forwarded there verbatim. Point it
+  only at a backend you control; neither hop is authenticated.
 
 ### Model Execution
 - **Memory**: Large models can consume significant RAM/GPU memory
@@ -149,13 +161,15 @@ The 2.0 alpha introduces an alpha upload capability. Treat it as opt‑in, with 
 
 ## Supported Versions
 
-We provide security updates for the versions below. **Upgrading to 2.0.6 is strongly recommended** — it closes a workspace-integrity coverage gap in `content_hash` and corrects long-standing capability labels for multimodal models.
+We provide security updates for the versions below. 2.0.7 is a feature release and
+carries no security fixes over 2.0.6; it does add new network surfaces, both
+experimental and opt-in (see *Embeddings Backend* above).
 
 | Version | Security Support |
 | ------- | ---------------- |
-| 2.0.6   | :white_check_mark: Recommended — current stable |
-| 2.0.5   | :warning: Supported — upgrade to 2.0.6 strongly recommended |
-| < 2.0.5 | :x: Upgrade recommended |
+| 2.0.7   | :white_check_mark: Recommended — current stable |
+| 2.0.6   | :warning: Supported — upgrade to 2.0.7 recommended |
+| < 2.0.6 | :x: Upgrade recommended |
 
 ## Additional Resources
 
