@@ -155,6 +155,14 @@ cat query.json | ./cosine-search.py index.jsonl - --output-json
 }
 ```
 
+**Same-model guard:** query and index lines must carry the `metadata` object
+stamped by `mlxk embed`, and their identity `(model, content_hash, device,
+dimensions)` must match. On mismatch — or missing metadata — the search refuses
+to rank and exits with code 2. This catches an index built with one model being
+queried with another (`index-files.py` and `rag-pipeline.sh` have separate
+`EMBED_MODEL` defaults), mixed CPU/GPU vectors, and stale indexes after a model
+revision change.
+
 ---
 
 ### 3. `retrieve-files.py` - Load File Contents

@@ -12,8 +12,15 @@ Usage:
     # JSON output (for pipes)
     cat query.json | cosine-search.py index.jsonl - --output-json
 
-Input: Query embedding (JSON with "embedding" field)
+Input: Query embedding as emitted by `mlxk embed` (JSON with "embedding" and
+       "metadata"); index is a JSONL of the same records (see index-files.py)
 Output: Top-K similar documents
+
+Same-model guard: the query and every index line must carry the identity that
+`mlxk embed` stamps into "metadata" — (model, content_hash, device, dimensions)
+— and those identities must match. Vectors from different models, revisions or
+devices share no vector space; ranking them silently produces garbage, so any
+mismatch (or missing metadata) aborts with exit code 2 instead.
 """
 
 import json
@@ -24,6 +31,26 @@ from argparse import ArgumentParser
 def cosine_similarity(a, b):
     """Compute cosine similarity between two vectors."""
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def embedding_identity(record):
+    """Extract the same-model identity stamped by `mlxk embed`.
+
+    Returns (model, content_hash, device, dimensions), or None if the record
+    carries no metadata (outdated index format or foreign source).
+    """
+    meta = record.get('metadata')
+    if not isinstance(meta, dict):
+        return None
+    return (meta.get('model'), meta.get('content_hash'),
+            meta.get('device'), meta.get('dimensions'))
+
+def reject(message):
+    """Refuse to rank: clear error, non-zero exit (same-model contract violation)."""
+    print(f"Error: {message}", file=sys.stderr)
+    print("Hint: query and index must come from the same `mlxk embed` model "
+          "(same model, content_hash, device, dimensions). "
+          "Re-index or re-embed with the matching model.", file=sys.stderr)
+    sys.exit(2)
 
 def main():
     parser = ArgumentParser(description="Cosine similarity search")
@@ -45,13 +72,31 @@ def main():
 
     query_vec = np.array(query_data['embedding'])
 
+    # Same-model guard: never compare vectors across embedding identities.
+    query_ident = embedding_identity(query_data)
+    if query_ident is None:
+        reject("query has no 'metadata' (expected the output of `mlxk embed`)")
+    if query_ident[3] != len(query_vec):
+        reject(f"query vector length {len(query_vec)} does not match "
+               f"metadata.dimensions {query_ident[3]}")
+
     # Search index
     results = []
     with open(args.index) as f:
         for line_num, line in enumerate(f, 1):
             try:
                 doc = json.loads(line)
+                doc_ident = embedding_identity(doc)
+                if doc_ident is None:
+                    reject(f"index line {line_num} has no 'metadata' — "
+                           f"outdated or foreign index")
+                if doc_ident != query_ident:
+                    reject(f"index line {line_num} identity {doc_ident} "
+                           f"does not match query identity {query_ident}")
                 doc_vec = np.array(doc['embedding'])
+                if len(doc_vec) != len(query_vec):
+                    reject(f"index line {line_num} vector length {len(doc_vec)} "
+                           f"!= query length {len(query_vec)}")
                 score = cosine_similarity(query_vec, doc_vec)
 
                 if score >= args.min_score:

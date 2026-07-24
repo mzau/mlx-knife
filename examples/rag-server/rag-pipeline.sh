@@ -27,8 +27,10 @@ if [ -z "$QUERY" ]; then
     exit 1
 fi
 
-# Pipeline: Query → Embed → Search → Retrieve
+# Pipeline: Query → Embed (query mode) → Search → Retrieve
+# --query applies the model's retrieval-query preparation (bge instruction,
+# e5 "query: " prefix); the index side stays in document mode (index-files.py).
 echo "$QUERY" \
-  | MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed "$EMBED_MODEL" - \
+  | MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed "$EMBED_MODEL" - --query \
   | python3 "$SCRIPT_DIR/cosine-search.py" "$INDEX" - --top-k "$TOP_K" --output-json \
   | python3 "$SCRIPT_DIR/retrieve-files.py" --include-score
