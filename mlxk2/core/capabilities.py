@@ -297,7 +297,10 @@ def detect_audio_translate_en_capability(
     Reachable iff:
         1. `config.model_type` matches a Whisper-derived architecture
            (WHISPER_DERIVED_TRANSLATE_TYPES), AND
-        2. the model is not an English-only variant (whisper-*.en).
+        2. the model is not an English-only variant (whisper-*.en) — architectural:
+           the checkpoint lacks the `<|translate|>` token, AND
+        3. the model is not a turbo variant — functional: the token is present but
+           the reduced decoder cannot emit reliable English.
 
     Whisper's translate task always emits English output regardless of source
     language. English-only variants lack the `<|translate|>` special token

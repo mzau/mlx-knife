@@ -5,6 +5,18 @@
 **Implementation:** Complete (beta.9 development, routing fix applied)
 **Replaces:** ADR-019 (Beta.8 mlx-vlm-only implementation)
 
+> **Correction (2026-07-24, pre-release doc sweep).** This ADR plans an `audio` extra
+> (§Phase 3.1) and its examples install `mlx-knife[audio]` / `mlx-knife[all]`. **Those extras
+> were never defined.** `pyproject.toml` has only ever carried `test` and `dev` (verified across
+> v2.0.2 … 2.0.6); `mlx-audio` and `mlx-vlm` ship as **base dependencies**, so
+> `pip install mlx-knife[audio]` only warns about an unknown extra and installs the base package.
+> The motivation is visible in the version history: through v2.0.2 the package declared
+> `requires-python >=3.9` while vision and audio need 3.10+, so extras would have preserved a
+> 3.9-capable base install — a path dropped when `requires-python` moved to `>=3.10` in 2.0.4.
+> The decision record below is left as written; its install lines are **historical, not
+> instructions**. For the current install see `README.md` and `docs/SERVER-HANDBOOK.md`. Some
+> runtime reject messages still quote the phantom extra; they are corrected separately.
+
 ---
 
 ## Context

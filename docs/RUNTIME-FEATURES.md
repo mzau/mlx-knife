@@ -218,15 +218,19 @@ applications:
 
 | Request                                  | Non-reachable case                                                                                                       | Required behaviour                                                                                                                          |
 |------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| `mlxk run M --translate`                 | `M` lacks audio-translate (English-only Whisper variant; non-Whisper STT model; non-STT model)                           | Hard error: "Model does not support translate. <reason>". Never silently fall back to plain transcribe.                                    |
-| `mlxk run M --audio FILE`                | `M` is text-only; `M` is base + media-input invocation gap; `M`'s loader is missing                                      | Hard error with specific layer named. Never silently transcribe nothing or attempt text-only.                                              |
-| `mlxk run M --image FILE`                | `M` is text-only; mllama-class without text-tower; base variant of multimodal architecture                              | Hard error. Never silently strip the image and run text-only.                                                                              |
-| `mlxk run M "prompt"` (text-only)        | `M` requires media input (multimodal-only architecture, e.g. mllama)                                                     | Hard error: "Model requires media input. Use `--image` / `--audio`." (ADR-024 case.)                                                       |
+| `mlxk run M --translate`                 | `M` lacks audio-translate (English-only Whisper variant; non-Whisper STT model; non-STT model)                           | Hard error: "Model does not support translate. <reason>". Never silently fall back to plain transcribe. `[CURRENT]`.                                    |
+| `mlxk run M --audio FILE`                | `M` is text-only; `M` is base + media-input invocation gap; `M`'s loader is missing                                      | Hard error with specific layer named. Never silently transcribe nothing or attempt text-only. `[CURRENT]` for the text-only case; `[TARGET]` for the base + media gap and missing-loader (Class C/D).                                              |
+| `mlxk run M --image FILE`                | `M` is text-only; mllama-class without text-tower; base variant of multimodal architecture                              | Hard error. Never silently strip the image and run text-only. `[CURRENT]` on `mlxk run`; `[TARGET]` on the server surface.                                                                              |
+| `mlxk run M "prompt"` (text-only)        | `M` requires media input (multimodal-only architecture, e.g. mllama)                                                     | Hard error: "Model requires media input. Use `--image` / `--audio`." (ADR-024 case.) `[TARGET]` (Class C — mllama / gemma3n base still report `text-generation`).                                                       |
 
 This couples to the same reachability probe as visibility — a feature that
 is *visible* in the Type column is invocable; a feature that is *not* in the
-Type column rejects on invocation. The two policies cannot drift, because
-they read the same set.
+Type column rejects on invocation. **`[TARGET]`.** On the axes already gated
+on `mlxk run` (translate, vision-in, audio-in text-only, text-loader) the two
+policies read the same set. They still diverge where the fix has not landed:
+the **health axis** (a model hidden as unhealthy can still run), **Class C
+reachability**, and `GET /v1/models`, which carries no capability field and so
+cannot emit the set it is meant to share.
 
 **Consistency with ARCHITECTURE.md.** The pre-execution-reject behaviour is
 the No-Silent-Fallbacks (#2) and Fail-Fast (#3) principles applied to the
@@ -250,7 +254,7 @@ audio task classes that are conceptually distinct, with portfolio status:
 |----------------------------|-----------------------------------------------------------------------|-------------|------------|--------------------------------------------------------------------------------------------------------------------|
 | ASR (Speech-to-Text)       | Audio → verbatim transcription                                        | mlx-audio   | ✅         | Whisper. ASR is *only* transcription — speaker info is not part of the definition.                                |
 | ASR + Diarisation          | ASR + anonymous speaker clustering ("Speaker 1", "Speaker 2")         | mlx-audio   | ✅         | VibeVoice-ASR.                                                                                                     |
-| ASR + Speech Translation (English-only target) | Audio in any source language → text in **English** (fixed target — Whisper architectural constraint, no free target-language argument) | mlx-audio   | ✅        | Shipped 2.0.7 (#54): CLI `mlxk run --audio FILE --translate [en]` and server `POST /v1/audio/translations` (OpenAI-compatible, hardcoded `task=translate`). `task` is threaded through `audio_runner.transcribe()`; mlxk additionally sets `condition_on_previous_text=False` on translate to break Whisper's long-form repetition loop. Reachability is per-model (`detect_audio_translate_en_capability`): multilingual non-turbo Whisper has it; `whisper.en` variants (no `<\|translate\|>` token) and turbo variants (reduced decoder, non-English garbage) do not, nor do non-Whisper STT models. Non-capable models reject pre-execution per §3.2 (CLI error / server HTTP 422) — never a silent transcribe fallback. |
+| ASR + Speech Translation (English-only target) | Audio in any source language → text in **English** (fixed target — Whisper architectural constraint, no free target-language argument) | mlx-audio   | ✅        | Shipped 2.0.7 (#54): CLI `mlxk run --audio FILE --translate [en]` and server `POST /v1/audio/translations` (OpenAI-compatible, hardcoded `task=translate`). `task` is threaded through `audio_runner.transcribe()`; mlxk additionally sets `condition_on_previous_text=False` on translate to mitigate Whisper's long-form repetition loop. Reachability is per-model (`detect_audio_translate_en_capability`): multilingual non-turbo Whisper has it; `whisper.en` variants (no `<\|translate\|>` token) and turbo variants (reduced decoder, non-English garbage) do not, nor do non-Whisper STT models. Non-capable models reject pre-execution per §3.2 (CLI error / server HTTP 422) — never a silent transcribe fallback. |
 | ASR + Free-target Speech-to-Text Translation | Audio in language A → text in arbitrary language B                    | —           | ⚫         | Not in mlxk portfolio. Requires Seamless-M4T-class S2TT models; not in mlx-audio. Distinct task class from English-only Whisper translation, often conflated. |
 | Grounded Audio-Chat        | Audio + question text → text answer *about* the audio                 | mlx-vlm     | ✅         | Gemma3n-it, Gemma4-e4b-it. Distinct from ASR: model can answer questions, not only transcribe.                     |
 | Audio Classification       | Audio → label (language, emotion, scene, instrument)                  | mlx-audio   | ⚫         | No model in portfolio.                                                                                             |
@@ -418,7 +422,7 @@ variant is excluded on a **functional** basis — the `<|translate|>` token is p
 but the reduced 4-layer decoder emits non-English garbage (Finding 7-C). A non-Whisper
 STT or non-STT model fails at layer 1+2. On the translate path mlxk additionally
 applies a quality-relevant invocation default — `condition_on_previous_text=False` —
-to break Whisper's long-form repetition loop (Finding 7-D). Per §3.2, a
+to mitigate Whisper's long-form repetition loop (Finding 7-D). Per §3.2, a
 `mlxk run M --translate` call (or `POST /v1/audio/translations`) against any
 non-capable model rejects pre-execution with a hint (CLI error / server HTTP 422),
 never silently transcribes instead.

@@ -14,7 +14,7 @@
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 [![MLX](https://img.shields.io/badge/MLX-Latest-orange.svg)](https://github.com/ml-explore/mlx)
 
-**Release Notes:** See [CHANGELOG.md](CHANGELOG.md) for detailed changes, fixes, and migration guides.
+**Release Notes:** See [CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md) for detailed changes, fixes, and migration guides.
 
 
 ## What mlx-knife is
@@ -26,7 +26,7 @@ A **text-first model CLI for Apple Silicon**. Every standard text model
 Alongside text, mlx-knife has **curated support for a verified set of
 vision and audio model types** (Whisper, Pixtral, Gemma-3, Qwen2-VL,
 VibeVoice, and others). The current per-release list with status per
-operation lives in [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md).
+operation lives in [`docs/MODEL-COVERAGE.md`](https://github.com/mzau/mlx-knife/blob/main/docs/MODEL-COVERAGE.md).
 
 ## What mlx-knife is not
 
@@ -66,7 +66,7 @@ capability-honesty fixes; 2.0.7 adds new capabilities):
     backend, so a client uses **one base URL** for both chat and embeddings.
   - Gated by `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles. See
     [Embeddings](#embeddings-experimental); the server side is in the
-    [Server Handbook](docs/SERVER-HANDBOOK.md).
+    [Server Handbook](https://github.com/mzau/mlx-knife/blob/main/docs/SERVER-HANDBOOK.md).
 - **Whisper translation** — translate multilingual speech to English with a
   multilingual (non-turbo) Whisper model, on the CLI
   (`mlxk run … --audio FILE --translate`) or the server
@@ -153,7 +153,7 @@ pytest -v
 
 ### Migrating from 1.x
 
-If you're upgrading from MLX Knife 1.x, see [MIGRATION.md](MIGRATION.md) for important information about the license change (MIT → Apache 2.0) and behavior changes.
+If you're upgrading from MLX Knife 1.x, see [MIGRATION.md](https://github.com/mzau/mlx-knife/blob/main/MIGRATION.md) for important information about the license change (MIT → Apache 2.0) and behavior changes.
 
 
 ## Quick Start
@@ -434,7 +434,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "pixtral", "chunk": 3, "messages": [...]}'
 ```
 
-**Note:** `chunk` is an mlx-knife extension parameter. See [SERVER-HANDBOOK.md](docs/SERVER-HANDBOOK.md) for details.
+**Note:** `chunk` is an mlx-knife extension parameter. See [SERVER-HANDBOOK.md](https://github.com/mzau/mlx-knife/blob/main/docs/SERVER-HANDBOOK.md) for details.
 
 #### Metadata Output Format
 
@@ -513,7 +513,7 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 
 Vision support routes through mlx-vlm upstream. File integrity is verified by `mlxk health`, but runtime behavior depends on the per-model upstream state.
 
-> **For the authoritative per-release status of every supported `model_type`, see [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md).**
+> **For the authoritative per-release status of every supported `model_type`, see [`docs/MODEL-COVERAGE.md`](https://github.com/mzau/mlx-knife/blob/main/docs/MODEL-COVERAGE.md).**
 
 A reasonable starting point: **Pixtral 12B 8-bit** (`mlx-community/pixtral-12b-8bit`, ~13.5 GB) — multi-image capable, strong text recognition, verified across recent releases. Other verified model families, repair workflows for legacy conversions, and known runtime issues are tracked release-by-release in the coverage matrix.
 
@@ -527,7 +527,7 @@ Some legacy mlx-vlm conversions need a one-time index repair before they load �
 - **Python 3.10+** (mlx-audio dependency, included in base install)
 - **No system dependencies:** MP3/WAV decoding via embedded libsndfile (no ffmpeg or Homebrew required)
 
-**Reference model:** `mlx-community/whisper-large-v3-turbo-4bit` (~464 MB, supports >10 min audio, 4bit + 8bit variants both verified). See [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md) for the full per-release verified list.
+**Reference model:** `mlx-community/whisper-large-v3-turbo-4bit` (~464 MB, supports >10 min audio, 4bit + 8bit variants both verified). See [`docs/MODEL-COVERAGE.md`](https://github.com/mzau/mlx-knife/blob/main/docs/MODEL-COVERAGE.md) for the full per-release verified list.
 
 **🔧 Backend Architecture:**
 
@@ -562,7 +562,7 @@ mlxk run whisper-large --audio podcast.wav
 **⚠️ Limitations:**
 
 - **Duration:** depends on model architecture — dedicated STT models (Whisper) support >10 min; multimodal LLMs with audio are typically token-limited to ~30 s
-- **File size:** 50 MB max per request (configurable)
+- **File size:** 50 MB max per request (fixed limit)
 - **Formats:** WAV, MP3, M4A on macOS (M4A via Core Audio); Linux needs ffmpeg for non-WAV
 - **Legacy weights:** `.npz`-only models are not supported — use `.safetensors` variants
 
@@ -614,7 +614,7 @@ client.audio.translations.create(
 ```
 
 A non-audio model returns HTTP 400; an audio model that can't translate returns
-HTTP 422. See the [Server Handbook](docs/SERVER-HANDBOOK.md) for the full
+HTTP 422. See the [Server Handbook](https://github.com/mzau/mlx-knife/blob/main/docs/SERVER-HANDBOOK.md) for the full
 endpoint contract.
 
 ## Embeddings (Experimental)
@@ -634,7 +634,7 @@ mlxk embed mlx-community/bge-small-en-v1.5-4bit "machine learning on Apple Silic
 
 Also reads stdin (`-`), a `--batch` JSONL stream, a retrieval `--query`, or the standard
 envelope with `--json` — see `mlxk embed --help`. A worked end-to-end RAG loop
-(index → search → retrieve) lives in [examples/rag-server](examples/rag-server/).
+(index → search → retrieve) lives in [examples/rag-server](https://github.com/mzau/mlx-knife/tree/main/examples/rag-server/).
 
 **Two consumer rules matter:** embeddings are only comparable within one model's vector
 space, and they are *not* bit-reproducible across CPU/GPU — build a store with **one model
@@ -642,11 +642,11 @@ and one device** (see [Model Identity in Output](#model-identity-in-output)).
 
 **Serving over HTTP:** `mlxk embed-serve <model>` + `mlxk serve --embed-backend URL` give a
 client one OpenAI-compatible base URL for both chat and embeddings — see the
-[Server Handbook](docs/SERVER-HANDBOOK.md).
+[Server Handbook](https://github.com/mzau/mlx-knife/blob/main/docs/SERVER-HANDBOOK.md).
 
 ## JSON API
 
-> **📋 Complete API Specification**: See [JSON API Specification](docs/json-api-specification.md) for comprehensive schema, error codes, and examples.
+> **📋 Complete API Specification**: See [JSON API Specification](https://github.com/mzau/mlx-knife/blob/main/docs/json-api-specification.md) for comprehensive schema, error codes, and examples.
 
 All commands support both human-readable and JSON output (`--json` flag) for automation and scripting, enabling seamless integration with CI/CD pipelines and cluster management systems.
 
@@ -1358,16 +1358,16 @@ tests_2.0/                   # 2.0 test suite
 docs/ADR/                    # Architecture decision records
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+See [CONTRIBUTING.md](https://github.com/mzau/mlx-knife/blob/main/CONTRIBUTING.md) for detailed guidelines.
 
 
 ## Support & Feedback
 
 - **Issues**: [GitHub Issues](https://github.com/mzau/mlx-knife/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/mzau/mlx-knife/discussions)
-- **API Specification**: [JSON API Specification](docs/json-api-specification.md)
+- **API Specification**: [JSON API Specification](https://github.com/mzau/mlx-knife/blob/main/docs/json-api-specification.md)
 - **Documentation**: See `docs/` directory for technical details
-- **Security Policy**: See [SECURITY.md](SECURITY.md)
+- **Security Policy**: See [SECURITY.md](https://github.com/mzau/mlx-knife/blob/main/SECURITY.md)
 
 
 ## License

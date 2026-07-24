@@ -119,7 +119,7 @@ probe/
 |----------|----------|---------|
 | `detect_framework()` | `common.py` | MLX vs PyTorch vs GGUF |
 | `detect_model_type()` | `common.py` | chat, base, audio, embedding |
-| `detect_capabilities()` | `common.py` | text-generation, vision, audio, audio-translate-en, embeddings |
+| `detect_capabilities()` | `common.py` | text-generation, chat, vision, audio, audio-translate-en, embeddings (authoritative: `Capability` enum, `capabilities.py`) |
 | `detect_vision_capability()` | `common.py` | vision_config, preprocessor_config |
 | `detect_audio_capability()` | `common.py` | audio_config, WhisperFeatureExtractor |
 | `detect_audio_translate_en_capability()` | `capabilities.py` | Whisper translate→English sub-capability (#54): multilingual non-turbo only |
@@ -207,7 +207,9 @@ runtime_compatible?
 If all gates pass → True (runtime_compatible)
 ```
 
-> **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `run.py:462-486`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
+> **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `run.py:506-530`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
+
+> **Shipped (2.0.7, [#54](https://github.com/mzau/mlx-knife/issues/54)).** `mlxk run --translate` adds its own pre-execution reject *ahead* of the Class-A one, at `run.py:472-504`, with three checks: target ≠ `en` (Whisper's translate task is fixed-target English), `--translate` without `--audio`, and a model that is not `audio-translate-en` capable (`detect_audio_translate_en_capability`). Like the reject above it fires before any model load and returns a corrective hint; the server mirrors it on `POST /v1/audio/translations` (HTTP 422; a non-audio model gets 400). `runtime_compatible` is again unchanged — translate capability is a per-verb property, not a listing gate.
 
 > **Shipped (2.0.7, ADR-015 Slice C).** `mlxk embed` ships with config-first embedder detection (`classify_embedder()`, the single source of truth shared by `detect_model_type`, gate [5] and the serve-load probe — replacing the `"embed" in name` heuristic that mislabelled bge-small as `base`). Gate [5]'s blanket `False` is now a verified-encoder-list filter: `bert`/`qwen3` are runnable-via-`embed` (`runtime_compatible=True`); non-vendored encoder types (xlm-roberta/modernbert/nomic_bert) stay `False` with a "not vendored" reason; plus an embed-side pre-execution reject (`operations/embed.py`). **Surface asymmetry (deliberate):** `mlxk list` shows runnable embedders (the honesty win); serve's `/v1/models` deliberately *hides* them (`handlers/models.py`) — the embed-backend `/v1/models` merge is deferred to 2.1 and the chat-surface response carries no capability field, so advertising an embedder there would be a list↔verb contradiction (Invariant 4). Spec + scope: [ADR-015](ADR/ADR-015-Embeddings-API.md).
 

@@ -482,7 +482,8 @@ def main():
     embed_parser.add_argument("--query", action="store_true",
                               help="Encode as a retrieval query (applies the model's query instruction prefix)")
     embed_parser.add_argument("--instruct", default=None,
-                              help="Override the query task instruction (implies --query)")
+                              help="Override the query task instruction (implies --query; decoder "
+                                   "embedders only — bge/e5 encoders ignore it)")
     embed_parser.add_argument("--cpu", action="store_true",
                               help="Force CPU execution (fallback for memory / GPU co-residency; "
                                    "slower than GPU for non-tiny models, and CPU vectors differ "

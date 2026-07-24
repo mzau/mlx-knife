@@ -29,8 +29,8 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 **Requirements (2.0.7):**
 - Python 3.10-3.13 (Text + Vision); 3.10-3.12 only for Audio (miniaudio wheel missing on 3.13/macOS-ARM)
 - `mlx-lm==0.31.3` (text backend)
-- `mlx-vlm==0.6.2` (vision + multimodal audio; `pip install mlx-knife[vision]`)
-- `mlx-audio==0.4.4` (Whisper / Voxtral STT; `pip install mlx-knife[audio]`)
+- `mlx-vlm==0.6.2` (vision + multimodal audio)
+- `mlx-audio==0.4.4` (Whisper / Voxtral STT)
 - `transformers==5.5.4` (driven by mlx-audio 0.4.4)
 - `torch>=2.0`, `torchvision>=0.15` — temporary base deps for Pixtral / Llama-Vision / Mistral-Small-3.1 (`sunset-by mlx-vlm#1011`, see ADR-023 Workaround-Sunset Policy)
 
@@ -356,7 +356,7 @@ A man said to the universe, Sir, I exist.
 - Whisper: `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`
 - Voxtral: `mlx-community/Voxtral-Mini-3B-2507-bf16` (upstream tokenizer issues)
 
-**Note:** This endpoint requires `mlx-audio` (`pip install mlx-knife[audio]`).
+**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.12).
 
 **Translation:** for audio-to-English translation, use the dedicated
 [`POST /v1/audio/translations`](#post-v1audiotranslations) endpoint (or the CLI
@@ -438,7 +438,7 @@ client.audio.translations.create(
 | Not an audio model at all | **400** | a text or vision model |
 | Audio model that cannot translate | **422** | whisper-turbo (reduced decoder), `whisper-*.en` (no `<\|translate\|>` token), non-Whisper STT (Voxtral, VibeVoice) |
 
-**Note:** This endpoint requires `mlx-audio` (`pip install mlx-knife[audio]`).
+**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.12).
 
 ---
 
@@ -470,7 +470,7 @@ curl -X POST http://localhost:8000/v1/embeddings \
 | `dimensions` | Integer | ❌ | Accepted only if equal to the model's native width; any other value → **400** (no Matryoshka truncation in 2.0.7). |
 | `user` | String | ❌ | Accepted and ignored (OpenAI passthrough). |
 | `input_type` | String | ❌ | **mlxk extension** (RAG): `document` (default) or `query` (applies the model's query-instruction prefix). Ignored by standard OpenAI clients. |
-| `instruct` | String | ❌ | **mlxk extension**: overrides the query task instruction; implies `input_type: query`. |
+| `instruct` | String | ❌ | **mlxk extension**: overrides the query task instruction; implies `input_type: query`. **Decoder embedders only (Qwen3)** — the BERT-family encoders (bge/e5) ignore this field; encoder support is pending. |
 
 **Response (`encoding_format: float`):**
 ```json
@@ -673,7 +673,7 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 - ✅ Response formats: `json`, `text`, `verbose_json`
 - ✅ Language detection or explicit `language` parameter
 
-**Models:** Whisper, Voxtral (requires `pip install mlx-knife[audio]`)
+**Models:** Whisper, Voxtral (needs `mlx-audio` — included in the base install)
 
 #### Method 2: `/v1/chat/completions` with `input_audio`
 
@@ -1003,14 +1003,9 @@ interpreter.
 pyenv install 3.10
 pyenv local 3.10
 
-# Install with Vision support
-pip install mlx-knife[vision]
-
-# Install with Audio STT support (Whisper)
-pip install mlx-knife[audio]
-
-# Install with everything
-pip install mlx-knife[all]
+# Reinstall — the vision and audio backends are base dependencies,
+# there are no extras to select
+pip install mlx-knife
 ```
 
 ### Memory Constraint Errors (HTTP 507)
@@ -1107,9 +1102,14 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 **Symptom:** `STT models require mlx-audio`
 
+**Cause:** `mlx-audio` is a base dependency, so this only appears when the install is
+incomplete — most commonly on **Python 3.13 / macOS-ARM**, where the `miniaudio` wheel is
+missing and the build fails.
+
 **Solution:**
 ```bash
-pip install mlx-knife[audio]
+# Use Python 3.10-3.12, then reinstall
+pip install --force-reinstall mlx-knife
 ```
 
 ### Embeddings Errors (experimental, 2.0.7)
@@ -1160,9 +1160,9 @@ batch. Reduce the batch size or retry.
 
 | Feature | Endpoint | Requirements |
 |---------|----------|--------------|
-| Vision (images) | `/v1/chat/completions` | `pip install mlx-knife[vision]` |
-| Audio Chat (Gemma-3n) | `/v1/chat/completions` | `pip install mlx-knife[vision]` |
-| Audio STT (Whisper) | `/v1/audio/transcriptions` | `pip install mlx-knife[audio]` |
+| Vision (images) | `/v1/chat/completions` | Base install (`mlx-vlm`) |
+| Audio Chat (Gemma-3n) | `/v1/chat/completions` | Base install (`mlx-vlm`) |
+| Audio STT (Whisper) | `/v1/audio/transcriptions` | Base install (`mlx-audio`) |
 | Memory pre-load checks | All endpoints | Built-in (HTTP 507) |
 | Server audio preload | `mlxk serve --model whisper-large` | Built-in |
 
@@ -1535,7 +1535,7 @@ Hello world.
 - Use `multipart/form-data` content type (not `application/json`)
 - File field name must be `file`
 - Maximum file size: 50 MB (~15 min @ 16kHz mono)
-- Requires `mlx-audio` on server (`pip install mlx-knife[audio]`)
+- Requires `mlx-audio` on the server — included in the base install (Python 3.10–3.12)
 
 ### Embeddings: Model Identity & Change Detection
 
@@ -1606,7 +1606,8 @@ When switching from Vision or Audio to Text model mid-conversation:
     backend (separate single-model process; ADR-015). Experimental — requires
     `MLXK2_ENABLE_ALPHA_FEATURES=1`.
   - `encoding_format`: `base64` (default, SDK-compatible) and `float`; batch `input`; L2-normalized
-    vectors; mlxk extensions `input_type` / `instruct` for RAG query embedding.
+    vectors; mlxk extensions `input_type` / `instruct` for RAG query embedding (`instruct` applies on
+    the decoder path only).
   - Topology: `serve --embed-backend URL` proxies `/v1/embeddings` to the backend (Slice D2, same
     release). Proxy errors: **501** (no `--embed-backend` configured), **502** `bad_gateway`
     (backend unreachable), **504** `gateway_timeout` (read-timeout) — 502/504 retryable; backend
