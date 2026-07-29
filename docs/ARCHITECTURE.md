@@ -361,18 +361,26 @@ Workspace Model implementation (ADR-022, ADR-025):
 | Clean-check hot path | `is_workspace_clean` | `operations/workspace.py:734` |
 | Algorithm constants | `HASH_ALGORITHM_V2`, `CATCHALL_FULL_READ_CAP`, `SAFETENSORS_HEADER_MAX`, `DEFAULT_EXCLUDE_PATTERNS` | `operations/workspace.py:43-76` |
 
-Dependency stack (`pyproject.toml:41-56`):
+Dependency stack (`pyproject.toml:41-52`):
 
-| Package | Pin (2.0.7) | Note |
-|---|---|---|
-| `mlx` | `>=0.30.0,<0.32` | Apple Silicon ML framework |
-| `mlx-lm` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |
-| `mlx-audio` | `==0.4.4` | STT backend (Whisper, VibeVoice); drives the `transformers >=5.5.0` floor |
-| `mlx-vlm` | `==0.6.2` | VLM backend; fixes the Mistral `multi_modal_projector` crash + Kimi projector (#1309) |
-| `transformers` | `==5.5.4` | Required by `mlx-audio 0.4.4` |
-| `torch>=2.0`, `torchvision>=0.15` | Temporary | Pixtral / Llama-Vision / Mistral-Small-3.1; `sunset-by mlx-vlm#1011` |
+| Package | 2.0.7 (released) | 2.0.8 (this tree) | Note |
+|---|---|---|---|
+| `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.33` | Apple Silicon ML framework |
+| `mlx-lm` | `==0.31.3` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |
+| `mlx-audio` | `==0.4.4` | `==0.4.4` | STT backend (Whisper, VibeVoice) |
+| `mlx-vlm` | `==0.6.2` | `==0.6.8` | VLM backend |
+| `transformers` | `==5.5.4` | `==5.14.1` | 2.0.7: floor driven by `mlx-audio`. 2.0.8: `mlx-vlm >=0.6.5` requires `>=5.14.0` |
+| `torch>=2.0`, `torchvision>=0.15` | base deps | **removed** | See torch-free note below |
 
-Upper bounds are hygiene per ADR-023: every upstream minor bump requires an explicit mlx-knife release with re-verified integration. The `torch` / `torchvision` lines carry a sunset marker (ADR-023 Workaround-Sunset Policy) and drop when `mlx-vlm` ships a `use_fast=False` fallback.
+Upper bounds are hygiene per ADR-023: every upstream minor bump requires an explicit mlx-knife release with re-verified integration.
+
+**The 2.0.8 column is a pin change, not a code change.** It was validated against *unchanged* 2.0.7 source — same tree, new pin set — so the behavioral differences below are properties of the dependency versions, not of the mlx-knife release. Where behavior depends on a pin, this document states the **dependency condition** rather than the mlx-knife version that happens to carry it.
+
+**`mlx-audio` stays explicitly pinned** even though `mlx-vlm 0.6.8` resolves it to `0.4.4` anyway: that transitive protection only holds while upstream's own `transformers <5.13.0` cap stands, and that cap is a CI pin, not a code constraint. The explicit pin records what was verified — Whisper carries bridge patches in `audio_runner.py` that an untested `mlx-audio` would silently slide under.
+
+**Torch-free from `mlx-vlm >= 0.6.4`.** The `torch` / `torchvision` base deps carried a sunset marker (ADR-023 Workaround-Sunset Policy); the condition they waited on — mlx-vlm #1011, torch/torchvision pulled in by the Pixtral / Mistral-Small-3.1 processor — is **resolved as of `mlx-vlm 0.6.4`**, so the pins are gone. The full verified vision set (`pixtral`, `mistral3`, `mllama`, `gemma4`) was re-verified torch-free; the base install loses ~1 GB.
+
+This is a **packaging** change, not a capability change. Model types that mlx-knife gates off — e.g. video-capable checkpoints, see `docs/MODEL-COVERAGE.md` — were gated off with torch installed and remain gated off without it: that gate keys on `transformers` major version plus a checkpoint marker, and never on torch.
 
 See module docstrings for detailed per-symbol API documentation.
 
@@ -434,7 +442,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 - **ADR-018** — Convert Operation (workspace sentinel infrastructure; v1 deprecated by ADR-025)
 - **ADR-020** — Audio Backend Architecture (STT routing via `detect_audio_backend`; MLX_AUDIO vs MLX_VLM split behind decision-tree gate [3])
 - **ADR-022** — Workspace-First Paradigm (workspace as primary store; `.hf_cache/` isolation; sentinel philosophy behind the Workspace Model section)
-- **ADR-023** — Text-First + Verified Multimodal (no-silent-degradation policy reinforces §2; Workaround-Sunset Policy governs the `torch` / `torchvision` temporary dep)
+- **ADR-023** — Text-First + Verified Multimodal (no-silent-degradation policy reinforces §2; its Workaround-Sunset Policy retired the `torch` / `torchvision` base deps once mlx-vlm #1011 resolved)
 - **ADR-024** — Pre-Execution Capability-Mismatch Reject (Class A shipped 2.0.6 — STT/embedding text-only invocation; Class C + D deferred 2.1; behind the §1 decision-tree note)
 - **ADR-025** — content_hash v2 (algorithm + portable-recipe storage in sentinel; behind the Workspace Model content_hash subsection)
 
@@ -462,6 +470,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 
 ## Changelog
 
+- **2026-07-29 (dep wave + torch drop):** Dependency-stack table rewritten — pointer corrected (`pyproject.toml:41-56` → `:41-52`) and split into a released-2.0.7 column and the current tree, because the change is **pins only, no code**: `mlx <0.32 → <0.33`, `mlx-vlm 0.6.2 → 0.6.8`, `transformers 5.5.4 → 5.14.1`, `torch`/`torchvision` removed, `mlx-lm`/`mlx-audio` unchanged. The `torch` sunset marker is retired — its condition (mlx-vlm #1011) resolved in `mlx-vlm 0.6.4`. Added the rationale for keeping `mlx-audio` explicitly pinned under a transitive resolution, and the note that mlx-knife's own video-capable-checkpoint gate keys on `transformers` version + checkpoint marker, never on torch — so the torch drop is a packaging change, not a capability change.
 - **2026-07-14 (ADR-021 rejected — MCP out):** §7 corrected — `MLXK2_ENABLE_ALPHA_FEATURES=1` gates the **Embeddings** surface only (`embed`, `embed-serve`, `serve --embed-backend`) and is active since 2.0.7; it never gated MCP, though this document said it did. §Capability Presentation: the client-facing capability contract is tracked as **#51**, not #58 (a different, closed bug — the workspace scan it named is built).
 - **2026-06-16 (embeddings capability honesty — ADR-015 Slice C):** Promoted the gate-[5] forward-note + §Capability Presentation Scope from *forthcoming* to *shipped*. Config-first embedder detection (`classify_embedder()`) is now the single source of truth shared by `embed`, `detect_model_type`, gate [5] and `probe_model_capabilities` — fixing the `"embed" in name` heuristic that mislabelled bge-small (model_type `bert`) as `base`. Gate [5] is a verified-list runnable filter (`bert`/`qwen3` → `runtime_compatible=True`; non-vendored encoders → honest "not vendored"). Deliberate surface asymmetry: `mlxk list` shows runnable embedders, serve's `/v1/models` hides them (embed-backend merge deferred to 2.1).
 - **2026-06-14 (embeddings capability hooks):** Added the gate-[5] forward-note + §Capability Presentation Scope entry for the forthcoming 2.0.7 embedding verified-list runnable flagging (ADR-015), and Invariant (4) (*runnable = prediction, not a per-model certificate*: verbs attempted, never pre-rejected; runtime fails honestly; verified sets are class-level). Clarified the §Capability Presentation filter rule (verified list = confidence, not a per-model runnable gate). No behavior change — `runtime_compatible` semantics unchanged until `mlxk embed` ships.

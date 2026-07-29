@@ -26,15 +26,18 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk embed-serve bge-small-en-v1.5 --port 8002    
 MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.0.0.1:8002   # gateway: /v1/embeddings + /v1/chat/completions both on :8000
 ```
 
-**Requirements (2.0.7):**
-- Python 3.10-3.13 (Text + Vision); 3.10-3.12 only for Audio (miniaudio wheel missing on 3.13/macOS-ARM)
+**Requirements (2.0.8 pin set):**
+- Python 3.10–3.12. macOS/ARM has no 3.13 wheel for `miniaudio`, and `mlx-audio` is a **base** dependency — there is no audio-free install variant, so 3.13 fails at install time.
+- `mlx>=0.30.0,<0.33`
 - `mlx-lm==0.31.3` (text backend)
-- `mlx-vlm==0.6.2` (vision + multimodal audio)
+- `mlx-vlm==0.6.8` (vision + multimodal audio)
 - `mlx-audio==0.4.4` (Whisper / Voxtral STT)
-- `transformers==5.5.4` (driven by mlx-audio 0.4.4)
-- `torch>=2.0`, `torchvision>=0.15` — temporary base deps for Pixtral / Llama-Vision / Mistral-Small-3.1 (`sunset-by mlx-vlm#1011`, see ADR-023 Workaround-Sunset Policy)
+- `transformers==5.14.1` (required by `mlx-vlm >=0.6.5`)
+- **no `torch` / `torchvision`** — the verified vision set loads torch-free from `mlx-vlm 0.6.4` onwards (mlx-vlm #1011)
 
 Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
+
+> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. The pin set above is a **dependency change with no server-code change**; endpoints, request and response shapes are identical. See *From 2.0.7 → 2.0.8* under Migration Notes for what actually differs.
 
 ---
 
@@ -1277,6 +1280,45 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 
 ---
 
+### From 2.0.7 → 2.0.8
+
+> 2.0.8 is in development. This section covers the dependency wave, which has landed; further
+> 2.0.8 changes are not yet reflected here.
+
+**Endpoint surface:** unchanged. **Request and response shapes:** unchanged. The wave is a pin
+change validated against unchanged 2.0.7 server code, so nothing on the wire moves.
+
+**Dependency bumps (auto-installed):**
+
+| Package | 2.0.7 | 2.0.8 |
+|---------|-------|-------|
+| `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.33` |
+| `mlx-vlm` | `==0.6.2` | `==0.6.8` |
+| `transformers` | `==5.5.4` | `==5.14.1` |
+| `torch` | `>=2.0` (base dep) | **removed** |
+| `torchvision` | `>=0.15` (base dep) | **removed** |
+
+(`mlx-lm==0.31.3` and `mlx-audio==0.4.4` unchanged.)
+
+**Why `torch` + `torchvision` go away:** mlx-vlm #1011 — the Pixtral / Mistral-Small-3.1 processor
+pulling torch in as a base dependency — is resolved as of `mlx-vlm 0.6.4`. The sunset marker they
+carried since 2.0.6 (ADR-023 Workaround-Sunset Policy) is therefore retired. The verified vision
+set (`pixtral`, `mistral3`, `mllama`, `gemma4`) was re-verified torch-free.
+
+**Install size impact:** the base install shrinks by roughly 1 GB. Operators on size-constrained
+images can drop the allowance they were told to plan for in 2.0.6.
+
+**Behavior changes:**
+
+| Change | Effect on operators |
+|--------|---------------------|
+| Torch-free install | Packaging only. No endpoint or schema change, and no change to which model types are gated — those gates never keyed on torch. |
+| Model listing follows the pin set | `/v1/models` stays the authority on what this server can run; a dependency wave can shift which models qualify. No API contract change. Per-model detail lives in `docs/MODEL-COVERAGE.md`, not here. |
+
+**Client updates required:** none.
+
+---
+
 ## References
 
 - **Architecture Principles:** `docs/ARCHITECTURE.md`
@@ -1291,7 +1333,7 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 - **ADR-016:** Memory-Aware Loading (HTTP 507 rationale)
 - **ADR-020:** Audio Backend Architecture (STT routing, MLX_AUDIO vs MLX_VLM)
 - **ADR-022:** Workspace-First Paradigm (background; surface-transparent on the server)
-- **ADR-023:** Text-First + Verified Multimodal (HTTP 501 `unsupported_multimodal` policy + Workaround-Sunset Policy for `torch` / `torchvision`)
+- **ADR-023:** Text-First + Verified Multimodal (HTTP 501 `unsupported_multimodal` policy + the Workaround-Sunset Policy that retired the `torch` / `torchvision` base deps)
 - **ADR-024:** Pre-Execution Capability-Mismatch Reject (Class A — CLI-side; surface-transparent on the server today)
 - **ADR-025:** content_hash v2 (background; surface-transparent on the server)
 
@@ -1594,6 +1636,16 @@ When switching from Vision or Audio to Text model mid-conversation:
 ---
 
 ## Changelog
+
+- **2026-07-29:** 2.0.8 (in progress) — dependency wave, torch-free install
+  - Endpoint surface, request and response shapes unchanged — the wave is pins only, validated
+    against unchanged 2.0.7 server code.
+  - Dep-wave: `mlx-vlm 0.6.2 → 0.6.8`, `transformers 5.5.4 → 5.14.1`, `mlx <0.32 → <0.33`
+    (`mlx-lm==0.31.3`, `mlx-audio==0.4.4` unchanged).
+  - **REMOVED base deps** `torch` / `torchvision` — the condition their sunset marker waited on
+    (mlx-vlm #1011) is resolved as of `mlx-vlm 0.6.4`. Base install ~1 GB smaller.
+  - Requirements corrected to Python 3.10–3.12: 3.13 fails at install time on macOS/ARM because
+    `mlx-audio` is a base dep and `miniaudio` ships no 3.13 wheel (no audio-free install variant).
 
 - **2026-06-18:** 2.0.7 (in progress) — embeddings model identity
   - **NEW:** the `/v1/embeddings` response (and `embed-serve` `/health`) carries
