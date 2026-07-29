@@ -40,14 +40,14 @@ dependencies = [
     # re-verified the integration.
     "mlx>=0.30.0,<0.33",
     "mlx-lm==0.31.3",
-    # Pinned explicitly, even though mlx-vlm 0.6.7 currently forces 0.4.4 anyway:
+    # Pinned explicitly, even though mlx-vlm 0.6.8 currently forces 0.4.4 anyway:
     # mlx-audio >=0.4.5 caps transformers <5.13.0, which is incompatible with
     # mlx-vlm >=0.6.5. That transitive protection lasts only as long as upstream's
     # cap stands — and it is a CI pin, not a code constraint. The explicit pin
     # records what we verified; Whisper carries bridge patches in audio_runner.py
     # that an untested mlx-audio would silently slide under.
     "mlx-audio==0.4.4",
-    "mlx-vlm==0.6.7",
+    "mlx-vlm==0.6.8",
     "transformers==5.14.1",
     "tiktoken>=0.7.0,<1.0",
 ]
