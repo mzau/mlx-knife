@@ -84,6 +84,16 @@ dev = [
     "openai>=1.0",
 ]
 
+[tool.ruff.lint]
+# Pin the rule set to the project's own choice, not to whatever the installed
+# ruff happens to default to. Without this, a ruff release can turn a green
+# lint gate red on unchanged code: 0.15.16 reported 0 findings here, 0.16.0
+# reported 959 — same tree, same config, wider defaults. These four are the
+# state that is green today, so adopting them is a zero-diff change. Widening
+# the set is a deliberate decision, made here, never a side effect of an
+# upgrade — which is why `ruff` stays unpinned in [dev].
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # cli.py: HF_HOME bootstrap (ADR-022) must run before any huggingface imports
 "mlxk2/cli.py" = ["E402"]
