@@ -4,7 +4,13 @@
 - **Authors:** mlx-knife maintainers
 - **Date:** 2025-11-16
 - **Updated:** 2025-12-03
-- **Target Version:** 2.0.4-beta.1 (Phase 1)
+- **Target Version:** 2.0.4-beta.1 (Phase 1) — shipped ✅
+- **When (stable promotion):** when the `MLXK2_ENABLE_PIPES=1` gate is dropped;
+  that is the same event as the API freeze (see §API Stability, *Gate removal*).
+  Nothing external pulls the promotion today — the Phase 1 surface is usable
+  gated. What *is* pulled is ADR-014 Appendix C (typed pipe records with a
+  content-addressed locator): a downstream consumer needs one record = one job,
+  carrying an identity that survives the hop.
 - **Prerequisite:** 2.0.3 (stdout/stderr separation) ✅
 - **Related:** ADR-012 (Vision Support), Issue #26 (Embeddings API)
 
@@ -501,7 +507,7 @@ parallel model execution. For production distributed workflows, see broke-cluste
 - [ ] `examples/cosine-search.py` - Vector search for RAG (depends on ADR-015)
 - [ ] `examples/rag-pipeline.sh` - End-to-end RAG example
 
-### Phase 3: Documentation (2.0.3 or 2.1)
+### Phase 3: Documentation
 - [ ] README: Unix Pipes section with single-model + multi-model examples
 - [ ] TESTING-DETAILS.md: Pipe mode test cases
 - [ ] `mlxk run --help`: Document `-` syntax
@@ -555,7 +561,7 @@ parallel model execution. For production distributed workflows, see broke-cluste
 **Mitigation:**
 - Unlikely: `-` is unusual prompt text
 - Feature gate: `MLXK2_ENABLE_PIPES=1` (optional, for alpha)
-- Can graduate to default in 2.1 after validation
+- Can graduate to default after validation
 
 ## Alternatives Considered
 

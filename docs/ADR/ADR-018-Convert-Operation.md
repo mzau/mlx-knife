@@ -1,6 +1,7 @@
 # ADR-018: Convert Operation
 
-**Status:** Implemented through Phase 3 (Phase 2 shipped in 2.0.5; Phase 3 content_hash v2 shipped in 2.0.6 via ADR-025); Phase 4 (`--repair` unified detection-driven) deferred to 2.0.7
+**Status:** Implemented through Phase 3 (Phase 2 shipped in 2.0.5; Phase 3 content_hash v2 shipped in 2.0.6 via ADR-025); Phase 4 (`--repair` unified detection-driven) deferred — it was named for 2.0.7 and did not ship there.
+**When (Phase 4):** nothing pulls it. The two-step workflow it would collapse (`--repair-index`, then the manual `spatial_merge_size` edit) is documented and works; only legacy pre-2026-03 conversions need it at all, and that set does not grow.
 **Created:** 2025-12-18
 **Updated:** 2026-05-11 (Phase 3 shipped 2.0.6; Phase 4 deferred 2.0.6→2.0.7 — not implemented in main, see SMOKE-TEST-2.0.6 Section J DEFER 2.0.7); 2026-04-20 (Phase 2 shipped 2.0.5; Phase 3 delegated to ADR-025; Phase 4 `--repair` unified design added from session)
 **Context:** Users need to (a) quantize MLX workspaces locally without polluting the HF cache and (b) repair MLX/HF compliance issues (notably safetensors index/shard mismatches and known config defects) in a deterministic way.

@@ -3,13 +3,13 @@
 **Status:** Draft (provisional — captures the direction; decision not yet finalized)
 **Created:** 2026-06-16
 **Related:** ADR-022 (Workspace-First Paradigm — *parent*), ADR-018 Phase 0c (workspace-path support in operations — *superseded*), ADR-012 / ADR-016 / ADR-020 / ADR-024 (*consumers*), ADR-015 §Code-Structure (run.py size tech-debt), ADR-025 (content_hash identity)
-**Target:** 2.1 (NOT 2.0.7)
+**When:** together with the `run.py` split — dispatcher and split are one job, and there is no clean split without the handle (see §Decision, *"Same initiative as the `run.py` size-refactor"*). **No consumer pulls this**, and none will: it is contract-invariant by construction — the JSON-API schema, the `serve` HTTP surface and the workspace layout all stay byte-identical. The pull is internal and it is the reason this cannot wait for a champion: `run.py` accreted from ~850 to ~950 LOC while carrying the label "opportunistic, no active trigger".
 
 ---
 
 > **Provisional note.** This ADR is a Draft capturing insights surfaced during ADR-015 Slice C
 > (embeddings capability honesty, 2026-06-16). It records the *direction* so it is canonical in the
-> repo; the concrete design + decision happen in the dedicated 2.1 refactor session. Nothing here is
+> repo; the concrete design + decision happen in the dedicated refactor session. Nothing here is
 > implemented yet beyond the interim seed noted below.
 
 ## Context
@@ -52,7 +52,7 @@ This is a **resolution substrate (its own axis)**, distinct from capability hone
 
 **Same initiative as the `run.py` size-refactor** (the "run.py ~850 LOC accreted by inlining
 handlers" tech-debt, ADR-015 §Code-Structure): the clean way to split `run.py` is to extract
-exactly the dispatcher + per-modality handlers. So they are done together, in 2.1 — not piecemeal.
+exactly the dispatcher + per-modality handlers. So they are done together — not piecemeal.
 
 ## Scope & non-goals
 

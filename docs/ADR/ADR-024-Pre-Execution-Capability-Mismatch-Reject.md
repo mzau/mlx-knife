@@ -1,10 +1,10 @@
 # ADR-024: Pre-Execution Capability-Mismatch Reject
 
-**Status:** Partially Implemented — Class A (STT / Embedding) shipped 2.0.6 (`2de2f21`, smoke §P). Class C (Loader Gap) + Class D (Invocation Gap) deferred 2.1.
+**Status:** Partially Implemented — Class A (STT / Embedding) shipped 2.0.6 (`2de2f21`, smoke §P). Class C (Loader Gap) + Class D (Invocation Gap) deferred.
 **Created:** 2026-04-19
 **Updated:** 2026-05-11 — title widened from "Vision-only Pre-Execution Routing" to reflect the scope of the pattern as actually shipped in 2.0.6; status promoted from "Proposed (stub)" to "Partially Implemented"; Class A shipped section added; Decision section retro'd — the pattern-choice was made implicitly when `2de2f21` landed.
 **Related:** ADR-020 (Audio Backend Architecture), ADR-022 (Workspace-First Paradigm), ADR-023 (Text-First + Verified Multimodal), [Issue #53](https://github.com/mzau/mlx-knife/issues/53)
-**Target:** Class A — 2.0.6 ✅. Class C + D — 2.1.
+**When:** Class A — shipped 2.0.6 ✅. **Class C + D** — when their acceptance criteria below are met: Class C is gated on `MLX_LM_TEXT_LOADER_TYPES` auto-discovery, Class D additionally on reachability layer 3. No consumer pulls either today; the pull is internal and stated in §Context — `show` and `run` disagree about the same model, which is two surfaces telling two truths.
 **Analytical anchor:** [`docs/RUNTIME-FEATURES.md`](../RUNTIME-FEATURES.md) §5 Bug Class Catalog. The four-bug-class model (A: STT misclassification, B: audio/vision key-FP, C: loader gap, D: invocation gap) is the single source of truth; this ADR records the routing decision derived from that catalog.
 
 ---
@@ -46,8 +46,8 @@ This pattern is **chosen, not TBD** — it shipped in 2.0.6 for Class A (STT / e
 | A     | audio-only (STT)          | text-only call              | ✅ `Use \`--audio FILE\` for transcription.`                          | Shipped 2.0.6 (`run.py:462-486`) |
 | A     | embedding-only            | text-only call              | ✅ `\`mlxk run\` does not support embeddings.`                        | Shipped 2.0.6 (`run.py:462-486`) |
 | B     | audio/vision key-FP       | (detection layer)           | n/a — fixed at `detect_audio_capability` / `detect_vision_capability` | Shipped 2.0.6 (separate fix)     |
-| C     | vision-only (loader gap)  | text-only call              | ❌ `Use \`--image\` for vision-only model.`                           | **Pending 2.1**                  |
-| D     | base + multimodal         | `--image` / `--audio` call  | ❌ `Base variant has no chat template for media; use \`-it\` sibling.`| **Pending 2.1**                  |
+| C     | vision-only (loader gap)  | text-only call              | ❌ `Use \`--image\` for vision-only model.`                           | **Pending**                      |
+| D     | base + multimodal         | `--image` / `--audio` call  | ❌ `Base variant has no chat template for media; use \`-it\` sibling.`| **Pending**                      |
 
 Class B is listed for completeness — it is a detection-layer bugfix (key-existence → truthy-dict predicate) and does not interact with routing. It shipped alongside Class A in `2de2f21` but lives elsewhere in code (`common.py:299,233`).
 
@@ -80,7 +80,7 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 ---
 
-## Class C — Pending 2.1 (Loader Gap, originally "Vision-only Routing")
+## Class C — Pending (Loader Gap, originally "Vision-only Routing")
 
 **Symptom.** `mlxk run <C-class-model> "prompt"` (text-only) fails inside the runner with cryptic errors:
 
@@ -101,7 +101,7 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 → The discriminator is **not** purely `model_type`. The hypothesis (RUNTIME-FEATURES.md §5 Class C): text-only is loadable iff `model_type ∈ MLX_LM_TEXT_LOADER_TYPES` (auto-discovered) AND `audio_config` is not a truthy dict. `vision_config`-truthy alone does not break the loader.
 
-**Implementation sketch (2.1).**
+**Implementation sketch.**
 
 1. **`MLX_LM_TEXT_LOADER_TYPES` discovery** in `mlxk2/core/capabilities.py`:
    - Auto-discover via `pkgutil.iter_modules(mlx_lm.models.__path__)`.
@@ -112,7 +112,7 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 3. **Capability label derivation.** Same allowlist drives the `text` capability label exposed by `mlxk show` / `mlxk list --json`.
 4. **Health-aggregator alignment** in `common.py:645-647`: when `model_type ∈ VISION_MODEL_TYPES` AND `model_type ∉ MLX_LM_TEXT_LOADER_TYPES` AND vision_load succeeds → `runtime_compatible = True`, `runtime_reason = "healthy, vision-only — use --image"`. Single truth-source; `show` no longer contradicts `run`.
 
-**Open design questions for the 2.1 implementer.**
+**Open design questions for the implementer.**
 
 1. Auto-discovery vs. curated frozenset — auto-discovery is preferred (zero per-mlx-lm-release maintenance), but the exclude-list for non-loader modules has to live somewhere. Curated frozenset is more controllable but ages with mlx-lm.
 2. Discovery scope: include `MODEL_REMAPPING` keys? Audit set-difference `VISION_MODEL_TYPES \ MLX_LM_TEXT_LOADER_TYPES` against the live mlx-lm version to surface unknown members beyond `mllama`/`gemma3n`/`gemma-4-e4b`.
@@ -122,11 +122,11 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 ---
 
-## Class D — Pending 2.1 (Invocation Gap, base + media)
+## Class D — Pending (Invocation Gap, base + media)
 
 **Symptom.** A base model with `vision_config`/`audio_config` truthy lets `--image`/`--audio` through to the runner and either errors late ("0 audio tokens in the text and N tokens from audio embeddings") or produces base-continuation off the metadata header — not a useful answer. Cause: multimodal grounded chat presupposes a chat template emitting media-placeholder tokens; base models lack such templates.
 
-**Implementation sketch (2.1).** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` / `audio-in` as reachable. When the probe fails: pre-execution reject from `mlxk run` with hint to use the `-it` sibling variant; `show`/`list` report media-axes as not reachable. Layer 3 design lives in the Iter 2/3 reachability plan (`[POLICY]`-driven reframe per ADR-023 §4 No-Silent-Degradation).
+**Implementation sketch.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` / `audio-in` as reachable. When the probe fails: pre-execution reject from `mlxk run` with hint to use the `-it` sibling variant; `show`/`list` report media-axes as not reachable. Layer 3 design lives in the Iter 2/3 reachability plan (`[POLICY]`-driven reframe per ADR-023 §4 No-Silent-Degradation).
 
 ---
 
@@ -134,13 +134,13 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 The capability-label-from-runnability derivation that Class C item 3 foreshadows generalises from the text/vision-only axis to **all** modalities: a modality is *listed* iff it is both **declared** and **runnable** (its per-modality gate passes, per the ADR-023 verified list), and `runtime_compatible` becomes a boolean over the filtered set. This is a **capability-presentation** concern (listing side) — orthogonal to this ADR's **reject** concern (run side). The canonical model and its two-surface contract live in **ARCHITECTURE.md** (the architectural anchor); the client-facing capability contract (`/v1/models` emission) is **SERVER-HANDBOOK.md** terrain and is tracked as **[#51](https://github.com/mzau/mlx-knife/issues/51)** (*Model Capabilities in Server API*). *(Corrected 2026-07-14: this previously cited #58, which is a different, closed bug — `/v1/models` not listing workspace models.)*
 
-**Reject scope-cut relevant to this ADR (2026-06-10).** Class C is not monolithic. A new media-invocation runtime-spin class (a media-capable `-it` omni model whose audio-tower forward does not terminate — distinct from Classes A–D) ships its pre-execution reject **surgically in 2.0.7** (like Class A): `audio_runtime_compatibility` returns `False` for `Backend.MLX_VLM` omni audio (not on the verified list), and `run` routes `--audio` through the audio gate even for vision-capable models (today an omni vision+audio model enters the `is_vision_model` branch at `run.py:387` and never reaches the audio gate in the `else` branch → unkillable spin). The `MLX_LM_TEXT_LOADER_TYPES` auto-discovery (Classes C/D) stays **2.1**.
+**Reject scope-cut relevant to this ADR (2026-06-10).** Class C is not monolithic. A new media-invocation runtime-spin class (a media-capable `-it` omni model whose audio-tower forward does not terminate — distinct from Classes A–D) ships its pre-execution reject **surgically, ahead of Classes C/D** (like Class A) — planned for 2.0.7, not shipped there: `audio_runtime_compatibility` returns `False` for `Backend.MLX_VLM` omni audio (not on the verified list), and `run` routes `--audio` through the audio gate even for vision-capable models (today an omni vision+audio model enters the `is_vision_model` branch at `run.py:387` and never reaches the audio gate in the `else` branch → unkillable spin). The `MLX_LM_TEXT_LOADER_TYPES` auto-discovery (Classes C/D) stays **behind the acceptance criteria below**.
 
 ---
 
 ## Acceptance Criteria
 
-For Class C to ship (2.1):
+For Class C to ship:
 
 - [ ] `MLX_LM_TEXT_LOADER_TYPES` auto-discovery in `capabilities.py`, with explicit non-loader-module exclude list.
 - [ ] `mlxk run` Class C reject in `run.py:462-486` region — typed error, JSON-clean.
@@ -148,7 +148,7 @@ For Class C to ship (2.1):
 - [ ] Smoke-Test §K transitions from `DEFER 2.1` to `ok`.
 - [ ] Set-difference audit of `VISION_MODEL_TYPES \ MLX_LM_TEXT_LOADER_TYPES` in CHANGELOG: explicit list of newly-rejected model_types per release.
 
-For Class D to ship (2.1, gated on Iter 2/3 reachability layer 3):
+For Class D to ship (gated on Iter 2/3 reachability layer 3):
 
 - [ ] Chat-template-with-media-placeholder probe in `capabilities.py`.
 - [ ] `mlxk run --image` / `--audio` reject for base+multimodal in `run.py`.

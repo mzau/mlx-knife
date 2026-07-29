@@ -4,6 +4,37 @@
 
 This directory contains Architecture Decision Records (ADRs) that document significant architectural and design decisions for the MLX-Knife project.
 
+## Reading `Status` and `When`
+
+ADRs record decisions, not schedules. A **`When:`** line therefore states a
+**condition**, never a future release number:
+
+> **When:** together with the `run.py` split — dispatcher and split are one job.
+
+The reason is structural, not stylistic. A release here is not a feature set:
+which version happens to be current when a given piece of work becomes due is
+not knowable when the ADR is written. A future version number is therefore a
+promise the document cannot keep — and it decays silently, because it survives
+the release it named without anyone noticing.
+
+What follows for readers and writers:
+
+- **A version number appears in the past tense only** — `shipped 2.0.6`,
+  `landed in 2.0.7`. A fulfilled target is a fact and stays.
+- **An open item carries its condition**, in the form *when X holds, this
+  becomes due*. If the condition is that something else must land first, name
+  that thing, not the release it might ride in.
+- **"Nothing pulls it yet" is a valid condition** — and the honest one for an
+  item that is on the list because it seemed reasonable, not because anything
+  needs it. It says strictly more than a version number, which hides the same
+  state behind false precision.
+- **`Target:` is legacy.** Where it survives, it is either fulfilled (a fact) or
+  it predates this convention.
+
+This is the inward-facing half of a practice the project already applies to its
+dependencies: a workaround retires when its cause is gone, not on a date
+(ADR-023, §Workaround-Sunset Policy).
+
 ## Active ADRs
 
 | ADR | Title | Status | Date |
@@ -17,7 +48,7 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-007](ADR-007-Clone-Implementation-Fixed.md) | Clone Implementation Fixed Strategy | Accepted | 2025-09-18 |
 | ADR-008 | MLXModel Package Format | Proposed | (not committed) |
 | [ADR-009](ADR-009-Stop-Token-Detection-Fix.md) | Stop Token Detection Fix | Implemented | 2025-10-21 |
-| ADR-010 | Reasoning Content Schema & Template-Derived Segmentation (#40) | Accepted — scoped, target 2.1 (`reasoning_content` + template vocab); 2.0.8 detection-bite split out | (not committed) |
+| ADR-010 | Reasoning Content Schema & Template-Derived Segmentation (#40) | Accepted — scoped (`reasoning_content` + template vocab); when the detection-bite has shipped **and** Decision 3 is decided; 2.0.8 detection-bite split out | (not committed) |
 | [ADR-011](ADR-011-E2E-Live-Test-Architecture.md) | E2E Live Test Architecture | Implemented | 2025-10-21 |
 | [ADR-012](ADR-012-Vision-Support-Roadmap.md) | Vision Support Roadmap | Implemented (Phase 1-3) | 2025-11-12 |
 | ADR-013 | Community Model Quality Database | Planned | (not committed) |
@@ -25,15 +56,15 @@ This directory contains Architecture Decision Records (ADRs) that document signi
 | [ADR-015](ADR-015-Embeddings-API.md) | Embeddings API | Accepted — Partially Implemented (Slices A–C + D1 `embed-serve` + D2 serve-proxy landed in 2.0.7, experimental-gated `MLXK2_ENABLE_ALPHA_FEATURES=1`; Slice E pending) | 2025-11-16 |
 | [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2b; Phase 3 deferred) | 2026-01-29 |
 | ADR-017 | Image Metadata Extraction (EXIF) | Implemented (Phase 1) | (not committed) |
-| [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented through Phase 3 (Phase 1 `--repair-index` 2.0.4-beta.5, Phase 2 `--quantize` 2.0.5, Phase 3 content_hash v2 via ADR-025 2.0.6; Phase 4 `--repair` deferred 2.1) | 2025-12-18 |
+| [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented through Phase 3 (Phase 1 `--repair-index` 2.0.4-beta.5, Phase 2 `--quantize` 2.0.5, Phase 3 content_hash v2 via ADR-025 2.0.6; Phase 4 `--repair` deferred — nothing pulls it) | 2025-12-18 |
 | [ADR-019](ADR-019-Audio-Input-Support-beta8.md) | Audio Input Support (beta.8) | Obsolete (→ ADR-020) | 2026-01-20 |
 | [ADR-020](ADR-020-Audio-Backend-Architecture.md) | Audio Backend Architecture (beta.9) | Implemented | 2026-01-31 |
 | [ADR-021](ADR-021-MCP-Integration.md) | MCP Integration | **Rejected — not planned.** MCP is a consumer of `serve`, not part of mlx-knife (Issue #56 closed as not-planned) | 2026-07-14 |
 | [ADR-022](ADR-022-Workspace-First-Paradigm.md) | Workspace-First Paradigm | Implemented (2.0.5) | 2026-02-06 |
 | [ADR-023](ADR-023-Text-First-Verified-Multimodal.md) | Text-First CLI + Verified Multimodal List | Accepted (Implemented in 2.0.5) | 2026-04-17 |
-| [ADR-024](ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) | Pre-Execution Capability-Mismatch Reject | Partially Implemented (Class A STT/Embedding shipped 2.0.6; Class C Loader-Gap + Class D Invocation-Gap deferred 2.1) | 2026-04-19 |
+| [ADR-024](ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) | Pre-Execution Capability-Mismatch Reject | Partially Implemented (Class A STT/Embedding shipped 2.0.6; Class C Loader-Gap + Class D Invocation-Gap deferred, gated on their acceptance criteria) | 2026-04-19 |
 | [ADR-025](ADR-025-content-hash-v2.md) | content_hash v2 Algorithm + Sentinel Migration | Accepted (Implemented in 2.0.6; real-world smoke pending) | 2026-04-20 |
-| [ADR-026](ADR-026-Model-Location-Dispatcher.md) | Unified Model Resolution — Model-Location-Dispatcher | Draft (full design deferred 2.1; interim seed shipped — `run.py` embed pre-flight, Slice C) | 2026-06-16 |
+| [ADR-026](ADR-026-Model-Location-Dispatcher.md) | Unified Model Resolution — Model-Location-Dispatcher | Draft (full design deferred to the `run.py` split; interim seed shipped — `run.py` embed pre-flight, Slice C) | 2026-06-16 |
 
 ## ADR Format
 
