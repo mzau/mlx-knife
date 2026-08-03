@@ -985,7 +985,7 @@ def _filter_multimodal_history_for_text_models(messages: List[ChatMessage]) -> L
                 ChatMessage(role='user', content='What country?')
             ]
 
-    See: docs/ISSUES/VISION-MULTIMODAL-HISTORY-ISSUE.md
+    See: docs/SERVER-HANDBOOK.md, "Cross-Model Workflows (Vision/Audio → Text)"
     """
     filtered = []
 

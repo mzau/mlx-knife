@@ -248,7 +248,7 @@ class TestVisionServerE2E:
         This is a special integration test (not parametrized) that tests
         the switching behavior between a vision and text model pair.
 
-        See: docs/ISSUES/VISION-MULTIMODAL-HISTORY-ISSUE.md
+        See: docs/SERVER-HANDBOOK.md, "Cross-Model Workflows (Vision/Audio → Text)"
         """
         if not TEST_IMAGE.exists():
             pytest.skip(f"Test image not found: {TEST_IMAGE}")

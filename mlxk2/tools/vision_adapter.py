@@ -71,7 +71,7 @@ class VisionHTTPAdapter:
         Raises:
             ValueError: If message format is invalid or media cannot be decoded
 
-        See: docs/ISSUES/VISION-SEQUENTIAL-IMAGES-ISSUE.md
+        See: docs/SERVER-HANDBOOK.md, "Vision: Stateless Prompt, History-Based IDs"
         """
         if not messages:
             raise ValueError("Messages list cannot be empty")

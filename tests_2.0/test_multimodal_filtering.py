@@ -3,7 +3,7 @@
 Tests the server-side filtering logic that enables nChat users to switch
 from Vision models to Text models while preserving conversation history.
 
-See: docs/ISSUES/VISION-MULTIMODAL-HISTORY-ISSUE.md
+See: docs/SERVER-HANDBOOK.md, "Cross-Model Workflows (Vision/Audio → Text)"
 """
 
 import pytest

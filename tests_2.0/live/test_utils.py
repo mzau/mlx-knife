@@ -60,23 +60,29 @@ finally:
 
 KNOWN_BROKEN_MODELS = {
     # transformers 5.0 video processor bug: "argument of type 'NoneType' is not iterable"
-    # Root Cause: transformers sets video_processor=None when torchvision unavailable
-    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
-    # Details: docs/ISSUES/transformers-5.0-video-processor-bug.md
+    # Root Cause (2026-01): transformers set video_processor=None without torchvision,
+    # then video_processor_class_from_name() evaluated `if class_name in extractors`
+    # against it (transformers/models/auto/video_processing_auto.py; no line number —
+    # it moves between releases). Check whether that shape still exists upstream
+    # before assuming mlxk's own gate is still needed.
+    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640 — closed 2026-02-04
+    # Details: docs/MODEL-COVERAGE.md, video-capable checkpoints (gate condition)
     # Test: `mlxk run mlx-community/MiMo-VL-7B-RL-bf16 "test" --image foo.jpg` → Error
-    # Strategy: Waiting for mlx-vlm Issue #640 resolution
+    # Status: the exclusion now rests on mlxk's own vision gate, not on #640. That
+    # gate's verdict can be a false negative (see MODEL-COVERAGE) — re-check before
+    # trusting these entries.
     "mlx-community/MiMo-VL-7B-RL-bf16",
 
     # transformers 5.0 video processor bug (same as MiMo-VL above)
     # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
-    # Details: docs/ISSUES/transformers-5.0-video-processor-bug.md
+    # Details: docs/MODEL-COVERAGE.md, video-capable checkpoints (gate condition)
     # Test: `mlxk run mlx-community/Qwen2-VL-7B-Instruct-4bit "test" --image foo.jpg` → Error
     # Note: Image-only processing works, video processing broken
     "mlx-community/Qwen2-VL-7B-Instruct-4bit",
 
     # transformers 5.0 video processor bug (same as above)
     # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
-    # Details: docs/ISSUES/transformers-5.0-video-processor-bug.md
+    # Details: docs/MODEL-COVERAGE.md, video-capable checkpoints (gate condition)
     # Test: `mlxk run Qwen3-Omni-30B-A3B-Instruct-4bit "test" --image foo.jpg` → Error
     # Note: Omni model (audio+video+vision) - all multimodal processing broken
     "mlx-community/Qwen3-Omni-30B-A3B-Instruct-4bit",

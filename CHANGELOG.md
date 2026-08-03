@@ -1467,7 +1467,6 @@ Enables model experimentation, repair (mlx-vlm #624 affected models), and testin
   - **Impact:** Pixtral and other Vision models now work correctly for both text-only and image requests
   - **Installation:** `pip install mlx-knife[vision]` now auto-installs patched mlx-vlm from git
   - **Future:** Will switch to PyPI mlx-vlm v0.3.10 when released
-  - **Details:** See `docs/ISSUES/pixtral-pad-token-regression.md`
   - **Upstream contribution:** Issue #643, PR merged into Blaizzy/mlx-vlm main
   - Files: `pyproject.toml:69`, `README.md`
 
@@ -2564,4 +2563,4 @@ Note: GitHub tag/version uses `1.1.1-beta.1`. PyPI release uses PEP 440 `1.1.1b1
   - Global suppression of macOS Python 3.9 `urllib3` LibreSSL warning in tests; runtime already suppressed.
 
 - Docs
-  - README/TESTING touch‑ups pending flip; CLAUDE.md tracks SSE UX roadmap (anti‑buffering headers, optional heartbeats, status/interrupt endpoints).
+  - README/TESTING touch‑ups pending flip; SSE UX roadmap tracked internally (anti‑buffering headers, optional heartbeats, status/interrupt endpoints).

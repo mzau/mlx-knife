@@ -50,8 +50,8 @@ _WHISPER_EN_ONLY_PATTERN = re.compile(
 # Whisper-Turbo variants have a reduced 4-layer decoder (vs 32 in large-v3)
 # that is fine-tuned for transcribe-speed. Empirically, translate-task
 # output on non-English source is degraded to garbage (German output
-# instead of English, decoder fallback failures). See docs/MODEL-NOTES.md
-# "Whisper-large-v3-turbo" entry for the full empirical record (2026-05-14).
+# instead of English, decoder fallback failures; measured 2026-05-14).
+# See docs/MODEL-COVERAGE.md, `whisper` row, for the published verdict.
 # Matches `whisper-large-v3-turbo*`, `whisper-turbo*` (legacy pre-large-v3),
 # and any other Whisper variant carrying the `turbo` token in its name.
 _WHISPER_TURBO_PATTERN = re.compile(
@@ -327,7 +327,8 @@ def detect_audio_translate_en_capability(
             return False
         # Turbo variants have decoder-capacity insufficient for translate task
         # (functional, not architectural — token is present but model cannot
-        # reliably emit English output). See docs/MODEL-NOTES.md.
+        # reliably emit English output). See docs/RUNTIME-FEATURES.md
+        # §4.1 "Audio-In → Text-Out" for the per-model reachability rule.
         if _WHISPER_TURBO_PATTERN.search(model_name):
             return False
     return True

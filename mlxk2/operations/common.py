@@ -390,7 +390,9 @@ def detect_audio_backend(probe: Path, config: Optional[Dict[str, Any]]) -> Optio
     # Priority 3: STT model_type = mlx-audio STT
     # Uses substring matching for flexibility
     # 2.0.5: Added VibeVoice (ADR-022 HF cache isolation enables runtime downloads)
-    # Note: Voxtral/Qwen3-ASR still excluded - see docs/ISSUES/
+    # Note: Voxtral still excluded - see docs/MODEL-COVERAGE.md, `voxtral` row,
+    # for the two reasons (tekken.json, processor forces "pt"). Qwen3-ASR is not
+    # classified here either - see docs/RUNTIME-FEATURES.md §5, bug class A.
     stt_model_types = ["whisper", "vibevoice"]
     if any(stt in model_type_lower for stt in stt_model_types):
         return Backend.MLX_AUDIO

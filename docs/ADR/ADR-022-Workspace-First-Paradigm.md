@@ -564,5 +564,5 @@ def get_current_cache_root() -> Path:
 
 - ADR-018: Convert Operation (workspace infrastructure)
 - SECURITY.md (current promises)
-- VibeVoice tokenizer issue (docs/ISSUES/vibevoice-missing-tokenizer.md)
+- VibeVoice tokenizer dependency (§The Broken Promise, undeclared-dependency row)
 - HuggingFace Hub caching behavior

@@ -279,9 +279,6 @@ data: {"choices":[{"delta":{"reasoning":"step 1..."}}]}
 
 ## Referenzen
 
-- **September Research:** docs/GPT5_CHAT_REASONING_FINDINGS.md
-- **Model Interview:** docs/GPT-OSS_EXPLAINS_CHAT-TEMPLATES.md (Appendix)
-- **Upstream Findings:** docs/ISSUES/ISSUE-32-UPSTREAM-FINDINGS.md
 - **mlx-lm Source:** https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/generate.py
 - **DeepSeek API:** https://api-docs.deepseek.com/guides/reasoning_model
 - **OpenAI Responses API:** https://cookbook.openai.com/examples/responses_api/reasoning_items
