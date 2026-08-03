@@ -7,6 +7,17 @@
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
 
+> **Which server does this describe?** Write your client against *this* document rather than a
+> release-pinned copy of it. **The server does not report its own version** — `GET /health`
+> returns the family string `mlx-knife-server-2.0` — and there is no capability negotiation, so
+> a client cannot select a version-specific contract at runtime even if one existed.
+>
+> The surface described here is current as of **2.0.7**. Older 2.0.x releases predate parts of
+> it — the Changelog at the end records when each endpoint appeared. Where behaviour genuinely
+> varies it is anchored inline rather than left to the reader, including the one case a client
+> cannot probe: container audio formats depend on tooling installed on the server host (see
+> [Audio Errors](#audio-errors)).
+
 ---
 
 ## Quick Start
@@ -321,7 +332,7 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `file` | File | ✅ | Audio file. WAV, MP3 and FLAC decode in-process; M4A/AAC, OGG/Opus and WebM require `ffmpeg` **and** `ffprobe` on the server's `PATH` (see [Audio Errors](#audio-errors)) |
+| `file` | File | ✅ | Audio file. **WAV, MP3 and FLAC are always accepted.** M4A/AAC, OGG/Opus and WebM additionally require `ffmpeg` and `ffprobe` on the server host — no endpoint exposes whether they are present, so treat those formats as best-effort and handle the documented failure (see [Audio Errors](#audio-errors)) |
 | `model` | String | ✅ | Model ID (e.g., `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`) |
 | `language` | String | ❌ | Language code (e.g., `en`, `de`). Auto-detect if omitted. |
 | `prompt` | String | ❌ | Optional context to guide transcription |
@@ -405,7 +416,7 @@ client.audio.translations.create(
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `file` | File | ✅ | Audio file. WAV, MP3 and FLAC decode in-process; M4A/AAC, OGG/Opus and WebM require `ffmpeg` **and** `ffprobe` on the server's `PATH` (see [Audio Errors](#audio-errors)) |
+| `file` | File | ✅ | Audio file. **WAV, MP3 and FLAC are always accepted.** M4A/AAC, OGG/Opus and WebM additionally require `ffmpeg` and `ffprobe` on the server host — no endpoint exposes whether they are present, so treat those formats as best-effort and handle the documented failure (see [Audio Errors](#audio-errors)) |
 | `model` | String | ✅ | Multilingual non-turbo Whisper model (e.g. `mlx-community/whisper-large-v3-4bit`) |
 | `language` | String | ❌ | **Source**-language hint (e.g. `de`). Auto-detected if omitted. Never sets the output language — output is always English. A documented superset of the OpenAI translations spec (which has no `language` field). |
 | `prompt` | String | ❌ | Optional vocabulary/context bias hint (no synthetic default is injected on the translate path) |
@@ -672,8 +683,8 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 **Supported:**
 - ✅ File upload (multipart/form-data)
-- ✅ Formats: WAV, MP3, FLAC — decoded in-process, no external tools
-- ⚠️ Formats: M4A/AAC, OGG/Opus, WebM — decoded by invoking `ffmpeg` **and** `ffprobe`, which must be installed on the machine running the server. Neither ships with mlx-knife. If either is missing the request fails; see [Audio Errors](#audio-errors)
+- ✅ Formats: WAV, MP3, FLAC — decoded in-process. Always available; depend on nothing outside the install
+- ⚠️ Formats: M4A/AAC, OGG/Opus, WebM — **best-effort**. They are decoded by invoking `ffmpeg` **and** `ffprobe`, which do not ship with mlx-knife and must be installed on the server host. **No endpoint reports whether they are there**, so a client cannot negotiate this up front: either restrict uploads to the always-available set, or send the container format and handle the failure documented under [Audio Errors](#audio-errors)
 - ✅ Response formats: `json`, `text`, `verbose_json`
 - ✅ Language detection or explicit `language` parameter
 
@@ -1079,9 +1090,20 @@ upload is accepted and then fails during decoding — **HTTP 500** with `error.t
 ```
 
 The status code reflects where the failure surfaces, not its nature: this is a missing
-deployment prerequisite, not a server fault, and retrying will not help. Clients that accept
-container uploads should treat a 500 whose message names `ffmpeg` or `ffprobe` as a
-configuration problem on the server host.
+deployment prerequisite, not a server fault, and retrying will not help.
+
+**There is no way to detect this in advance.** Neither `GET /health` nor `GET /v1/models`
+reports which decoders the host can reach, so a client cannot probe for it and cannot negotiate
+it during setup. Two workable client strategies:
+
+- **Avoid it:** upload only WAV, MP3 or FLAC. These never invoke an external tool, so they
+  behave identically on every host.
+- **Handle it:** send the container format and treat a 500 whose message names `ffmpeg` or
+  `ffprobe` as a server-host configuration problem — surface it to the operator, do not retry,
+  and fall back to transcoding client-side if you can.
+
+Verified against mlx-knife **2.0.7** (the current PyPI release) with the tools absent; the
+routing lives in the audio backend and is not affected by the 2.0.8 dependency wave.
 
 **Solution:** install ffmpeg on the server host (`brew install ffmpeg` provides both binaries),
 or restrict uploads to WAV, MP3 and FLAC, which never touch an external tool.
@@ -1574,7 +1596,7 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `file` | ✅ | Audio file. WAV/MP3/FLAC decode in-process; M4A/AAC, OGG/Opus, WebM need `ffmpeg` + `ffprobe` on the server's `PATH` |
+| `file` | ✅ | Audio file. **WAV/MP3/FLAC always accepted**; M4A/AAC, OGG/Opus, WebM are best-effort — they need `ffmpeg` + `ffprobe` on the server host, which the client cannot detect |
 | `model` | ✅ | Model ID (e.g., `whisper-large`, full HF path) |
 | `language` | ❌ | Language code (`en`, `de`, etc.). Auto-detect if omitted. |
 | `response_format` | ❌ | `json` (default), `text`, `verbose_json` |
@@ -1665,23 +1687,13 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ## Changelog
 
-- **2026-07-29:** 2.0.8 (in progress) — dependency wave, torch-free install
-  - Endpoint surface, request and response shapes unchanged — the wave is pins only, validated
-    against unchanged 2.0.7 server code.
-  - Dep-wave: `mlx-vlm 0.6.2 → 0.6.8`, `transformers 5.5.4 → 5.14.1`, `mlx <0.32 → <0.33`
-    (`mlx-lm==0.31.3`, `mlx-audio==0.4.4` unchanged).
-  - **REMOVED base deps** `torch` / `torchvision` — the condition their sunset marker waited on
-    (mlx-vlm #1011) is resolved as of `mlx-vlm 0.6.4`. Base install ~1 GB smaller.
-  - Requirements corrected to Python 3.10–3.12: 3.13 fails at install time on macOS/ARM because
-    `mlx-audio` is a base dep and `miniaudio` ships no 3.13 wheel (no audio-free install variant).
-
-- **2026-06-18:** 2.0.7 (in progress) — embeddings model identity
+- **2026-06-18:** 2.0.7 stable — embeddings model identity
   - **NEW:** the `/v1/embeddings` response (and `embed-serve` `/health`) carries
     `system_fingerprint` = `hash.device` — a change-detection token so a RAG client detects a
     model/revision/device swap; `model` stays the clean `org/name` selector (= `/v1/models` id).
     Additive field (standard on OpenAI chat/completions). ADR-015 §Model Identity.
 
-- **2026-06-17:** 2.0.7 (in progress) — embeddings + audio translation
+- **2026-06-17:** 2.0.7 stable — embeddings + audio translation
   - **NEW:** `/v1/embeddings` (OpenAI Embeddings API), served by the new `mlxk embed-serve`
     backend (separate single-model process; ADR-015). Experimental — requires
     `MLXK2_ENABLE_ALPHA_FEATURES=1`.
