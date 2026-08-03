@@ -517,7 +517,7 @@ Some legacy mlx-vlm conversions need a one-time index repair before they load �
 
 **Requirements:**
 - **Python 3.10+** (mlx-audio dependency, included in base install)
-- **No system dependencies:** MP3/WAV decoding via embedded libsndfile (no ffmpeg or Homebrew required)
+- **No system dependencies for WAV/MP3/FLAC:** decoded in-process via miniaudio (no ffmpeg or Homebrew required); other container formats need ffmpeg, see Limitations below
 
 **Reference model:** `mlx-community/whisper-large-v3-turbo-4bit` (~464 MB, supports >10 min audio, 4bit + 8bit variants both verified). See [`docs/MODEL-COVERAGE.md`](https://github.com/mzau/mlx-knife/blob/main/docs/MODEL-COVERAGE.md) for the full per-release verified list.
 
@@ -540,7 +540,7 @@ mlx-knife automatically routes audio models to the optimal backend:
 # Pull a Whisper model (one-time setup)
 mlxk pull mlx-community/whisper-large-v3-turbo-4bit
 
-# Transcribe audio (WAV, MP3, M4A - native on macOS)
+# Transcribe audio (WAV, MP3, FLAC - no extra tools needed)
 mlxk run whisper-large --audio speech.mp3
 # → Automatic greedy decoding (temp=0.0)
 
@@ -555,7 +555,7 @@ mlxk run whisper-large --audio podcast.wav
 
 - **Duration:** depends on model architecture — dedicated STT models (Whisper) support >10 min; multimodal LLMs with audio are typically token-limited to ~30 s
 - **File size:** 50 MB max per request (fixed limit)
-- **Formats:** WAV, MP3, M4A on macOS (M4A via Core Audio); Linux needs ffmpeg for non-WAV
+- **Formats:** WAV, MP3 and FLAC decode in-process — no extra tools. M4A/AAC, Ogg/Opus and WebM are handed to external `ffmpeg` **and** `ffprobe` binaries on your `PATH`; without both they fail with an explicit error (`brew install ffmpeg` provides both)
 - **Legacy weights:** `.npz`-only models are not supported — use `.safetensors` variants
 
 **🎯 Advanced Usage:**

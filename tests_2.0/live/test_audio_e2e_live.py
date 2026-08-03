@@ -150,8 +150,9 @@ class TestAudioTranscription:
         """Test that MP3 format is supported (no system dependencies).
 
         Same audio as WAV test but in MP3 format.
-        Note: MP3 decoding is provided by soundfile's embedded libsndfile.
-        No ffmpeg or Homebrew dependencies required.
+        Note: MP3 decoding is provided in-process by miniaudio, like WAV and FLAC.
+        No ffmpeg or Homebrew dependencies required. (Container formats — M4A/AAC,
+        OGG/Opus, WebM — do shell out to ffmpeg + ffprobe, and are not tested here.)
         """
         if audio_model_key == "_skipped":
             pytest.skip("Run with -m live_e2e or -m wet")
@@ -179,7 +180,7 @@ class TestAudioTranscription:
             env=os.environ,
         )
 
-        # MP3 should work with embedded libsndfile, but skip if any audio errors
+        # MP3 should work via miniaudio, but skip if any audio errors
         if result.returncode != 0:
             if "audio" in result.stderr.lower() or "mp3" in result.stderr.lower():
                 pytest.skip(f"MP3 decoding failed (edge case): {result.stderr[:200]}")

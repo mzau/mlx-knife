@@ -321,7 +321,7 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `file` | File | ✅ | Audio file (WAV, MP3, M4A, FLAC, OGG) |
+| `file` | File | ✅ | Audio file. WAV, MP3 and FLAC decode in-process; M4A/AAC, OGG/Opus and WebM require `ffmpeg` **and** `ffprobe` on the server's `PATH` (see [Audio Errors](#audio-errors)) |
 | `model` | String | ✅ | Model ID (e.g., `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`) |
 | `language` | String | ❌ | Language code (e.g., `en`, `de`). Auto-detect if omitted. |
 | `prompt` | String | ❌ | Optional context to guide transcription |
@@ -405,7 +405,7 @@ client.audio.translations.create(
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `file` | File | ✅ | Audio file (WAV, MP3, M4A, FLAC, OGG) |
+| `file` | File | ✅ | Audio file. WAV, MP3 and FLAC decode in-process; M4A/AAC, OGG/Opus and WebM require `ffmpeg` **and** `ffprobe` on the server's `PATH` (see [Audio Errors](#audio-errors)) |
 | `model` | String | ✅ | Multilingual non-turbo Whisper model (e.g. `mlx-community/whisper-large-v3-4bit`) |
 | `language` | String | ❌ | **Source**-language hint (e.g. `de`). Auto-detected if omitted. Never sets the output language — output is always English. A documented superset of the OpenAI translations spec (which has no `language` field). |
 | `prompt` | String | ❌ | Optional vocabulary/context bias hint (no synthetic default is injected on the translate path) |
@@ -672,7 +672,8 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 **Supported:**
 - ✅ File upload (multipart/form-data)
-- ✅ Formats: WAV, MP3, M4A, FLAC, OGG
+- ✅ Formats: WAV, MP3, FLAC — decoded in-process, no external tools
+- ⚠️ Formats: M4A/AAC, OGG/Opus, WebM — decoded by invoking `ffmpeg` **and** `ffprobe`, which must be installed on the machine running the server. Neither ships with mlx-knife. If either is missing the request fails; see [Audio Errors](#audio-errors)
 - ✅ Response formats: `json`, `text`, `verbose_json`
 - ✅ Language detection or explicit `language` parameter
 
@@ -1057,6 +1058,33 @@ pip install mlx-knife
 - Invalid Base64 encoding (chat endpoint only)
 
 **Solution:** Compress audio, ensure single audio per request, use supported format
+
+#### Container Format Fails Although It Is Listed (HTTP 500)
+
+M4A/AAC, OGG/Opus and WebM are decoded by invoking external `ffmpeg` and `ffprobe`
+executables. When either is absent from the `PATH` of the process running the server, the
+upload is accepted and then fails during decoding — **HTTP 500** with `error.type:
+"internal_error"`, `retryable: false`, and a message naming the missing tool:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "type": "internal_error",
+    "message": "Transcription failed: ... ffmpeg not found! ... Install ffmpeg: macOS: brew install ffmpeg ...",
+    "retryable": false
+  },
+  "request_id": "..."
+}
+```
+
+The status code reflects where the failure surfaces, not its nature: this is a missing
+deployment prerequisite, not a server fault, and retrying will not help. Clients that accept
+container uploads should treat a 500 whose message names `ffmpeg` or `ffprobe` as a
+configuration problem on the server host.
+
+**Solution:** install ffmpeg on the server host (`brew install ffmpeg` provides both binaries),
+or restrict uploads to WAV, MP3 and FLAC, which never touch an external tool.
 
 #### Audio Model Not Found
 
@@ -1546,7 +1574,7 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `file` | ✅ | Audio file (WAV, MP3, M4A, FLAC, OGG) |
+| `file` | ✅ | Audio file. WAV/MP3/FLAC decode in-process; M4A/AAC, OGG/Opus, WebM need `ffmpeg` + `ffprobe` on the server's `PATH` |
 | `model` | ✅ | Model ID (e.g., `whisper-large`, full HF path) |
 | `language` | ❌ | Language code (`en`, `de`, etc.). Auto-detect if omitted. |
 | `response_format` | ❌ | `json` (default), `text`, `verbose_json` |

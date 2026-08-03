@@ -40,12 +40,30 @@ dependencies = [
     # re-verified the integration.
     "mlx>=0.30.0,<0.33",
     "mlx-lm==0.31.3",
-    # Pinned explicitly, even though mlx-vlm 0.6.8 currently forces 0.4.4 anyway:
-    # mlx-audio >=0.4.5 caps transformers <5.13.0, which is incompatible with
-    # mlx-vlm >=0.6.5. That transitive protection lasts only as long as upstream's
-    # cap stands — and it is a CI pin, not a code constraint. The explicit pin
-    # records what we verified; Whisper carries bridge patches in audio_runner.py
-    # that an untested mlx-audio would silently slide under.
+    # This pin is now the ONLY thing holding the verified version. The former
+    # transitive protection (0.4.5/0.4.6 capped transformers <5.13.0, colliding
+    # with mlx-vlm >=0.6.5) expired with 0.4.7, which lifted the cap; mlx-vlm
+    # 0.6.8 only asks for mlx-audio>=0.4.3, so an unpinned resolve now lands on
+    # 0.4.7. Whisper also carries bridge patches in audio_runner.py that an
+    # untested mlx-audio would silently slide under.
+    # Holding at 0.4.4 is a measured decision, not lag: 0.4.6's PR #825 moved
+    # resampling from the Kaiser-windowed-sinc mlx_audio.utils.resample_audio
+    # into miniaudio's decoder. miniaudio does low-pass before decimating, so
+    # this is not a missing filter — its stopband is simply far too shallow for
+    # an ASR front-end. Measured through stt.utils.load_audio on both installs,
+    # 44.1k->16k: an 8.5 kHz tone survives at -5.6 dB and a 12 kHz tone at
+    # -22.4 dB (folding to 4 kHz, mid speech band), where 0.4.4 leaves nothing
+    # above the 16-bit test signal's own noise floor. The passband differs too:
+    # 0.4.4 is flat to 7 kHz then cuts sharply, 0.4.7 droops from ~5 kHz.
+    # Scope is narrower than "any resampling": it needs a downsample, energy
+    # above the target Nyquist, AND the miniaudio path (WAV/MP3/FLAC).
+    # ffmpeg-routed containers (m4a/aac/ogg/opus/webm) measured clean, and
+    # 16 kHz input never resamples at all.
+    # Upstream still ships and tests that filter; only the load path stopped
+    # calling it, so their regression test stays green.
+    # Condition to revisit (not a version): the load path band-limits again —
+    # both stt/utils.load_audio and the general mlx_audio/utils.py load_audio,
+    # which took the same change.
     "mlx-audio==0.4.4",
     "mlx-vlm==0.6.8",
     "transformers==5.14.1",
