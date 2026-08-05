@@ -1284,7 +1284,7 @@ def require_env(name: str, must_exist: bool = False) -> Path:
 def require_separate_catalog(catalog: Path, vault: Path) -> None:
     """The output tree must not live inside the library. Checked before anything is created.
 
-    "Your library is never written to" is a guarantee this example makes in its README, and
+    "Your collection is never written to" is a guarantee this example makes in MANUAL.md, and
     a guarantee nothing enforces is only a claim. Without this check a catalog placed inside
     the vault causes three separate harms, in rising order of how much they cost:
 

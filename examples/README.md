@@ -27,7 +27,11 @@ Some drift is expected; each example states what it is runnable against.
 
 ## Conventions (for adding an example)
 
-1. **One example = one self-contained subdirectory** with its own `README.md`.
+1. **One example = one self-contained subdirectory** with its own `README.md`. An example whose
+   README has grown past being readable in one sitting may carry **one** companion document
+   beside it, and no more — `photo-rag/` is the precedent: `README.md` is the way in and stays
+   short, `MANUAL.md` holds everything past the first run. One companion, never a
+   documentation tree.
 2. Each example README opens with a metadata block:
 
    ```
