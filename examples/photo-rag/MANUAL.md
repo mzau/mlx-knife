@@ -149,20 +149,18 @@ thousand photographs — and the log about 21 MB. Both live under `$PHOTO_CATALO
 - **Being killed is safe.** Ctrl-C finishes the picture in flight. A hard kill leaves an
   attempt without a result, which the next run counts; three of those on one photograph
   quarantine it rather than letting a single file stall a multi-day run forever.
-- **A second counter shares that limit, and it is the dangerous one.** A photograph that
-  fails *cleanly* — the file cannot be read, the upload is refused — is counted too, and three
-  of those quarantine it just the same. The two are not comparable. A process death is slow
-  and loud and costs one interpreter each time, so it cannot run away with you. A failed read
-  costs milliseconds, so anything that makes many photographs unreadable **at once** — a
-  network share going away mid-run is the obvious one — stamps every remaining photograph in
-  seconds. The counter is measuring how many chances it got, not what it learned about the
-  file.
-- **Quarantine is written down, and there is no way back.** No flag clears it, and
-  `--force-recaption` does not reach it. Before a multi-day run over a network share, raise
-  `--max-attempts` well above its default of three. It is a threshold compared at the moment
-  the decision is made, not a verdict stored on the photograph, so raising it still helps on a
-  later run — and it keeps an outage from spending the budget of photographs whose only fault
-  was being on the list when the storage went away.
+- **A photograph is only blamed for its own faults.** A clean failure counts like a process
+  death, and three of either quarantine it — but a failed read costs milliseconds, so anything
+  that makes many photographs unreadable at once would stamp them all in seconds. An error
+  from the operating system rather than the decoder therefore makes the run probe the storage
+  first: two observations before a permanent consequence, never one.
+- **If the collection becomes unreachable, the run stops** — exit code 10, and no failure
+  written against any photograph it never reached. What is already described stays described.
+- **Permission failures are reported, never quarantined.** Trying and failing costs a system
+  call; being wrong about it costs a photograph.
+- **Quarantine is still one-way.** No flag clears it and `--force-recaption` does not reach
+  it. It is now reserved for what it was meant for: a file that has killed the process three
+  times.
 - **The log is the only thing expensive to lose.** Catalog and index are derived and
   rebuild in minutes. If you back up one file, back up `log/captions.jsonl`.
 - **One run at a time.** The lock is never broken automatically. If a run died and left one

@@ -241,8 +241,17 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                     rec["prepared"] = {**prep.as_prepared_dict(), "from_cache": cached}
                     rec["exif"] = prep.exif.as_dict()
                     rec["src"] = {"w": prep.src_w, "h": prep.src_h, "converter": prep.converter}
+                    # Pixels are already in hand, so this costs a thumbnail — and moves
+                    # the duplicate question before the days of GPU time.
+                    rec["dhash"] = P.dhash_hex(_dhash_of(prep.data))
                 except P.PrepareError as e:
                     rec["skip"], rec["detail"] = e.reason, e.detail[:300]
+                    rec["errno"] = e.errno
+                    # Otherwise a body that will not convert appears with no camera —
+                    # invisible in the one query that would diagnose it.
+                    make_model = P.sips_identity(c.path) if c.branch == "sips" else None
+                    if make_model:
+                        rec["exif"] = {"camera": make_model}
             print(json.dumps(rec, ensure_ascii=True))
             n += 1
         sys.stderr.write(f"\ndry run: {n} records, no request made, no log written\n")
@@ -280,10 +289,14 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
         P.die(e)
 
     _install_signal_handlers()
-    counts = {"seen": 0, "already_done": 0, "captioned": 0, "failed": 0,
-              "skipped": 0, "quarantined": 0}
+    # Two questions, two blocks: what is out there, and what this run did. They were
+    # both being answered with the word "skipped".
+    walk_stats = {"files": 0, "candidates": 0, "skipped": {}}
+    counts = {"considered": 0, "already_done": 0, "moved": 0, "captioned": 0,
+              "failed": 0, "permission": 0, "quarantined": 0, "not_reached": 0}
     canaries = {"run": 0, "failed": 0}
     exit_code = P.EXIT_OK
+    stopped_by = None
     started = time.time()
     consecutive_canary_failures = 0
 
@@ -345,6 +358,9 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                 "jpeg_quality": args.jpeg_quality, "max_tokens": args.max_tokens,
                 "prompt_sha256": prompt_sha, "upload_exif": "stripped",
                 "fsync": args.fsync, "tmp_swept": swept,
+                # Quarantine is permanent and the log is its only account; without the
+                # budget it was measured against, the record cannot be read.
+                "max_attempts": args.max_attempts,
             })
 
             # --- startup canary: before a single real photo -----------------------
@@ -353,9 +369,11 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
             if not run_canary(client, args, log, run_id, "startup", orders, warn):
                 canaries["failed"] += 1
                 log.append({"type": "run_end", "run_id": run_id, "ts": P.utc_now(),
-                            "counts": counts, "canaries": canaries,
+                            "schema": P.SCHEMA, "walk": walk_stats, "counts": counts,
+                            "canaries": canaries,
                             "elapsed_s": round(time.time() - started, 1),
-                            "interrupted": False, "exit": P.EXIT_CANARY})
+                            "interrupted": False, "stopped_by": "canary",
+                            "exit": P.EXIT_CANARY})
                 lock.release()
                 P.die(P.Precondition(P.EXIT_CANARY, "canary failed — the model did not see the image",
                                      CANARY_HINT.format(base=args.base_url)))
@@ -370,7 +388,54 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                                      prefer_raw=args.prefer_raw, limit=args.limit))
             todo = [c for c in candidates if not c.skip]
             total = len(todo)
+
+            # Kept rather than dropped: these were produced and discarded one line
+            # later, so an unreadable directory looked like an empty one.
+            for c in candidates:
+                if c.skip:
+                    walk_stats["skipped"][c.skip] = walk_stats["skipped"].get(c.skip, 0) + 1
+            walk_stats["candidates"] = total
+            walk_stats["files"] = total + sum(walk_stats["skipped"].values())
+
             sys.stderr.write(f"\n{total} candidate(s); {len(idx.done)} already described\n")
+            if walk_stats["skipped"]:
+                sys.stderr.write("  set aside: " + ", ".join(
+                    f"{v} {k}" for k, v in sorted(walk_stats["skipped"].items())) + "\n")
+
+            # Spread on purpose: a library can span mounts, and three witnesses from
+            # the front would all vouch for whichever subtree os.walk reached first.
+            witness = P.Witness(vault)
+            if todo:
+                for i in sorted({0, total // 2, total - 1}):
+                    witness.remember(todo[i].path)
+
+            # A share that dies during the scan raises nothing: os.walk just stops
+            # yielding. One stat and one byte, against a walk that costs minutes.
+            env_ok, env_why = witness.alive()
+            if not env_ok:
+                log.append({"type": "environment_lost", "run_id": run_id, "ts": P.utc_now(),
+                            "phase": "walk", "witness": env_why, "not_reached": total})
+                counts["not_reached"] = total
+                lock.release()
+                P.die(P.Precondition(
+                    P.EXIT_ENVIRONMENT,
+                    f"the library became unreachable during the scan ({env_why})",
+                    "Nothing was written against any photograph. Check the mount and run again."))
+
+            # An already-dead share leaves an empty mountpoint, which passes
+            # must_exist. Empty log = first run; non-empty log = contradiction.
+            if total == 0 and idx.lines:
+                log.append({"type": "run_end", "run_id": run_id, "ts": P.utc_now(),
+                            "schema": P.SCHEMA, "walk": walk_stats, "counts": counts,
+                            "canaries": canaries, "elapsed_s": round(time.time() - started, 1),
+                            "interrupted": False, "stopped_by": "empty_library",
+                            "exit": P.EXIT_ENVIRONMENT})
+                lock.release()
+                P.die(P.Precondition(
+                    P.EXIT_ENVIRONMENT,
+                    f"no photographs found, but this catalog already knows {len(idx.done)}",
+                    "An empty mountpoint looks exactly like this. Check that the library is "
+                    "mounted before treating the run as finished."))
 
             since_canary = 0
             moved_seen: set = set()
@@ -378,11 +443,11 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                 if _stop["requested"]:
                     exit_code = P.EXIT_INTERRUPTED
                     break
-                counts["seen"] += 1
                 pid = c.photo_id
 
                 if only_ids is not None and pid not in only_ids:
                     continue
+                counts["considered"] += 1      # after the filter: what this run decided about
 
                 why = P.resume_decision(pid, idx, args.max_attempts, force=args.force_recaption)
                 if why == "already_done":
@@ -396,7 +461,7 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                         log.append({"type": "path_update", "run_id": run_id,
                                     "ts": P.utc_now(), "photo_id": pid, "rel": c.rel})
                         idx.rel[pid] = c.rel
-                        counts["moved"] = counts.get("moved", 0) + 1
+                        counts["moved"] += 1
                     # Two byte-identical copies both resolve to this id in one run; the
                     # first one walked wins, deterministically, rather than whichever the
                     # filesystem happened to return last.
@@ -409,7 +474,9 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                     log.append({"type": "quarantine", "run_id": run_id, "ts": P.utc_now(),
                                 "photo_id": pid, "rel": c.rel, "reason": why,
                                 "attempts": idx.attempts.get(pid, 0),
-                                "results": idx.results.get(pid, 0)})
+                                "results": idx.results.get(pid, 0),
+                                "failures": idx.failures.get(pid, 0),
+                                "max_attempts": args.max_attempts})
                     idx.quarantined.add(pid)
                     counts["quarantined"] += 1
                     warn(f"{pid[:8]} quarantined ({why})")
@@ -427,25 +494,62 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                 t0 = time.time()
                 rec: Dict[str, Any] = {"type": "result", "run_id": run_id, "ts": P.utc_now(),
                                        "photo_id": pid, "rel": c.rel, "attempt_no": attempt_no}
-                try:
-                    prep, from_cache = P.prepare_cached(
-                        c.path, c.branch, None if args.no_prepared_cache else prep_root,
-                        max_edge=args.max_edge, quality=args.jpeg_quality,
-                        max_pixels=args.max_pixels, tmpdir=tmpdir, photo_id_=pid)
-                except P.PrepareError as e:
-                    log.append({"type": "skip", "run_id": run_id, "ts": P.utc_now(),
-                                "photo_id": pid, "rel": c.rel, "reason": e.reason,
-                                "detail": e.detail[:300]})
-                    # A skip also counts as a result, or the photo looks like a process
-                    # death on the next run and eventually gets quarantined for it.
-                    log.append({**rec, "ok": False, "error": {"kind": "prepare_error",
-                                                              "reason": e.reason,
-                                                              "message": e.detail[:300]},
-                                "latency_ms": int((time.time() - t0) * 1000)})
+                # An errno means the machine refused, not the decoder, so the storage
+                # is asked before this file is charged with anything. See Witness for
+                # why a passing probe buys a second look rather than a verdict.
+                prep, from_cache, prep_error, env_dead = None, False, None, None
+                for looked_twice in (False, True):
+                    try:
+                        prep, from_cache = P.prepare_cached(
+                            c.path, c.branch, None if args.no_prepared_cache else prep_root,
+                            max_edge=args.max_edge, quality=args.jpeg_quality,
+                            max_pixels=args.max_pixels, tmpdir=tmpdir, photo_id_=pid)
+                        prep_error = None
+                        break
+                    except P.PrepareError as e:
+                        prep_error = e
+                        if looked_twice or e.errno is None or e.reason == "permission":
+                            break           # the decoder's verdict, or already asked twice
+                        env_ok, env_why = witness.alive(near=c.path.parent)
+                        if not env_ok:
+                            env_dead = env_why
+                            break
+
+                if env_dead is not None:
+                    # Stop: every photograph after this fails the same way in ~2 ms,
+                    # each against a file that is fine.
+                    log.append({"type": "environment_lost", "run_id": run_id,
+                                "ts": P.utc_now(), "photo_id": pid, "rel": c.rel,
+                                "reason": prep_error.reason, "errno": prep_error.errno,
+                                "witness": env_dead, "not_reached": total - n})
+                    # Closes the attempt written above, or this photograph looks like a
+                    # process death next time (see resume_index).
                     idx.results[pid] = idx.results.get(pid, 0) + 1
-                    idx.failures[pid] = idx.failures.get(pid, 0) + 1
-                    counts["skipped"] += 1
-                    warn(f"{pid[:8]} {e.reason}")
+                    counts["not_reached"] = total - n
+                    exit_code, stopped_by = P.EXIT_ENVIRONMENT, "environment_lost"
+                    warn(f"{pid[:8]} {prep_error.reason}: {env_dead}")
+                    warn(f"stopping: the library became unreachable, "
+                         f"{total - n} photograph(s) not reached and not blamed")
+                    break
+
+                if prep_error is not None:
+                    environmental = prep_error.reason == "permission"
+                    log.append({**rec, "ok": False,
+                                "error": {"kind": "prepare_error",
+                                          "reason": prep_error.reason,
+                                          "errno": prep_error.errno,
+                                          "message": prep_error.detail[:300]},
+                                "environmental": environmental,
+                                "latency_ms": int((time.time() - t0) * 1000)})
+                    # Always balances the attempt, or the next run reads a process death.
+                    idx.results[pid] = idx.results.get(pid, 0) + 1
+                    if environmental:
+                        # Counted, but it buys no evidence against the file.
+                        counts["permission"] += 1
+                    else:
+                        idx.failures[pid] = idx.failures.get(pid, 0) + 1
+                        counts["failed"] += 1
+                    warn(f"{pid[:8]} {prep_error.reason}")
                     continue
 
                 try:
@@ -515,19 +619,30 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                     else:
                         consecutive_canary_failures = 0
 
-            end = {"type": "run_end", "run_id": run_id, "ts": P.utc_now(), "counts": counts,
+            # Separate field, not a new meaning for `interrupted` — that flag is the
+            # only thing telling a clean Ctrl-C apart.
+            end = {"type": "run_end", "run_id": run_id, "ts": P.utc_now(),
+                   "schema": P.SCHEMA, "walk": walk_stats, "counts": counts,
                    "canaries": canaries, "elapsed_s": round(time.time() - started, 1),
-                   "interrupted": _stop["requested"], "exit": exit_code}
+                   "interrupted": _stop["requested"], "stopped_by": stopped_by,
+                   "exit": exit_code}
             log.append(end)
             print(json.dumps(end, ensure_ascii=True))
     finally:
         client.close()
         lock.release()
 
+    aside = ", ".join(f"{v} {k}" for k, v in sorted(walk_stats["skipped"].items()))
     sys.stderr.write(
-        f"\n{counts['captioned']} described, {counts['already_done']} already done, "
-        f"{counts['failed']} failed, {counts['skipped']} skipped, "
-        f"{counts['quarantined']} quarantined in {time.time() - started:.1f}s\n")
+        f"\nwalk:  {walk_stats['files']} file(s), {walk_stats['candidates']} candidate(s)"
+        + (f"; set aside {aside}" if aside else "") + "\n"
+        f"run:   {counts['captioned']} described, {counts['already_done']} already done, "
+        f"{counts['failed']} failed, {counts['permission']} unreadable by permission, "
+        f"{counts['quarantined']} quarantined"
+        + (f", {counts['not_reached']} not reached" if counts["not_reached"] else "")
+        + f" in {time.time() - started:.1f}s\n")
+    if stopped_by:
+        sys.stderr.write(f"       stopped by: {stopped_by}\n")
     return exit_code
 
 

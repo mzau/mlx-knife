@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from argparse import ArgumentParser
 from collections import Counter
 from pathlib import Path
@@ -53,6 +54,10 @@ def main() -> int:
     ap.add_argument("--follow-symlinks", action="store_true")
     ap.add_argument("--limit", type=int, default=None, help="stop after N candidates")
     ap.add_argument("--quiet", action="store_true", help="summary only, no per-file records")
+    ap.add_argument("--progress-every", type=int, default=0, metavar="N",
+                    help="print a progress line to stderr every N files (0 = never). "
+                         "Worth setting on network storage: the first pass reads nothing "
+                         "and prints nothing, so a long silence is the scan and not a stall")
     args = ap.parse_args()
 
     try:
@@ -74,6 +79,8 @@ def main() -> int:
     sink = sys.stdout if out_path is None else open(out_path, "w", encoding="utf-8")
     branches, skips, exts = Counter(), Counter(), Counter()
     total_bytes = kept = 0
+    seen_files = 0
+    t_start = time.time()
 
     try:
         for c in P.walk(vault,
@@ -92,6 +99,12 @@ def main() -> int:
                 branches[c.branch] += 1
                 exts[c.ext] += 1
                 total_bytes += c.bytes
+            seen_files += 1
+            if args.progress_every and seen_files % args.progress_every == 0:
+                rate = seen_files / max(time.time() - t_start, 1e-9)
+                sys.stderr.write(f"\r  {seen_files} file(s), {kept} candidate(s), "
+                                 f"{rate:.0f}/s")
+                sys.stderr.flush()
     finally:
         if sink is not sys.stdout:
             sink.close()

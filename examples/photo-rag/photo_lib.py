@@ -13,6 +13,7 @@ Output: JSONL records; see the module-level record documentation in caption-phot
 from __future__ import annotations
 
 import base64
+import errno as errno_mod
 import hashlib
 import io
 import json
@@ -43,6 +44,7 @@ EXIT_LOCKED = 6
 EXIT_INTERRUPTED = 7
 EXIT_LOG_UNREADABLE = 8
 EXIT_EMBED = 9
+EXIT_ENVIRONMENT = 10       # the library itself became unreachable; nothing is wrong with it
 
 SCHEMA = 1
 TOOL = "photo-rag/1.0"
@@ -70,10 +72,12 @@ SIPS = "/usr/bin/sips"
 # Skip reasons. `ext_filter` is deliberately distinct from `unsupported_format`:
 # one means "you asked me not to", the other means "I cannot". Conflating them
 # would make a filtered run look like it hit failures.
+# `decode_error` vs `read_error` is the same distinction: the photograph, or the
+# machine it sits on. Told apart by errno in _prepare_from().
 SKIP_REASONS = frozenset({
     "unsupported_format", "ext_filter", "raw_jpeg_pair", "duplicate_content",
     "decompression_bomb", "sips_failed", "no_converter", "read_error", "empty_file",
-    "symlink",
+    "symlink", "decode_error", "permission",
 })
 
 ERROR_KINDS = frozenset({
@@ -153,7 +157,10 @@ class Candidate:
     photo_id: Optional[str] = None
     skip: Optional[str] = None
     detail: Optional[str] = None
-    dup_count: int = 1
+
+    # No `dup_count`: walk() yields the keeper before any duplicate of it is known, so
+    # such a field could never have been written. Group the inventory by `photo_id`
+    # instead — it appears on the keeper and on every duplicate alike.
 
     def record(self) -> Dict[str, Any]:
         rec: Dict[str, Any] = {
@@ -168,8 +175,6 @@ class Candidate:
             rec["skip"] = self.skip
             if self.detail:
                 rec["detail"] = self.detail
-        if self.dup_count > 1:
-            rec["dup_count"] = self.dup_count
         return rec
 
 
@@ -223,7 +228,27 @@ def walk(
 
     # -- pass 1: names and sizes ------------------------------------------------
     found: List[Candidate] = []
-    for root, dirs, files in os.walk(vault, followlinks=follow_symlinks):
+
+    def _dir_unreadable(e: OSError) -> None:
+        """os.walk discards directory errors unless you ask for them.
+
+        Without this a share that dies during the scan simply stops yielding, and the
+        candidate list comes back short with nothing to show for it — a run over 60% of
+        a library that reports success. The failure has to arrive as a record like any
+        other, so route it through the same skip channel every other refusal uses.
+        """
+        where = getattr(e, "filename", None) or str(vault)
+        try:
+            rel_dir = str(Path(where).relative_to(vault))
+        except ValueError:
+            rel_dir = where
+        found.append(Candidate(Path(where), rel_dir, "", 0, None,
+                               skip="permission" if e.errno in (errno_mod.EACCES, errno_mod.EPERM)
+                               else "read_error",
+                               detail=f"directory unreadable: {e.strerror or e}"[:200]))
+
+    for root, dirs, files in os.walk(vault, followlinks=follow_symlinks,
+                                     onerror=_dir_unreadable):
         dirs[:] = [d for d in dirs if not d.startswith(".") and _norm(d) not in excluded]
         for name in sorted(files):
             name = _norm(name)
@@ -262,12 +287,23 @@ def walk(
                 if emit_skips:
                     found.append(Candidate(p, rel, ext, 0, br, skip="ext_filter"))
                 continue
+            if br == "sips" and not have_sips():
+                # One fact about the machine, not a thousand facts about photographs.
+                # Left to the batch it spent each file's retry budget instead.
+                if emit_skips:
+                    found.append(Candidate(p, rel, ext, 0, br, skip="no_converter",
+                                           detail=f"{SIPS} not present; this branch needs macOS"))
+                continue
 
             try:
                 size = p.stat().st_size
             except OSError as e:
                 if emit_skips:
-                    found.append(Candidate(p, rel, ext, 0, br, skip="read_error", detail=str(e)[:200]))
+                    found.append(Candidate(p, rel, ext, 0, br,
+                                           skip="permission" if e.errno in (errno_mod.EACCES,
+                                                                           errno_mod.EPERM)
+                                           else "read_error",
+                                           detail=str(e)[:200]))
                 continue
             if size == 0:
                 if emit_skips:
@@ -300,7 +336,7 @@ def walk(
                 c.detail = f"prefers sibling {keeper.ext}"
 
     # -- pass 3: content identity ----------------------------------------------
-    seen: Dict[str, Candidate] = {}
+    seen: set = set()          # photo_ids already emitted; membership is all we need
     emitted = 0
     for c in found:
         if c.skip:
@@ -315,20 +351,103 @@ def walk(
                 yield c
             continue
 
-        first = seen.get(c.photo_id)
-        if first is not None:
-            first.dup_count += 1
+        if c.photo_id in seen:
             c.skip = "duplicate_content"
             c.detail = "same content as an earlier file"
             if emit_skips:
                 yield c
             continue
 
-        seen[c.photo_id] = c
+        seen.add(c.photo_id)
         yield c
         emitted += 1
         if limit is not None and emitted >= limit:
             return
+
+
+class Witness:
+    """A second question to ask the environment when a single file will not open.
+
+    At the point of failure the distinction is unavailable: ENOENT from a deleted
+    photograph and ENOENT from a storage volume that went away are the same errno on
+    the same call. It cannot be recovered from the exception, only by asking something
+    else — and the something else must be sharper than `vault_root.exists()`, because
+    an unmounted share commonly leaves its mountpoint behind as an empty directory
+    that answers yes.
+
+    Two probes, cheapest first:
+
+      * `st_dev` of the library root, remembered at startup. An unmounted volume takes
+        its device number with it — the leftover mountpoint belongs to the PARENT
+        filesystem, so the number changes even though the path still resolves. One
+        stat, and it also catches a remount, which a file read would call healthy even
+        though every handle and every identity taken before it is now suspect.
+      * the failing file's own directory, when there is one — the sharpest probe
+        available, and the only one that answers the question actually being asked.
+      * failing that, a byte from a file that was demonstrably readable earlier in
+        this run. One that still reads proves the storage is serving; a single one
+        that does not proves nothing, because a photograph may simply have been
+        deleted while the run was working, and that is an ordinary Tuesday.
+
+    The verdicts are deliberately NOT symmetric, and this is the whole design:
+
+      * a witness that FAILS is proof that the environment is gone;
+      * a witness that PASSES proves nothing about a failure observed a moment ago.
+        It does not acquit the environment, it merely fails to convict it — the mount
+        may have returned in between. So a caller must treat that as INCONCLUSIVE and
+        look again at the file itself, never as a licence to blame the photograph.
+
+    One observation must not have a permanent consequence. That was the whole defect.
+    """
+
+    def __init__(self, root: Path, keep: int = 3):
+        self.root = root
+        self.keep = keep
+        self.paths: List[Path] = []
+        try:
+            self.dev: Optional[int] = root.stat().st_dev
+        except OSError:
+            self.dev = None
+
+    def remember(self, path: Path) -> None:
+        """Offer a file that was just read successfully."""
+        if len(self.paths) < self.keep:
+            self.paths.append(path)
+
+    def alive(self, near: Optional[Path] = None) -> Tuple[bool, str]:
+        """(True, "") if the environment still looks like itself, else (False, why)."""
+        try:
+            dev = self.root.stat().st_dev
+        except OSError as e:
+            return False, f"library root unreadable: {e.strerror or e}"
+        if self.dev is not None and dev != self.dev:
+            return False, "library root is on a different device than at startup"
+
+        # When there is a specific failure, its own directory is the sharpest probe
+        # there is, and it is the ONLY one that answers the question being asked. A
+        # library can span more than one mount; witnesses collected during the walk all
+        # come from wherever it went first, so they would vouch — perfectly honestly —
+        # for a share that is not the one that just died.
+        if near is not None:
+            try:
+                near.stat()
+            except OSError as e:
+                return False, f"{near.name}/: {e.strerror or e}"
+            return True, ""     # the storage under that file is serving ⇒ it IS the file
+
+        # No specific failure to stand next to (the post-walk check). Here a single
+        # unreadable witness proves nothing — it may simply have been deleted while the
+        # run was working, which is ordinary. One witness that still reads is enough to
+        # show the storage is serving; only losing all of them is evidence of absence.
+        why = []
+        for probe in self.paths:
+            try:
+                with open(probe, "rb") as fh:
+                    fh.read(1)
+                return True, ""
+            except OSError as e:
+                why.append(f"{probe.name}: {e.strerror or e}")
+        return (True, "") if not why else (False, "; ".join(why))
 
 
 # ---------------------------------------------------------------------------
@@ -411,12 +530,19 @@ def read_exif(im: Image.Image) -> Exif:
 
 
 class PrepareError(Exception):
-    """Raised with a skip/error reason from SKIP_REASONS or ERROR_KINDS."""
+    """Raised with a skip/error reason from SKIP_REASONS or ERROR_KINDS.
 
-    def __init__(self, reason: str, detail: str = ""):
+    `errno` is carried when the operating system supplied one, and its presence is
+    the signal that the failure came from the machine rather than from the picture.
+    A caller that has to decide whether to blame the photograph reads this, never
+    the message text — error strings are the decoder's, and they are not a contract.
+    """
+
+    def __init__(self, reason: str, detail: str = "", errno: Optional[int] = None):
         super().__init__(f"{reason}: {detail}" if detail else reason)
         self.reason = reason
         self.detail = detail
+        self.errno = errno
 
 
 @dataclass
@@ -465,6 +591,42 @@ def sips_geometry(src: Path) -> Tuple[Optional[int], Optional[int]]:
     return w, h
 
 
+def sips_identity(src: Path) -> Optional[str]:
+    """Ask sips for Make/Model when Pillow cannot open the file at all.
+
+    Only used on the failure path. A raw container that will not convert would
+    otherwise be recorded with no camera against it, which hides it from the one
+    query — "which body is this?" — that would explain why it failed. Never worth
+    failing over: not knowing the camera must not cost the diagnosis.
+    """
+    if not have_sips():
+        return None
+    try:
+        r = subprocess.run([SIPS, "-g", "make", "-g", "model", str(src)],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    got = {}
+    for line in r.stdout.splitlines():
+        k, _, v = line.strip().partition(": ")
+        if k in ("make", "model") and v:
+            got[k] = v.strip()
+    joined = " ".join(x for x in (got.get("make"), got.get("model")) if x)
+    return joined or None
+
+
+def have_sips() -> bool:
+    """Is the macOS system converter available on this machine?
+
+    A fact about the machine, so it is asked once per walk rather than once per
+    photograph, and never cached across processes — a run is short enough that the
+    answer cannot change under it, and long enough that caching would be a lie if it did.
+    """
+    return Path(SIPS).exists()
+
+
 def sips_convert(src: Path, dst: Path, max_edge: int, timeout: int = 180) -> None:
     """HEIC/RAW -> JPEG via the macOS system converter.
 
@@ -484,8 +646,18 @@ def sips_convert(src: Path, dst: Path, max_edge: int, timeout: int = 180) -> Non
         # that hangs is exactly what a large library eventually produces.
         raise PrepareError("sips_failed", f"converter timed out after {timeout}s") from None
     except OSError as e:
-        raise PrepareError("sips_failed", f"{type(e).__name__}: {e}"[:300]) from None
+        raise PrepareError("sips_failed", f"{type(e).__name__}: {e}"[:300],
+                           errno=e.errno) from None
     if r.returncode != 0 or not dst.exists():
+        # A broken HEIC and a vanished volume exit the same way, and sips' message is
+        # prose we must not parse. One stat answers it.
+        try:
+            source_gone = not src.exists()
+        except OSError:
+            source_gone = True          # cannot even ask ⇒ certainly not the file's fault
+        if source_gone:
+            raise PrepareError("read_error", f"source unreachable during conversion: {src.name}",
+                               errno=errno_mod.ENOENT)
         raise PrepareError("sips_failed", (r.stderr or r.stdout or "").strip()[:500])
 
 
@@ -580,7 +752,13 @@ def _prepare_from(
             except PrepareError:
                 raise
             except OSError as e:
-                raise PrepareError("read_error", str(e)[:300]) from e
+                # No errno = Pillow (UnidentifiedImageError, "truncated"); an errno
+                # = the kernel. Only the first is evidence against the photograph.
+                if e.errno is None:
+                    raise PrepareError("decode_error", str(e)[:300]) from e
+                if e.errno in (errno_mod.EACCES, errno_mod.EPERM):
+                    raise PrepareError("permission", str(e)[:300], errno=e.errno) from e
+                raise PrepareError("read_error", str(e)[:300], errno=e.errno) from e
             except Exception as e:  # noqa: BLE001 — any decoder fault is a skip, not a crash
                 raise PrepareError("prepare_error", f"{type(e).__name__}: {e}"[:300]) from e
     finally:
@@ -1120,7 +1298,9 @@ class Log:
                     idx.done.add(pid)
                     if rec.get("rel"):
                         idx.rel[pid] = rec["rel"]
-                else:
+                elif not rec.get("environmental"):
+                    # The run that saw the failure judged it; obey that. Without this
+                    # the replay re-blames the file and the fix lasts one process.
                     idx.failures[pid] = idx.failures.get(pid, 0) + 1
             elif t == "path_update":
                 # A photo already described, found somewhere else. Append-only: the old
@@ -1128,6 +1308,11 @@ class Log:
                 # last-wins for free.
                 if rec.get("rel"):
                     idx.rel[pid] = rec["rel"]
+            elif t == "environment_lost":
+                # Closes the attempt without charging the photograph. The attempt line
+                # goes down before the work, so without this the gap reads as a process
+                # death and three aborted nights quarantine the file.
+                idx.results[pid] = idx.results.get(pid, 0) + 1
             elif t == "quarantine":
                 idx.quarantined.add(pid)
         return idx
@@ -1143,9 +1328,17 @@ def resume_decision(pid: str, idx: ResumeIndex, max_attempts: int, force: bool =
       a decoder fault, the OOM killer. Three of those on one photo is a poison pill,
       and it must never be tried a fourth time or a single file stalls a multi-day
       run forever.
-    * `failures` counts CLEAN REJECTIONS — an HTTP 400 on an oversized image, a
-      corrupt file. Those are retried across runs because they may be environmental,
-      but bounded by the same limit.
+    * `failures` counts CLEAN REJECTIONS that were about the photograph — an HTTP 400
+      on an oversized image, a file the decoder cannot read. Bounded by the same limit,
+      because each one is a fresh observation of the same file.
+
+    What is NOT counted here is anything the environment caused: a vanished mount, a
+    permission bit. Those are recorded with `environmental: true` and resume_index
+    passes over them, because such a failure is one fact about the machine repeated
+    once per photograph, not one fact about each photograph. This docstring used to say
+    they were "retried across runs because they may be environmental, but bounded by
+    the same limit" — that limit is exactly how 15,613 intact photographs came within
+    two nights of permanent quarantine.
     """
     if pid in idx.quarantined:
         return "quarantined"
@@ -1277,7 +1470,19 @@ def require_env(name: str, must_exist: bool = False) -> Path:
             f"the tree to begin with (see the Conventions section of examples/README.md).")
     p = Path(raw).expanduser()
     if must_exist and not p.is_dir():
-        raise Precondition(EXIT_USAGE, f"{name} is not a readable directory", f"check {name}")
+        # An unquoted `export VAULT=/Vols/My Photos` is split by the shell, so what
+        # arrives is "/Vols/My" — no space to look for. The giveaway is the neighbour.
+        hint = f"check {name} — it is currently {raw!r}"
+        try:
+            near = sorted(x.name for x in p.parent.iterdir()
+                          if x.is_dir() and x.name.startswith(p.name + " "))
+        except OSError:
+            near = []
+        if near:
+            hint = (f'{name} is {raw!r}, but {p.parent} contains "{near[0]}".\n'
+                    f'      A path with spaces must be quoted where it is SET: '
+                    f'export {name}="{p.parent}/{near[0]}"')
+        raise Precondition(EXIT_USAGE, f"{name} is not a readable directory", hint)
     return p
 
 
