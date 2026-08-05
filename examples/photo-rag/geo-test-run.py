@@ -54,8 +54,9 @@ REPO = HERE.parent.parent
 FIXTURE = REPO / "tests_2.0" / "assets" / "geo-test"
 
 # The photographs published with this project, named rather than counted. Phase A is
-# these; anything else the fixture directory happens to hold on one machine is phase B.
-# A count would be satisfied by the wrong nine.
+# NOT a synonym for these: it is selected by extension, so a local .jpeg beside them
+# joins it. Every claim about the fixture is made against these names instead, and a
+# count would be satisfied by the wrong nine.
 TRACKED_JPEGS = tuple(f"coll2_{i}.jpeg" for i in range(1, 10))
 
 # coll2_3.jpeg carries three legible strings, painted on the hull and on a departure
@@ -85,12 +86,11 @@ class Table:
     def __init__(self):
         self.rows: List[Dict[str, Any]] = []
         self.notes: List[str] = []
-        # Captions printed in full for the photographs of the first phase, which are
-        # published in this repository. The fixture is public — that is the whole reason
-        # it exists — and a table of ratios is not evidence anyone can check. The second
-        # phase is where anything local-only would appear, so it is held back wholesale:
-        # the split is by phase, never by filename, so no tracked file has to name a
-        # directory that may not exist.
+        # Captions printed in full for the photographs this repository publishes. The
+        # fixture is public — that is the whole reason it exists — and a table of ratios
+        # is not evidence anyone can check. Membership is decided by NAME against
+        # TRACKED_JPEGS: a phase is not a privacy boundary, because phase A is chosen by
+        # extension and any local file carrying it lands there too.
         self.appendix: List[str] = []
 
     def add(self, rid: str, name: str, status: str, detail: str = "", mandatory: bool = True):
@@ -362,6 +362,115 @@ def guard_rows(t: Table, work: Path, env_of) -> None:
     t.check("G6", "a run that loses the lock does not rebind the vault",
             r.returncode == P.EXIT_LOCKED and bound == str(v6a.resolve()),
             f"exit {r.returncode}; marker still names the holder's library")
+
+    # -- having nothing to do is not automatically a lost mount --------------------
+    # The whole decision, computed without a server: the old test asked whether the log
+    # had any lines, and the log always does — this run appends its own run_start and
+    # canaries before the index is built. So every first run against an empty library
+    # exited 10 and blamed the mount, citing zero known photographs as the evidence.
+    fresh, prior = P.ResumeIndex(), P.ResumeIndex()
+    prior.done.add("0" * 64)
+    empty = {"files": 0, "candidates": 0, "skipped": {}}
+    filtered = {"files": 1, "candidates": 0, "skipped": {"ext_filter": 1}}
+    refused = {"files": 1, "candidates": 0, "skipped": {"permission": 1}}
+    # A real first-run log, built the way the batch builds one, so the trap is present
+    # and not merely described: `lines` counts these three, `done` counts none of them.
+    lg7 = P.Log(work / "guard-empty" / "log" / "captions.jsonl")
+    with lg7 as h:
+        h.append({"type": "run_start", "run_id": "r", "schema": P.SCHEMA})
+        h.append({"type": "canary", "run_id": "r", "shot": 1, "ok": True})
+        h.append({"type": "canary", "run_id": "r", "shot": 2, "ok": True})
+    started_run = lg7.resume_index()
+    said = {"first run, nothing there": P.scan_verdict(0, empty, started_run),
+            "filter matched nothing": P.scan_verdict(0, filtered, prior),
+            "work to do": P.scan_verdict(7, empty, prior),
+            "known catalog, empty library": P.scan_verdict(0, empty, prior),
+            "library unreadable": P.scan_verdict(0, refused, fresh)}
+    t.check("G7", "an empty walk is a lost mount only against a known catalog",
+            started_run.lines == 3 and not started_run.done
+            and said["first run, nothing there"] is None
+            and said["filter matched nothing"] is None
+            and said["work to do"] is None
+            and (said["known catalog, empty library"] or ("",))[0] == "empty_library"
+            and (said["library unreadable"] or ("",))[0] == "unreadable_library",
+            f"a fresh run has already written {started_run.lines} lines and 0 photographs; "
+            + ", ".join(f"{k}: {(v or ('exit 0',))[0]}" for k, v in said.items()))
+
+    # -- a copied diagnosis is data, not program text ------------------------------
+    # The hint for an unquoted path exists to be pasted into a shell, so it has to
+    # survive one: double quotes keep spaces but leave $(…) and $VAR live, and the
+    # remedy offered for one wrong path then quietly produced a different one.
+    def _hint_for(dirname: str) -> str:
+        parent = work / "guard-quote" / P.sha256_hex(dirname.encode())[:8]
+        (parent / dirname).mkdir(parents=True)
+        os.environ["PHOTO_GUARD_QUOTE"] = str(parent / "missing")
+        try:
+            P.require_env("PHOTO_GUARD_QUOTE", must_exist=True)
+            return ""
+        except P.Precondition as e:
+            return e.hint
+        finally:
+            os.environ.pop("PHOTO_GUARD_QUOTE", None)
+
+    literal = {}
+    for dirname in ("missing literal-$(printf INJECTED)", "missing literal-$USER"):
+        hint = _hint_for(dirname)
+        at = hint.find("export ")
+        line = hint[at:].strip() if at >= 0 else ""
+        shell = subprocess.run(["bash", "-c", f'{line}; printf %s "$PHOTO_GUARD_QUOTE"'],
+                               capture_output=True, text=True,
+                               env={**os.environ, "USER": "EXPANDED"})
+        literal[dirname] = bool(line) and shell.stdout.endswith("/" + dirname)
+    t.check("G8", "the suggested export survives being pasted into a shell",
+            all(literal.values()),
+            f"{sum(literal.values())}/2 kept the name literally; command substitution "
+            f"and $VAR both inert under a real bash")
+
+    # -- the pairing key compares stems and identifies parents ---------------------
+    # Not a filesystem test on purpose: APFS folds the two spellings of one directory
+    # name together, so the case this key must not merge cannot be built here at all.
+    nfc = unicodedata.normalize("NFC", "Cafe\u0301")
+    nfd = unicodedata.normalize("NFD", nfc)
+    one_parent = P.pair_key(Path(f"/v/{nfc}/shot.CR2")) == P.pair_key(Path(f"/v/{nfc}/Shot.jpg"))
+    two_stems = P.pair_key(Path(f"/v/a/{nfd}.cr2")) == P.pair_key(Path(f"/v/a/{nfc}.jpg"))
+    two_parents = P.pair_key(Path(f"/v/{nfd}/shot.cr2")) == P.pair_key(Path(f"/v/{nfc}/shot.jpg"))
+    t.check("G9", "RAW/JPEG pairing folds stems but never folds directories",
+            one_parent and two_stems and not two_parents,
+            "same parent pairs across case and across NFC/NFD stems; two "
+            "normalisation-variant parents stay separate")
+
+    # -- the stored relative path is the spelling the filesystem gave --------------
+    # `rel` is reopened later by build-catalog and photo-search, so it has to be the
+    # physical name, not a normalised one. Comparisons normalise at the comparison.
+    w9 = work / "guard-spelling"
+    decomposed = unicodedata.normalize("NFD", "Cafe\u0301.jpeg")
+    v9 = a_photo(w9 / "vault" / decomposed).parent
+    on_disk = os.listdir(v9)[0]
+    if on_disk != decomposed:
+        t.add("G10", "the stored relative path is the physical spelling", "SKIP",
+              "this filesystem normalises names on write; nothing to measure here",
+              mandatory=False)
+    else:
+        got = [c for c in P.walk(v9) if not c.skip]
+        t.check("G10", "the stored relative path is the physical spelling",
+                len(got) == 1 and got[0].rel == on_disk and (v9 / got[0].rel).exists()
+                and P.same_path(got[0].rel, unicodedata.normalize("NFC", decomposed)),
+                "rel is code-point-identical to the directory entry and reopens; "
+                "same_path still sees through NFC/NFD")
+
+    # -- the device snapshot spans the walk ----------------------------------------
+    w10 = work / "guard-witness"
+    v10 = a_photo(w10 / "vault" / "a.jpg").parent
+    wit, found = P.witnessed_walk(v10)
+    wit.dev = (wit.dev or 0) + 1          # as if the volume had been swapped underneath
+    caught, _ = wit.alive()
+    blind = P.Witness(v10).alive()[0]     # a witness born after the change sees nothing
+    batch = (HERE / "caption-photos.py").read_text(encoding="utf-8")
+    t.check("G11", "a device change during the scan is caught, not smoothed over",
+            len(found) == 1 and wit.dev is not None and not caught and blind
+            and "P.witnessed_walk(" in batch and "P.Witness(" not in batch,
+            "snapshot precedes the walk and the batch can only take both at once; "
+            "a snapshot taken afterwards demonstrably misses the same change")
 
 
 def main() -> int:  # noqa: C901
@@ -706,24 +815,29 @@ def main() -> int:  # noqa: C901
             len(prompts) == 1, "one prompt hash across every record")
 
     # -- resume == addition -------------------------------------------------
-    # Name the photographs instead of counting them. `already_done == 9` was a number
-    # the subprocess reported about itself, and it was equally true if a tracked JPEG
-    # had failed while some local-only file succeeded in its place. The tracked names
-    # are ground truth that exists outside this run, so check that phase B skipped
-    # exactly those — and derive the detail text from the measurement, since a
-    # hard-coded "0 of 9" reads the same whether the row passed or failed.
-    phase_a_ids = {x["photo_id"] for x in results
-                   if x.get("run_id") == (runs[0].get("run_id") if runs else None)}
+    # Name the photographs instead of counting them — and mean it. `already_done == 9`
+    # was still a count: phase A is selected by EXTENSION, so any local .jpeg in the
+    # fixture directory joins it, which let an extra file turn a correct run red and let
+    # a missing tracked file be replaced by one. Three separate claims now, each against
+    # a name: the nine were described, none was described twice, and phase B recognised
+    # exactly what phase A had done rather than walking a different set.
+    run_a = runs[0].get("run_id") if runs else None
+    run_b = runs[-1].get("run_id") if runs else None
+    phase_a = {x.get("rel"): x["photo_id"] for x in results if x.get("run_id") == run_a}
+    tracked_ids = {phase_a[rel] for rel in TRACKED_JPEGS if rel in phase_a}
+    missing = sorted(set(TRACKED_JPEGS) - set(phase_a))
     redone = {Path(x.get("rel", "")).name for x in results
-              if x.get("run_id") == (runs[-1].get("run_id") if runs else None)
-              and x.get("photo_id") in phase_a_ids}
+              if x.get("run_id") == run_b and x.get("photo_id") in tracked_ids}
     endB = runs[-1] if runs else {}
     already = (endB.get("counts") or {}).get("already_done", 0)
     t.check("P19", "resuming is the same operation as adding",
-            len(runs) == 2 and already == len(TRACKED_JPEGS) and not redone,
-            f"phase B re-described {len(redone)} of {len(TRACKED_JPEGS)} tracked JPEGs"
+            len(runs) == 2 and not missing and not redone and already == len(phase_a),
+            f"phase A described {len(tracked_ids)}/{len(TRACKED_JPEGS)} tracked JPEGs"
+            + (f", MISSING {', '.join(missing)}" if missing else "")
+            + f"; phase B re-described {len(redone)}"
             + (f" ({', '.join(sorted(redone))})" if redone else "")
-            + f", described {(endB.get('counts') or {}).get('captioned', 0)} new")
+            + f", skipped {already} of {len(phase_a)} known, described "
+            f"{(endB.get('counts') or {}).get('captioned', 0)} new")
 
     # -- the quality discriminator, and the resolution ladder ---------------
     c3 = next((x for x in results if x.get("rel", "").endswith("coll2_3.jpeg")), None)
@@ -775,20 +889,20 @@ def main() -> int:  # noqa: C901
               "coll2_3.jpeg missing from the results")
 
     # -- the publishable evidence -------------------------------------------
-    # Phase A captioned exactly the git-tracked photographs; phase B added whatever is
-    # only on this machine. So the first run_id is the publishable set, and no filename
-    # has to be hardcoded to tell the two apart.
-    first_run = next((x.get("run_id") for x in recs if x.get("type") == "run_start"), None)
-    public = sorted((x for x in results if x.get("run_id") == first_run),
+    # What may be published is decided by NAME, never by phase. Phase A is selected by
+    # extension, so a local .jpeg in the fixture directory joins it — and this block
+    # prints filenames and full captions. Inferring the publishable set from the run_id
+    # meant one such file would have been published along with them.
+    public = sorted((x for x in results if x.get("rel") in set(TRACKED_JPEGS)),
                     key=lambda x: x.get("rel", ""))
     local_only = len(results) - len(public)
     for x in public:
         cap = " ".join((x.get("text") or "").split())
         t.appendix.append(f"{Path(x['rel']).name:<14} {x.get('latency_ms', 0) / 1000:>5.1f}s  {cap}")
     if local_only:
-        t.appendix.append(f"({local_only} further photograph(s) were described in the second "
-                          f"phase; their captions are not printed here, because that phase is "
-                          f"where anything only present on this machine turns up)")
+        t.appendix.append(f"({local_only} further photograph(s) were described; their names "
+                          f"and captions are not printed here, because everything outside the "
+                          f"published fixture is only present on this machine)")
 
     # -- format coverage, honestly per extension ----------------------------
     by_ext: Dict[str, int] = {}

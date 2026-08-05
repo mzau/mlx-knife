@@ -382,10 +382,12 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
             if idx.torn:
                 warn(f"{idx.torn} unparseable log line(s) skipped; their photos will be redone")
 
-            candidates = list(P.walk(vault, include_ext=args.include_ext,
-                                     exclude_dir=args.exclude_dir,
-                                     pair_dedupe=not args.no_pair_dedupe,
-                                     prefer_raw=args.prefer_raw, limit=args.limit))
+            # One call, so the device snapshot cannot drift to after the scan it is
+            # supposed to span — see witnessed_walk().
+            witness, candidates = P.witnessed_walk(
+                vault, include_ext=args.include_ext, exclude_dir=args.exclude_dir,
+                pair_dedupe=not args.no_pair_dedupe, prefer_raw=args.prefer_raw,
+                limit=args.limit)
             todo = [c for c in candidates if not c.skip]
             total = len(todo)
 
@@ -404,7 +406,6 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
 
             # Spread on purpose: a library can span mounts, and three witnesses from
             # the front would all vouch for whichever subtree os.walk reached first.
-            witness = P.Witness(vault)
             if todo:
                 for i in sorted({0, total // 2, total - 1}):
                     witness.remember(todo[i].path)
@@ -422,20 +423,17 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                     f"the library became unreachable during the scan ({env_why})",
                     "Nothing was written against any photograph. Check the mount and run again."))
 
-            # An already-dead share leaves an empty mountpoint, which passes
-            # must_exist. Empty log = first run; non-empty log = contradiction.
-            if total == 0 and idx.lines:
+            # Having nothing to describe is not by itself a lost mount — see
+            # scan_verdict(), which is the whole of that decision.
+            verdict = P.scan_verdict(total, walk_stats, idx)
+            if verdict:
                 log.append({"type": "run_end", "run_id": run_id, "ts": P.utc_now(),
                             "schema": P.SCHEMA, "walk": walk_stats, "counts": counts,
                             "canaries": canaries, "elapsed_s": round(time.time() - started, 1),
-                            "interrupted": False, "stopped_by": "empty_library",
+                            "interrupted": False, "stopped_by": verdict[0],
                             "exit": P.EXIT_ENVIRONMENT})
                 lock.release()
-                P.die(P.Precondition(
-                    P.EXIT_ENVIRONMENT,
-                    f"no photographs found, but this catalog already knows {len(idx.done)}",
-                    "An empty mountpoint looks exactly like this. Check that the library is "
-                    "mounted before treating the run as finished."))
+                P.die(P.Precondition(P.EXIT_ENVIRONMENT, verdict[1], verdict[2]))
 
             since_canary = 0
             moved_seen: set = set()
@@ -457,7 +455,9 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                     # catalog would go on pointing at the old path, and photo-search.py
                     # hands that straight to the user as an absolute path. Record the new
                     # location; a run with nothing moved writes nothing.
-                    if pid not in moved_seen and c.rel != idx.rel.get(pid):
+                    # same_path, because `rel` is now stored physically: a `!=` would read
+                    # NFC records written earlier as a move, once per photo per run.
+                    if pid not in moved_seen and not P.same_path(c.rel, idx.rel.get(pid)):
                         log.append({"type": "path_update", "run_id": run_id,
                                     "ts": P.utc_now(), "photo_id": pid, "rel": c.rel})
                         idx.rel[pid] = c.rel

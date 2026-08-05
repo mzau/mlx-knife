@@ -19,6 +19,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import unicodedata
@@ -189,6 +190,30 @@ def _norm(s: str) -> str:
     return unicodedata.normalize("NFC", s)
 
 
+def same_path(a: Optional[str], b: Optional[str]) -> bool:
+    """Do two stored library-relative paths name the same photograph?
+
+    Stored paths are physical, so one mount can hand out NFD where another hands out
+    NFC for the same file — and records written before that rule carry NFC whatever
+    the disk said. Neither difference is a move, which is what a bare `!=` calls it.
+    """
+    return _norm(a or "") == _norm(b or "")
+
+
+def pair_key(path: Path) -> Tuple[str, str]:
+    """Grouping key for the RAW/JPEG sibling heuristic: (parent, comparable stem).
+
+    Only the STEM is a comparison. Two spellings of one name should pair, and folding
+    case follows the camera convention of IMG_0001.CR2 beside IMG_0001.jpg.
+
+    The parent is an IDENTITY and stays physical. Files from one os.walk step already
+    share a parent string, so normalising it can never rescue a pair — it can only merge
+    two directories that a byte-exact namespace keeps apart, and the survivor would be
+    dropped as a sibling of a photograph in a different folder.
+    """
+    return (str(path.parent), _norm(path.stem).lower())
+
+
 def branch_for(ext: str) -> Optional[str]:
     if ext in DIRECT_EXTS:
         return "direct"
@@ -251,14 +276,14 @@ def walk(
                                      onerror=_dir_unreadable):
         dirs[:] = [d for d in dirs if not d.startswith(".") and _norm(d) not in excluded]
         for name in sorted(files):
-            # Two spellings of the same name, kept apart on purpose. `p` must carry the
-            # one the filesystem handed out, because that is the one open() will find;
-            # `rel` carries the NFC form, because that is what has to compare equal
-            # across mounts. Normalising `p` too works on macOS only because the kernel
-            # folds on lookup — on SMB or NFS it names a file that does not exist, and
-            # the failure surfaces as read_error rather than as an encoding problem.
+            # `p` and `rel` are both the PHYSICAL spelling the filesystem handed out,
+            # because both get reopened: `p` by this run, `rel` by whoever reads the
+            # catalog later. A normalised `rel` resolves on macOS only because the kernel
+            # folds on lookup — on a byte-exact namespace it names a file that does not
+            # exist. Comparisons that need to see through the two spellings normalise at
+            # the point of comparison instead (`same_path`, and `name` just below).
             p = Path(root) / name
-            rel = _norm(str(p.relative_to(vault)))
+            rel = str(p.relative_to(vault))
             name = _norm(name)
             ext = p.suffix.lower()
 
@@ -327,11 +352,7 @@ def walk(
         for c in found:
             if c.skip:
                 continue
-            # Grouping key, so both halves must be the COMPARISON spelling. `c.path`
-            # carries whatever the filesystem said, which is the wrong side of the
-            # distinction to key on: two spellings of one stem would fail to pair.
-            by_stem.setdefault((_norm(str(c.path.parent)),
-                                _norm(c.path.stem).lower()), []).append(c)
+            by_stem.setdefault(pair_key(c.path), []).append(c)
         for group in by_stem.values():
             if len(group) < 2:
                 continue
@@ -458,6 +479,17 @@ class Witness:
             except OSError as e:
                 why.append(f"{probe.name}: {e.strerror or e}")
         return (True, "") if not why else (False, "; ".join(why))
+
+
+def witnessed_walk(vault: Path, **kw) -> Tuple[Witness, List[Candidate]]:
+    """Snapshot the library's device, THEN walk it. One call, because it is an ordering.
+
+    A snapshot has to span the thing it witnesses, and orderings regress silently: a
+    witness built after the walk compares the scan's own end state against itself, so a
+    share swapped underneath a walk that costs minutes still reports healthy. Taking the
+    two steps separately is how that happened, so the sequence lives here instead.
+    """
+    return Witness(vault), list(walk(vault, **kw))
 
 
 # ---------------------------------------------------------------------------
@@ -1373,6 +1405,43 @@ def resume_decision(pid: str, idx: ResumeIndex, max_attempts: int, force: bool =
     return None
 
 
+def scan_verdict(candidates: int, walk_stats: Dict[str, Any],
+                 idx: ResumeIndex) -> Optional[Tuple[str, str, str]]:
+    """Nothing to describe — is that a fact about the library, or about the machine?
+
+    Returns (stopped_by, message, hint) for the two environment failures, or None when
+    having nothing to do is legitimate and the run should simply end.
+
+    A LINE count cannot answer this. The resume index is built after the run has already
+    appended its own run_start and canaries, so `idx.lines` is true on every first run —
+    which reported a legitimately empty library as a vanished mount, and said so in a
+    sentence that named zero known photographs as the evidence. Only records carrying a
+    photo_id are history.
+    """
+    if candidates:
+        return None
+    refused = sum(v for k, v in walk_stats.get("skipped", {}).items()
+                  if k in ("permission", "read_error"))
+    if refused:
+        # The walk was refused, not answered — a fact about the machine, and true
+        # whether or not this catalog has ever seen a photograph.
+        return ("unreadable_library",
+                f"nothing could be described: {refused} path(s) under the library could "
+                f"not be read",
+                "Check the mount and the permissions on it, then run again. Nothing was "
+                "written against any photograph.")
+    known = len(idx.done | idx.quarantined | idx.attempts.keys() | idx.results.keys())
+    if known and not walk_stats.get("files"):
+        # An already-dead share leaves an empty mountpoint, which passes must_exist.
+        # Only PRIOR photo records turn an empty walk into a contradiction: a filter that
+        # matched nothing is not one, and neither is a first run against an empty library.
+        return ("empty_library",
+                f"the library is empty, but this catalog already knows {known} photograph(s)",
+                "An empty mountpoint looks exactly like this. Check that the library is "
+                "mounted before treating the run as finished.")
+    return None
+
+
 class Lock:
     """O_CREAT|O_EXCL, never broken automatically.
 
@@ -1500,9 +1569,11 @@ def require_env(name: str, must_exist: bool = False) -> Path:
         except OSError:
             near = []
         if near:
+            # shlex, not hand-written quotes: double quotes keep the spaces but leave
+            # `$(…)` and `$VAR` live, so the remedy for one wrong path produced another.
             hint = (f'{name} is {raw!r}, but {p.parent} contains "{near[0]}".\n'
                     f'      A path with spaces must be quoted where it is SET: '
-                    f'export {name}="{p.parent}/{near[0]}"')
+                    f'export {name}={shlex.quote(str(p.parent / near[0]))}')
         raise Precondition(EXIT_USAGE, f"{name} is not a readable directory", hint)
     return p
 

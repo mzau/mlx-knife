@@ -156,6 +156,11 @@ thousand photographs — and the log about 21 MB. Both live under `$PHOTO_CATALO
   first: two observations before a permanent consequence, never one.
 - **If the collection becomes unreachable, the run stops** — exit code 10, and no failure
   written against any photograph it never reached. What is already described stays described.
+- **Finding nothing to describe is not that.** An empty collection, or a filter that matched
+  nothing, ends at exit 0. Exit 10 is for an empty collection this catalog has already
+  described photographs from, or a walk the storage refused. The honest limit: on a *first*
+  run there is nothing to contradict, so a share that was already unmounted — leaving an
+  empty directory where it used to be — cannot be told apart from an empty collection.
 - **Permission failures are reported, never quarantined.** Trying and failing costs a system
   call; being wrong about it costs a photograph.
 - **Quarantine is still one-way.** No flag clears it and `--force-recaption` does not reach
@@ -401,7 +406,10 @@ you cannot check is not an example:
 `text` is the description and nothing but the description. Coordinates, dates and camera
 names travel as separate fields on the same line: filter inputs, never embedding inputs.
 `filepath` is relative to the album root, which appears only in `vault.json` — so neither a
-search result nor an index line can carry it.
+search result nor an index line can carry it. It is stored in the exact spelling the
+filesystem gave, character for character, so that joining it back onto the root names the
+file on any filesystem — including one that tells `é` and `é` apart. Comparisons that have to
+see through those two spellings normalise where they compare, not where they store.
 
 The three key names `text`, `filename` and `filepath` are not free choices:
 [`../rag-server/cosine-search.py`](../rag-server/cosine-search.py) reads exactly those, which
