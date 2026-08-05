@@ -251,9 +251,15 @@ def walk(
                                      onerror=_dir_unreadable):
         dirs[:] = [d for d in dirs if not d.startswith(".") and _norm(d) not in excluded]
         for name in sorted(files):
-            name = _norm(name)
+            # Two spellings of the same name, kept apart on purpose. `p` must carry the
+            # one the filesystem handed out, because that is the one open() will find;
+            # `rel` carries the NFC form, because that is what has to compare equal
+            # across mounts. Normalising `p` too works on macOS only because the kernel
+            # folds on lookup — on SMB or NFS it names a file that does not exist, and
+            # the failure surfaces as read_error rather than as an encoding problem.
             p = Path(root) / name
             rel = _norm(str(p.relative_to(vault)))
+            name = _norm(name)
             ext = p.suffix.lower()
 
             if name.startswith("."):
@@ -321,7 +327,11 @@ def walk(
         for c in found:
             if c.skip:
                 continue
-            by_stem.setdefault((str(c.path.parent), c.path.stem.lower()), []).append(c)
+            # Grouping key, so both halves must be the COMPARISON spelling. `c.path`
+            # carries whatever the filesystem said, which is the wrong side of the
+            # distinction to key on: two spellings of one stem would fail to pair.
+            by_stem.setdefault((_norm(str(c.path.parent)),
+                                _norm(c.path.stem).lower()), []).append(c)
         for group in by_stem.values():
             if len(group) < 2:
                 continue
@@ -816,6 +826,17 @@ class MetaBlock:
     @property
     def filename_cell(self) -> Optional[str]:
         return self.cell(0, 1)
+
+    @property
+    def image_hash(self) -> Optional[str]:
+        """The hash the SERVER computed over the bytes it received, or None.
+
+        Worth storing next to the one we computed locally: with only ours on record,
+        any later check of "did the pixels arrive" can restate the claim but cannot
+        re-derive it — the server's half is gone by then.
+        """
+        m = re.match(r"^image_([0-9a-f]{8})\.", self.filename_cell or "")
+        return m.group(1) if m else None
 
     def exif_cells(self) -> Dict[str, Optional[str]]:
         """Location/Date/Camera as the server rendered them, or None on a 2-column table."""

@@ -53,6 +53,11 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 FIXTURE = REPO / "tests_2.0" / "assets" / "geo-test"
 
+# The photographs published with this project, named rather than counted. Phase A is
+# these; anything else the fixture directory happens to hold on one machine is phase B.
+# A count would be satisfied by the wrong nine.
+TRACKED_JPEGS = tuple(f"coll2_{i}.jpeg" for i in range(1, 10))
+
 # coll2_3.jpeg carries three legible strings, painted on the hull and on a departure
 # sign. They are the only public, objectively checkable *content* in the fixture, which
 # makes them the one probe that re-measures the resolution decision the whole cost model
@@ -631,12 +636,17 @@ def main() -> int:  # noqa: C901
             f"{len(results)} photos described")
 
     # -- the deterministic proof that the pixels arrived --------------------
-    proven = sum(1 for x in results
-                 if (x.get("prepared") or {}).get("server_hash")
-                 and (x.get("server") or {}).get("table_columns"))
-    t.check("P12", "every response proves it came from the vision path",
-            proven == len(results),
-            f"{proven}/{len(results)} carry the server's own image hash")
+    # Compare the two halves. Asserting that both fields are merely PRESENT proves
+    # nothing: an ok record cannot exist without them, so the row was true of any log
+    # this tool can produce, and its detail text named a comparison it never made.
+    matched = [x for x in results
+               if (x.get("server") or {}).get("image_hash")
+               and (x["server"]["image_hash"] == (x.get("prepared") or {}).get("server_hash"))]
+    mismatched = len(results) - len(matched)
+    t.check("P12", "the server hashed the bytes we sent, per photo",
+            mismatched == 0 and len(matched) == len(results),
+            f"{len(matched)}/{len(results)} server hash == locally computed hash"
+            + (f", {mismatched} did NOT match" if mismatched else ""))
 
     # -- geometry and EXIF, measured from the produced bytes -----------------
     prep_dir_ok, exif_ok = 0, 0
@@ -696,15 +706,24 @@ def main() -> int:  # noqa: C901
             len(prompts) == 1, "one prompt hash across every record")
 
     # -- resume == addition -------------------------------------------------
-    by_run: Dict[str, int] = {}
-    for x in recs:
-        if x.get("type") == "attempt":
-            by_run[x.get("run_id", "")] = by_run.get(x.get("run_id", ""), 0) + 1
+    # Name the photographs instead of counting them. `already_done == 9` was a number
+    # the subprocess reported about itself, and it was equally true if a tracked JPEG
+    # had failed while some local-only file succeeded in its place. The tracked names
+    # are ground truth that exists outside this run, so check that phase B skipped
+    # exactly those — and derive the detail text from the measurement, since a
+    # hard-coded "0 of 9" reads the same whether the row passed or failed.
+    phase_a_ids = {x["photo_id"] for x in results
+                   if x.get("run_id") == (runs[0].get("run_id") if runs else None)}
+    redone = {Path(x.get("rel", "")).name for x in results
+              if x.get("run_id") == (runs[-1].get("run_id") if runs else None)
+              and x.get("photo_id") in phase_a_ids}
     endB = runs[-1] if runs else {}
     already = (endB.get("counts") or {}).get("already_done", 0)
     t.check("P19", "resuming is the same operation as adding",
-            already == 9 and len(runs) == 2,
-            f"phase B re-described 0 of 9, described {(endB.get('counts') or {}).get('captioned', 0)} new")
+            len(runs) == 2 and already == len(TRACKED_JPEGS) and not redone,
+            f"phase B re-described {len(redone)} of {len(TRACKED_JPEGS)} tracked JPEGs"
+            + (f" ({', '.join(sorted(redone))})" if redone else "")
+            + f", described {(endB.get('counts') or {}).get('captioned', 0)} new")
 
     # -- the quality discriminator, and the resolution ladder ---------------
     c3 = next((x for x in results if x.get("rel", "").endswith("coll2_3.jpeg")), None)

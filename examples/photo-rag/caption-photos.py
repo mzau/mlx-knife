@@ -571,7 +571,8 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                         "prepared": {**prep.as_prepared_dict(), "from_cache": from_cache},
                         "dhash": P.dhash_hex(_dhash_of(prep.data)),
                         "exif": prep.exif.as_dict(),
-                        "server": {"table_columns": meta.columns, **meta.exif_cells()},
+                        "server": {"table_columns": meta.columns,
+                                   "image_hash": meta.image_hash, **meta.exif_cells()},
                         # finish_reason is hardcoded "stop" on every server path and the
                         # token counts are a word-count estimate, so neither wire field can
                         # report truncation. Terminal punctuation is the only signal left.
