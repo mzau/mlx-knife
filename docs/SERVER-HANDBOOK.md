@@ -932,14 +932,22 @@ MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
 **Behavior:**
 - Handles Ctrl-C gracefully (clean shutdown with 5s timeout)
 - Runs server in subprocess for improved signal handling
-- Logs go to stderr
-- `--log-json` produces 100% JSON output
+- Logs go to stderr — application *and* access logs, so stdout stays clean for data
+- `--log-json` produces 100% JSON output. Without it Uvicorn's defaults apply and access logs
+  land on stdout instead; `--log-json` is what makes the separation complete
 - **Note:** No auto-restart on crashes (use systemd/supervisor for production)
 
 **Start:**
 ```bash
 mlxk serve --port 8000 --log-json
+
+# Capturing needs a stderr redirect — a bare `| tee` writes an empty file.
+mlxk serve --port 8000 --log-json 2>&1 | tee serve.log   # capture and watch
+mlxk serve --port 8000 --log-json 2> serve.log           # capture only
 ```
+
+The supervised child inherits the parent's descriptors, so one shell redirect captures both
+processes. There is no `--log-file` option.
 
 ### Direct Mode (Development)
 

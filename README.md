@@ -951,6 +951,10 @@ MLXK2_LOG_JSON=1 mlxk serve
 
 **Note:** `--log-json` also formats Uvicorn access logs as JSON for consistent output.
 
+**Logs go to stderr** — in JSON mode both application and access logs, by the same rule the CLI
+follows for errors: stdout stays clean. Capturing them needs a stderr redirect, not a bare pipe.
+See [SERVER-HANDBOOK → Supervised Mode](docs/SERVER-HANDBOOK.md#supervised-mode-default).
+
 **JSON Format:**
 ```json
 {"ts": 1760830072.96, "level": "INFO", "msg": "MLX Knife Server 2.0 starting up..."}
