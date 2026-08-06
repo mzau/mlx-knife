@@ -115,10 +115,9 @@ something you know is in those twenty.
 ./caption-photos.py --model pixtral-12b-4bit
 ```
 
-Roughly 4.7 s per photograph — about eleven hours per ten thousand. The twenty already
-described are not repeated. Ctrl-C whenever you like; starting it again continues where it
-stopped. Nothing done in steps 1–3 has to be undone: the same catalog carries straight
-through.
+Roughly 4.7 s per photograph. The twenty from step 3 are not described again. Ctrl-C whenever
+you like; starting it again continues where it stopped. Nothing done in steps 1–3 has to be
+undone: the same catalog carries straight through.
 
 ### Where to put the catalog
 
@@ -234,12 +233,24 @@ number — because *least far* is not the same as *near*. This is why `--min-sco
 strict. You have to measure the zero point once, per index.
 
 **Calibrate after indexing.** Ask three or four control questions for things your album cannot
-possibly hold — a medical scan, a spacecraft, a stock chart. The **highest** score any of them
-returns is your floor. Everything at or below it is noise wearing a plausible face.
+possibly hold — a medical scan, a stock chart, a laboratory instrument. The **highest** score any
+of them returns is your floor.
+
+What the floor tells you is where a question with no answer tops out. What it does **not** tell
+you is that everything below is noise. A score belongs to the pair of query and caption, not to
+the photograph: rewording a question can move a single photograph further than the whole distance
+between a confirmed hit and the floor, and a correct match for one question can land below the
+floor measured with another. Treat the floor as a precision setting for the browsing mode below,
+never as a boundary between true and false.
+
+The three below are illustrations, not a recipe. A lab technician's album holds centrifuges, a
+radiologist's holds scans, and anyone who screenshots dashboards holds bar charts. Choose three
+your own collection cannot hold — and expect to get one of them wrong, which is what the third
+point below is for.
 
 ```bash
 for q in "an MRI scan of a human knee joint" \
-         "a spacecraft docking with the space station" \
+         "a laboratory centrifuge on a workbench" \
          "a bar chart showing quarterly revenue"; do
   ./photo-search.py "$q" --top-k 3 --output-json | jq -r '[.results[].score] | @csv'
 done
@@ -310,12 +321,12 @@ from an assumption into a measurement.
 
 ## What it costs
 
-Against `pixtral-12b-4bit` with the model resident, over HTTP:
+Against `pixtral-12b-4bit` with the model resident, over HTTP, on a Mac Studio (M2 Max):
 
-| Longest edge | Seconds per photograph | Extrapolated to 30,000 |
-|---|---|---|
-| 512 px | **4.7** (3.8 – 5.9) | ~39 h |
-| 1024 px | 14.4 | ~120 h |
+| Longest edge | Seconds per photograph |
+|---|---|
+| 512 px | **4.7** (3.8 – 5.9) |
+| 1024 px | 14.4 |
 
 Resolution dominates the cost. It is emphatically **not** the lever for reading text, and
 this is the one place where the obvious intuition is not merely wrong but dangerous.
@@ -591,9 +602,11 @@ in later without re-describing a single photo.
 
 ### What it will and will not do for throughput
 
-A single node answers requests one at a time. Parallelism comes from putting more
-nodes behind the same address, and the example is built so that this needs no
-change beyond the address. Until then, that is a seam, not a claim.
+A single node answers requests one at a time, and this driver asks one question at a
+time. Pointing at more nodes behind the same address is free — that part is contract-gated
+and needs nothing but `--base-url`. Using them is not: a serial client leaves every
+additional node idle, so parallelism would need concurrent dispatch here, which is not
+built. The address is a seam; the throughput is not a claim.
 
 ### Extending it
 
