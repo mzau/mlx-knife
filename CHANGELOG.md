@@ -1,5 +1,40 @@
 # Changelog
 
+## [Unreleased]
+
+> Reinstated 2026-08-06. It was dropped in `20a3606` because it duplicated the Migration
+> Notes, so entries here **point at** the canonical text instead of repeating it. Folded
+> into the release section at release, as before.
+
+### Added
+
+- `examples/photo-rag/` — a private photo library made searchable: walk, describe one
+  photograph per request, derive a catalog from an append-only log, embed and search.
+  Runs against released 2.0.7 with **no change to mlx-knife**. `geo-test-run.py` drives the
+  documented command line and grades itself against the photographs shipped with the project.
+- Four camera HEIC at 1024 px under `tests_2.0/assets/geo-test/heic/`, so the `sips`
+  conversion branch is demonstrable for any clone rather than asserted.
+
+### Changed
+
+- Dependency wave for 2.0.8 — mlx-vlm 0.6.8, transformers 5.14.1, `mlx<0.33`,
+  torch/torchvision and `datasets` dropped. **No server-code change**; endpoints and payloads
+  are identical. Canonical text: SERVER-HANDBOOK → Migration Notes → *From 2.0.7 → 2.0.8*.
+- ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
+  installed ruff version defaults to.
+
+### Fixed
+
+- `NOTICE` credited soundfile/libsndfile; audio I/O is miniaudio (MIT). The ffmpeg/ffprobe
+  boundary for container formats is now stated in terms a client can act on.
+- `mlxk serve --log-json` routes application *and* access logs to stderr — a bare `| tee`
+  captures nothing. Documented in README and SERVER-HANDBOOK.
+- Five lines that shipped in the 2.0.7 wheel cited notes that are not part of the repository;
+  they cite the published documents now.
+- Two forward-promises in shipped ADRs had expired: ADR-018 Phase 4 and ADR-024's surgical
+  reject both named 2.0.7 and did not ship there. Open promises now state the condition that
+  makes them due rather than a release number (convention in `docs/ADR/README.md`).
+
 ## [2.0.7] - 2026-07-24
 
 > **On-device embeddings (experimental).** A new `mlxk embed` verb, a
