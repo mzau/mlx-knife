@@ -17,7 +17,7 @@
 
 ### Changed
 
-- Dependency wave for 2.0.8 — mlx-vlm 0.6.8, transformers 5.14.1, `mlx<0.33`,
+- Dependency wave for 2.0.8 — mlx-vlm 0.6.10, transformers 5.14.1, `mlx<0.33`,
   torch/torchvision and `datasets` dropped. **No server-code change**; endpoints and payloads
   are identical. Canonical text: SERVER-HANDBOOK → Migration Notes → *From 2.0.7 → 2.0.8*.
 - ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the

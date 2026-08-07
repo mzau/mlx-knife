@@ -43,7 +43,7 @@ dependencies = [
     # This pin is now the ONLY thing holding the verified version. The former
     # transitive protection (0.4.5/0.4.6 capped transformers <5.13.0, colliding
     # with mlx-vlm >=0.6.5) expired with 0.4.7, which lifted the cap; mlx-vlm
-    # 0.6.8 only asks for mlx-audio>=0.4.3, so an unpinned resolve now lands on
+    # 0.6.10 only asks for mlx-audio>=0.4.3, so an unpinned resolve now lands on
     # 0.4.7. Whisper also carries bridge patches in audio_runner.py that an
     # untested mlx-audio would silently slide under.
     # Holding at 0.4.4 is a measured decision, not lag: 0.4.6's PR #825 moved
@@ -65,7 +65,7 @@ dependencies = [
     # both stt/utils.load_audio and the general mlx_audio/utils.py load_audio,
     # which took the same change.
     "mlx-audio==0.4.4",
-    "mlx-vlm==0.6.8",
+    "mlx-vlm==0.6.10",
     "transformers==5.14.1",
     "tiktoken>=0.7.0,<1.0",
 ]

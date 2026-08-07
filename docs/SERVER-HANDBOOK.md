@@ -41,7 +41,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 - Python 3.10–3.12. macOS/ARM has no 3.13 wheel for `miniaudio`, and `mlx-audio` is a **base** dependency — there is no audio-free install variant, so 3.13 fails at install time.
 - `mlx>=0.30.0,<0.33`
 - `mlx-lm==0.31.3` (text backend)
-- `mlx-vlm==0.6.8` (vision + multimodal audio)
+- `mlx-vlm==0.6.10` (vision + multimodal audio)
 - `mlx-audio==0.4.4` (Whisper / Voxtral STT)
 - `transformers==5.14.1` (required by `mlx-vlm >=0.6.5`)
 - **no `torch` / `torchvision`** — the verified vision set loads torch-free from `mlx-vlm 0.6.4` onwards (mlx-vlm #1011)
@@ -1368,7 +1368,7 @@ change validated against unchanged 2.0.7 server code, so nothing on the wire mov
 | Package | 2.0.7 | 2.0.8 |
 |---------|-------|-------|
 | `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.33` |
-| `mlx-vlm` | `==0.6.2` | `==0.6.8` |
+| `mlx-vlm` | `==0.6.2` | `==0.6.10` |
 | `transformers` | `==5.5.4` | `==5.14.1` |
 | `torch` | `>=2.0` (base dep) | **removed** |
 | `torchvision` | `>=0.15` (base dep) | **removed** |

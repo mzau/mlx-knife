@@ -368,7 +368,7 @@ Dependency stack (`pyproject.toml:41-52`):
 | `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.33` | Apple Silicon ML framework |
 | `mlx-lm` | `==0.31.3` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |
 | `mlx-audio` | `==0.4.4` | `==0.4.4` | STT backend (Whisper, VibeVoice) |
-| `mlx-vlm` | `==0.6.2` | `==0.6.8` | VLM backend |
+| `mlx-vlm` | `==0.6.2` | `==0.6.10` | VLM backend |
 | `transformers` | `==5.5.4` | `==5.14.1` | 2.0.7: floor driven by `mlx-audio`. 2.0.8: `mlx-vlm >=0.6.5` requires `>=5.14.0` |
 | `torch>=2.0`, `torchvision>=0.15` | base deps | **removed** | See torch-free note below |
 
