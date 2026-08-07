@@ -113,6 +113,7 @@ defined in [ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md).
 | Vision E2E (ADR-012) | `pytest -m live_e2e tests_2.0/live/test_vision*.py -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `mlx-vlm` | Vision CLI + Server. Uses Portfolio Discovery or `pixtral-12b-4bit` fallback. | No |
 | Audio E2E (ADR-020) | `pytest -m live_e2e tests_2.0/live/test_audio*.py -v` | `live_e2e`; Optional: `HF_HOME`; `MLXK_TRANSLATE_FIXTURE_DE` (local non-English audio → runs the #54 translate E2E, else skips) + optional `MLXK_TRANSLATE_FIXTURE_DE_EXPECT` (English substring to assert); Requires: `mlx-audio` | Audio transcription + translation (#54) + Server. Uses Portfolio Discovery or `whisper` fallback. | No |
 | Embeddings E2E (ADR-015) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_e2e tests_2.0/live/test_embed*.py -v` | `live_e2e`; **alpha-gated** Env: `MLXK2_ENABLE_ALPHA_FEATURES=1` + `HF_HOME`/`MLXK_WORKSPACE_HOME` | `mlxk embed` decoder path (`mlx-lm`) + vendored BERT encoder (CLS **and** mean pooling). Verified fixtures (`EMBED_TEST_MODELS`): `Qwen3-Embedding-0.6B-4bit-DWQ` (decoder, workspace), `bge-small-en-v1.5-4bit` (encoder CLS, 4-bit, cache), `multilingual-e5-small-mlx` (encoder mean, float, workspace). Class-level (any `model_type` qwen3/bert embedder is attempted); per-model skip if absent. Which **classes** are verified-for-users → `docs/MODEL-COVERAGE.md`, not here. | No (cache + workspace) |
+| serve process lifecycle (#60) | `pytest -m wet tests_2.0/live/test_serve_cli_signals_live.py -v` | `live_e2e`; Requires: `httpx`; no model, no env | The only test that starts `mlxk serve` **through the CLI** and stops it: SIGTERM/SIGHUP to the supervisor, and SIGKILL to prove the server stops itself. Asserts the child is gone *and* the port is re-bindable. Every other live test boots `server_base` directly and therefore cannot see this path. | No |
 | FIM E2E (Issue #55) | `MLXK_FIM_MODEL=<coder> pytest -m live_e2e tests_2.0/live/test_fim_e2e.py -v` | `live_e2e`; Env: `MLXK_FIM_MODEL` (FIM-capable coder id/path; else auto-picks a `*coder*` model from the text portfolio) + `HF_HOME`/`MLXK_WORKSPACE_HOME`; Requires: `httpx` | A coder model fills a FIM gap via `/v1/completions` (raw, no chat template) — verifies the FIM enabler end-to-end. Skips if no coder model available. | No |
 | Cross-Volume (ADR-022) | `pytest -m live_cross_volume -v` | `live_cross_volume`; Env: `MLXK_WORKSPACE_HOME` (source vol); `/tmp` must be different volume | Clone + Convert cross-volume fallback. Requires small model (~700MB) in portfolio. Tests CoW fallback to regular copy. | No |
 | Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v` | `live_pull` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
@@ -1827,6 +1828,7 @@ tests_2.0/
 ├── test_model_naming.py               # Conversion rules, bijection, parsing
 ├── test_model_resolution_workspace.py # Workspace path resolution tests (ADR-018, explicit path detection, prefix matching)
 ├── test_multimodal_filtering.py       # Multimodal history filtering (Vision→Text model switching)
+├── test_parent_watch.py               # Server subprocess notices a dead supervisor via pipe EOF and stops itself (#60 second half)
 ├── test_portfolio_discovery.py        # Portfolio separation discovery tests (text/vision filtering, RAM formulas)
 ├── test_push_dry_run.py               # Push dry-run diff planning (added/modified/deleted)
 ├── test_push_extended.py              # Extended push: no-op vs commit, branch/retry, .hfignore
@@ -1839,6 +1841,7 @@ tests_2.0/
 ├── test_run_vision.py                 # Vision runner unit tests (ADR-012 Phase 1b, VisionRunner routing, default prompt)
 ├── test_runner_core.py                # MLXRunner core generation/memory/stop tokens
 ├── test_runtime_compatibility_reason_chain.py  # Runtime compatibility reason field decision chain (Issue #36)
+├── test_serve_signal_teardown.py      # Supervisor teardown on SIGINT/SIGTERM/SIGHUP against a real child, escalation, exit codes (#60)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
 ├── test_server_audio.py               # Audio server unit tests (ADR-020 Phase 4: request detection, Base64 decoding, format validation)

@@ -9,7 +9,7 @@ via env vars, then delegate to the shared ``_run_supervised_uvicorn`` with the e
 import os
 import sys
 
-from .serve import _run_supervised_uvicorn
+from .serve import _cli_exit_code, _run_supervised_uvicorn
 
 
 def start_embed_serve(
@@ -75,12 +75,14 @@ def start_embed_serve(
 
     if supervise:
         # Delegate to the shared subprocess supervisor (serve.py), targeting the embed app.
-        exit_code = _run_supervised_uvicorn(
-            host=host,
-            port=port,
-            log_level=log_level,
-            module="mlxk2.core.embed_server_base",
-            extra_env=extra_env,
+        exit_code = _cli_exit_code(
+            _run_supervised_uvicorn(
+                host=host,
+                port=port,
+                log_level=log_level,
+                module="mlxk2.core.embed_server_base",
+                extra_env=extra_env,
+            )
         )
         if exit_code != 0:
             sys.exit(exit_code)

@@ -218,6 +218,12 @@ def create_embeddings(request: EmbeddingRequest):
 # CLI entrypoint for supervised mode (python -m mlxk2.core.embed_server_base).
 # Reads config from env vars set by operations/embed_serve.py before Popen.
 if __name__ == "__main__":
+    from .parent_watch import watch_supervisor
+
+    # Before the model load: a supervisor that dies meanwhile must not leave us behind
+    # holding the port (issue #60). No-op without a supervisor.
+    watch_supervisor()
+
     host = os.environ.get("MLXK2_HOST", "127.0.0.1")
     port = int(os.environ.get("MLXK2_PORT", "8002"))
     log_level = os.environ.get("MLXK2_LOG_LEVEL", "info")

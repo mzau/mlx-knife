@@ -146,7 +146,7 @@ def remove_model(name: str, force: bool = False):
 - **Streaming vs non-streaming**: End tokens must match
 - **Concurrent requests**: Model loading race conditions
 - **Port conflicts**: Handle "address already in use"
-- **SIGTERM handling**: Clean shutdown (Issue #18 known limitation)
+- **SIGTERM handling**: Clean shutdown of the supervised server ([#60](https://github.com/mzau/mlx-knife/issues/60))
 - **Memory management**: Proper cleanup after each request
 
 **Token Limit Strategy:**

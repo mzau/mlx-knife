@@ -183,9 +183,9 @@ def LocalServer(
     # Pass environment variables (including HF_HOME) to subprocess
     env = os.environ.copy()
 
-    # Start server_base directly (NOT via CLI) to avoid double start_new_session orphan bug
-    # The CLI uses start_new_session=True in serve.py, which creates a separate process group
-    # that won't receive our SIGTERM. By starting server_base directly, we control the session.
+    # Start server_base directly (NOT via CLI): one process less between test and server,
+    # and this fixture owns the session it signals. The CLI's own process handling is covered
+    # by test_serve_cli_signals_live.py — routing around it here is what hid issue #60.
     env["MLXK2_HOST"] = "127.0.0.1"
     env["MLXK2_PORT"] = str(port)
     env["MLXK2_LOG_LEVEL"] = log_level

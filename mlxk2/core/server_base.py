@@ -1287,6 +1287,12 @@ def run_server(
 if __name__ == "__main__":
     import os
 
+    from .parent_watch import watch_supervisor
+
+    # Before the preload: a supervisor that dies while the model is still loading must
+    # not leave us behind holding the port (issue #60). No-op without a supervisor.
+    watch_supervisor()
+
     # Read configuration from environment variables
     # (set by mlxk2/operations/serve.py in supervised mode)
     host = os.environ.get("MLXK2_HOST", "127.0.0.1")

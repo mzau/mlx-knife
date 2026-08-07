@@ -11,9 +11,8 @@ Requires a server you started yourself:
 
     mlxk serve --model pixtral-12b-4bit --port 8000
 
-This script never starts or stops one. A server it started would die with it and take
-the run down too; and mlx-knife's own `serve` leaves an orphan behind on SIGTERM
-(issue #60), so owning that lifecycle would mean owning that bug as well.
+This script never starts or stops one: a server it started would die with it and take
+the run down too.
 
 Usage:
     # the whole library; Ctrl-C any time, re-run to continue

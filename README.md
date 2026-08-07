@@ -185,7 +185,7 @@ mlxk serve --port 8080
 | `pull` | HuggingFace model downloads with corruption detection |
 | `rm` | Model deletion with lock cleanup and fuzzy matching |
 | `run` | Interactive and single-shot model execution with streaming/batch modes |
-| `server`/`serve` | OpenAI-compatible API server; SIGINT-robust (Supervisor); SSE streaming |
+| `server`/`serve` | OpenAI-compatible API server; supervised, signal-safe shutdown; SSE streaming |
 | `clone` | Model workspace cloning - create local editable copy from cache |
 | `push` | Upload to HuggingFace Hub (requires `--private` flag for safety) |
 | `convert` | Workspace transformations: `--repair-index`, `--quantize <bits>` |

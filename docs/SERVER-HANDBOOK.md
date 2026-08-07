@@ -930,8 +930,15 @@ MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
 ### Supervised Mode (Default)
 
 **Behavior:**
-- Handles Ctrl-C gracefully (clean shutdown with 5s timeout)
 - Runs server in subprocess for improved signal handling
+- **Stopping it:** Ctrl-C, `SIGTERM` and `SIGHUP` all take the same path — the server gets
+  5s to finish, then it is killed. A second stop signal skips the rest of that grace. A
+  script, a shell `trap`, launchd or systemd can therefore stop `mlxk serve` the way they
+  stop anything else
+- If the supervisor is killed outright (`SIGKILL`) or crashes, the server process notices
+  and stops itself, so neither the model nor the port is left behind. Not covered: a server
+  wedged inside a native call — no in-process mechanism can end that, only an external
+  supervisor or the OS
 - Logs go to stderr — application *and* access logs, so stdout stays clean for data
 - `--log-json` produces 100% JSON output. Without it Uvicorn's defaults apply and access logs
   land on stdout instead; `--log-json` is what makes the separation complete
@@ -945,6 +952,16 @@ mlxk serve --port 8000 --log-json
 mlxk serve --port 8000 --log-json 2>&1 | tee serve.log   # capture and watch
 mlxk serve --port 8000 --log-json 2> serve.log           # capture only
 ```
+
+**Stop:**
+```bash
+kill "$SERVER_PID"        # graceful; the port is free once the process is gone
+kill -9 "$SERVER_PID"     # the server notices and stops itself too
+```
+The exit status follows the shell convention: `143` (128+SIGTERM) when the server was
+stopped by a signal — Ctrl-C included, because the supervisor stops the server with
+SIGTERM — and `137` when it had to be forced. A server that exits on its own reports its
+own code.
 
 The supervised child inherits the parent's descriptors, so one shell redirect captures both
 processes. There is no `--log-file` option.

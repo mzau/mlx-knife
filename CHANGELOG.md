@@ -25,6 +25,12 @@
 
 ### Fixed
 
+- `mlxk serve` and `mlxk embed-serve` left the server process running and the port bound
+  when the supervisor was stopped by a signal or killed outright
+  ([#60](https://github.com/mzau/mlx-knife/issues/60)) — a restart then talked to the old
+  server with the old model and said nothing. Stopping either one now also reports the exit
+  status a shell reports (`143`/`137` instead of `241`). Canonical text: SERVER-HANDBOOK →
+  *Supervised Mode*.
 - `NOTICE` credited soundfile/libsndfile; audio I/O is miniaudio (MIT). The ffmpeg/ffprobe
   boundary for container formats is now stated in terms a client can act on.
 - `mlxk serve --log-json` routes application *and* access logs to stderr — a bare `| tee`
