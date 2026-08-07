@@ -1,8 +1,11 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.7 stable — includes `POST /v1/audio/translations` (#54) and the experimental `/v1/embeddings` backend (`embed-serve`) + `serve --embed-backend` proxy
-**Status:** ⚠️ **WORK IN PROGRESS** - This document will evolve until 2.1 stable release
-**Last Updated:** 2026-07-24
+**Version:** 2.0.7 plus the unreleased tree state — the 2.0.8 dependency wave and the `serve`
+signal/teardown fix. Endpoint surface, request and response shapes are those of released 2.0.7;
+the [Migration Guide](#migration-guide) records what differs.
+**Scope:** what the server does today. Planned work, deferred features and target releases are
+deliberately absent — this is a contract, not a roadmap.
+**Last Updated:** 2026-08-07
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -48,7 +51,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 
 Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
 
-> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. The pin set above is a **dependency change with no server-code change**; endpoints, request and response shapes are identical. See *From 2.0.7 → 2.0.8* under Migration Notes for what actually differs.
+> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints, request and response shapes are identical; what differs is the pin set and how `serve` shuts down. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
 
 ---
 
@@ -65,8 +68,8 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
 | `/v1/audio/translations` | ✅ Supported (2.0.7+) | OpenAI Whisper translations API — speech→English (multilingual non-turbo Whisper; non-capable models → 400/422). See [POST /v1/audio/translations](#post-v1audiotranslations) |
 | `/v1/embeddings` | ✅ Supported (2.0.7, experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend`. Returns **501** on a plain `serve` started without `--embed-backend` (embeddings not enabled). See [Embeddings Backend](#embeddings-backend-embed-serve) |
-| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field. Does **not** list embedders in 2.0.7 (discovery merge → 2.1) |
-| `/health` | ✅ Custom | MLX Knife extension |
+| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field. Does **not** list embedders — they belong to the separate `embed-serve` backend, whose model list is not merged in |
+| `/health` | ✅ Custom | MLX Knife extension — liveness probe, no backend state |
 
 ### Authentication
 
@@ -119,9 +122,8 @@ Notes for client implementers:
   `serve → embed-serve` hop is server-to-server (no browser CORS). Talking
   directly to the `embed-serve` port uses its own, identical policy.
 - This is a wide-open, **local / trusted-network** posture — origins are not
-  restricted and not currently configurable. For exposure to untrusted origins,
-  front the server with a reverse proxy. *(A configurable origin allow-list may
-  change in a future release.)*
+  restricted and not configurable. For exposure to untrusted origins, front the
+  server with a reverse proxy.
 
 ### Request Headers
 
@@ -171,7 +173,7 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 }
 ```
 
-**Error types** (full `ErrorType` enum, `mlxk2/errors.py`):
+**Error types** (every type the server emits):
 
 | Type | HTTP | Meaning |
 |------|------|---------|
@@ -183,13 +185,25 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 | `push_operation_failed` | 500 | `/v1/push`-style operation failed (CLI-only path; not user-reachable on the server today) |
 | `server_shutdown` | 503 | Lifespan shutdown in progress; new requests are rejected |
 | `insufficient_memory` | 507 | Model exceeds the memory threshold (ADR-016) |
-| `not_implemented` | 501 | Known capability class, but the feature is not yet implemented (e.g. STT quantization) |
+| `not_implemented` | 501 | Known capability class, but the feature is not implemented (e.g. STT quantization) |
 | `unsupported_multimodal` | 501 | Model uses a multimodal class outside the verified-multimodal list (ADR-023) |
-| `bad_gateway` | 502 | Embed backend (`serve --embed-backend`) unreachable / connection failed / connect-timeout (retryable; ADR-015 D2) |
-| `gateway_timeout` | 504 | Embed backend read-timeout on a slow / large batch (retryable; ADR-015 D2) |
+| `bad_gateway` | 502 | Embed backend (`serve --embed-backend`) unreachable / connection failed / connect-timeout (retryable; ADR-015) |
+| `gateway_timeout` | 504 | Embed backend read-timeout on a slow / large batch (retryable; ADR-015) |
 | `internal_error` | 500 | Unexpected backend failure |
 
 (`bad_gateway` / `gateway_timeout` are raised only by the `serve --embed-backend` proxy; a backend's own `4xx`/`5xx` envelopes otherwise pass through verbatim.)
+
+**Route on the HTTP status, not on `error.type`.** The type is derived *from* the status by a fixed
+mapping, which makes the status the more reliable of the two — and two statuses are absent from that
+mapping, so their envelopes fall back to `error.type: "internal_error"` with `retryable: false`:
+
+- **422** — `POST /v1/audio/translations` against an audio model that cannot translate
+  (see [the reject matrix](#post-v1audiotranslations))
+- **413** — an audio upload above the 50 MB limit, on either audio endpoint
+
+Both are deliberate, correct rejects wearing the label of a server fault
+([#62](https://github.com/mzau/mlx-knife/issues/62)). The statuses are correct and stable; the type on
+these two paths is not.
 
 ---
 
@@ -481,7 +495,7 @@ curl -X POST http://localhost:8000/v1/embeddings \
 | `model` | String | ✅ | Model ID. The backend serves a **single** model, so this is informational (the loaded model answers regardless). The response echoes the canonical `org/name` **selector** (and adds a `system_fingerprint` realization token — see Notes). |
 | `input` | String or String[] | ✅ | One text, or a batch (one vector per item, in order). |
 | `encoding_format` | String | ❌ | `base64` (**default** — little-endian float32, what the OpenAI SDK decodes) or `float` (raw JSON array, handy for `curl`). |
-| `dimensions` | Integer | ❌ | Accepted only if equal to the model's native width; any other value → **400** (no Matryoshka truncation in 2.0.7). |
+| `dimensions` | Integer | ❌ | Accepted only if equal to the model's native width; any other value → **400** (no Matryoshka truncation). |
 | `user` | String | ❌ | Accepted and ignored (OpenAI passthrough). |
 | `input_type` | String | ❌ | **mlxk extension** (RAG): `document` (default) or `query` (applies the model's query-instruction prefix). Ignored by standard OpenAI clients. |
 | `instruct` | String | ❌ | **mlxk extension**: overrides the query task instruction; implies `input_type: query`. **Decoder embedders only (Qwen3)** — the BERT-family encoders (bge/e5) ignore this field; encoder support is pending. |
@@ -532,7 +546,7 @@ docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).
   (`Qwen3-Embedding-*`, via `mlx-lm`) and encoder (`bge-*`, `*-e5-*`, `mxbai-*`; `model_type: bert`).
   A declared-but-not-vendored embedder (e.g. `xlm-roberta`/`modernbert`) is rejected at backend
   **startup**, never silently.
-- **Experimental:** the backend requires `MLXK2_ENABLE_ALPHA_FEATURES=1` (2.0.7).
+- **Experimental:** the backend requires `MLXK2_ENABLE_ALPHA_FEATURES=1`.
 
 ---
 
@@ -547,17 +561,15 @@ a model preloaded from outside the workspace home is included as well.
 The preloaded model (if any) appears exactly once, sorted first; all other
 models follow alphabetically.
 
-> **Embedders are excluded in 2.0.7.** Embedding models (e.g. `bge-*`,
-> `Qwen3-Embedding-*`) are **not** listed here — they are served by the separate
-> `embed-serve` backend, and the discovery merge is deferred to 2.1 (ADR-015). This is the
-> one case where `/v1/models` differs from `mlxk list`, which *does* show embedders.
+> **Embedders are excluded.** Embedding models (e.g. `bge-*`, `Qwen3-Embedding-*`) are
+> **not** listed here — they are served by the separate `embed-serve` backend, whose model
+> list is not merged in. This is the one case where `/v1/models` differs from `mlxk list`,
+> which *does* show embedders.
 
-> **No per-model capability label or `dimensions` field (2.0.7).** Entries carry no
-> capability label (e.g. `chat` / `+vision` / `+audio`) — an unsupported modality is
-> signalled at **request** time with HTTP **501**, not advertised here — and no embedding
-> `dimensions` (read it from the first `/v1/embeddings` response: the returned vector's
-> length). Surfacing capability labels and embedder `dimensions` on `/v1/models` is under
-> consideration for a future release.
+> **No per-model capability label and no `dimensions` field.** Entries carry no capability
+> label (e.g. `chat` / `+vision` / `+audio`) — an unsupported modality is signalled at
+> **request** time with HTTP **501**, not advertised here — and no embedding `dimensions`
+> (read it from the first `/v1/embeddings` response: the returned vector's length).
 
 **Response:**
 ```json
@@ -606,11 +618,16 @@ Note: LM Studio provides similar field as `max_context_length`.
 
 ### GET /health
 
-**Server health check (200 OK if server is running).**
+**Liveness only — 200 OK means the process is up and answering.**
 
 ```json
 { "status": "healthy", "service": "mlx-knife-server-2.0" }
 ```
+
+The response is a constant: it inspects neither the loaded model nor the inference backend, so
+`"status": "healthy"` is not a statement about whether the next request will succeed. A process whose
+backend has failed still answers `healthy`. Treat it as a liveness probe — it detects a dead or
+unreachable server, not an unhealthy one — and not as a readiness or retry signal.
 
 (The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}` and `503` until its model is loaded. The `system_fingerprint` matches the `/v1/embeddings` response, so a client **talking directly to the backend port** can poll that `/health` to detect a model/device swap without an embed request. **Through the `serve` gateway the backend's `/health` is not exposed** — a gateway client detects swaps reactively, from the next `/v1/embeddings` response.)
 
@@ -713,7 +730,7 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 - ✅ Temperature 0.0 (greedy sampling for transcription consistency)
 
 **Limits (both methods):**
-- **Per-audio:** 50 MB max (`MAX_AUDIO_SIZE_BYTES` in `mlxk2/tools/vision_adapter.py`; same limit on both endpoints)
+- **Per-audio:** 50 MB max (same limit on both endpoints)
 - **Count:** 1 audio per request
 
 > **Caveat — multimodal chat audio.** STT-dedicated models (Whisper, Voxtral) have natural stop tokens and process long audio reliably; the `/v1/audio/transcriptions` endpoint is robust against runaway inference. Multimodal chat audio (Gemma-3n in `/v1/chat/completions` with `input_audio`) lacks robust EOS-detection and can hallucinate without converging — `max_tokens` (default 2048) is currently the only inference bound. Keep chat audio short (a few seconds) for now; model-specific bounds are an open engineering item.
@@ -843,7 +860,7 @@ data: [DONE]
 
 ### Embeddings Backend (embed-serve)
 
-**Experimental (2.0.7).** Text embeddings run in a **separate process**, `mlxk embed-serve` —
+**Experimental.** Text embeddings run in a **separate process**, `mlxk embed-serve` —
 not inside `mlxk serve`. This keeps the main server's memory gates (8 GB vision / 4 GB audio)
 intact: an embedding model is never loaded into serve's address space. The backend exposes two
 routes: `POST /v1/embeddings` (the OpenAI surface) and `GET /health` (liveness **+ identity** —
@@ -861,10 +878,10 @@ A RAG client points at `serve` (or, in a cluster, broke's gateway) for both `/v1
 and `/v1/chat/completions` — it never talks to `embed-serve` directly. In standalone use you may
 also call the backend port directly.
 
-> **2.0.7 rollout:** both the `embed-serve` backend (Slice D1) and the `serve --embed-backend`
-> proxy (Slice D2) ship in 2.0.7 (experimental, alpha-gated). `GET /v1/models` on `serve` does
-> **not** advertise the backend's embedders in 2.0.7 (discovery merge deferred to 2.1) — embeddings
-> still work; only "list → embed" auto-discovery is incomplete.
+> **Both halves are experimental and alpha-gated:** the `embed-serve` backend and the
+> `serve --embed-backend` proxy. `GET /v1/models` on `serve` does **not** advertise the backend's
+> embedders — embeddings work, but a client cannot discover the embedding model over HTTP. It has to
+> be configured, or read from `mlxk list` on the host.
 
 **Proxy behavior (`serve --embed-backend`):** serve forwards the request body to the backend
 **byte-for-byte** and returns the backend's response verbatim — the embed model is never loaded
@@ -886,8 +903,7 @@ Timeouts: connect 3 s (fail fast when the backend is down), read 120 s (large ba
 **proactively** depends on topology: talking **directly** to the backend port it can poll
 `GET /health` (same `model` + `system_fingerprint`, no embed request); **through the `serve` gateway**
 only `/v1/embeddings` is proxied — the backend's `/health` is not exposed — so a gateway client detects
-a model/revision/device swap **reactively**, from the next embeddings response. Proactive identity
-through the gateway is under consideration for a future release.
+a model/revision/device swap **reactively**, from the next embeddings response.
 
 **Flags:** `mlxk embed-serve <model> [--port 8002] [--host 127.0.0.1] [--cpu] [--log-level info] [--log-json] [--json] [--verbose]`
 (`--json` prints startup info as JSON; `--verbose` shows detailed output.)
@@ -920,9 +936,9 @@ MLXK2_LOG_LEVEL=info      # debug|info|warning|error
 
 # Feature gates
 MLXK2_ENABLE_PIPES=1              # Unix pipe integration (beta, 2.0.4-beta.1)
-MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha (2.0.7): embed, embed-serve, serve --embed-backend
+MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha: embed, embed-serve, serve --embed-backend
 
-# Embeddings proxy (ADR-015 D2) — normally set for you by `serve --embed-backend URL`,
+# Embeddings proxy (ADR-015) — normally set for you by `serve --embed-backend URL`,
 # but can be set directly. When unset, POST /v1/embeddings on serve returns 501.
 MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
 ```
@@ -988,15 +1004,17 @@ python -m mlxk2.core.server_base
 - **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures, ambiguous model spec; for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
 - **403 Forbidden:** File or cache permission denied (`access_denied`)
 - **404 Not Found:** Model not found in cache or workspace
+- **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints). The envelope carries `error.type: "internal_error"`; route on the status (see [Error Response Format](#error-response-format))
+- **422 Unprocessable Entity:** `POST /v1/audio/translations` only — an audio model that cannot translate. Same envelope caveat as 413
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
 - **501 Not Implemented:** Feature not supported. Sub-causes:
-  - `not_implemented` — known capability class, feature missing (e.g. STT quantization); also returned by `POST /v1/embeddings` when `serve` has no `--embed-backend` configured (ADR-015 D2)
+  - `not_implemented` — known capability class, feature missing (e.g. STT quantization); also returned by `POST /v1/embeddings` when `serve` has no `--embed-backend` configured (ADR-015)
   - `unsupported_multimodal` — model uses a multimodal class outside the verified-multimodal list (ADR-023)
-- **502 Bad Gateway:** Embed backend unreachable / connection refused / connect-timeout (`bad_gateway`, **retryable**; `serve --embed-backend` proxy, ADR-015 D2)
+- **502 Bad Gateway:** Embed backend unreachable / connection refused / connect-timeout (`bad_gateway`, **retryable**; `serve --embed-backend` proxy, ADR-015)
 - **503 Service Unavailable:** Server shutting down (`server_shutdown`) or HF download failed (`download_failed`)
-- **504 Gateway Timeout:** Embed backend read-timeout on a slow / large batch (`gateway_timeout`, **retryable**; `serve --embed-backend` proxy, ADR-015 D2)
+- **504 Gateway Timeout:** Embed backend read-timeout on a slow / large batch (`gateway_timeout`, **retryable**; `serve --embed-backend` proxy, ADR-015)
 - **507 Insufficient Storage:** Memory constraints violated (vision/audio model >70% RAM, ADR-016)
 
 ---
@@ -1085,10 +1103,12 @@ pip install mlx-knife
 
 ### Audio Errors
 
-#### Audio Request Fails (HTTP 400)
+#### Audio Request Fails
 
-**Common causes:**
-- Audio size > 50 MB (hard limit, both endpoints — `MAX_AUDIO_SIZE_BYTES`)
+**HTTP 413** — the upload is above the 50 MB limit (hard limit, both endpoints).
+
+**HTTP 400** — any of:
+- An empty file
 - More than 1 audio per request (multi-audio not supported)
 - Unsupported format (use WAV or MP3 for chat `input_audio`; WAV/MP3/M4A/FLAC/OGG for `/v1/audio/transcriptions`)
 - Invalid Base64 encoding (chat endpoint only)
@@ -1221,7 +1241,7 @@ batch. Reduce the batch size or retry.
 | Image size | 20 MB | Metal OOM prevention |
 | Total image size | 50 MB | Metal OOM prevention |
 | **Audio per request (chat)** | **1** | **mlx-vlm limitation** |
-| **Audio size (both endpoints)** | **50 MB** | **`MAX_AUDIO_SIZE_BYTES` — measured in raw bytes, codec-agnostic. WAV @ 16 kHz mono caps at ~26 min; compressed formats fit much more (verified: 55 min MP3 transcription via Whisper stays under the limit). Whisper handles long audio robustly; multimodal chat audio is bounded by `max_tokens` only (see Audio Support caveat).** |
+| **Audio size (both endpoints)** | **50 MB** (52,428,800 bytes) | **Measured in raw bytes, codec-agnostic. WAV @ 16 kHz mono 16-bit caps at ~27 min; compressed formats fit much more (verified: 55 min MP3 transcription via Whisper stays under the limit). Whisper handles long audio robustly; multimodal chat audio is bounded by `max_tokens` only (see Audio Support caveat).** |
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
 | Vision max_tokens | 2048 (default) | Stateless, slow inference |
@@ -1326,10 +1346,10 @@ batch. Reduce the batch size or retry.
 `MLXK2_ENABLE_ALPHA_FEATURES=1`). It is served by the separate `mlxk embed-serve` backend and
 exposed on `serve` only when started with `--embed-backend URL` (otherwise `POST /v1/embeddings`
 returns **501**). The embed model is never loaded into serve's process. `GET /v1/models` does
-**not** advertise embedders in 2.0.7 (discovery merge deferred to 2.1).
+**not** advertise embedders.
 
 **New error codes:** the proxy adds **502** `bad_gateway` (backend unreachable) and **504**
-`gateway_timeout` (backend read-timeout) — both **retryable** (ADR-015 D2). Backend `4xx/5xx`
+`gateway_timeout` (backend read-timeout) — both **retryable** (ADR-015). Backend `4xx/5xx`
 envelopes pass through verbatim.
 
 **Dependency bumps (auto-installed):**
@@ -1357,11 +1377,15 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 
 ### From 2.0.7 → 2.0.8
 
-> 2.0.8 is in development. This section covers the dependency wave, which has landed; further
-> 2.0.8 changes are not yet reflected here.
+> Unreleased. This records what the tree carries beyond released 2.0.7.
 
-**Endpoint surface:** unchanged. **Request and response shapes:** unchanged. The wave is a pin
-change validated against unchanged 2.0.7 server code, so nothing on the wire moves.
+**Endpoint surface:** unchanged. **Request and response shapes:** unchanged — nothing on the wire
+moves.
+
+**Process behaviour changed.** `mlxk serve` takes the same teardown path for Ctrl-C, `SIGTERM` and
+`SIGHUP`, and a server whose supervisor is killed stops itself instead of holding the port. Exit
+status follows the shell convention: `143` when stopped by a signal, `137` when it had to be forced.
+See [Supervised Mode](#supervised-mode-default).
 
 **Dependency bumps (auto-installed):**
 
@@ -1651,7 +1675,7 @@ Hello world.
 **Client Implementation Notes:**
 - Use `multipart/form-data` content type (not `application/json`)
 - File field name must be `file`
-- Maximum file size: 50 MB (~15 min @ 16kHz mono)
+- Maximum file size: 50 MB — see [Limits Summary](#limits-summary) for what that means per format
 - Requires `mlx-audio` on the server — included in the base install (Python 3.10–3.12)
 
 ### Embeddings: Model Identity & Change Detection
@@ -1725,10 +1749,10 @@ When switching from Vision or Audio to Text model mid-conversation:
   - `encoding_format`: `base64` (default, SDK-compatible) and `float`; batch `input`; L2-normalized
     vectors; mlxk extensions `input_type` / `instruct` for RAG query embedding (`instruct` applies on
     the decoder path only).
-  - Topology: `serve --embed-backend URL` proxies `/v1/embeddings` to the backend (Slice D2, same
+  - Topology: `serve --embed-backend URL` proxies `/v1/embeddings` to the backend (same
     release). Proxy errors: **501** (no `--embed-backend` configured), **502** `bad_gateway`
     (backend unreachable), **504** `gateway_timeout` (read-timeout) — 502/504 retryable; backend
-    `4xx/5xx` pass through verbatim. `GET /v1/models` does not yet advertise embedders (merge → 2.1).
+    `4xx/5xx` pass through verbatim. `GET /v1/models` does not advertise embedders.
   - **NEW:** Whisper audio-to-English translation — CLI `mlxk run --audio FILE --translate`
     and server `POST /v1/audio/translations` (multilingual non-turbo; OpenAI-compatible
     translations endpoint, hardcoded `task=translate`; non-capable models rejected 400/422).
@@ -1775,4 +1799,6 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ---
 
-**📝 Note:** This handbook will be updated continuously until 2.1 stable release. Check version header for freshness.
+**📝 Note:** This handbook tracks the server and changes when the server changes. `Last Updated` is
+maintained by hand; an automated consumer should compare a content hash, which is the only reliable
+drift signal.
