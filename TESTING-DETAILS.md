@@ -4,21 +4,57 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-✅ **2.0.5** — Dependency modernization (transformers 5.0.0, mlx-lm 0.31.1, mlx-audio 0.4.x) on top of workspace-first (beta.1), quantize/cross-volume (beta.2), clone shorthand + JSON API 0.2.1 (beta.3). Quantize/rm/audio-patch fixes. **New Text-First + Verified Multimodal policy** ([ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md)) with explicit reject for unverified multimodal types at `convert --quantize`. See CHANGELOG.md for details.
-
-✅ **2.0.4** — First stable release with Vision + Audio. See CHANGELOG.md for details.
+Released: **2.0.7**. Per-release detail belongs in [CHANGELOG.md](CHANGELOG.md); this section
+carries only what a test run should be able to reproduce.
 
 ### Test Results (Official Reference)
 
-**Standard Unit Tests (2.0.5):**
-```
-Platform: macOS 26.4 (Tahoe), Apple Silicon (M2 Max, 64GB RAM)
-Python 3.10: 749 passed, 6 skipped
-Note: Default suite works on 16GB. Full integration tests: 64GB recommended
-      Apple Silicon (M-series) required for MLX
-```
+A row is *official* once the release has passed its smoke test — and replacing the provisional
+row with the measured one is the **last step of that acceptance**, not a follow-up. Numbers
+taken from a moving development tree stay marked provisional and carry their date, so they
+cannot be mistaken for a release reference.
 
-**Full Integration Tests (`./scripts/test-wet-umbrella.sh`):**
+**Standard unit tests** (`pytest tests_2.0/`):
+
+| Measured | Environment | passed | skipped | deselected |
+|---|---|---|---|---|
+| 2.0.5 (release) | macOS 26.4, M2 Max 64GB, Python 3.10 | 749 | 6 | — |
+| 2.0.8 dev, 2026-08-07 *(provisional)* | empty env | 992 | 18 | 96 |
+| 2.0.8 dev, 2026-08-07 *(provisional)* | `+ HF_HOME` | 999 | 11 | 112 |
+| 2.0.8 dev, 2026-08-07 *(provisional)* | `+ MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_ENABLE_PIPES=1` | 999 | **48** | 112 |
+| 2.0.8 dev, 2026-08-07 *(provisional)* | `+ MLXK_WORKSPACE_HOME` | 999 | 48 | **126** |
+
+*(2.0.8 rows: macOS 26.6, M2 Max 64GB, Python 3.10.18. Each row adds one variable to the row
+above it.)*
+
+> **Every one of the three numbers moves with the environment, and each moves for its own
+> reason** — which is why a bare "992 passed" is not comparable to anything.
+>
+> - `HF_HOME` — seven tests need a cached model to run at all: `passed` rises, `skipped` falls.
+>   Portfolio discovery also parametrizes live tests per cached model, so `deselected` rises.
+> - **Feature gates — a rising `skipped` here is not a regression.** With a gate closed, the
+>   four alpha modules skip at *module* level: one line each. Open the gate and they are
+>   collected, so their 41 individual tests each skip with "Run with `-m live_e2e` or
+>   `-m wet`". Four become 41, while `passed` and `deselected` do not move at all.
+> - `MLXK_WORKSPACE_HOME` — workspace models join the portfolio, adding 14 more parametrized
+>   live tests to the deselected pile. Note the spelling: the code reads `MLXK_WORKSPACE_HOME`,
+>   not `MLXK2_…`; the misspelled variant is silently ignored, and `deselected` is where you
+>   would notice (112 vs 126).
+> - `MLXK2_LIVE_CLONE` / `MLXK2_LIVE_CHV2` change nothing here: those tests carry the `live`
+>   marker and are *deselected*, never skipped.
+>
+> The empty-env row is the one that measures code and pins alone. The numbers worth watching
+> are `passed` and `failed`; `skipped` mostly reports how much of the suite this environment
+> declines to select.
+>
+> No unit-test reference was recorded for 2.0.6 or 2.0.7, and no OS version either.
+
+Default suite runs on 16GB. Full integration: 64GB recommended. Apple Silicon (M-series)
+required for MLX.
+
+**Full integration (`./scripts/test-wet-umbrella.sh`)** — last recorded full run is 2.0.5,
+taken *before* Phase 1 was split path-scoped into 1a/1b/1c (see the nanobind note below), so
+the shape is not directly comparable to a run made today:
 ```
 Phase 1 (portfolio tests):   170 passed, 61 skipped, 751 deselected
 Phase 2-4 (live operations): 3+3+3 passed
@@ -113,9 +149,9 @@ defined in [ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md).
 | Vision E2E (ADR-012) | `pytest -m live_e2e tests_2.0/live/test_vision*.py -v` | `live_e2e`; Optional: `HF_HOME`; Requires: `mlx-vlm` | Vision CLI + Server. Uses Portfolio Discovery or `pixtral-12b-4bit` fallback. | No |
 | Audio E2E (ADR-020) | `pytest -m live_e2e tests_2.0/live/test_audio*.py -v` | `live_e2e`; Optional: `HF_HOME`; `MLXK_TRANSLATE_FIXTURE_DE` (local non-English audio → runs the #54 translate E2E, else skips) + optional `MLXK_TRANSLATE_FIXTURE_DE_EXPECT` (English substring to assert); Requires: `mlx-audio` | Audio transcription + translation (#54) + Server. Uses Portfolio Discovery or `whisper` fallback. | No |
 | Embeddings E2E (ADR-015) | `MLXK2_ENABLE_ALPHA_FEATURES=1 pytest -m live_e2e tests_2.0/live/test_embed*.py -v` | `live_e2e`; **alpha-gated** Env: `MLXK2_ENABLE_ALPHA_FEATURES=1` + `HF_HOME`/`MLXK_WORKSPACE_HOME` | `mlxk embed` decoder path (`mlx-lm`) + vendored BERT encoder (CLS **and** mean pooling). Verified fixtures (`EMBED_TEST_MODELS`): `Qwen3-Embedding-0.6B-4bit-DWQ` (decoder, workspace), `bge-small-en-v1.5-4bit` (encoder CLS, 4-bit, cache), `multilingual-e5-small-mlx` (encoder mean, float, workspace). Class-level (any `model_type` qwen3/bert embedder is attempted); per-model skip if absent. Which **classes** are verified-for-users → `docs/MODEL-COVERAGE.md`, not here. | No (cache + workspace) |
-| serve process lifecycle (#60) | `pytest -m wet tests_2.0/live/test_serve_cli_signals_live.py -v` | `live_e2e`; Requires: `httpx`; no model, no env | The only test that starts `mlxk serve` **through the CLI** and stops it: SIGTERM/SIGHUP to the supervisor, and SIGKILL to prove the server stops itself. Asserts the child is gone *and* the port is re-bindable. Every other live test boots `server_base` directly and therefore cannot see this path. | No |
+| serve process lifecycle (#60) | `pytest -m live_e2e tests_2.0/live/test_serve_cli_signals_live.py -v` | `live_e2e`; Requires: `httpx`; no model, no env | The only test that starts `mlxk serve` **through the CLI** and stops it: SIGTERM/SIGHUP to the supervisor, and SIGKILL to prove the server stops itself. Asserts the child is gone *and* the port is re-bindable. Every other live test boots `server_base` directly and therefore cannot see this path. | No |
 | FIM E2E (Issue #55) | `MLXK_FIM_MODEL=<coder> pytest -m live_e2e tests_2.0/live/test_fim_e2e.py -v` | `live_e2e`; Env: `MLXK_FIM_MODEL` (FIM-capable coder id/path; else auto-picks a `*coder*` model from the text portfolio) + `HF_HOME`/`MLXK_WORKSPACE_HOME`; Requires: `httpx` | A coder model fills a FIM gap via `/v1/completions` (raw, no chat template) — verifies the FIM enabler end-to-end. Skips if no coder model available. | No |
-| Cross-Volume (ADR-022) | `pytest -m live_cross_volume -v` | `live_cross_volume`; Env: `MLXK_WORKSPACE_HOME` (source vol); `/tmp` must be different volume | Clone + Convert cross-volume fallback. Requires small model (~700MB) in portfolio. Tests CoW fallback to regular copy. | No |
+| Cross-Volume (ADR-022) | `pytest -m live_clone -v` (see Cross-Volume Testing below) | `live_clone` + the env that marker needs; `/tmp` must be on a different volume than `MLXK_WORKSPACE_HOME` | Clone cross-volume CoW fallback, exercised inside `test_clone_live.py` | Yes |
 | Resumable Pull | `MLXK2_TEST_RESUMABLE_DOWNLOAD=1 pytest -m live_pull tests_2.0/test_resumable_pull.py -v` | `live_pull` (required) + Env: `MLXK2_TEST_RESUMABLE_DOWNLOAD=1` (opt-in for network test) | **✅ Working:** Real network download with controlled interruption (45s timer). Tests unhealthy detection → `requires_confirmation` status → resume with `force_resume=True` → final health check. Validates resumable pull feature (interrupted downloads can be resumed). Uses isolated cache (no impact on user cache). | Yes (HuggingFace download) |
 | Show E2E portfolios | `HF_HOME=/path/to/cache python tests_2.0/show_portfolios.py` OR `pytest -m show_model_portfolio -s` | Env: `HF_HOME` | Displays TEXT and VISION portfolios separately. Shows model keys (text_XX, vision_XX), RAM requirements, and test/skip status. Diagnostic tool for understanding portfolio separation. Use script for detailed output, or pytest marker for quick check. | No (uses local cache) |
 | Manual debug mode | `mlxk run <model> "test prompt" --verbose` | Manual CLI usage with `--verbose` flag | Shows token generation details including multiple EOS token warnings. Use this for manual debugging of model quality issues. Output includes `[DEBUG] Token generation analysis` and `⚠️ WARNING: Multiple EOS tokens detected` for broken models. | No (uses local cache) |
@@ -202,17 +238,19 @@ def test_clone_cross_volume():
 
 Note: APFS detection uses `st_dev` matching (firmlink-safe). CoW fallback is silent — no warnings on stdout or stderr.
 
-### Marker
+### How it is run
+
+The cross-volume CoW fallback is exercised inside the live clone flow:
 
 ```bash
-# Cross-volume tests (subset of live_e2e)
-pytest -m live_cross_volume -v
-
-# Requires:
-# - MLXK_WORKSPACE_HOME (source volume)
-# - /tmp on different volume (target)
-# - Small model in portfolio (~700MB)
+MLXK2_LIVE_CLONE=1 HF_TOKEN=... MLXK2_LIVE_CLONE_MODEL=<small-model> \
+MLXK_WORKSPACE_HOME=<source volume> pytest -m live_clone -v
 ```
+
+The fallback is only *taken* when `/tmp` and `MLXK_WORKSPACE_HOME` are on different volumes;
+on a single-volume machine the same run exercises the CoW path instead. Everything above this
+heading — the matrix, the skip-condition sketch, the SMB/NFS setup — is a **plan for manual
+smoke testing**, not a description of automated coverage.
 
 ---
 
@@ -259,28 +297,25 @@ Test 2: def test_bar(isolated_cache):
     [TEARDOWN] Delete /tmp/mlxk2_test_xyz789/  ✓ Instance 2 destroyed
 ```
 
-**Sentinel Safety Mechanism:**
+**Two safety mechanisms, often confused — they guard different moments:**
 
-Every isolated cache contains a sentinel model: `models--TEST-CACHE-SENTINEL--mlxk2-safety-check`
+*Before an operation — the canary.* The `isolated_cache` fixture plants a sentinel model
+`models--TEST-CACHE-SENTINEL--mlxk2-safety-check` in every isolated cache. Tests call
+`assert_is_test_cache(path)`, which raises unless the path contains the marker `mlxk2_test_`
+**and** the sentinel directory exists. Its job is to catch "am I pointed at the user cache?"
+*before* anything is written or deleted.
 
-```python
-# Fixture setup (Line 464-468 conftest.py)
-sentinel_dir = hub_path / TEST_SENTINEL
-sentinel_snapshot = sentinel_dir / "snapshots" / "test123..."
-sentinel_snapshot.mkdir(parents=True)
-(sentinel_snapshot / "config.json").write_text('{"model_type": "test_sentinel", "test_cache": true}')
+*Before a deletion — the signature.* `_safe_rmtree(cache_root, expected_signature_id)`
+(`tests_2.0/conftest.py`) does **not** look at the sentinel. It verifies a signature file
+written at creation time — magic string, signature id, and a hash of the path itself — and
+additionally requires `mlxk2_test_` in the path. Any mismatch raises instead of deleting.
 
-# Fixture teardown (Line 498-500)
-_safe_rmtree(temp_dir_path, signature_id)  # ← Checks signature before delete
-```
+> ⚠ Three different functions are called `_safe_rmtree`. The one in `conftest.py` is the
+> signature check above. `test_clone_live.py` and `test_content_hash_v2_live.py` each define
+> their own single-argument version that refuses paths without the `mlxk-test-` prefix. Do
+> not reason from one to the other.
 
-**How Sentinel protects User Cache:**
-1. Test code tries to delete a directory
-2. `_safe_rmtree()` checks: Does this directory contain TEST_SENTINEL?
-3. **NO** → ❌ REFUSE deletion (could be User Cache!)
-4. **YES** → ✅ OK to delete (is Test Cache)
-
-**What it prevents:**
+**What this prevents:**
 - Accidental deletion if `HF_HOME` wrongly points to User Cache
 - Bugs in test code using wrong paths
 - Race conditions between tests
@@ -345,8 +380,10 @@ Portable:  Yes - cross-volume, SMB, NFS, USB (CoW on same APFS, fallback copy ot
 - Pattern: `target_dir = str(tmp_path / "workspace")` (unit) or `f"{TEST_PREFIX}clone"` (live)
 
 **Workspace safety:**
-- Live test directories always use `mlxk-test-` prefix
-- `_safe_rmtree()` refuses to delete directories without this prefix
+- Live test directories always use the `mlxk-test-` prefix (`mlxk-test-chv2-` for the
+  content_hash v2 suite)
+- The live-test `_safe_rmtree(path)` — the single-argument one, defined per live module, not
+  the signature-checking helper in `conftest.py` — refuses any path without that prefix
 - Temp cache during clone: `.mlxk2_temp_cache_sentinel` (cleanup protection)
 - Temp cache deleted after successful clone → workspace remains
 
@@ -452,16 +489,20 @@ def test_old_style(model_key):  # Don't use - shows as "Unknown (legacy)" in rep
     pass
 ```
 
-**Available Fixtures:**
+**Available test arguments:**
 
-| Fixture | Modality | Use Case |
-|---------|----------|----------|
-| `text_model_key` | Text | Parametrized text model tests |
-| `text_model_info` | Text | Access model metadata (size, path) |
-| `vision_model_key` | Vision | Parametrized vision model tests |
-| `vision_model_info` | Vision | Access vision model metadata |
-| `audio_model_key` | Audio | Parametrized audio model tests |
-| `audio_model_info` | Audio | Access audio model metadata |
+| Argument | Modality | Provided by | Use Case |
+|---------|----------|-------------|----------|
+| `text_model_key` | Text | `pytest_generate_tests` | Parametrized text model tests |
+| `text_model_info` | Text | fixture | Access model metadata (size, path) |
+| `vision_model_key` | Vision | `pytest_generate_tests` | Parametrized vision model tests |
+| `vision_model_info` | Vision | fixture | Access vision model metadata |
+| `audio_model_key` | Audio | `pytest_generate_tests` | Parametrized audio model tests |
+| `audio_model_info` | Audio | fixture | Access audio model metadata |
+
+> The `*_model_key` arguments are **not** fixtures. They are parametrized by the
+> `pytest_generate_tests` hook in `tests_2.0/live/conftest.py`, which reads the portfolio and
+> generates one test per model. Only the `*_model_info` arguments are `def`-defined fixtures.
 
 **DEPRECATED Fixtures (do not use in new code):**
 
@@ -525,12 +566,12 @@ This bug was discovered during beta.9 benchmark run and cost a full re-run.
 **1. Update Schema JSON**
 
 ```bash
-# Create new schema version
-cp benchmarks/schemas/report-v0.2.1.schema.json \
-   benchmarks/schemas/report-v0.2.2.schema.json
+# Create new schema version (current on disk: report-v0.2.2.schema.json)
+cp benchmarks/schemas/report-v0.2.2.schema.json \
+   benchmarks/schemas/report-v0.2.3.schema.json
 
 # Edit schema: Add new fields with descriptions
-# Update: "title": "MLX Knife Benchmark Report Schema v0.2.2"
+# Update: "title": "MLX Knife Benchmark Report Schema v0.2.3"
 ```
 
 **2. Register pytest Hooks (CRITICAL)**
@@ -792,9 +833,9 @@ tests_2.0/
 - Portfolio Discovery hooks (`pytest_generate_tests`) run during collection, expecting models in HF_HOME
 - When test uses `isolated_cache` in `live/`, hooks interfere with cache isolation
 
-**Observed:**
-- ✅ `tests_2.0/test_resumable_pull.py` → 2.15GB downloaded, PASS
-- ❌ `tests_2.0/live/test_resumable_pull.py` → 0 bytes downloaded, FAIL
+**Observed** — the same test, by location:
+- ✅ where it lives today, `tests_2.0/test_resumable_pull.py` → 2.15GB downloaded, PASS
+- ❌ moved under `tests_2.0/live/` → 0 bytes downloaded, FAIL
 
 ### Decision Tree: Where does my test belong?
 
@@ -847,7 +888,7 @@ HF_HOME=/path/to/cache pytest -m live_e2e -n auto  # ← NEVER DO THIS!
 - ✅ **One server per test:** No parallel inference within a single test
 - ✅ **Active cleanup polling:** Waits for actual process termination (not blind timeout)
 - ✅ **Explicit garbage collection:** Forces Python GC + 2s Metal memory buffer
-- ✅ **Conservative timeout:** 45s max wait for very large models (>40GB), but polls every 500ms
+- ✅ **Bounded waits, never blind sleeps:** startup polls `/health` every 0.5s for up to 60s; teardown gives SIGTERM 10s before SIGKILL; the memory gate then waits up to 10s for 8GB to come free (`server_context.py`)
 - ⚠️ **Large model transitions:** Models >20GB may have 10-15s RAM overlap during cleanup
 
 **Safe execution guidelines:**
@@ -865,22 +906,24 @@ HF_HOME=/path/to/cache pytest -m live_e2e -n auto  # ← NEVER DO THIS!
 
 ## Python Version Verification Results
 
-**All standard tests validated on Apple Silicon with enhanced isolation**
+The supported set is what [`test-multi-python.sh`](test-multi-python.sh) actually builds and
+runs — it is the single source of truth, and [README](README.md) states the same boundary:
 
-| Python Version | Status | Tests Passing | Skipped | Notes |
-|----------------|--------|---------------|---------|-------|
-| 3.9.6 (macOS)  | ✅ Verified | 519/588 | 69 | Vision tests auto-skip (mlx-vlm requires 3.10+) |
-| 3.10.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
-| 3.11.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
-| 3.12.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
-| 3.13.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
-| 3.14.x         | ✅ Verified | 528/588 | 60 | Full suite including vision tests |
+| Python Version | Status | Reason |
+|----------------|--------|--------|
+| 3.9            | ❌ Not supported | MLX 0.30+ requires 3.10+ |
+| 3.10.x         | ✅ Supported | text + vision + audio |
+| 3.11.x         | ✅ Supported | text + vision + audio |
+| 3.12.x         | ✅ Supported | text + vision + audio |
+| 3.13+          | ❌ Not supported | miniaudio has no pre-built macOS-ARM wheel; the base install needs a C compiler + macOS SDK. mlx-audio is a base dependency, not an extra |
 
-**Note:** 60 skipped tests (69 on Python 3.9) are opt-in (live tests, alpha features). Skipped count may vary by environment:
-- Without `HF_HOME`: Standard 60 skipped (69 on Py3.9, live E2E tests use fallback parametrization)
-- With `HF_HOME`: Live E2E tests run with discovered models across text_portfolio (23) and vision_portfolio (3)
+Per-version pass/skip counts are **not carried here**: they move with every test added and
+with the environment (see the note under Test Results above). Re-measure at release with
+`bash test-multi-python.sh`, which builds a fresh venv per version and runs the default suite
+plus ruff.
 
-All versions tested with `isolated_cache` system and MLX stubs for fast execution without model downloads.
+All versions run against the `isolated_cache` system and MLX stubs, so no model downloads are
+needed.
 
 ## Push Testing Details (2.0)
 
@@ -944,9 +987,8 @@ This section summarizes what our test suite covers for the experimental `push` f
 - `tests_2.0/test_push_extended.py` (no-op vs commit, branch/repo, .hfignore, human; includes retry on invalid revision with `--create`)
 - `tests_2.0/spec/test_push_output_matches_schema.py` (schema success path)
 
-**Run (venv39):**
+**Run** (any supported interpreter, editable install):
 ```bash
-source venv39/bin/activate && pip install -e .
 pytest -q tests_2.0/test_cli_push_args.py tests_2.0/test_push_extended.py
 pytest -q tests_2.0/spec/test_push_output_matches_schema.py
 pytest -q tests_2.0/test_push_extended.py::test_push_retry_creates_branch_on_upload_revision_error
@@ -1192,7 +1234,7 @@ Goal: Pull a small MLX chat model, verify classification, prepare a local worksp
 
 ### Steps
 
-1. **Pull (venv39):**
+1. **Pull:**
    ```bash
    mlxk2 pull mlx-community/Qwen2.5-0.5B-Instruct-4bit
    ```
@@ -1205,11 +1247,11 @@ Goal: Pull a small MLX chat model, verify classification, prepare a local worksp
 
 3. **Prepare local workspace from cache (dereference symlinks):**
    ```bash
-   # Ensure HF_HOME points to your HF cache
-   # Compute cache path: $HF_HOME/models--mlx-community--Qwen2.5-0.5B-Instruct-4bit
+   # Ensure HF_HOME points to your HF cache (models live under $HF_HOME/hub/)
+   # Compute cache path: $HF_HOME/hub/models--mlx-community--Qwen2.5-0.5B-Instruct-4bit
    # Find latest snapshot hash under snapshots/
    # Copy to workspace and dereference symlinks:
-   rsync -aL "$HF_HOME/models--mlx-community--Qwen2.5-0.5B-Instruct-4bit/snapshots/<HASH>/" ./mymodel_test_workspace/
+   rsync -aL "$HF_HOME/hub/models--mlx-community--Qwen2.5-0.5B-Instruct-4bit/snapshots/<HASH>/" ./mymodel_test_workspace/
    ```
 
 4. **Recommended README front-matter (to preserve intent on push):**
@@ -1329,9 +1371,9 @@ pytest -m live_e2e --collect-only  # Should work without errors
 - ✅ **Production Command:** Uses `mlxk list --json` instead of duplicating cache logic (~70 LOC eliminated)
 - ✅ **Parametrized Tests:** text_XX (23 text models), vision_XX (3 vision models) - deterministic indices
 - ✅ **Independent RAM Formulas:** Text uses 1.2x multiplier, Vision uses 0.70 threshold (ADR-016)
-- ✅ **Clean Lifecycle:** Each test gets its own server instance (45s timeout for MLX cleanup)
+- ✅ **Clean Lifecycle:** Each test gets its own server instance (60s startup budget; teardown SIGTERM → 10s → SIGKILL, then a 10s memory gate)
 - ✅ **Disjoint Portfolios:** No model appears in both text and vision portfolios
-- ✅ **Current result:** 136/136 tests passing (23 text + 3 vision models, deterministic discovered_XX replaced)
+- ✅ **Result at the time of measurement:** 136/136 passing — but the count is **portfolio-bound**: it comes from 23 text + 3 vision models being present in that cache. A different machine gets a different total from the same green run, so this is not a number to reproduce
 
 **Tests Covered:**
 - **Text Portfolio:** Server health/metadata, chat completions (batch/streaming), text completions, CLI run, streaming parity, stop tokens
@@ -1735,11 +1777,12 @@ These variables enable optional live tests that interact with real models or ext
 | `MLXK2_SUBSET_COUNT` | Limit Issue #27 test count | `pytest -m issue27` |
 | `MLXK2_BOOTSTRAP_INDEX` | Auto-download model for Issue #27 | `pytest -m issue27` |
 | `MLXK2_TEST_RESUMABLE_DOWNLOAD` | Enable resumable pull tests (requires network) | `pytest -m live_pull tests_2.0/test_resumable_pull.py` |
+| `MLXK2_RESUMABLE_TEST_MODEL` | Override the model the resumable pull test downloads | `pytest -m live_pull tests_2.0/test_resumable_pull.py` |
 
 **Example:**
 ```bash
 # Enable debug logging for troubleshooting
-MLXK2_DEBUG=1 pytest tests_2.0/test_server_base.py -v
+MLXK2_DEBUG=1 pytest tests_2.0/test_server_api_minimal.py -v
 
 # Run live push tests with credentials
 MLXK2_LIVE_PUSH=1 \
@@ -1784,7 +1827,7 @@ tests_2.0/
 ├── live/                              # Opt-in live tests (markers)
 │   ├── __init__.py
 │   ├── conftest.py                              # Shared fixtures for live E2E tests (text_portfolio, vision_portfolio, audio_portfolio, pytest_generate_tests hook)
-│   ├── server_context.py                       # LocalServer context manager for E2E testing (45s timeout for MLX cleanup)
+│   ├── server_context.py                       # LocalServer context manager for E2E testing (60s startup, SIGTERM→10s→SIGKILL teardown, 10s memory gate)
 │   ├── sse_parser.py                           # SSE parsing utilities for streaming validation
 │   ├── test_utils.py                           # Portfolio Discovery (text/vision/audio separation), RAM calculation modularization, RAM gating utilities
 │   ├── test_audio_e2e_live.py                  # Audio E2E tests with Whisper models (ADR-020: CLI + Server transcriptions + size limit, parametrized: audio_XX)
@@ -1792,11 +1835,18 @@ tests_2.0/
 │   ├── test_cli_pipe_live.py                   # Pipe-mode E2E (stdin '-', JSON interactive error, list→run pipe) using first eligible model
 │   ├── test_clone_live.py                      # Live clone flow (requires MLXK2_LIVE_CLONE, HF_TOKEN)
 │   ├── test_content_hash_v2_live.py            # content_hash v2 live tests (ADR-025, marker: live_chv2; v2 sentinel format + file_index + repair-index Issue #52 regression; tmp_path_factory + mlxk-test-chv2- prefix + _safe_rmtree; bf16/fp16/fp32 hard-gated)
+│   ├── test_embed_encoder_live.py              # Encoder path of `mlxk embed` live (ADR-015 B, alpha-gated: bge CLS + e5 mean via CLI subprocess, real mlx)
+│   ├── test_embed_pipe_live.py                 # Decoder path of `mlxk embed` live (ADR-015 A, alpha-gated: JSONL contract, L2 norm, dimensions, batching)
+│   ├── test_embed_serve_live.py                # `mlxk embed-serve` E2E (ADR-015 D1, alpha-gated: real backend process, OpenAI /v1/embeddings contract)
+│   ├── test_json_smoke.py                      # Per-command --json smoke: clean stdout, json.loads-parseable, schema-valid against docs/json-api-schema.json
 │   ├── test_list_human_live.py                 # Live list/health against user cache (requires HF_HOME)
 │   ├── test_pipe_vision_geo.py                 # Vision→Geo pipe integration tests (marker: live_vision_pipe: batch processing, complete pipe, chunk isolation)
 │   ├── test_portfolio_fixtures.py              # Portfolio separation validation tests (fixture behavior, disjoint check)
 │   ├── test_push_live.py                       # Live push flow (requires MLXK2_LIVE_PUSH, HF_TOKEN)
+│   ├── test_serve_cli_signals_live.py          # The only test that starts `mlxk serve` through the CLI and signals it (#60: SIGTERM/SIGHUP/SIGKILL, child gone + port re-bindable)
+│   ├── test_serve_embed_proxy_live.py          # serve --embed-backend proxy E2E (ADR-015 D2, alpha-gated: parity with the backend, base64 default, 502/501)
 │   ├── test_server_e2e.py                      # Server E2E tests with TEXT models (ADR-011 + Portfolio Separation, parametrized: text_XX)
+│   ├── test_server_models_workspace_live.py    # /v1/models lists workspace models by basename, matching the default `mlxk list` view (Issue #58, ADR-022)
 │   ├── test_show_portfolio.py                  # Portfolio display (marker: show_model_portfolio, requires HF_HOME)
 │   ├── test_streaming_parity.py                # Streaming vs batch parity tests (Issue #20, ADR-011, parametrized)
 │   ├── test_vision_e2e_live.py                 # Vision CLI E2E tests with real models (ADR-012, 5 deterministic vision queries)
@@ -1805,14 +1855,24 @@ tests_2.0/
 ├── test_adr004_error_logging.py       # ADR-004 error logging and redaction (tokens, paths)
 ├── test_audio_cli.py                  # Audio CLI argument tests (ADR-020 Phase 2: --audio parsing, file validation, capability checks, backend detection)
 ├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016)
+├── test_capabilities_invariants.py    # Structural invariants on the capabilities.py frozensets (ADR-023: casing/disjointness, every vision-quantize type routes to vision, STT rejects)
+├── test_cli_embed_gate.py             # Alpha gate for `mlxk embed` (ADR-015 A, subprocess-level: reject without MLXK2_ENABLE_ALPHA_FEATURES, JSON error envelope)
+├── test_cli_embed_serve_gate.py       # Alpha gate for `mlxk embed-serve` (ADR-015 D1: rejects before import and port bind; a bogus model fails at pre-flight, not at the gate)
 ├── test_cli_log_json_flag.py          # CLI --log-json flag behavior and JSON log format
 ├── test_cli_push_args.py              # Push CLI args and JSON error/output handling (offline)
 ├── test_cli_run_exit_codes.py         # CLI exit codes + pipe/JSON regressions, stdin '-', non-TTY batch, interactive JSON error, SIGPIPE, BrokenPipeError
 ├── test_cli_run_wrapper.py            # mlx-run wrapper argv injection
+├── test_cli_serve_embed_backend_gate.py  # Alpha gate + URL validation for `serve --embed-backend` (ADR-015 D2: rejects before any server boot; plain `serve` stays ungated)
 ├── test_clone_operation.py            # Clone operations with APFS optimization
+├── test_convert_multimodal_reject.py  # `convert --quantize` dispatch policy (ADR-023: verified types route to their backend, unverified multimodal markers reject)
 ├── test_ctrl_c_handling.py            # SIGINT handling during run/interactive flows
 ├── test_detection_readme_tokenizer.py # README/tokenizer-based framework detection
 ├── test_edge_cases_adr002.py          # Naming/health edge cases (ADR-002)
+├── test_embed_operation.py            # embed operation envelopes + routing (ADR-015 A/B, runner mocked: batch passthrough, metadata stamping, error envelopes)
+├── test_embed_proxy_handler.py        # /v1/embeddings thin-proxy handler (ADR-015 D2, httpx.MockTransport: verbatim forwarding, header/URL handling, 502/504 mapping)
+├── test_embed_serve_handler.py        # embeddings HTTP handler (ADR-015 D1, runner mocked: base64/float wire encoding, usage counting, 400 cases)
+├── test_embedding_runner.py           # EmbeddingRunner pooling/normalize/prefix math (ADR-015 A, numpy-backed mlx shim: last-token/mean/CLS, EOS, query prefixes)
+├── test_encoder_pooling.py            # Encoder (BERT) path: pooling/family/prefix inference + the _embed_encoder loop (ADR-015 B: bge CLS vs e5 mean)
 ├── test_health_multifile.py           # Multi-file health completeness (index vs pattern)
 ├── test_health_vision.py              # Vision model health checks (ADR-012 Phase 2, preprocessor_config.json validation)
 ├── test_human_output.py               # Human rendering of list/health views
@@ -1836,12 +1896,17 @@ tests_2.0/
 ├── test_push_workspace_check.py       # Push check-only: workspace validation without network
 ├── test_ram_calculation.py            # RAM calculation unit tests (text 1.2x, vision 0.70 threshold, system memory)
 ├── test_resumable_pull.py             # Resumable download tests (real network download with controlled interruption)
+├── test_rm_workspace_guard.py         # ADR-022 guard: `mlxk rm` refuses workspace paths (HF cache only) without shadowing model-not-found
 ├── test_robustness.py                 # Robustness for rm/pull/disk/timeout/concurrency
 ├── test_run_complete.py               # End-to-end run command (stream/batch/params)
+├── test_run_embedding_reject.py       # Regression: `mlxk run <embedder>` gives the honest 'use mlxk embed' reject (ADR-015 C)
 ├── test_run_vision.py                 # Vision runner unit tests (ADR-012 Phase 1b, VisionRunner routing, default prompt)
 ├── test_runner_core.py                # MLXRunner core generation/memory/stop tokens
 ├── test_runtime_compatibility_reason_chain.py  # Runtime compatibility reason field decision chain (Issue #36)
+├── test_serve_audio_translations_route.py  # Route tests for POST /v1/audio/translations (Issue #54: 400/422 gates, task threading, no synthetic prompt on translate)
+├── test_serve_embed_proxy_route.py    # Route tests for POST /v1/embeddings on serve (ADR-015 D2: 501 unconfigured, proxying, backend error passthrough)
 ├── test_serve_signal_teardown.py      # Supervisor teardown on SIGINT/SIGTERM/SIGHUP against a real child, escalation, exit codes (#60)
+├── test_serve_supervisor.py           # Supervisor command/env construction with Popen mocked (module + extra_env seam, --embed-backend config bridge)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
 ├── test_server_audio.py               # Audio server unit tests (ADR-020 Phase 4: request detection, Base64 decoding, format validation)
@@ -1854,7 +1919,9 @@ tests_2.0/
 ├── test_vision_adapter.py             # Vision HTTP adapter unit tests (Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
 ├── test_vision_chunk_streaming.py     # Vision chunk streaming tests (SSE format, multi-chunk streaming, single-chunk routing, generator integration)
 ├── test_vision_exif.py                # EXIF extraction tests (GPS, DateTime, Camera, collapsible table, privacy controls)
+├── test_whisper_tokenizer.py          # Bundled Whisper tokenizer (mlx-audio #645 workaround: encodings, special tokens, word splitting, language constants)
 ├── test_workspace_hash_v2.py          # content_hash v2 algorithm unit tests (ADR-025, closes Issue #52: per-class hashing strategies, file_index, aggregate, exclude patterns, transport invariance, path validation)
+├── test_workspace_integration.py      # Workspace integration for list/health/show/clone/convert (ADR-022, MLXK_WORKSPACE_HOME fixture)
 ├── test_workspace_sentinel.py         # Workspace infrastructure tests (ADR-018 Phase 0a: sentinel primitives, atomic write, managed/unmanaged detection, health checks, CLI integration)
 └── test_convert_repair_index.py       # Convert operation tests (ADR-018 Phase 1: rebuild_safetensors_index, cache sanctity, workspace sentinels, validation)
 ```
@@ -1867,13 +1934,13 @@ Pre-test checklist: where each `live_*` marker expects to find its model(s). Mar
 |---|---|---|---|---|---|
 | `live_chv2` | **Cache** (or auto-download with `HF_TOKEN`) | Text: `mlx-community/Llama-3.2-1B-Instruct-4bit`<br>Vision: `mlx-community/Llama-3.2-11B-Vision-Instruct-4bit` | `MLXK2_LIVE_CHV2_TEXT_MODEL`<br>`MLXK2_LIVE_CHV2_VISION_MODEL` | ~0.7GB + ~6.5GB | `mlxk clone` from cache → fresh tmp workspace. Vision must be quantized (4bit); bf16/fp16/fp32 variants hard-gated → skip. |
 | `live_clone` | **HF remote** (fresh per run) | User-supplied (no default) | `MLXK2_LIVE_CLONE_MODEL` (**required**) | Depends on supplied model | Pull→temp cache→clone→workspace. Target always `mlxk-test-clone` in `MLXK_WORKSPACE_HOME`. Example: `mlx-community/bge-small-en-v1.5-4bit`. |
-| `live_pull` | **HF remote** (fresh per run) | `mlx-community/Phi-3-mini-4k-instruct-4bit` (hardcoded in `test_resumable_pull.py:68`) | — (not overridable) | ~2.15GB | Downloads into isolated test cache; no impact on user cache. |
+| `live_pull` | **HF remote** (fresh per run) | `mlx-community/Phi-3-mini-4k-instruct-4bit` (default in `test_resumable_pull.py`) | `MLXK2_RESUMABLE_TEST_MODEL` | ~2.15GB | Downloads into isolated test cache; no impact on user cache. |
 | `live_vision_pipe` | **Cache** (Portfolio Discovery, cache-filtered) | Vision: any `pixtral`-substring match (e.g. `mlx-community/pixtral-12b-bf16`)<br>Text: first eligible from text portfolio | — (Portfolio-driven; skips if no pixtral-family model found) | Vision ~12.6GB<br>Text varies | Vision hard-filtered to pixtral-family; text picks first eligible from cache. |
 | `live_push` | **Workspace** (`MLXK_WORKSPACE_HOME`) | User-supplied workspace + HF repo | `MLXK2_LIVE_REPO`, `MLXK2_LIVE_WORKSPACE` (**both required**) | Depends on workspace | Workspace itself is the push source. Test SKIPs on error (diagnostic). |
 | `live_run` (#37) | **Cache** (`HF_HOME`) | Any `Phi-3-mini`-substring model in cache | — | ~2.15GB | Private/org MLX model framework detection. |
 | `issue27` | **Cache** (read-only user cache) | User-supplied | `MLXK2_ISSUE27_MODEL`, `MLXK2_ISSUE27_INDEX_MODEL` (optional) | Depends | Copies cache models into isolated test cache for strict health policy validation. |
 
-**Markers using Portfolio Discovery** (no required model — auto-select from `mlxk list --json` cache-filtered results, skip cleanly when no eligible model found): `live_e2e`, `live_stop_tokens`, `live_list`, `live_cross_volume`, `show_model_portfolio`. See "Portfolio Discovery" note in the marker overview above.
+**Markers using Portfolio Discovery** (no required model — auto-select from `mlxk list --json` cache-filtered results, skip cleanly when no eligible model found): `live_e2e`, `live_stop_tokens`, `live_list`, `show_model_portfolio`. See "Portfolio Discovery" note in the marker overview above.
 
 **Source legend:**
 - **Cache** — model must exist in (or be auto-downloadable to) `HF_HOME`; test reads from there.
