@@ -967,7 +967,7 @@ def _format_conversation(messages: List[dict]) -> str:
 | System prompts | `messages[0].role = "system"` | `--system file.txt` | `_format_conversation()` |
 | Multi-turn | `messages[]` array | `--in file1 --in file2` | Chat template engine |
 | Context injection | `messages[].content` | `--in context.txt` | Token management |
-| Reasoning content | `reasoning_content` field | `--show-reasoning` | ADR-010 parser |
+| Reasoning content | `reasoning_content` field | `--no-reasoning` (shipped) | ADR-010 segmenter |
 
 **Benefit:** CLI becomes a thin wrapper around server logic, ensuring consistency.
 
