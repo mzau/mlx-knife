@@ -58,7 +58,7 @@ def _select_parity_test_keys(portfolio: Dict[str, Dict[str, Any]]) -> set:
 
     Strategy:
     - Only small models (<6GB RAM) for fast testing
-    - Exclude reasoning models (known batch/stream inconsistency, fixed in ADR-010)
+    - Exclude reasoning models (batch/stream inconsistency, see below)
     - Prefer diverse model families (Qwen, Llama, Phi, etc.)
     - Limit to 3 models max (parity tests are slow)
 
@@ -77,7 +77,9 @@ def _select_parity_test_keys(portfolio: Dict[str, Dict[str, Any]]) -> set:
     if not candidates:
         return set()
 
-    # Exclude reasoning models (known Issue #20 regression - will fix in ADR-010)
+    # Exclude reasoning models — a workaround for the mismatch below, not a record
+    # of a fix (and not #20, which is closed and about end-token filtering).
+    # ADR-010 Decision 6 replaces this filter with a reconstruction check.
     # Reasoning models have batch/stream inconsistency:
     # - Batch: raw reasoning text
     # - Stream: adds **[Reasoning]** headers via StreamingReasoningParser
