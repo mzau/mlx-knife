@@ -175,11 +175,11 @@ runtime_compatible?
 │     │      ├─ Python < 3.10?
 │     │      │  └─→ False ("Vision requires Python 3.10+")
 │     │      │
-│     │      ├─ mlx-vlm not installed?
-│     │      │  └─→ False ("mlx-vlm not installed")
-│     │      │
-│     │      └─ transformers 5.x + temporal_patch_size?
-│     │         └─→ False ("Video processor bug in transformers 5.x")
+│     │      └─ mlx-vlm not installed?
+│     │         └─→ False ("mlx-vlm not installed")
+│     │
+│     │      (a third branch rejected transformers 5.x + temporal_patch_size
+│     │       until 2.0.8 — removed, the premise did not reproduce)
 │     │
 │     └─[4b] check_runtime_compatibility(probe):
 │            │
@@ -365,9 +365,9 @@ Dependency stack (`pyproject.toml:41-52`):
 
 | Package | 2.0.7 (released) | 2.0.8 (this tree) | Note |
 |---|---|---|---|
-| `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.33` | Apple Silicon ML framework |
+| `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.32.1` | Apple Silicon ML framework; 0.32.1+ breaks Qwen VL vision with the pinned mlx-vlm |
 | `mlx-lm` | `==0.31.3` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |
-| `mlx-audio` | `==0.4.4` | `==0.4.4` | STT backend (Whisper, VibeVoice) |
+| `mlx-audio` | `==0.4.4` | `==0.4.8` | STT backend (Whisper, VibeVoice) |
 | `mlx-vlm` | `==0.6.2` | `==0.6.10` | VLM backend |
 | `transformers` | `==5.5.4` | `==5.14.1` | 2.0.7: floor driven by `mlx-audio`. 2.0.8: `mlx-vlm >=0.6.5` requires `>=5.14.0` |
 | `torch>=2.0`, `torchvision>=0.15` | base deps | **removed** | See torch-free note below |
@@ -376,7 +376,9 @@ Upper bounds are hygiene per ADR-023: every upstream minor bump requires an expl
 
 **The 2.0.8 column is a pin change, not a code change.** It was validated against *unchanged* 2.0.7 source — same tree, new pin set — so the behavioral differences below are properties of the dependency versions, not of the mlx-knife release. Where behavior depends on a pin, this document states the **dependency condition** rather than the mlx-knife version that happens to carry it.
 
-**`mlx-audio` stays explicitly pinned**, and that pin is now the only thing holding the verified version. The former transitive protection — `mlx-audio 0.4.5`/`0.4.6` capping `transformers <5.13.0`, which collides with `mlx-vlm >= 0.6.5` — ended when `0.4.7` lifted the cap; `mlx-vlm 0.6.8` asks only for `mlx-audio >= 0.4.3`, so an unpinned resolve now selects the newer release. Holding at `0.4.4` is a measured decision: from `0.4.6`, the audio load path hands resampling to the decoder instead of the Kaiser-windowed-sinc `resample_audio`. A low-pass is still applied, but its stopband is much shallower — downsampling 44.1 → 16 kHz, an 8.5 kHz tone survives at −5.6 dB and a 12 kHz tone at −22.4 dB (folding to 4 kHz), where the previous path left nothing above the test signal's noise floor. This needs a downsample *and* energy above the target Nyquist *and* the miniaudio-backed formats (WAV/MP3/FLAC); ffmpeg-routed containers measured clean, and 16 kHz input never resamples. Whisper additionally carries bridge patches in `audio_runner.py` that an untested `mlx-audio` would silently slide under. **Condition to revisit** — not a version: the load path band-limits again.
+**`mlx-audio` stays explicitly pinned**, but the version it holds has moved. From `0.4.6` the audio load path handed resampling to the decoder instead of the Kaiser-windowed-sinc `resample_audio`; a low-pass was still applied, but its stopband was far too shallow for an ASR front-end — downsampling 44.1 → 16 kHz, an 8.5 kHz tone survived at −5.6 dB and a 12 kHz tone at −22.4 dB (folding to 4 kHz). Reported as mlx-audio#870, fixed by PR #872, released in `0.4.8`, and re-measured here: `0.4.8` is identical to `0.4.4` to two decimals (−102.8 dB at 8.5 kHz, −102.4 dB at 12 kHz), and a 4-minute 44.1 kHz stereo transcription is byte-identical across the two.
+
+The pin stays explicit rather than becoming a floor, for a reason unrelated to that episode: Whisper carries a bridge in `audio_runner.py` (mlx-audio#645) that an untested release would silently slide under, and `mlx-vlm` asks only for `>= 0.4.3`. **Two guards replace the version-watching:** `tests_2.0/live/test_audio_resample_guard.py` drives synthetic tones through the real entry point — deliberately the path, not the function, since upstream's own regression test stayed green by calling `resample_audio` directly — and `tests_2.0/test_audio_bridge_canary.py` reports when the bridge becomes redundant.
 
 **Torch-free from `mlx-vlm >= 0.6.4`.** The `torch` / `torchvision` base deps carried a sunset marker (ADR-023 Workaround-Sunset Policy); the condition they waited on — mlx-vlm #1011, torch/torchvision pulled in by the Pixtral / Mistral-Small-3.1 processor — is **resolved as of `mlx-vlm 0.6.4`**, so the pins are gone. The full verified vision set (`pixtral`, `mistral3`, `mllama`, `gemma4`) was re-verified torch-free; the base install loses ~1 GB.
 
@@ -470,6 +472,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 
 ## Changelog
 
+- **2026-08-27 (mlx upper bound tightened to `<0.32.1`):** The `<0.33` bound set on 07-29 was the only loose one in the MLX stack, and a plain `pip install` had begun resolving past what the pinned `mlx-vlm==0.6.10` can run. Measured against one model and one command (Qwen2-VL-7B, single image, temperature 0): **0.32.0** clean; **0.32.1** produces correct output and then aborts the interpreter (`PyThreadState_Get … GIL is released` during finalize, exit 134); **0.32.2** raises before inference (`mx.tile` given an array-derived tuple in the vision tower, exit 1). Same class both times — `mx.array` where an `int` is expected — fixed upstream in mlx-vlm 0.6.16 (#1982) and 0.6.17 (#2021), neither of which this release takes. Scope is narrow: the text path and non-MRoPE vision (pixtral) were unaffected in the same runs. ⚠ The bound also excludes **mlx#3675** (state corruption when a primitive throws during eval), which shipped in 0.32.1 — the serve fault-recovery question must therefore be measured in a scratch environment, not in the pinned tree.
 - **2026-07-29 (dep wave + torch drop):** Dependency-stack table rewritten — pointer corrected (`pyproject.toml:41-56` → `:41-52`) and split into a released-2.0.7 column and the current tree, because the change is **pins only, no code**: `mlx <0.32 → <0.33`, `mlx-vlm 0.6.2 → 0.6.8`, `transformers 5.5.4 → 5.14.1`, `torch`/`torchvision` removed, `mlx-lm`/`mlx-audio` unchanged. The `torch` sunset marker is retired — its condition (mlx-vlm #1011) resolved in `mlx-vlm 0.6.4`. Added the rationale for keeping `mlx-audio` explicitly pinned under a transitive resolution, and the note that mlx-knife's own video-capable-checkpoint gate keys on `transformers` version + checkpoint marker, never on torch — so the torch drop is a packaging change, not a capability change.
 - **2026-07-14 (ADR-021 rejected — MCP out):** §7 corrected — `MLXK2_ENABLE_ALPHA_FEATURES=1` gates the **Embeddings** surface only (`embed`, `embed-serve`, `serve --embed-backend`) and is active since 2.0.7; it never gated MCP, though this document said it did. §Capability Presentation: the client-facing capability contract is tracked as **#51**, not #58 (a different, closed bug — the workspace scan it named is built).
 - **2026-06-16 (embeddings capability honesty — ADR-015 Slice C):** Promoted the gate-[5] forward-note + §Capability Presentation Scope from *forthcoming* to *shipped*. Config-first embedder detection (`classify_embedder()`) is now the single source of truth shared by `embed`, `detect_model_type`, gate [5] and `probe_model_capabilities` — fixing the `"embed" in name` heuristic that mislabelled bge-small (model_type `bert`) as `base`. Gate [5] is a verified-list runnable filter (`bert`/`qwen3` → `runtime_compatible=True`; non-vendored encoders → honest "not vendored"). Deliberate surface asymmetry: `mlxk list` shows runnable embedders, serve's `/v1/models` hides them (embed-backend merge deferred to 2.1).

@@ -452,39 +452,24 @@ def detect_capabilities(
     return caps
 
 
-def vision_runtime_compatibility(probe: Optional[Path] = None) -> tuple[bool, Optional[str]]:
-    """Vision uses mlx-vlm backend; mark compatible only if available.
+def vision_runtime_compatibility() -> tuple[bool, Optional[str]]:
+    """Vision uses the mlx-vlm backend; compatible if that backend is importable.
 
-    Args:
-        probe: Optional path to model snapshot for video processor detection
+    This deliberately does not inspect the checkpoint. A gate here used to reject
+    any snapshot whose `preprocessor_config.json` carried `temporal_patch_size`
+    while transformers reported 5.x, blaming a `video_processor_class_from_name()`
+    bug. Measured 2026-08-27 on transformers 5.14.1: that function does not raise,
+    and the five locally affected checkpoints answer `run --image` correctly. What
+    actually needs torchvision is transformers' `AutoVideoProcessor` — a path the
+    runtime never takes, because mlx-vlm ships numpy ports of those processors.
 
     Returns:
         (is_compatible, reason): reason is None if compatible
     """
     if sys.version_info < (3, 10):
         return False, "Vision requires Python 3.10+ (mlx-vlm dependency)"
-    spec = importlib.util.find_spec("mlx_vlm")
-    if spec is None:
-        return False, "mlx-vlm not installed (install extras: vision)"
-
-    # Gate 3: Check for transformers 5.x video_processor bug
-    # transformers 5.0.x RC has a bug where video_processor_class_from_name()
-    # fails with "argument of type 'NoneType' is not iterable" for models
-    # with temporal_patch_size (video-capable models like Qwen2-VL)
-    if probe is not None:
-        try:
-            from importlib.metadata import version
-            tf_version = version("transformers")
-            # Check if transformers 5.x (RC or early release with potential bugs)
-            if tf_version.startswith("5."):
-                preprocessor_path = probe / "preprocessor_config.json"
-                if preprocessor_path.exists():
-                    preproc_data = _json.loads(preprocessor_path.read_text(encoding="utf-8", errors="ignore"))
-                    if isinstance(preproc_data, dict) and "temporal_patch_size" in preproc_data:
-                        return False, f"Video processor bug in transformers {tf_version} (use transformers<5.0 or wait for fix)"
-        except Exception:
-            pass  # If check fails, proceed (may still work)
-
+    if importlib.util.find_spec("mlx_vlm") is None:
+        return False, "mlx-vlm not installed (base dependency — reinstall mlx-knife)"
     return True, None
 
 
@@ -547,7 +532,7 @@ def audio_runtime_compatibility(
     elif backend == Backend.MLX_VLM:
         # Multimodal audio (Gemma-3n, Qwen3-Omni) needs mlx-vlm
         # Gate 1: mlx-vlm must be available (pass probe for video_processor bug check)
-        vlm_ok, vlm_reason = vision_runtime_compatibility(probe)
+        vlm_ok, vlm_reason = vision_runtime_compatibility()
         if not vlm_ok:
             return vlm_ok, vlm_reason
 
@@ -654,7 +639,7 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         # Vision models: check BOTH backends for full chat+vision support
         # 1. mlx-vlm must be available (vision mode with images)
         # Pass probe for transformers 5.x video_processor bug detection
-        vision_ok, vision_reason = vision_runtime_compatibility(probe)
+        vision_ok, vision_reason = vision_runtime_compatibility()
         # 2. mlx-lm must support model_type (text-only mode without images)
         text_ok, text_reason = check_runtime_compatibility(probe, framework)
 

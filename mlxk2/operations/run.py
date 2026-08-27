@@ -386,7 +386,7 @@ def run_model(
 
                     if is_vision_model:
                         # Pass model_path for transformers 5.x video_processor bug detection
-                        compat, reason = vision_runtime_compatibility(model_path)
+                        compat, reason = vision_runtime_compatibility()
                         if not compat:
                             error_msg = f"Model '{resolved_name}' is vision-capable but not runnable: {reason}"
                             error_result = f"Error: {error_msg}"

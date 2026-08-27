@@ -17,7 +17,14 @@
 
 ### Changed
 
-- Dependency wave for 2.0.8 — mlx-vlm 0.6.10, transformers 5.14.1, `mlx<0.33`,
+- `mlx-audio` moves `0.4.4` → `0.4.8`. The regression that held the pin — 0.4.6 handed
+  resampling to the decoder, whose stopband is far too shallow for an ASR front-end
+  ([mlx-audio#870](https://github.com/Blaizzy/mlx-audio/issues/870)) — is fixed upstream and
+  re-measured here as identical to 0.4.4 to two decimals; a 4-minute 44.1 kHz stereo
+  transcription is byte-identical across the two versions. A guard now drives synthetic tones
+  through the real load path, because this class of defect is invisible to the audio assets in
+  this repository: they are 16 kHz mono and never resample.
+- Dependency wave for 2.0.8 — mlx-vlm 0.6.10, transformers 5.14.1, `mlx<0.32.1`, mlx-audio 0.4.8,
   torch/torchvision and `datasets` dropped. **No server-code change**; endpoints and payloads
   are identical. Canonical text: SERVER-HANDBOOK → Migration Notes → *From 2.0.7 → 2.0.8*.
 - ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
@@ -25,6 +32,18 @@
 
 ### Fixed
 
+- A vision runtime check rejected any checkpoint carrying `temporal_patch_size` while
+  transformers reported 5.x, citing a `video_processor_class_from_name()` bug. Measured on
+  transformers 5.14.1: that function does not raise, and the affected checkpoints answer
+  `run --image` correctly. The gate is removed — `qwen2_vl` / `qwen2_5_vl` / `qwen3_5`
+  checkpoints report `Runtime: yes` again, and a type mlx-lm genuinely does not know still says
+  so, with the accurate reason. The verdict also drove live-test discovery, so the models it
+  refused were never exercised and nothing could contradict it.
+- The `mlx` upper bound was the only loose one in the MLX stack, and a plain
+  `pip install` resolved past what the pinned mlx-vlm can run: mlx 0.32.2 breaks Qwen VL
+  vision outright, and 0.32.1 aborts the interpreter after producing correct output. The
+  bound is `<0.32.1`; the three measured versions, and how narrow the damage is, are
+  recorded at the pin itself.
 - A version gate switched the two Whisper workarounds off at `mlx-audio >= 0.5`, betting on a
   fix upstream never promised — 0.5.0 shipped 2026-08-17 with the issue still open. The gate is
   removed rather than re-aimed: one workaround was provably dead and is deleted with it, the
