@@ -48,7 +48,7 @@ dependencies: a workaround retires when its cause is gone, not on a date
 | [ADR-007](ADR-007-Clone-Implementation-Fixed.md) | Clone Implementation Fixed Strategy | Accepted | 2025-09-18 |
 | ADR-008 | MLXModel Package Format | Proposed | (not committed) |
 | [ADR-009](ADR-009-Stop-Token-Detection-Fix.md) | Stop Token Detection Fix | Implemented | 2025-10-21 |
-| ADR-010 | Reasoning Content Schema & Template-Derived Segmentation (#40) | Accepted — scoped (`reasoning_content` + template vocab); when the detection-bite has shipped **and** Decision 3 is decided; 2.0.8 detection-bite split out | (not committed) |
+| [ADR-010](ADR-010-Reasoning-Content-API.md) | Reasoning Content Schema & Shape-Derived Segmentation (#40) | Accepted — all decisions taken, **not implemented**; two shapes not N dialects, `reasoning_content` + `reasoning` alias, strip-only, runner returns raw; the former 2.0.8 detection-bite is withdrawn | 2026-08-27 |
 | [ADR-011](ADR-011-E2E-Live-Test-Architecture.md) | E2E Live Test Architecture | Implemented | 2025-10-21 |
 | [ADR-012](ADR-012-Vision-Support-Roadmap.md) | Vision Support Roadmap | Implemented (Phase 1-3) | 2025-11-12 |
 | ADR-013 | Community Model Quality Database | Planned | (not committed) |
