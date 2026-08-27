@@ -13,6 +13,16 @@ cannot expose the defect is why the regression survived a release cycle here.
 No model, no network, no GPU — it lives under live/ only because
 `mlx_audio.stt.utils` imports the real `mlx.core` at module level, which
 TESTING-DETAILS forbids inside the stub-collecting tree.
+
+To watch it go red, against the release that carried the regression::
+
+    python3.10 -m venv /tmp/red
+    /tmp/red/bin/pip install "mlx-audio==0.4.7" pytest numpy
+    /tmp/red/bin/python -m pytest tests_2.0/live/test_audio_resample_guard.py -o addopts=""
+
+Measured 2026-08-27: 0.4.7 lets 8.5 kHz through at -5.6 dB and 12 kHz at
+-22.5 dB, while 0.4.4 and 0.4.8 both leave -102.8 / -102.4 dB. A guard that
+never fails is decoration; this one discriminates.
 """
 
 import struct
