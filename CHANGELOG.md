@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-> Reinstated 2026-08-06. It was dropped in `20a3606` because it duplicated the Migration
-> Notes, so entries here **point at** the canonical text instead of repeating it. Folded
-> into the release section at release, as before.
-
 ### Added
 
 - `examples/photo-rag/` — a private photo library made searchable: walk, describe one
@@ -27,6 +23,16 @@
 - Dependency wave for 2.0.8 — mlx-vlm 0.6.10, transformers 5.14.1, `mlx<0.32.1`, mlx-audio 0.4.8,
   torch/torchvision and `datasets` dropped. **No server-code change**; endpoints and payloads
   are identical. Canonical text: SERVER-HANDBOOK → Migration Notes → *From 2.0.7 → 2.0.8*.
+  The `mlx` bound moves to `<0.32.1` rather than following mlx-vlm's floor upward: measured
+  against the pinned mlx-vlm, 0.32.2 breaks Qwen VL vision before inference and 0.32.1 aborts
+  the interpreter after producing correct output. The three versions and how far the scope was
+  checked are recorded at the pin.
+- SERVER-HANDBOOK describes the server that exists rather than the one that is planned. Eleven
+  forward-looking statements and four pointers into the source are gone; HTTP **413** and
+  **422** are documented (both were absent from the status list and both reported
+  `internal_error`); `/health` is stated as liveness, not readiness; the audio size limit is
+  given once instead of as two contradicting figures. `scripts/check-handbook-contract.py`
+  checks the decidable part of that contract before a release commit.
 - ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
   installed ruff version defaults to.
 
@@ -39,11 +45,6 @@
   checkpoints report `Runtime: yes` again, and a type mlx-lm genuinely does not know still says
   so, with the accurate reason. The verdict also drove live-test discovery, so the models it
   refused were never exercised and nothing could contradict it.
-- The `mlx` upper bound was the only loose one in the MLX stack, and a plain
-  `pip install` resolved past what the pinned mlx-vlm can run: mlx 0.32.2 breaks Qwen VL
-  vision outright, and 0.32.1 aborts the interpreter after producing correct output. The
-  bound is `<0.32.1`; the three measured versions, and how narrow the damage is, are
-  recorded at the pin itself.
 - A version gate switched the two Whisper workarounds off at `mlx-audio >= 0.5`, betting on a
   fix upstream never promised — 0.5.0 shipped 2026-08-17 with the issue still open. The gate is
   removed rather than re-aimed: one workaround was provably dead and is deleted with it, the
@@ -69,6 +70,13 @@
 - Two forward-promises in shipped ADRs had expired: ADR-018 Phase 4 and ADR-024's surgical
   reject both named 2.0.7 and did not ship there. Open promises now state the condition that
   makes them due rather than a release number (convention in `docs/ADR/README.md`).
+- ADR-014's CLI-symmetry table named a `--show-reasoning` flag that has never existed; the
+  shipped one is `--no-reasoning`.
+- TESTING-DETAILS claimed Python 3.9, 3.13 and 3.14 as verified while the project excludes all
+  three, documented a `live_cross_volume` marker that exists nowhere, invented a cleanup
+  timeout, and gave an rsync path missing the cache's `hub/` segment. Its inventory now lists
+  every test file, and per-release numbers are marked provisional until a release passes its
+  acceptance run.
 
 ## [2.0.7] - 2026-07-24
 
