@@ -11,158 +11,50 @@ from __future__ import annotations
 
 import os
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..operations.workspace import is_workspace_path
 
 
-# ============================================================================
-# Workaround version gate (ADR-023 Workaround-Sunset Policy)
-# ============================================================================
-# The two whisper-related patches below target mlx-audio 0.4.x behavior
-# (issue #645). When mlx-audio reaches `_MLX_AUDIO_SUNSET_AT` they
-# auto-disable. Before shipping 2.0.6, every `sunset-by 2.0.6` marker in this
-# file must be re-evaluated:
-#   - if upstream fixed the issue -> delete the patch function entirely,
-#   - if upstream did NOT fix it  -> delete the patch function AND drop the
-#     affected model type (Whisper) from the verified list in capabilities.py.
-# Rationale: ADR-023 — mlx-knife does not carry upstream workarounds
-# indefinitely. `grep -rn "sunset-by" mlxk2/` is the canonical inventory.
-
-try:
-    from importlib.metadata import version as _pkg_version
-    _MLX_AUDIO_VERSION_STR = _pkg_version("mlx-audio")
-except Exception:
-    _MLX_AUDIO_VERSION_STR = "0.0.0"
-
-
-def _mlx_audio_version_tuple(v: str) -> Tuple[int, int, int]:
-    """Best-effort (major, minor, patch) tuple; strips pre/local suffixes."""
-    parts: List[int] = []
-    for p in v.split(".")[:3]:
-        head = p
-        for sep in ("-", "+", "rc", "a", "b"):
-            head = head.split(sep)[0]
-        try:
-            parts.append(int(head))
-        except ValueError:
-            parts.append(0)
-    while len(parts) < 3:
-        parts.append(0)
-    return (parts[0], parts[1], parts[2])
-
-
-_MLX_AUDIO_VERSION = _mlx_audio_version_tuple(_MLX_AUDIO_VERSION_STR)
-_MLX_AUDIO_SUNSET_AT = (0, 5, 0)
-_MLX_AUDIO_NEEDS_PATCHES = _MLX_AUDIO_VERSION < _MLX_AUDIO_SUNSET_AT
-
-
-# ============================================================================
-# CRITICAL: Patch Model.get_tokenizer() to use our tiktoken tokenizer
-# ============================================================================
-# WORKAROUND: mlx-audio#645 — sunset-by 2.0.6
-# mlx-audio 0.3.1 (PyPI) removed the get_tokenizer() function that creates
-# tiktoken-based tokenizers. The Model.get_tokenizer() method now throws
-# ValueError if no HuggingFace processor is available. We patch
-# Model.get_tokenizer() to fall back to our bundled tokenizer
-# (mlxk2.audio.whisper_tokenizer) when no processor is available.
-# This MUST happen at module import time, before any Whisper model is loaded.
-# ============================================================================
+# WORKAROUND: mlx-audio#645 — bridge, retires via tests_2.0/test_audio_bridge_canary.py
+#
+# mlx-audio 0.3.1 dropped the tiktoken `get_tokenizer()` factory from the PyPI
+# package, so `Model.get_tokenizer()` raises for mlx-community Whisper repos,
+# which ship no HuggingFace processor. We restore it from our vendored copy of
+# upstream's own code (commit 9349644, MIT) — a BRIDGE per ADR-023: parity with
+# upstream HEAD, not beyond it, so it carries no version deadline. It is purely
+# additive, replacing a method that would otherwise raise, so keeping it after
+# upstream recovers is redundant but never wrong. The canary says when.
 
 def _apply_whisper_tokenizer_patch():
-    """Patch Model.get_tokenizer to fall back to our tiktoken tokenizer."""
-    if not _MLX_AUDIO_NEEDS_PATCHES:
-        return  # Upstream expected to have fixed this; no patch needed.
+    """Give Model.get_tokenizer a tokenizer instead of a ValueError."""
     try:
         from mlx_audio.stt.models.whisper.whisper import Model as WhisperModel
         from mlxk2.audio.whisper_tokenizer import get_tokenizer
-
-        # Store original method (if it exists and isn't already patched)
-        if hasattr(WhisperModel, "_mlxk_original_get_tokenizer"):
-            # Already patched
-            return
-
-        original_get_tokenizer = WhisperModel.get_tokenizer
-
-        def patched_get_tokenizer(self, language=None, task="transcribe"):
-            """Patched get_tokenizer with tiktoken fallback.
-
-            First tries the original method (uses HF Processor if available).
-            Falls back to our bundled tiktoken-based tokenizer on failure.
-            """
-            # Try original first (uses HF Processor if available)
-            if hasattr(self, "_processor") and self._processor is not None:
-                try:
-                    return original_get_tokenizer(self, language, task)
-                except Exception:
-                    # HF Processor failed, fall through to tiktoken
-                    pass
-
-            # Fallback to our tiktoken-based tokenizer
-            return get_tokenizer(
-                self.is_multilingual,
-                num_languages=getattr(self, "num_languages", 99),
-                language=language,
-                task=task,
-            )
-
-        # Apply patch
-        WhisperModel.get_tokenizer = patched_get_tokenizer
-        WhisperModel._mlxk_original_get_tokenizer = original_get_tokenizer
-
     except ImportError:
-        # mlx-audio not installed - skip patching
-        pass
+        return  # mlx-audio not installed
+
+    if hasattr(WhisperModel, "_mlxk_original_get_tokenizer"):
+        return
+
+    original_get_tokenizer = WhisperModel.get_tokenizer
+
+    def patched_get_tokenizer(self, language=None, task="transcribe"):
+        return get_tokenizer(
+            self.is_multilingual,
+            num_languages=getattr(self, "num_languages", 99),
+            language=language,
+            task=task,
+        )
+
+    WhisperModel.get_tokenizer = patched_get_tokenizer
+    WhisperModel._mlxk_original_get_tokenizer = original_get_tokenizer
 
 
-# Apply Whisper tokenizer patch immediately at module import
+# Must run before any Whisper model is loaded.
 _apply_whisper_tokenizer_patch()
-
-
-# ============================================================================
-# CRITICAL: Patch post_load_hook to skip WhisperProcessor loading
-# ============================================================================
-# WORKAROUND: mlx-audio#645 — sunset-by 2.0.6
-# mlx-audio 0.4.x added _init_processor() in post_load_hook which calls
-# WhisperProcessor.from_pretrained(model_path). This fails for mlx-community
-# models because they don't ship preprocessor_config.json, causing a
-# UserWarning on every run. Even when the file IS present, the HF tokenizer
-# is incompatible with MLX Whisper models (scatter crash).
-# Upstream: https://github.com/Blaizzy/mlx-audio/issues/645
-# This MUST happen at module import time, before any Whisper model is loaded.
-# ============================================================================
-
-def _apply_post_load_hook_patch():
-    """Skip WhisperProcessor loading — tiktoken handles tokenization."""
-    if not _MLX_AUDIO_NEEDS_PATCHES:
-        return  # Upstream expected to have fixed this; no patch needed.
-    try:
-        from mlx_audio.stt.models.whisper.whisper import Model as WhisperModel
-
-        if not hasattr(WhisperModel, "post_load_hook"):
-            return
-
-        if hasattr(WhisperModel, "_mlxk_original_post_load_hook"):
-            return  # Already patched
-
-        original_post_load_hook = WhisperModel.post_load_hook
-
-        @staticmethod
-        def patched_post_load_hook(model, model_path):
-            """No-op: skip WhisperProcessor, set _processor = None."""
-            model._processor = None
-            return model
-
-        WhisperModel.post_load_hook = patched_post_load_hook
-        WhisperModel._mlxk_original_post_load_hook = original_post_load_hook
-
-    except ImportError:
-        pass
-
-
-# Apply post_load_hook patch immediately at module import
-_apply_post_load_hook_patch()
 
 
 class AudioRunner:
@@ -216,7 +108,11 @@ class AudioRunner:
         prev_pbar = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
         os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
         try:
-            self._load_model_impl()
+            # Upstream's post_load_hook warns when a repo ships no HuggingFace
+            # processor. The bridge above makes that the expected path, not a fault.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="Could not load WhisperProcessor")
+                self._load_model_impl()
         finally:
             if prev_pbar is None:
                 os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
@@ -233,7 +129,7 @@ class AudioRunner:
         except ImportError as e:
             raise RuntimeError(
                 f"Failed to import mlx-audio (audio backend): {e}\n"
-                "Install with: pip install mlx-knife[audio]"
+                "mlx-audio is a base dependency — reinstall mlx-knife"
             ) from e
 
         self._generate_fn = generate_transcription

@@ -18,7 +18,6 @@ Memory Gates (ARCHITECTURE.md Principle #4):
 import subprocess
 import threading
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -505,11 +504,8 @@ class ModelManager:
 
         self._logger.info(f"Loading audio model: {model_spec}", model=model_spec, backend="mlx_audio")
 
-        # Suppress mlx-audio WhisperProcessor warnings in server mode
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="Could not load WhisperProcessor")
-            runner = AudioRunner(model_path, resolved_name or model_spec, verbose=verbose)
-            runner.load_model()
+        runner = AudioRunner(model_path, resolved_name or model_spec, verbose=verbose)
+        runner.load_model()
 
         self._check_shutdown()
         return runner

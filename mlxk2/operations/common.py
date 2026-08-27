@@ -512,7 +512,7 @@ def audio_runtime_compatibility(
         # STT models (Whisper, Voxtral) need mlx-audio
         spec = importlib.util.find_spec("mlx_audio")
         if spec is None:
-            return False, "mlx-audio not installed (pip install mlx-knife[audio])"
+            return False, "mlx-audio not installed (base dependency — reinstall mlx-knife)"
 
         # Gate 2: model_type must be supported by mlx-audio
         # This catches mis-routed models like Qwen3-Omni that have WhisperFeatureExtractor
@@ -535,12 +535,13 @@ def audio_runtime_compatibility(
                 except Exception:
                     pass  # If config can't be read, proceed (health check will catch it)
 
-            # Gate 3: Check for Voxtral tekken.json tokenizer bug (mlx-audio#450)
-            # Voxtral uses tekken.json (Mistral tokenizer format) which mlx-audio can't convert properly
+            # Gate 3: Voxtral ships tekken.json (Mistral tokenizer format), which
+            # mlx-audio cannot convert. No upstream issue tracks this — do not cite
+            # one; the condition below is the whole claim.
             tekken_path = probe / "tekken.json"
             tokenizer_path = probe / "tokenizer.json"
             if tekken_path.exists() and not tokenizer_path.exists():
-                return False, "Voxtral tekken.json tokenizer not supported (mlx-audio#450, upstream fix pending)"
+                return False, "Voxtral tekken.json tokenizer not supported by mlx-audio"
 
         return True, None
     elif backend == Backend.MLX_VLM:

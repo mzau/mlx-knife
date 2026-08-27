@@ -147,7 +147,7 @@ VISION_MODEL_TYPES = frozenset({
 STT_MODEL_TYPES = frozenset({
     "whisper",
     "vibevoice",
-    "voxtral",       # mlx-audio runtime gated by tekken.json bug (mlx-audio#450)
+    "voxtral",       # runtime-gated in common.py: tekken.json without tokenizer.json
 })
 
 # Audio model types (ADR-019, ADR-020) - All audio-capable models
@@ -748,7 +748,7 @@ def select_backend_policy(
                 return BackendPolicy(
                     backend=Backend.UNSUPPORTED,
                     decision=PolicyDecision.BLOCK,
-                    message="STT models require mlx-audio (pip install mlx-knife[audio])",
+                    message="STT models require mlx-audio (a base dependency — reinstall mlx-knife)",
                     http_status=501,
                     error_type="missing_dependency",
                 )

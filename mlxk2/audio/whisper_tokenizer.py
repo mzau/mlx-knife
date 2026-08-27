@@ -5,17 +5,12 @@
 # This code was removed in PyPI release 0.3.1 (2026-01-29), breaking Whisper
 # transcription for models without HuggingFace processor.
 #
-# WORKAROUND: mlx-audio#645 — sunset-by 2.0.6
-# Bundled tiktoken-based tokenizer for Whisper. Used by audio_runner.py's
-# Whisper get_tokenizer() patch (#645 Patch #2) to fall back when no HF
-# Processor is available, and by the post_load_hook patch (#645 Patch #3).
-# Originally introduced for #479 (assets removed in mlx-audio f7328a4); that
-# issue is now closed upstream and the related _apply_tiktoken_patch was
-# dropped in 2.0.6. The module stays because #645 (Whisper post_load_hook)
-# still requires our tokenizer fallback.
-# If #645 is fixed upstream by the next freeze → this module is removed
-# along with audio_runner.py's #645 patches. If not → module is removed
-# anyway and Whisper drops from the verified list per ADR-023 policy.
+# WORKAROUND: mlx-audio#645 — bridge, retires via tests_2.0/test_audio_bridge_canary.py
+# Bundled tiktoken-based tokenizer for Whisper, consumed by audio_runner.py's
+# get_tokenizer bridge. This is upstream's own code restored, not something
+# exceeding it, so it carries no version deadline and Whisper stays on the
+# verified list — a BRIDGE, not a shim (ADR-023). It retires when the canary
+# stops failing, i.e. when upstream serves these repos again.
 # See: https://github.com/Blaizzy/mlx-audio/issues/645
 #
 # Original source:

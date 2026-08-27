@@ -31,7 +31,8 @@ This product includes software developed by:
   or linked into mlx-knife, and mlx-knife ships no ffmpeg code.
 
   mlx-knife bundles tiktoken vocabulary files (gpt2.tiktoken, multilingual.tiktoken)
-  in mlxk2/assets/whisper/ from mlx-audio commit 9349644. These files are used as
-  a workaround for mlx-audio Issue #479 (assets removed in f7328a4 but code still
-  requires them). Original files are from the OpenAI Whisper model, distributed by
-  mlx-audio under the MIT License.
+  in mlxk2/assets/whisper/ from mlx-audio commit 9349644. They are read by the
+  vendored Whisper tokenizer that bridges mlx-audio issue #645: upstream dropped
+  the tiktoken path from its PyPI package, so mlx-knife carries both that tokenizer
+  and the vocabularies it needs. Original files are from the OpenAI Whisper model,
+  distributed by mlx-audio under the MIT License.

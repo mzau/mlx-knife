@@ -25,6 +25,16 @@
 
 ### Fixed
 
+- A version gate switched the two Whisper workarounds off at `mlx-audio >= 0.5`, betting on a
+  fix upstream never promised — 0.5.0 shipped 2026-08-17 with the issue still open. The gate is
+  removed rather than re-aimed: one workaround was provably dead and is deleted with it, the
+  other is now unconditional, and a canary (`tests_2.0/test_audio_bridge_canary.py`) reports
+  when upstream makes it redundant. At the pinned mlx-audio, transcripts are byte-identical and
+  upstream's alignment-heads loading runs again.
+- Three messages advertised an `mlx-knife[audio]` extra that has never existed; the Voxtral
+  reject cited `mlx-audio#450`, a pull request closed unmerged rather than an open issue; and
+  `NOTICE` attributed the bundled tiktoken vocabularies to the wrong issue, with a rationale
+  that described upstream's code rather than ours. Each now states what is actually the case.
 - `mlxk serve` and `mlxk embed-serve` left the server process running and the port bound
   when the supervisor was stopped by a signal or killed outright
   ([#60](https://github.com/mzau/mlx-knife/issues/60)) — a restart then talked to the old
