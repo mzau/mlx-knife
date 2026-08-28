@@ -16,11 +16,13 @@ class ErrorType(str, Enum):
     AMBIGUOUS_MATCH = "ambiguous_match"
     DOWNLOAD_FAILED = "download_failed"
     VALIDATION_ERROR = "validation_error"
+    PAYLOAD_TOO_LARGE = "payload_too_large"  # HTTP 413: Upload above the accepted size
     PUSH_OPERATION_FAILED = "push_operation_failed"
     SERVER_SHUTDOWN = "server_shutdown"
     INSUFFICIENT_MEMORY = "insufficient_memory"  # ADR-016: Model exceeds memory threshold
     NOT_IMPLEMENTED = "not_implemented"  # HTTP 501: Feature not supported
     UNSUPPORTED_MULTIMODAL = "unsupported_multimodal"  # ADR-023: Model type outside verified multimodal list
+    CAPABILITY_NOT_SUPPORTED = "capability_not_supported"  # HTTP 422: This model cannot do it
     INTERNAL_ERROR = "internal_error"
     BAD_GATEWAY = "bad_gateway"  # HTTP 502: upstream backend unreachable (ADR-015 D2 embed proxy)
     GATEWAY_TIMEOUT = "gateway_timeout"  # HTTP 504: upstream backend timed out (ADR-015 D2 embed proxy)
@@ -33,11 +35,13 @@ ERROR_TYPE_TO_HTTP_STATUS: Dict[ErrorType, int] = {
     ErrorType.AMBIGUOUS_MATCH: 400,
     ErrorType.DOWNLOAD_FAILED: 503,
     ErrorType.VALIDATION_ERROR: 400,
+    ErrorType.PAYLOAD_TOO_LARGE: 413,  # Audio upload above the size limit
     ErrorType.PUSH_OPERATION_FAILED: 500,
     ErrorType.SERVER_SHUTDOWN: 503,
     ErrorType.INSUFFICIENT_MEMORY: 507,  # ADR-016: HTTP 507 Insufficient Storage
     ErrorType.NOT_IMPLEMENTED: 501,  # Feature not supported
     ErrorType.UNSUPPORTED_MULTIMODAL: 501,  # ADR-023: Model type outside verified multimodal list
+    ErrorType.CAPABILITY_NOT_SUPPORTED: 422,  # Request is well-formed, this model cannot serve it
     ErrorType.INTERNAL_ERROR: 500,
     ErrorType.BAD_GATEWAY: 502,  # ADR-015 D2: embed backend unreachable
     ErrorType.GATEWAY_TIMEOUT: 504,  # ADR-015 D2: embed backend read-timeout

@@ -3,8 +3,8 @@
 FastAPI TestClient against the real serve app. The model resolution / capability
 gates and the audio runner are faked via ``patch.object`` on the module globals —
 no live backend, no model, no audio decode. Covers:
-  * non-audio model           -> 400
-  * audio, not translate-able  -> 422 AND the runner is never invoked
+  * non-audio model           -> 400 validation_error
+  * audio, not translate-able  -> 422 capability_not_supported AND the runner is never invoked
   * translate-able             -> task="translate" + no synthetic prompt threaded
   * verbose_json               -> response task == "translate"
 
@@ -38,6 +38,7 @@ def test_non_audio_model_returns_400():
         client = TestClient(app)
         r = _post(client)
     assert r.status_code == 400
+    assert r.json()["error"]["type"] == "validation_error"
     assert "not an audio model" in r.json()["error"]["message"]
 
 
@@ -51,6 +52,10 @@ def test_non_translate_capable_returns_422_without_invoking_runner():
         client = TestClient(app)
         r = _post(client)
     assert r.status_code == 422
+    # #62: the envelope reported `internal_error` here for a whole release line, because
+    # this assert was missing and 422 had no entry in the status->type mapping.
+    assert r.json()["error"]["type"] == "capability_not_supported"
+    assert r.json()["error"]["retryable"] is False
     assert "does not support speech translation" in r.json()["error"]["message"]
     runner_factory.assert_not_called()
 

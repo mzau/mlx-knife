@@ -181,6 +181,8 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 | `access_denied` | 403 | File / cache permission denied |
 | `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
 | `ambiguous_match` | 400 | Model spec matches multiple cached models — disambiguate |
+| `payload_too_large` | 413 | Audio upload above the 50 MB limit, on either audio endpoint |
+| `capability_not_supported` | 422 | The request is well-formed and the feature exists, but *this* model cannot serve it |
 | `download_failed` | 503 | HF download failed mid-stream |
 | `push_operation_failed` | 500 | `/v1/push`-style operation failed (CLI-only path; not user-reachable on the server today) |
 | `server_shutdown` | 503 | Lifespan shutdown in progress; new requests are rejected |
@@ -193,17 +195,17 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 
 (`bad_gateway` / `gateway_timeout` are raised only by the `serve --embed-backend` proxy; a backend's own `4xx`/`5xx` envelopes otherwise pass through verbatim.)
 
-**Route on the HTTP status, not on `error.type`.** The type is derived *from* the status by a fixed
-mapping, which makes the status the more reliable of the two — and two statuses are absent from that
-mapping, so their envelopes fall back to `error.type: "internal_error"` with `retryable: false`:
+**Status and type always agree.** The type is derived *from* the status by a fixed mapping, so routing
+on either one gives the same answer; the type is the more specific of the two, because three statuses
+carry more than one meaning (400, 500, 503) and two types share 501.
 
-- **422** — `POST /v1/audio/translations` against an audio model that cannot translate
-  (see [the reject matrix](#post-v1audiotranslations))
-- **413** — an audio upload above the 50 MB limit, on either audio endpoint
-
-Both are deliberate, correct rejects wearing the label of a server fault
-([#62](https://github.com/mzau/mlx-knife/issues/62)). The statuses are correct and stable; the type on
-these two paths is not.
+Three types describe a request the server declines rather than fails, and they say different things.
+`not_implemented` — the feature does not exist here. `unsupported_multimodal` — the model's class is
+outside the verified-multimodal list. `capability_not_supported` — the feature exists and the request
+is fine, but the model you named cannot serve it; `POST /v1/audio/translations` against a
+whisper-turbo or `.en` variant is the case you will meet (see
+[the reject matrix](#post-v1audiotranslations)). All three are deliberate rejects, and none of them is
+`retryable`.
 
 ---
 
@@ -1004,8 +1006,8 @@ python -m mlxk2.core.server_base
 - **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures, ambiguous model spec; for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
 - **403 Forbidden:** File or cache permission denied (`access_denied`)
 - **404 Not Found:** Model not found in cache or workspace
-- **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints). The envelope carries `error.type: "internal_error"`; route on the status (see [Error Response Format](#error-response-format))
-- **422 Unprocessable Entity:** `POST /v1/audio/translations` only — an audio model that cannot translate. Same envelope caveat as 413
+- **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints) (`payload_too_large`)
+- **422 Unprocessable Entity:** `POST /v1/audio/translations` only — an audio model that cannot translate (`capability_not_supported`)
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
@@ -1105,7 +1107,8 @@ pip install mlx-knife
 
 #### Audio Request Fails
 
-**HTTP 413** — the upload is above the 50 MB limit (hard limit, both endpoints).
+**HTTP 413** — the upload is above the 50 MB limit (hard limit, both endpoints), with
+`error.type: "payload_too_large"`.
 
 **HTTP 400** — any of:
 - An empty file

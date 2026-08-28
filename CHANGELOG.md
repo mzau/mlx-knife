@@ -38,6 +38,14 @@
 
 ### Fixed
 
+- Two deliberate rejects went out labelled as a server fault
+  ([#62](https://github.com/mzau/mlx-knife/issues/62)): the status→type mapping had no entry
+  for **422** (`POST /v1/audio/translations` against a model that cannot translate) or for
+  **413** (an audio upload above the size limit, on either audio endpoint), so both fell back
+  to `error.type: "internal_error"` with the status itself correct. They now carry
+  `capability_not_supported` and `payload_too_large`. A test holds every status the server
+  raises against the mapping, so the next one added cannot repeat this quietly — that is what
+  let 413 follow 422. Canonical text: SERVER-HANDBOOK → *Error Response Format*.
 - A vision runtime check rejected any checkpoint carrying `temporal_patch_size` while
   transformers reported 5.x, citing a `video_processor_class_from_name()` bug. Measured on
   transformers 5.14.1: that function does not raise, and the affected checkpoints answer

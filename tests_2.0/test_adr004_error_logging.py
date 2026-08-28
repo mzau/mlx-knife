@@ -124,6 +124,8 @@ def test_error_type_to_http_status_mapping():
         ErrorType.AMBIGUOUS_MATCH: 400,
         ErrorType.DOWNLOAD_FAILED: 503,
         ErrorType.VALIDATION_ERROR: 400,
+        ErrorType.PAYLOAD_TOO_LARGE: 413,
+        ErrorType.CAPABILITY_NOT_SUPPORTED: 422,
         ErrorType.PUSH_OPERATION_FAILED: 500,
         ErrorType.SERVER_SHUTDOWN: 503,
         ErrorType.INTERNAL_ERROR: 500,
@@ -133,6 +135,36 @@ def test_error_type_to_http_status_mapping():
         error = MLXKError(type=error_type, message="test")
         assert error.to_http_status() == expected_status
         assert ERROR_TYPE_TO_HTTP_STATUS[error_type] == expected_status
+
+
+def test_every_raised_status_has_an_error_type():
+    """Every HTTP status the server raises must have a _STATUS_TO_ERROR_TYPE entry (#62).
+
+    Without an entry the handler falls back to `internal_error`, so a deliberate, correct
+    reject goes out wearing the label of a server fault. That happened silently to 422 and
+    then again to 413; this test is what makes the third one loud. Same source scan as
+    `rule_status_codes` in scripts/check-handbook-contract.py, held against the mapping
+    instead of against the handbook.
+    """
+    from mlxk2.core.server.error_handlers import _STATUS_TO_ERROR_TYPE
+
+    root = Path(__file__).resolve().parent.parent / "mlxk2" / "core"
+    sources = sorted(root.glob("server*.py")) + sorted((root / "server").rglob("*.py"))
+    assert sources, "no server sources found - the scan would pass vacuously"
+
+    raised = set()
+    for src in sources:
+        text = src.read_text()
+        raised |= {int(c) for c in re.findall(r"status_code\s*=\s*(\d{3})", text)}
+        raised |= {int(c) for c in re.findall(r"HTTPException\(\s*(\d{3})", text)}
+
+    # Statuses reached only through a variable (model_manager's `policy.http_status`) are
+    # invisible to this scan, exactly as they are to the handbook check.
+    unmapped = sorted(c for c in raised if c >= 400 and c not in _STATUS_TO_ERROR_TYPE)
+    assert not unmapped, (
+        f"statuses raised without an error-type mapping: {unmapped} - "
+        f"they would be served as 'internal_error'"
+    )
 
 
 def test_common_error_constructors():

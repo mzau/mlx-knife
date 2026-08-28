@@ -19,6 +19,8 @@ _STATUS_TO_ERROR_TYPE = {
     400: ErrorType.VALIDATION_ERROR,
     403: ErrorType.ACCESS_DENIED,
     404: ErrorType.MODEL_NOT_FOUND,
+    413: ErrorType.PAYLOAD_TOO_LARGE,  # Audio upload above the size limit (both audio routes)
+    422: ErrorType.CAPABILITY_NOT_SUPPORTED,  # /v1/audio/translations against a non-translating model
     500: ErrorType.INTERNAL_ERROR,
     501: ErrorType.NOT_IMPLEMENTED,
     502: ErrorType.BAD_GATEWAY,  # ADR-015 D2: embed backend unreachable
@@ -47,7 +49,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """Convert FastAPI validation errors (422) to an ADR-004 envelope (400).
 
     FastAPI returns 422 Unprocessable Entity for validation errors by default; we convert to
-    400 Bad Request with the ADR-004 envelope for API consistency.
+    400 Bad Request with the ADR-004 envelope for API consistency. A 422 raised by hand stays
+    422 and goes through the handler above — a malformed request and a model that cannot serve
+    a well-formed one are different answers.
     """
     request_id = getattr(request.state, "request_id", None)
     errors = exc.errors()
