@@ -537,7 +537,7 @@ class VisionRunner:
         Enhanced in ADR-017 Phase 1:
         - Collapsible <details> wrapper (collapsed by default)
         - Optional EXIF metadata columns (GPS, DateTime, Camera)
-        - Feature flag: MLXK2_EXIF_METADATA=1 enables EXIF extraction
+        - Feature flag: MLXK2_EXIF_METADATA=0 disables EXIF extraction (default: enabled)
 
         Args:
             result: Model output text

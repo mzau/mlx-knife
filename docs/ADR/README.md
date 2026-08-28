@@ -55,7 +55,7 @@ dependencies: a workaround retires when its cause is gone, not on a date
 | [ADR-014](ADR-014-Unix-Pipe-Integration.md) | Unix Pipe Integration | Beta (Phase 1 feature complete, gated via `MLXK2_ENABLE_PIPES=1`) | 2025-11-16 |
 | [ADR-015](ADR-015-Embeddings-API.md) | Embeddings API | Accepted — Partially Implemented (Slices A–C + D1 `embed-serve` + D2 serve-proxy landed in 2.0.7, experimental-gated `MLXK2_ENABLE_ALPHA_FEATURES=1`; Slice E pending) | 2025-11-16 |
 | [ADR-016](ADR-016-Memory-Aware-Model-Loading.md) | Memory-Aware Model Loading | Implemented (Phase 1-2b; Phase 3 deferred) | 2026-01-29 |
-| ADR-017 | Image Metadata Extraction (EXIF) | Implemented (Phase 1) | (not committed) |
+| [ADR-017](ADR-017-Image-Metadata-RAG.md) | Image Metadata Extraction (EXIF) | Implemented (Phase 1, shipped 2.0.4-beta.1; Phase 2 conditional — only if demand emerges) | 2025-12-15 |
 | [ADR-018](ADR-018-Convert-Operation.md) | Convert Operation | Implemented through Phase 3 (Phase 1 `--repair-index` 2.0.4-beta.5, Phase 2 `--quantize` 2.0.5, Phase 3 content_hash v2 via ADR-025 2.0.6; Phase 4 `--repair` deferred — nothing pulls it) | 2025-12-18 |
 | [ADR-019](ADR-019-Audio-Input-Support-beta8.md) | Audio Input Support (beta.8) | Obsolete (→ ADR-020) | 2026-01-20 |
 | [ADR-020](ADR-020-Audio-Backend-Architecture.md) | Audio Backend Architecture (beta.9) | Implemented | 2026-01-31 |
