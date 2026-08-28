@@ -88,6 +88,12 @@
   makes them due rather than a release number (convention in `docs/ADR/README.md`).
 - ADR-014's CLI-symmetry table named a `--show-reasoning` flag that has never existed; the
   shipped one is `--no-reasoning`.
+- `MLXK2_EXIF_METADATA` was described backwards in two places: a `vision_runner` docstring
+  said `=1` enables EXIF extraction, and ADR-017 called the flag opt-in. The code reads
+  `!= "0"` — extraction is on by default and `=0` is what turns it off. The wrong docstring
+  shipped in the 2.0.7 wheel, in the same file as a second docstring that had it right.
+  README and SERVER-HANDBOOK were correct throughout. ADR-017 is published with the
+  correction.
 - TESTING-DETAILS claimed Python 3.9, 3.13 and 3.14 as verified while the project excludes all
   three, documented a `live_cross_volume` marker that exists nowhere, invented a cleanup
   timeout, and gave an rsync path missing the cache's `hub/` segment. Its inventory now lists
