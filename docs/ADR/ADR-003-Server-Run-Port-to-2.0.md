@@ -1,8 +1,7 @@
 # ADR-003: Server and Run Functionality Port from 1.x to 2.0
 
-**Status**: Accepted  
+**Status**: Accepted — Implemented. The port shipped; the layout in §Implementation Mapping is the one in the tree, and 1.x is no longer maintained. This ADR is a record of the port, not a live plan.  
 **Date**: 2025-09-10  
-**Decision Makers**: mzau, Claude
 
 ## Context
 
@@ -149,38 +148,22 @@ class ServerAPIContract:
 - **Push feature**: Remains experimental/undefined as per current state
 - **License split**: Maintained (1.x MIT, 2.x Apache-2.0)
 
-## Implementation Checklist
+## Outcome
 
-*Chronologische Reihenfolge - kann parallel oder iterativ bearbeitet werden*
+The port completed. Every module the strategy named exists in the tree —
+`mlxk2/core/runner/` (a package, not the single `runner.py` the sketch assumed),
+`core/server_base.py`, `core/reasoning.py`, the extended `core/cache.py`,
+`operations/run.py`, `operations/serve.py`, and the CLI that drives them; output
+formatters and the default test suite came with them.
 
-### Week 1: Test Infrastructure
-- [ ] Extract server test specifications from 1.x
-- [ ] Extract run/chat test specifications from 1.x
-- [ ] Create abstract test contracts in 2.0
-- [ ] Write failing tests for all core features
+One deliberate deviation: **`operations/chat.py` was never built.** Interactive chat lives
+inside `operations/run.py`, exactly as §Port Strategy decided — a separate chat module was
+listed in an early checklist that contradicted the decision on the same page.
 
-### Week 2: Core Implementation
-- [ ] Implement `mlxk2/core/runner.py`
-- [ ] Implement `mlxk2/core/server_base.py`
-- [ ] Implement `mlxk2/core/reasoning.py`
-- [ ] Extend `mlxk2/core/cache.py` with detection
+## Release Criteria for 2.0.0-beta.1 — how they resolved
 
-### Week 3: Operations Layer
-- [ ] Implement `mlxk2/operations/run.py`
-- [ ] Implement `mlxk2/operations/chat.py`
-- [ ] Implement `mlxk2/operations/serve.py`
-- [ ] Update CLI in `mlxk2/cli.py`
+### Shipped
 
-### Week 4: Integration & Polish
-- [x] Integrate output formatters (Human + JSON)
-- [x] Full 2.0 default test suite passing (containing server-minimaltests)
-- [x] Documentation updates (CLAUDE.md, TESTING.md)
-
-## Release Criteria for 2.0.0-beta.1
-
-Based on this port and existing 2.0 features:
-
-### Must Have (Beta.1)
 - ✅ JSON-first API (already in alpha.3)
 - ✅ Human output backend (already in alpha.3)
 - ✅ Enhanced model detection (already in alpha.3)
@@ -188,28 +171,27 @@ Based on this port and existing 2.0 features:
 - ✅ Run command with streaming
 - ✅ Interactive chat mode
 - ✅ Basic reasoning support (GPT-OSS)
-- [ ] 90%+ test coverage
+- ✅ Issue #30 preflight
+- ✅ Push — a documented first-class command since the port, no longer experimental (Issue #29)
 
-### Should Have (Beta.2)
-- [ ] Full reasoning features (hide-reasoning flag)
-- [ ] Advanced token management
-- [ ] Performance optimizations
-- [ ] Extended test coverage (95%+)
-- [x] Issue #30 Preflight (premature integration)
+### The rest
 
-### Could Have (Future)
-- [ ] Custom reasoning token configuration
-- [ ] Multi-model server support
-- [ ] Push functionality (currently experimental)
-- [ ] Web UI (not part of 2.0‑port)
+| Criterion | How it resolved |
+|---|---|
+| 90%+ / 95%+ test coverage | **Never operationalised.** Nothing in the repo measures coverage; the suite is reported in tests, not in percent. Not a criterion today. |
+| Full reasoning features ("hide-reasoning flag") | The flag shipped as **`--no-reasoning`**, not under the name used here, and it *hides* a reasoning trace rather than suppressing it. The remainder is [#40](https://github.com/mzau/mlx-knife/issues/40). |
+| Custom reasoning token configuration | Same place — [#40](https://github.com/mzau/mlx-knife/issues/40). |
+| Advanced token management | Context-derived limits shipped with the port. Nothing further was ever specified under this heading. |
+| Performance optimizations | Never carried a threshold; folded into ordinary work. |
+| Multi-model server support | **Not planned.** The server holds one warm model and hot-swaps; serving several at once is outside what a single-node tool promises. |
+| Web UI | Never in scope for the port, and still isn't. |
 
 ### Not in Scope for Port
-- **System prompt CLI support** (`--system` parameter): This is a future enhancement not yet implemented in 1.x. Decision on this feature will be made after successful server & run functional parity with 1.1.1 is achieved. See CLAUDE.md for ongoing discussion.
+- **System prompt CLI support** (`--system` parameter): Never existed in 1.x, so it is not a port gap — and still unimplemented in 2.x (the CLI passes no system prompt; `run.py` carries the parameter without the behaviour). The original gate is spent: the port shipped, and 1.x is no longer maintained. Tracked as [#33](https://github.com/mzau/mlx-knife/issues/33).
 
 ## References
 
 - CHANGELOG.md: Complete feature history of 1.1.1-beta.2 and beta.3
-- TESTING.md: 1.x test structure and categories
+- TESTING.md: the test strategy the port was built against
 - Issue #27: Strict health checks for multi-shard models
 - Issue #31: Lenient MLX detection for private repos
-- CLAUDE.md: Current context and TODOs

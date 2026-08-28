@@ -291,5 +291,7 @@ Example: 57 GB used in test_text_request_still_works_on_vision_model
 ## Further Documentation
 
 - **[TESTING.md](TESTING.md)** - Benchmark handbook (How-To)
-- **[schemas/LEARNINGS-FOR-v1.0.md](schemas/LEARNINGS-FOR-v1.0.md)** - Learnings for Phase 1
-- **[docs/ADR/ADR-013-Community-Model-Quality-Database.md](../docs/ADR/ADR-013-Community-Model-Quality-Database.md)** - Architecture vision
+
+Two further documents exist but are not published: `schemas/LEARNINGS-FOR-v1.0.md`
+(learnings for Phase 1) and ADR-013 *Community Model Quality Database* (the architecture
+vision). Ask if you are interested — that is what would move this forward.

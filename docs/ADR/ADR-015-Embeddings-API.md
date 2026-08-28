@@ -3,7 +3,7 @@
 - **Status:** Accepted — Partially Implemented (Slices A–C + D1 embed-serve + D2 serve-proxy landed in 2.0.7; Slice E examples pending). Key decisions settled 2026-06-14 (implementation-library + server-topology + code-structure + 2.0.7-scope + verified-encoder-list + config-first detection — see the §Decision sections below). (Consolidated 2026-04-07; 2.0.7 implementation slot confirmed 2026-05-11)
 - **Authors:** mlx-knife maintainers
 - **Date:** 2025-11-16
-- **Updated:** 2026-06-18 (**Model-Identity decision** — embed identity split into two response fields: `model` stays the clean `org/name` **selector** (= `/v1/models` id, re-sendable), and a new `system_fingerprint` realization token (`hash.device`) carries the change-detection signal; HTTP response format specified in the ADR for the first time — see §HTTP Response Format + §Decision: Model Identity & the Same-Model Rule); 2026-06-17 (Slices B + C landed [vendored BERT encoder; config-first `declared ∩ runnable` capability honesty + gate [5]]; **Slice D1 embed-serve landed** — `/v1/embeddings` backend + transport-agnostic handler + `mlxk embed-serve` CLI; interface: `encoding_format` default `base64`, lenient `request.model`, single runner + lock (no ModelManager), alpha-gated — see §2.0.7 Scope + `docs/SERVER-HANDBOOK.md`); 2026-06-15 (Slice-A landed — JSONL envelope finalized to `{model, dimensions, content_hash, device}` with Model-Identity/same-model + device-determinism rules; detection corrected so `gemma3_text` needs an EmbeddingGemma signal, not `model_type` alone; Slice B scoped to BERT-only with `xlm-roberta` deferred; `serve`'s `GET /v1/models` merge deferred to 2.1); 2026-06-14 (Open Q #1 resolved — verified-encoder list = one vendored BERT file + zero-vendored `mlx-lm` decoder path; config-first `declared ∩ runnable` detection; showcase `Qwen3-Embedding-0.6B-4bit-DWQ`; see §Decision: Verified-Encoder List & Model Detection); 2026-06-13 (implementation-library resolved — direct/vendored MIT, no turnkey lib; vision/multimodal embeddings deferred to BEYOND; CLI `embed`-verb confirmed; **server topology resolved (Open Q #3): separate processes, `serve` proxies `/v1/embeddings`; three-layer runner/op/handler structure with `EmbeddingRunner` as the 4th runner; CLI + server both minimal in 2.0.7**); 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
+- **Updated:** 2026-06-18 (**Model-Identity decision** — embed identity split into two response fields: `model` stays the clean `org/name` **selector** (= `/v1/models` id, re-sendable), and a new `system_fingerprint` realization token (`hash.device`) carries the change-detection signal; HTTP response format specified in the ADR for the first time — see §HTTP Response Format + §Decision: Model Identity & the Same-Model Rule); 2026-06-17 (Slices B + C landed [vendored BERT encoder; config-first `declared ∩ runnable` capability honesty + gate [5]]; **Slice D1 embed-serve landed** — `/v1/embeddings` backend + transport-agnostic handler + `mlxk embed-serve` CLI; interface: `encoding_format` default `base64`, lenient `request.model`, single runner + lock (no ModelManager), alpha-gated — see §2.0.7 Scope + `docs/SERVER-HANDBOOK.md`); 2026-06-15 (Slice-A landed — JSONL envelope finalized to `{model, dimensions, content_hash, device}` with Model-Identity/same-model + device-determinism rules; detection corrected so `gemma3_text` needs an EmbeddingGemma signal, not `model_type` alone; Slice B scoped to BERT-only with `xlm-roberta` deferred; `serve`'s `GET /v1/models` merge deferred to 2.1); 2026-06-14 (Open Q #1 resolved — verified-encoder list = one vendored BERT file + zero-vendored `mlx-lm` decoder path; config-first `declared ∩ runnable` detection; showcase `Qwen3-Embedding-0.6B-4bit-DWQ`; see §Decision: Verified-Encoder List & Model Detection); 2026-06-13 (implementation-library resolved — direct/vendored MIT, no turnkey lib; vision/multimodal embeddings deferred; CLI `embed`-verb confirmed; **server topology resolved (Open Q #3): separate processes, `serve` proxies `/v1/embeddings`; three-layer runner/op/handler structure with `EmbeddingRunner` as the 4th runner; CLI + server both minimal in 2.0.7**); 2026-05-11 (2.0.7 slot pinned, experimental-gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, stable-promotion in 2.1); 2026-04-07 (consolidated: workspace-first, memory safety, server architecture)
 - **When:** experimental, alpha-gated — shipped 2.0.7 ✅. **Stable promotion:**
   when `MLXK2_ENABLE_ALPHA_FEATURES` is dropped for `embed` — gated on the open
   alpha defects, not on a release number. Pulled by the **released** examples:
@@ -335,7 +335,7 @@ Ships in `examples/cosine-search.py`. No dependencies beyond numpy.
 
 ### Phase 1: CLI + embed-serve + serve-proxy (2.0.7) — **living TODO checklist**
 
-> This is the canonical TODO home for embeddings implementation (CLAUDE.md points here, no duplication). Decision-aligned with the §Decision sections below; check items off as they land.
+> This is the canonical TODO home for embeddings implementation (no duplication elsewhere). Decision-aligned with the §Decision sections below; check items off as they land.
 
 **Prerequisites:** ✅ 2.0.6 dep-consolidation · ✅ ADR-014 pipe semantics (since 2.0.4) · ✅ decisions frozen 2026-06-13/14 (§Decision: Implementation Library / Server Topology / Code Structure / 2.0.7 Scope).
 
@@ -356,7 +356,7 @@ Ships in `examples/cosine-search.py`. No dependencies beyond numpy.
 
 - [ ] **Slice E — Examples + docs** (publish with the release). `examples/cosine-search.py` + RAG examples (`examples/rag-server`, `examples/photo-rag`); RAG-workflow end-to-end test; README section + help text.
 
-**Deferred** (see §Decision: 2.0.7 Scope): `GET /v1/models` merge in serve · Variant B (serve spawns embed-serve) · CPU-co-residency device guidance · full typed-JSON envelope (ADR-014 Appendix C) · vision/audio embedders (BEYOND §3).
+**Deferred** (see §Decision: 2.0.7 Scope): `GET /v1/models` merge in serve · Variant B (serve spawns embed-serve) · CPU-co-residency device guidance · full typed-JSON envelope (ADR-014 Appendix C) · vision/audio embedders.
 
 ### Phase 2: Advanced Features (Future) — ⚠ wedge-watch
 
@@ -437,7 +437,7 @@ core/server/handlers/embeddings.py  → /v1/embeddings    (HTTP handler — driv
 
 - `EmbeddingRunner` is the **fourth runner** alongside `MLXRunner` (text), `VisionRunner`, `AudioRunner` — i.e. the "fourth stateless primitive" of this ADR made structurally concrete (a file beside the other three).
 - Both surfaces drive the **same** runner: CLI op (`operations/embed.py`) and server handler (`core/server/handlers/embeddings.py`). The handler + runner live in the **`embed-serve`** process; `serve`'s `/v1/embeddings` is a proxy route with **no runner** in its address space.
-- **Build clean per the three-layer split** — `run.py` accreted to ~850 LOC by inlining handlers (BEYOND §4 tech-debt); embed is the chance to instantiate the pattern cleanly from the start.
+- **Build clean per the three-layer split** — `run.py` accreted to ~850 LOC by inlining handlers; embed is the chance to instantiate the pattern cleanly from the start.
 - **Stay open for vision/audio embedders.** The runner / op / handler shapes must **not preclude multimodal embedders** (CLIP/SigLIP vision embeddings, audio embeddings) — those are deferred to a later release, but the structure keeps the door open. Note (ADR-014 Appendix C): a vector is **typed structured data, not a media artifact** — it has no mime type and does not belong in a media block. Keep the artifact shape transport-agnostic so a future vision/audio embedder slots into the same three layers.
 
 ## Decision: 2.0.7 Scope (CLI + server, both minimal)
@@ -536,7 +536,7 @@ Download counts summed across quants in the `mlx-community` org, grouped by `mod
 | **XLM-RoBERTa** | `xlm-roberta` | BERT file + ~30 lines | bge-m3 4.4k, multilingual-e5-large 392 | ~4.8k |
 | **ModernBERT** | `modernbert` | heavy separate file | nomic modernbert-embed (not in top-100) | ~0 |
 | **EmbeddingGemma** | `gemma3_text` + bidirectional attn | needs bidir handling | embeddinggemma-300m ~3.5k | ~3.5k |
-| Vision (→ BEYOND §3) | `qwen3_vl…` | deferred | Qwen3-VL-Embedding-2B ~600 | — |
+| Vision | `qwen3_vl…` | deferred | Qwen3-VL-Embedding-2B ~600 | — |
 
 Two facts drove the cut: (a) the decoder path is both dominant and free — Qwen3-Embedding-0.6B alone is the single most-downloaded embedder and costs no code (`mlx-lm` already loads `qwen3`); (b) `multilingual-e5-small` is itself `model_type: bert`, so the one BERT file is already multilingual-capable — the *only* thing `xlm-roberta` uniquely unlocks is bge-m3.
 
@@ -553,7 +553,7 @@ This sizes the vendored work to **one BERT file + pooling/normalize/prefix glue 
 - **`gemma3_text` + EmbeddingGemma signal (embeddinggemma)** — popular (~3.5k) but needs bidirectional-attention handling (neither the plain decoder forward nor BERT runs it correctly) and an explicit signal beyond `model_type` (plain `gemma3_text` causal LMs stay text-generation models); the strongest post-v1 candidate, *not* modernbert.
 - **`modernbert`** (nomic modernbert-embed) — heavy code (alternating local/global attention), ~zero mlx-community demand; defer is now evidence-based, not instinct.
 - **`nomic_bert`** — no mlx-community presence.
-- **Vision embedders** (Qwen3-VL-Embedding) — → BEYOND §3.
+- **Vision embedders** (Qwen3-VL-Embedding) — the single-vector envelope (§Non-Goals) already admits them; what is missing is the loader wiring, not a decision.
 
 ### Coupled detection fix (`declared ∩ runnable`)
 

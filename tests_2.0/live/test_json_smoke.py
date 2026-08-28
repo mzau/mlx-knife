@@ -5,7 +5,7 @@ Validates that every mlxk command with --json produces:
 2. Valid JSON parseable by json.loads() — same strictness as `python -m json.tool`
 3. Schema-valid output against docs/json-api-schema.json (0.2.1)
 
-Mirrors SMOKE-TEST-beta3.md Section A.
+Mirrors the manual JSON-output acceptance rows, one per command.
 Runs as part of wet-umbrella Phase 1 (wet marker).
 """
 
@@ -99,7 +99,7 @@ def _find_workspace_model() -> str | None:
 
 
 class TestJsonSmoke:
-    """SMOKE-TEST-beta3.md Section A: JSON output per command (read-only)."""
+    """JSON output per command (read-only)."""
 
     def test_a1_list_json(self):
         """mlxk list --json → clean stdout, schema-valid."""
@@ -146,7 +146,7 @@ class TestJsonSmoke:
 
 
 class TestJsonSmokeWrite:
-    """SMOKE-TEST-beta3.md Section A4-A5: write operations.
+    """JSON output for write operations.
 
     Uses mlxk-test- prefix targets in MLXK_WORKSPACE_HOME.
     Subprocess-isolated to avoid mlx nanobind double-import.

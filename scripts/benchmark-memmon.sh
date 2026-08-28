@@ -95,4 +95,4 @@ echo "   python benchmarks/tools/memplot.py benchmarks/reports/${DATE}-benchmark
 echo ""
 echo "Phase 1 complete: Filtered pure inference tests (~94 tests)"
 echo "Next: Phase 2 (Curation) - select 30-40 high-value tests for dedicated benchmarking"
-echo "See BENCHMARK-EVOLUTION.md for roadmap: benchmarks/BENCHMARK-EVOLUTION.md"
+echo "The roadmap lives in BENCHMARK-EVOLUTION.md, which is not published - ask if you are interested"
