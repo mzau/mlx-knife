@@ -293,6 +293,69 @@ class TestPromptThreading:
         kwargs = self._transcribe_kwargs(tmp_path, prompt="Rochefoucauld", translate="en")
         assert kwargs["prompt"] == "Rochefoucauld"
 
+    # --- the both-at-once case: --image AND --audio -----------------------
+
+    def _vision_kwargs(self, tmp_path, images=None, audio=None):
+        """Drive run_model_enhanced's MLX_VLM branch with a faked VisionRunner."""
+        import sys
+        import types
+        import mlxk2.operations.run as run_mod
+        import mlxk2.operations.workspace as ws_mod
+        from mlxk2.core.capabilities import Backend
+
+        model_dir = tmp_path / "gemma-4-e4b-it-4bit"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text(json.dumps({"model_type": "gemma4"}))
+
+        runner = MagicMock()
+        runner.generate.return_value = "OUT"
+        runner.__enter__.return_value = runner
+        runner.__exit__.return_value = False
+
+        fake_vision = types.ModuleType("mlxk2.core.vision_runner")
+        fake_vision.VisionRunner = lambda *a, **k: runner
+
+        with patch.dict(sys.modules, {"mlxk2.core.vision_runner": fake_vision}), \
+             patch.object(run_mod, "resolve_model_for_operation",
+                          lambda spec: (str(model_dir), None, None)), \
+             patch.object(ws_mod, "is_workspace_path", lambda p: True), \
+             patch.object(run_mod, "detect_vision_capability", lambda *a, **k: True), \
+             patch.object(run_mod, "detect_audio_capability", lambda *a, **k: True), \
+             patch.object(run_mod, "detect_audio_backend", lambda *a, **k: Backend.MLX_VLM), \
+             patch.object(run_mod, "vision_runtime_compatibility", lambda *a, **k: (True, "")), \
+             patch.object(run_mod, "check_memory_before_load", lambda *a, **k: None):
+            result = run_mod.run_model_enhanced(
+                model_spec="gemma-4-e4b-it-4bit",
+                prompt=None,
+                images=images,
+                audio=audio,
+                json_output=True,
+            )
+
+        assert result == "OUT", f"vision branch not reached: {result!r}"
+        return runner.generate.call_args.kwargs
+
+    def test_image_and_audio_together_keeps_the_207_default(self, tmp_path):
+        """`--image X --audio Y` must still ask to transcribe, as 2.0.7 did.
+
+        2.0.7's default lived in cli.py inside `if audios:`, so it fired whenever audio
+        was present — image alongside or not. Moving it into run.py put it next to the
+        images branch, where testing `images` first silently reworded this combination.
+        It did, for one commit. Order is the whole content of this test.
+        """
+        kwargs = self._vision_kwargs(
+            tmp_path,
+            images=[("pic.jpg", b"\xff\xd8\xff")],
+            audio=[("clip.wav", b"RIFF")],
+        )
+        assert kwargs["prompt"] == "Transcribe this audio."
+        assert kwargs["audio"] is not None, "audio must reach the runner, not be dropped"
+
+    def test_image_only_still_describes(self, tmp_path):
+        """Non-regression on the other side of the same branch."""
+        kwargs = self._vision_kwargs(tmp_path, images=[("pic.jpg", b"\xff\xd8\xff")])
+        assert kwargs["prompt"] == "Describe the image."
+
 
 class TestAudioTestAssets:
     """Tests to verify audio test assets are available."""

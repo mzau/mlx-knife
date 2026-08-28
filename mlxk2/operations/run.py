@@ -590,14 +590,18 @@ def run_model(
                 return error_result
 
             if prompt is None:
-                if images:
-                    prompt = "Describe the image."
-                elif audio:
+                # Audio first, images second — that is the order 2.0.7 shipped, and it is
+                # load-bearing for the both-at-once case: the CLI filled the slot for every
+                # --audio run, image alongside or not, so `--image X --audio Y` has always
+                # been asked to transcribe. Testing `images` first silently rewords that
+                # combination (#61 did, for one commit).
+                if audio:
                     # Simple prompt - complex prompts cause multilingual drift in Gemma-3n
                     # with MP3. Held identical to the STT default: until #61 this branch
-                    # was unreachable, because the CLI pre-filled the slot for every
-                    # --audio run, and multimodal audio has been running on that value.
+                    # was unreachable, because the CLI pre-filled the slot.
                     prompt = "Transcribe this audio."
+                elif images:
+                    prompt = "Describe the image."
                 # Note: This else block is unreachable due to routing condition above
                 # (only enters this path if images or audio present)
 
