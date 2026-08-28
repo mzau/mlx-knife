@@ -542,25 +542,15 @@ def run_model(
                     print(error_result, file=sys.stderr)
                 return error_result
 
-            # TEMPORARY (#54 implementation, pending pure-audio prompt-UX issue):
-            # No synthetic default prompt for pure-audio backend. Whisper's
-            # initial_prompt is documented as a vocabulary/context bias hint,
-            # not a chat/task instruction (Whisper docstring: "prompt-engineer
-            # a context for transcription, e.g. custom vocabularies"). The
-            # previous defaults `"Transcribe this audio."` / `"Translate this
-            # audio to English."` were silently routed there and caused
-            # decoder confusion on translate+non-English-source paths.
-            #
-            # Keeping the slot empty unless the user explicitly supplies a
-            # positional prompt lets us smoke-test Whisper's behavior with
-            # and without bias-hint and characterize the right long-term UX
-            # (reject the positional / dedicate a --initial-prompt flag /
-            # warn). User-supplied prompt continues to thread to
-            # audio_runner.transcribe() and lands as initial_prompt — that is
-            # an informed override for vocab-bias use cases.
-            #
-            # Multimodal-audio chat (Gemma-3n via mlx-vlm path below) is
-            # unaffected and still gets its chat-default prompt.
+            # Synthetic default prompt on transcribe only — the same rule the server
+            # applies in core/server/handlers/audio.py, so both surfaces answer alike.
+            # Whisper's initial_prompt is a vocabulary/context bias hint, not a task
+            # instruction ("prompt-engineer a context for transcription, e.g. custom
+            # vocabularies"), so on translate an injected "Transcribe this audio."
+            # biases the decoder toward transcription on non-English source (#61). A
+            # user-supplied positional prompt threads through either way — that is an
+            # informed override for vocab-bias use cases.
+            effective_prompt = prompt if translate else (prompt or "Transcribe this audio.")
 
             try:
                 from ..core.audio_runner import AudioRunner
@@ -568,7 +558,7 @@ def run_model(
                 with AudioRunner(model_path, resolved_name or model_spec, verbose=verbose) as runner:
                     result = runner.transcribe(
                         audio=list(audio),
-                        prompt=prompt,
+                        prompt=effective_prompt,
                         max_tokens=max_tokens or 4096,
                         temperature=temperature,
                         language=language,
@@ -603,7 +593,11 @@ def run_model(
                 if images:
                     prompt = "Describe the image."
                 elif audio:
-                    prompt = "What do you hear in this audio?"
+                    # Simple prompt - complex prompts cause multilingual drift in Gemma-3n
+                    # with MP3. Held identical to the STT default: until #61 this branch
+                    # was unreachable, because the CLI pre-filled the slot for every
+                    # --audio run, and multimodal audio has been running on that value.
+                    prompt = "Transcribe this audio."
                 # Note: This else block is unreachable due to routing condition above
                 # (only enters this path if images or audio present)
 

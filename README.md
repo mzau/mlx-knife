@@ -532,7 +532,7 @@ mlx-knife automatically routes audio models to the optimal backend:
 | Setting | Audio | Text/Vision | Reason |
 |---------|-------|-------------|--------|
 | Temperature | 0.0 | 0.7 | Greedy decoding (STT best practice) |
-| Default Prompt | "Transcribe this audio." | - | Minimal prompt for pure transcription |
+| Default Prompt | "Transcribe this audio." (not on `--translate`) | - | Minimal prompt for pure transcription; on translate it would bias the decoder back toward transcribing |
 
 **💡 Quick Start:**
 

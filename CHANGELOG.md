@@ -38,6 +38,14 @@
 
 ### Fixed
 
+- `mlxk run … --audio FILE --translate` sent Whisper the synthetic prompt
+  `"Transcribe this audio."` as `initial_prompt`
+  ([#61](https://github.com/mzau/mlx-knife/issues/61)) — decoder context pulling a
+  non-English source back toward transcription, next to the very token that asks for
+  translation. The CLI filled the prompt slot for every `--audio` run, before anything knew
+  the backend or the task; the run path now applies the default, on transcribe only, which is
+  the rule the server has been applying all along. Transcription is unchanged on both
+  surfaces, and a positional prompt still threads through as an explicit vocabulary bias.
 - Two deliberate rejects went out labelled as a server fault
   ([#62](https://github.com/mzau/mlx-knife/issues/62)): the status→type mapping had no entry
   for **422** (`POST /v1/audio/translations` against a model that cannot translate) or for

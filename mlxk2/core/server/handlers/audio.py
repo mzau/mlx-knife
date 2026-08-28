@@ -190,9 +190,9 @@ async def handle_transcription(
 
         # Synthetic default prompt is applied for transcription only. On the
         # translate path an injected "Transcribe this audio." biases Whisper's
-        # decoder on non-English source (documented in run.py:545-563 — the CLI
-        # dropped the synthetic default for the same reason); pass the user
-        # prompt as-is (None when absent) instead.
+        # decoder on non-English source; pass the user prompt as-is (None when
+        # absent) instead. The CLI applies the same rule in operations/run.py —
+        # it did not until #61, and this comment claimed otherwise.
         effective_prompt = prompt if task == "translate" else (prompt or "Transcribe this audio.")
 
         # Transcribe audio - runner.transcribe() expects List[(filename, bytes)]

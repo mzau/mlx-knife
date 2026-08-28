@@ -4,6 +4,7 @@ Tests audio file handling in CLI without requiring actual model inference.
 """
 
 import argparse
+import json
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -175,6 +176,122 @@ class TestTranslateValidation:
 
         captured = capsys.readouterr()
         assert "--translate" in captured.out
+
+
+class TestPromptThreading:
+    """What actually reaches Whisper as `initial_prompt` (Issue #61).
+
+    Two halves, because the bug had two. The CLI must leave the prompt slot empty
+    when the user typed nothing — until #61 it filled it for every `--audio` run,
+    before anything knew the backend or the task. And the run path must then apply
+    the synthetic default on transcribe only, the same rule the server applies in
+    core/server/handlers/audio.py. The route invariants in
+    test_serve_audio_translations_route.py are the server-side twin of these.
+    """
+
+    # --- CLI half: what cli.py hands to the run path -----------------------
+
+    def _cli_prompt(self, tmp_path, extra_argv):
+        """Run `mlxk run … --audio` and return the kwargs the CLI passed on."""
+        import sys
+        import mlxk2.cli as cli_mod
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+        # Positional prompt (if any) before --audio: --audio takes one or more values.
+        argv = ["mlxk", "run", "whisper-large-v3-4bit"] + extra_argv + ["--audio", str(clip)]
+
+        with patch.object(cli_mod, "run_model_enhanced") as mock_run:
+            mock_run.return_value = "TRANSCRIPT"
+            with patch.object(sys, "argv", argv):
+                with pytest.raises(SystemExit) as exc:
+                    cli_mod.main()
+        assert exc.value.code == 0
+        return mock_run.call_args.kwargs
+
+    def test_cli_leaves_prompt_empty_on_translate(self, tmp_path):
+        """--translate with no positional prompt must not invent one (#61)."""
+        kwargs = self._cli_prompt(tmp_path, ["--translate"])
+        assert kwargs["prompt"] is None
+        assert kwargs["translate"] == "en"
+
+    def test_cli_leaves_prompt_empty_on_transcribe(self, tmp_path):
+        """Plain --audio too: the default belongs to the run path, not the CLI."""
+        kwargs = self._cli_prompt(tmp_path, [])
+        assert kwargs["prompt"] is None
+        assert kwargs["translate"] is None
+
+    def test_cli_threads_user_prompt(self, tmp_path):
+        """A positional prompt still reaches the run path untouched."""
+        kwargs = self._cli_prompt(tmp_path, ["medical vocabulary"])
+        assert kwargs["prompt"] == "medical vocabulary"
+
+    # --- run path half: what run.py hands to AudioRunner -------------------
+
+    def _transcribe_kwargs(self, tmp_path, prompt=None, translate=None):
+        """Drive run_model_enhanced's MLX_AUDIO branch with a faked runner.
+
+        `mlxk2.core.audio_runner` is injected rather than patched: importing it pulls
+        mlx_audio, and the unit suite runs against the lightweight `stubs/mlx`. run.py
+        imports AudioRunner inside the branch, so the injected module is what it gets.
+        """
+        import sys
+        import types
+        import mlxk2.operations.run as run_mod
+        import mlxk2.operations.workspace as ws_mod
+        from mlxk2.core.capabilities import Backend
+
+        model_dir = tmp_path / "whisper-large-v3-4bit"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text(json.dumps({"model_type": "whisper"}))
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+
+        runner = MagicMock()
+        runner.transcribe.return_value = "OUT"
+        runner.__enter__.return_value = runner
+        runner.__exit__.return_value = False
+
+        fake_audio_runner = types.ModuleType("mlxk2.core.audio_runner")
+        fake_audio_runner.AudioRunner = lambda *a, **k: runner
+
+        with patch.dict(sys.modules, {"mlxk2.core.audio_runner": fake_audio_runner}), \
+             patch.object(run_mod, "resolve_model_for_operation",
+                          lambda spec: (str(model_dir), None, None)), \
+             patch.object(ws_mod, "is_workspace_path", lambda p: True), \
+             patch.object(run_mod, "detect_vision_capability", lambda *a, **k: False), \
+             patch.object(run_mod, "detect_audio_capability", lambda *a, **k: True), \
+             patch.object(run_mod, "detect_audio_backend", lambda *a, **k: Backend.MLX_AUDIO), \
+             patch.object(run_mod, "audio_runtime_compatibility", lambda *a, **k: (True, "")), \
+             patch("mlxk2.core.capabilities.detect_audio_translate_en_capability",
+                   lambda *a, **k: True):
+            result = run_mod.run_model_enhanced(
+                model_spec="whisper-large-v3-4bit",
+                prompt=prompt,
+                audio=[("clip.wav", clip.read_bytes())],
+                translate=translate,
+                json_output=True,
+            )
+
+        assert result == "OUT", f"audio branch not reached: {result!r}"
+        return runner.transcribe.call_args.kwargs
+
+    def test_translate_drops_the_synthetic_prompt(self, tmp_path):
+        """The bug itself: translate must not carry a transcription instruction."""
+        kwargs = self._transcribe_kwargs(tmp_path, prompt=None, translate="en")
+        assert kwargs["task"] == "translate"
+        assert kwargs["prompt"] is None
+
+    def test_transcribe_keeps_the_synthetic_prompt(self, tmp_path):
+        """Non-regression, and parity with POST /v1/audio/transcriptions."""
+        kwargs = self._transcribe_kwargs(tmp_path, prompt=None, translate=None)
+        assert kwargs["task"] is None
+        assert kwargs["prompt"] == "Transcribe this audio."
+
+    def test_user_prompt_survives_translate(self, tmp_path):
+        """An explicit prompt is an informed vocab-bias override, not a default."""
+        kwargs = self._transcribe_kwargs(tmp_path, prompt="Rochefoucauld", translate="en")
+        assert kwargs["prompt"] == "Rochefoucauld"
 
 
 class TestAudioTestAssets:

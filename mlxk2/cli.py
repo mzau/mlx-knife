@@ -799,9 +799,9 @@ def main():
                     result = handle_error("CommandError", "Multiple audio files not supported. Process one file at a time.")
                     print_result(result, None, args.json)
                     sys.exit(1)
-                if prompt_value is None:
-                    # Simple prompt - complex prompts cause multilingual drift in Gemma-3n with MP3
-                    prompt_value = "Transcribe this audio."
+                # No default prompt here: the run path picks it per backend and task,
+                # which is the only place that can tell "user typed nothing" apart from
+                # "the CLI filled it in" (#61).
 
             stream_mode = not args.no_stream
             if image_inputs or audio_inputs:
