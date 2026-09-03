@@ -52,6 +52,12 @@
 
 ### Fixed
 
+- `mlxk serve --max-tokens N` and `MLXK2_MAX_TOKENS=N` reached no request. `serve` supervises,
+  and uvicorn imports `server_base` a second time under its real name: the ceiling was set on
+  the module copy that starts the server, never on the copy that answers, while the startup
+  line reported the value it had accepted. The serving process now reads the ceiling from the
+  environment itself, and a value below 1 fails the server instead of being ignored. Canonical
+  text: SERVER-HANDBOOK → *Token Limits* → *Precedence*.
 - A stream that failed part-way reported `finish_reason: "error"` — a value the OpenAI enum does
   not define — then carried on to emit a second, contradicting terminal chunk saying `"stop"`,
   followed by `[DONE]`, so the stream also claimed to have completed. The failure now travels in a

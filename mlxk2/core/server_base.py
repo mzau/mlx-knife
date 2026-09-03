@@ -56,8 +56,26 @@ from .server.error_handlers import register_error_handlers
 # ADR-015 D2: thin /v1/embeddings proxy to a separate embed-serve backend (no runner in-process)
 from .server.handlers.embed_proxy import proxy_embeddings, PROXY_TIMEOUT
 
+
+def _operator_ceiling_from_env() -> Optional[int]:
+    """The operator ceiling (``serve --max-tokens`` / ``MLXK2_MAX_TOKENS``), or None.
+
+    Read at import, not only in run_server(): ``mlxk serve`` supervises, and uvicorn
+    imports this module a second time under its real name. The copy that answers
+    requests is not the copy run_server() configured, so a ceiling set only there
+    never reached a single request.
+    """
+    raw = os.environ.get("MLXK2_MAX_TOKENS")
+    if not raw:
+        return None
+    ceiling = int(raw)
+    if ceiling < 1:
+        raise ValueError(f"MLXK2_MAX_TOKENS must be at least 1 (got {ceiling})")
+    return ceiling
+
+
 # Global configuration
-_default_max_tokens: Optional[int] = None  # Operator ceiling (serve --max-tokens / MLXK2_MAX_TOKENS); None = DEFAULT_MAX_TOKENS
+_default_max_tokens: Optional[int] = _operator_ceiling_from_env()  # None = DEFAULT_MAX_TOKENS
 # Global shutdown flag to interrupt in-flight generations promptly
 _shutdown_event = threading.Event()
 # Pre-load model specification (set via environment MLXK2_PRELOAD_MODEL)
@@ -1231,7 +1249,12 @@ def run_server(
     if max_tokens is not None and max_tokens < 1:
         raise ValueError(f"--max-tokens must be at least 1 (got {max_tokens})")
     global _default_max_tokens
-    _default_max_tokens = max_tokens
+    if max_tokens is None:
+        max_tokens = _default_max_tokens  # ambient MLXK2_MAX_TOKENS, already read at import
+    else:
+        # uvicorn re-imports this module below; the environment is what that copy reads.
+        _default_max_tokens = max_tokens
+        os.environ["MLXK2_MAX_TOKENS"] = str(max_tokens)
 
     # Check for log level from environment (subprocess mode)
     env_log_level = os.environ.get("MLXK2_LOG_LEVEL")
