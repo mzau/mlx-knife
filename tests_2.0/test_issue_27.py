@@ -121,8 +121,10 @@ class TestIssue27Exploration:
         if not user_hf_home:
             pytest.skip("User cache root not set; set MLXK2_USER_HF_HOME or HF_HOME")
 
+        # Small, healthy, and read-only here: the default only has to exist in the
+        # user cache, so keep it the cheapest model that does.
         model = os.environ.get(
-            "MLXK2_ISSUE27_MODEL", "intfloat/multilingual-e5-large"
+            "MLXK2_ISSUE27_MODEL", "mlx-community/Qwen2.5-0.5B-Instruct-4bit"
         )
         # Verify model exists in user cache
         from pathlib import Path
