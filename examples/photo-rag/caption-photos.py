@@ -572,9 +572,10 @@ def main() -> int:  # noqa: C901 — a batch driver is a sequence, splitting it 
                         "exif": prep.exif.as_dict(),
                         "server": {"table_columns": meta.columns,
                                    "image_hash": meta.image_hash, **meta.exif_cells()},
-                        # finish_reason is hardcoded "stop" on every server path and the
-                        # token counts are a word-count estimate, so neither wire field can
-                        # report truncation. Terminal punctuation is the only signal left.
+                        # On released 2.0.7 finish_reason is a constant "stop" and the token
+                        # counts are a word-count estimate, so neither wire field reports a
+                        # cut; 2.0.8 emits "length". Terminal punctuation works on both, so it
+                        # stays the signal here.
                         "truncated": not text.rstrip().endswith((".", "!", "?", '"', "'", ")")),
                         "latency_ms": int((time.time() - t0) * 1000),
                     })

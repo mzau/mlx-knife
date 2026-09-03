@@ -1433,29 +1433,27 @@ pytest -m live_e2e --collect-only  # Should work without errors
 
 ### max_tokens Strategy: Vision vs Text
 
-**Problem:** Vision and text models have fundamentally different context management strategies.
+**One rule, both surfaces.** A text generation may produce `min(32768, context_length − prompt_tokens)` tokens; the CLI and the server apply the same rule (#66). `max_tokens` counts *generated* tokens, so without the `− prompt` term prompt plus output could exceed the window the model was trained for.
 
 **Text Models (MLXRunner):**
-- **Shift-Window Context:** Maintain conversation history in context buffer
-- **Server Default:** `context_length / 2` (reserve half for history, half for generation)
-- **CLI Default:** `context_length` (full context, no reservation)
-- **Example:** Llama-3.2-3B (128K context) → Server: 64K max_tokens
-- **Implementation:** `get_effective_max_tokens(runner, requested_max_tokens, server_mode)`
+- **Ceiling:** `32768` without `--max-tokens` / request `max_tokens`; an explicit value replaces the ceiling and is clamped to the window as well
+- **Window guard:** `context_length` from `config.json` (`max_position_embeddings` and aliases, top level then `text_config`); unknown → `None`, no guard, only the ceiling applies
+- **Prompt fills the window:** pre-execution reject, nothing is generated — `ContextLengthExceeded`; HTTP 400 `context_length_exceeded` with `prompt_tokens` and `context_length` in `error.detail`; CLI `Error: …` + exit 1
+- **Budget cut:** runner attribute `last_finish_reason` (`"stop"` / `"length"` / `"interrupted"`, the last reported as `"stop"`) drives `finish_reason` on every surface (`run --json`, HTTP batch + final SSE chunk); the CLI prints a stderr notice naming the active bound
+- **Example:** Qwen3.8 (262144 context) → 32768 max_tokens on both surfaces; a 4096-token prompt on an 8192-token window → 4096 max_tokens
+- **Implementation:** `token_limits.resolve_generation_budget(requested, context_length, prompt_tokens)`; `MLXRunner.generation_budget(prompt, max_tokens=None, use_chat_template=True)` applies it without generating (streaming pre-check); `server_base.get_effective_max_tokens(requested)` resolves the ceiling (request > operator > 32768), the runner clamps
 
 **Vision Models (VisionRunner):**
 - **Stateless Processing:** Each request is independent (Metal memory limitations prevent context preservation)
-- **No Shift-Window:** History not maintained in model context
-- **Server/CLI Default:** `2048` tokens (conservative, works for all vision models)
-- **Rationale:**
-  - No need for `/2` division (no history to reserve)
-  - Vision inference is slow → 2048 adequate for image descriptions
-  - Prevents accidentally generating 64K+ tokens on large-context models
+- **Server/CLI Default:** `2048` tokens, set explicitly on both surfaces rather than inherited from mlx-vlm
+- **No window guard:** the ceiling goes to mlx-vlm as is; `finish_reason` comes from mlx-vlm's `GenerationResult`
+- **Rationale:** vision inference is slow → 2048 adequate for image descriptions; prevents accidentally generating 32K tokens on large-context models
 - **Example:** Llama-3.2-11B-Vision (128K context) → Default: 2048 max_tokens
-- **Implementation:** `get_effective_max_tokens_vision(runner, requested_max_tokens)`
+- **Implementation:** `server_base.get_effective_max_tokens_vision(requested)` (request > operator > 2048); `VisionRunner.generate(max_tokens=None)` applies 2048
 
 **Batch Processing:**
 - Vision: Processes multiple images → Batched stateless (each image independent)
-- Text: Receives ALL vision outputs → Full shift-window context for complex queries
+- Text: Receives ALL vision outputs → same budget rule, `32768` ceiling clamped to the window minus the (now larger) prompt
 - Example: "Compare Image 1 and Image 15" requires text model with full history
 
 ### Text Portfolio E2E Tests

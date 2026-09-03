@@ -17,7 +17,13 @@ from ..cache import get_current_model_cache, hf_to_cache_dir
 from ..model_resolution import resolve_model_for_operation
 from ..reasoning import ReasoningExtractor, StreamingReasoningParser
 from ...operations.workspace import is_workspace_path
-from .token_limits import get_model_context_length, calculate_dynamic_max_tokens
+from .token_limits import (
+    FINISH_INTERRUPTED,
+    FINISH_LENGTH,
+    FINISH_STOP,
+    get_model_context_length,
+    resolve_generation_budget,
+)
 from .chat_format import apply_user_prompt, format_conversation as _format_conversation_helper
 from .reasoning_format import format_reasoning_response as _format_reasoning_helper
 from .stop_tokens import extract_stop_tokens as _extract_stop_tokens_helper
@@ -64,7 +70,15 @@ class MLXRunner:
         self._context_entered = False
         self._interrupted = False
         self._current_generator = None  # Handle to in-flight generation (for early cancellation)
-        
+
+        # How the last generation ended and what it cost — set by generate_streaming /
+        # generate_batch at every exit, read by the shells (finish_reason, CLI notice, log).
+        # None until a generation ran: absent, not invented.
+        self.last_finish_reason: Optional[str] = None
+        self.last_prompt_tokens: Optional[int] = None
+        self.last_completion_tokens: Optional[int] = None
+        self.last_max_tokens: Optional[int] = None
+
         # Lazy-loaded MLX/MLX-LM refs (set in load_model / generation)
         self._mx = None
         self._load = None
@@ -247,8 +261,11 @@ class MLXRunner:
             self._context_length = get_model_context_length(str(model_path))
             
             if self.verbose:
-                print(f"Model context length: {self._context_length} tokens")
-                
+                if self._context_length is None:
+                    print("Model context length: not stated in config.json (no window guard)")
+                else:
+                    print(f"Model context length: {self._context_length} tokens")
+
             self._model_loaded = True
             # Store MLX refs for later use
             self._mx = _mx
@@ -417,9 +434,59 @@ class MLXRunner:
             else:
                 print(f"Cleanup complete (memory after: {memory_after:.1f}GB)")
 
-    def _calculate_dynamic_max_tokens(self, server_mode: bool = True) -> int:
-        """Calculate dynamic max tokens based on model context and usage mode."""
-        return calculate_dynamic_max_tokens(self._context_length, server_mode=server_mode)
+    def _encode_prompt(self, formatted_prompt: str) -> list:
+        """Tokenize a formatted prompt (tolerates mocks that return non-lists)."""
+        prompt_tokens = self.tokenizer.encode(formatted_prompt)
+        if not isinstance(prompt_tokens, (list, tuple)):
+            prompt_tokens = [0]
+        return list(prompt_tokens)
+
+    def generation_budget(
+        self,
+        prompt: str,
+        max_tokens: Optional[int] = None,
+        use_chat_template: bool = True,
+    ) -> int:
+        """Tokens this runner will let a generation produce for ``prompt``.
+
+        ``min(max_tokens or DEFAULT_MAX_TOKENS, context_length − prompt_tokens)``;
+        raises ``ContextLengthExceeded`` when the prompt fills the window. The
+        generation paths apply the same rule; shells that must answer before
+        streaming starts call this first.
+        """
+        if not self.tokenizer:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+        formatted_prompt = apply_user_prompt(self.tokenizer, prompt, use_chat_template=use_chat_template)
+        return resolve_generation_budget(
+            max_tokens, self._context_length, len(self._encode_prompt(formatted_prompt))
+        )
+
+    def _begin_generation(self, prompt_tokens: list, max_tokens: Optional[int]) -> int:
+        """Record the prompt cost, resolve the budget, reset the stop reason."""
+        self._interrupted = False
+        self.last_finish_reason = None
+        self.last_completion_tokens = None
+        self.last_prompt_tokens = len(prompt_tokens)
+        self.last_max_tokens = resolve_generation_budget(
+            max_tokens, self._context_length, len(prompt_tokens)
+        )
+        return self.last_max_tokens
+
+    def _end_generation(self, generated: int, stopped: bool, budget: int) -> None:
+        """Name the exit: interrupt, model stop, budget, or unknown (generator ended early).
+
+        ``budget`` is the caller's own, not ``last_max_tokens``: a second generation
+        starting on this runner meanwhile would otherwise be the yardstick.
+        """
+        self.last_completion_tokens = generated
+        if self._interrupted:
+            self.last_finish_reason = FINISH_INTERRUPTED
+        elif stopped:
+            self.last_finish_reason = FINISH_STOP
+        elif generated >= budget:
+            self.last_finish_reason = FINISH_LENGTH
+        else:
+            self.last_finish_reason = None
 
     def generate_streaming(
         self,
@@ -451,10 +518,6 @@ class MLXRunner:
         """
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load_model() first.")
-        
-        # Reset any prior interruption at the start of a new generation
-        # so that a previous Ctrl-C does not affect the next run
-        self._interrupted = False
 
         # Initialize reasoning parser if this is a reasoning model
         reasoning_parser = None
@@ -464,16 +527,13 @@ class MLXRunner:
             )
             reasoning_parser = StreamingReasoningParser(model_type, hide_reasoning=hide_reasoning)
 
-        # Use dynamic max tokens if not specified (run command uses full context)
-        effective_max_tokens = max_tokens if max_tokens is not None else self._calculate_dynamic_max_tokens(server_mode=False)
-
         # Apply chat template if available and requested
         formatted_prompt = apply_user_prompt(self.tokenizer, prompt, use_chat_template=use_chat_template)
 
-        # Tokenize the prompt (tolerate mocks)
-        prompt_tokens = self.tokenizer.encode(formatted_prompt)
-        if not isinstance(prompt_tokens, (list, tuple)):
-            prompt_tokens = [0]
+        # The budget needs the prompt length: min(max_tokens, window − prompt).
+        # Raises before any token is produced when the prompt fills the window.
+        prompt_tokens = self._encode_prompt(formatted_prompt)
+        effective_max_tokens = self._begin_generation(prompt_tokens, max_tokens)
         # Ensure MLX core is available
         mx_core = self._mx
         if mx_core is None:
@@ -534,6 +594,7 @@ class MLXRunner:
         previous_decoded = ""
         accumulated_response = ""
         context_window = 10
+        stopped = False  # model ended its turn (EOS id or stop string)
 
         for token, _ in generator:
             # Check for interruption
@@ -544,6 +605,7 @@ class MLXRunner:
                         generator.close()
                 except Exception:
                     pass
+                self._end_generation(len(generated_tokens), stopped=False, budget=effective_max_tokens)
                 yield "\n[Generation interrupted by user]"
                 break
 
@@ -596,6 +658,7 @@ class MLXRunner:
 
                     if earliest_token:
                         # Found stop token - yield remaining text before it and stop
+                        self._end_generation(len(generated_tokens), stopped=True, budget=effective_max_tokens)
                         text_before_stop = accumulated_response[:earliest_pos]
                         previously_yielded_length = len(accumulated_response) - len(new_text)
                         if len(text_before_stop) > previously_yielded_length:
@@ -621,7 +684,11 @@ class MLXRunner:
 
             # Check for EOS token (ADR-009: use eos_token_ids Set for multi-EOS models)
             if token_id in self.tokenizer.eos_token_ids:
+                stopped = True
                 break
+
+        if not self._interrupted:
+            self._end_generation(len(generated_tokens), stopped=stopped, budget=effective_max_tokens)
 
         # Finalize reasoning parser if used
         if reasoning_parser:
@@ -665,22 +732,16 @@ class MLXRunner:
         """
         if not self.model or not self.tokenizer:
             raise RuntimeError("Model not loaded. Call load_model() first.")
-        
-        # Reset any prior interruption at the start of a new generation
-        self._interrupted = False
-
-        # Use dynamic max tokens if not specified (run command uses full context)
-        effective_max_tokens = max_tokens if max_tokens is not None else self._calculate_dynamic_max_tokens(server_mode=False)
 
         # Apply chat template if available and requested
         formatted_prompt = apply_user_prompt(self.tokenizer, prompt, use_chat_template=use_chat_template)
 
         start_time = time.time()
 
-        # Tokenize and generate (tolerate mocks)
-        prompt_tokens = self.tokenizer.encode(formatted_prompt)
-        if not isinstance(prompt_tokens, (list, tuple)):
-            prompt_tokens = [0]
+        # The budget needs the prompt length: min(max_tokens, window − prompt).
+        # Raises before any token is produced when the prompt fills the window.
+        prompt_tokens = self._encode_prompt(formatted_prompt)
+        effective_max_tokens = self._begin_generation(prompt_tokens, max_tokens)
         # Ensure MLX core is available
         mx_core = self._mx
         if mx_core is None:
@@ -717,6 +778,7 @@ class MLXRunner:
         # Generate all tokens
         generated_tokens = []
         all_tokens = list(prompt_tokens)
+        stopped = False  # model ended its turn (EOS id, or a stop string found below)
 
         ret = self._generate_step(
             prompt=prompt_array,
@@ -738,13 +800,14 @@ class MLXRunner:
                 except Exception:
                     pass
                 break
-                
+
             token_id = token.item() if hasattr(token, 'item') else token
             generated_tokens.append(token_id)
             all_tokens.append(token_id)
 
             # Check for EOS token (ADR-009: use eos_token_ids Set for multi-EOS models)
             if token_id in self.tokenizer.eos_token_ids:
+                stopped = True
                 break
 
         # Decode full response using the streaming detokenizer
@@ -797,6 +860,7 @@ class MLXRunner:
 
             if earliest_token:
                 response = response[:earliest_pos]
+                stopped = True
 
         # Optionally filter chat stop tokens to prevent self-conversations in batch mode
         # Find the EARLIEST chat stop token (same logic as above)
@@ -809,6 +873,10 @@ class MLXRunner:
                         earliest_pos = pos
             if earliest_pos < len(response):
                 response = response[:earliest_pos]
+                stopped = True
+
+        # A stop string in the text is the model ending its turn, like an EOS id.
+        self._end_generation(len(generated_tokens), stopped=stopped, budget=effective_max_tokens)
 
         # Format reasoning models output
         response = self._format_reasoning_response(response, hide_reasoning=hide_reasoning)

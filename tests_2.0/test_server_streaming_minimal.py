@@ -33,8 +33,6 @@ def test_streaming_completions_happy_path_sse():
     client = TestClient(app)
 
     class DummyRunner:
-        def _calculate_dynamic_max_tokens(self, server_mode: bool = True):
-            return 16
         def generate_streaming(self, **kwargs):
             yield "Hello"
             yield " world"
@@ -57,8 +55,6 @@ def test_streaming_completions_interrupt_marker():
     client = TestClient(app)
 
     class InterruptingRunner:
-        def _calculate_dynamic_max_tokens(self, server_mode: bool = True):
-            return 16
         def generate_streaming(self, **kwargs):
             yield "Hello"
             raise KeyboardInterrupt()
@@ -87,8 +83,6 @@ def test_chat_streaming_uses_chat_stop_tokens_flag():
     captured = {}
 
     class CapturingRunner:
-        def _calculate_dynamic_max_tokens(self, server_mode: bool = True):
-            return 16
         def _format_conversation(self, messages):
             return "prompt"
 

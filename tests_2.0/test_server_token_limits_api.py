@@ -1,115 +1,92 @@
 """
-Server-level token limit tests (edge cases without changing core behavior).
+Server-level token ceiling tests: which number reaches the runner (#66).
 
-Focus: ensure endpoints pass effective max_tokens correctly:
-- When request.max_tokens is None -> use runner._calculate_dynamic_max_tokens(server_mode=True)
-- When request.max_tokens is set -> pass through unchanged
+The server is policy only — request max_tokens > operator ceiling > default —
+and hands that number to the runner, which clamps it to the model's window.
+Covered on all four text surfaces: chat/completions × batch/stream.
 """
 
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from mlxk2.core.server_base import app
+from mlxk2.core.server_base import app, get_effective_max_tokens_vision
 
 
-def test_server_completions_uses_dynamic_when_none():
+class CapturingRunner:
+    """Records the kwargs the endpoint hands to generation."""
+
+    def __init__(self):
+        self.seen = {}
+
+    def _format_conversation(self, messages):
+        return "prompt"
+
+    def generate_batch(self, **kwargs):
+        self.seen.update(kwargs)
+        return "ok"
+
+    def generate_streaming(self, **kwargs):
+        self.seen.update(kwargs)
+        yield "A"
+        yield "B"
+
+
+# surface -> (path, request body, stream flag)
+SURFACES = {
+    "chat-batch": ("/v1/chat/completions", {"messages": [{"role": "user", "content": "Hi"}]}, False),
+    "chat-stream": ("/v1/chat/completions", {"messages": [{"role": "user", "content": "Hi"}]}, True),
+    "completions-batch": ("/v1/completions", {"prompt": "Hi"}, False),
+    "completions-stream": ("/v1/completions", {"prompt": "Hi"}, True),
+}
+
+
+def _max_tokens_seen_by_runner(surface: str, **payload_extra) -> int:
+    """POST on one surface with a capturing runner; return the max_tokens it received."""
+    path, body, stream = SURFACES[surface]
+    payload = {"model": "org/model", "stream": stream, **body, **payload_extra}
+    runner = CapturingRunner()
     client = TestClient(app)
-
-    class Runner:
-        def _calculate_dynamic_max_tokens(self, server_mode=True):
-            assert server_mode is True
-            return 123
-
-        def generate_batch(self, **kwargs):
-            # Assert server passes the dynamic value
-            assert kwargs.get("max_tokens") == 123
-            return "ok"
-
-    with patch('mlxk2.core.server_base.get_or_load_model', return_value=Runner()):
-        payload = {"model": "org/model", "prompt": "Hi"}  # max_tokens omitted
-        resp = client.post("/v1/completions", json=payload)
-        assert resp.status_code == 200
-
-
-def test_server_completions_respects_explicit_max_tokens():
-    client = TestClient(app)
-
-    seen = {}
-
-    class Runner:
-        def _calculate_dynamic_max_tokens(self, server_mode=True):
-            return 999  # should be ignored when explicit max_tokens provided
-
-        def generate_batch(self, **kwargs):
-            seen.update(kwargs)
-            return "ok"
-
-    with patch('mlxk2.core.server_base.get_or_load_model', return_value=Runner()):
-        payload = {"model": "org/model", "prompt": "Hi", "max_tokens": 7}
-        resp = client.post("/v1/completions", json=payload)
-        assert resp.status_code == 200
-        assert seen.get("max_tokens") == 7
-
-
-def test_server_chat_streaming_uses_dynamic_when_none():
-    client = TestClient(app)
-
-    captured = {}
-
-    class Runner:
-        def _calculate_dynamic_max_tokens(self, server_mode=True):
-            assert server_mode is True
-            return 42
-
-        def _format_conversation(self, messages):
-            return "prompt"
-
-        def generate_streaming(self, **kwargs):
-            captured.update(kwargs)
-            yield "A"
-            yield "B"
-
-    with patch('mlxk2.core.server_base.get_or_load_model', return_value=Runner()):
-        payload = {
-            "model": "org/model",
-            "messages": [{"role": "user", "content": "Hi"}],
-            "stream": True,
-        }
-        with client.stream("POST", "/v1/chat/completions", json=payload) as resp:
+    with patch('mlxk2.core.server_base.get_or_load_model', return_value=runner):
+        if stream:
+            with client.stream("POST", path, json=payload) as resp:
+                assert resp.status_code == 200
+                for _ in resp.iter_lines():  # the generator only runs when consumed
+                    pass
+        else:
+            resp = client.post(path, json=payload)
             assert resp.status_code == 200
-            for _ in resp.iter_lines():
-                pass
-
-    assert captured.get("max_tokens") == 42
-    assert captured.get("use_chat_stop_tokens") is True
-    assert captured.get("use_chat_template") is False
+    return runner.seen["max_tokens"]
 
 
-def test_server_chat_non_streaming_respects_explicit_max_tokens():
-    client = TestClient(app)
+@pytest.mark.parametrize("surface", sorted(SURFACES))
+def test_default_ceiling_reaches_runner(surface):
+    assert _max_tokens_seen_by_runner(surface) == 32768
 
-    seen = {}
 
-    class Runner:
-        def _calculate_dynamic_max_tokens(self, server_mode=True):
-            return 111
+@pytest.mark.parametrize("surface", sorted(SURFACES))
+def test_explicit_max_tokens_passes_through(surface):
+    assert _max_tokens_seen_by_runner(surface, max_tokens=7) == 7
 
-        def _format_conversation(self, messages):
-            return "prompt"
 
-        def generate_batch(self, **kwargs):
-            seen.update(kwargs)
-            return "ok"
+@pytest.mark.parametrize("surface", sorted(SURFACES))
+def test_operator_ceiling_beats_default(monkeypatch, surface):
+    monkeypatch.setattr("mlxk2.core.server_base._default_max_tokens", 500)
+    assert _max_tokens_seen_by_runner(surface) == 500
 
-    with patch('mlxk2.core.server_base.get_or_load_model', return_value=Runner()):
-        payload = {
-            "model": "org/model",
-            "messages": [{"role": "user", "content": "Hi"}],
-            "stream": False,
-            "max_tokens": 5,
-        }
-        resp = client.post("/v1/chat/completions", json=payload)
-        assert resp.status_code == 200
-        assert seen.get("max_tokens") == 5
 
+@pytest.mark.parametrize("surface", sorted(SURFACES))
+def test_request_beats_operator_ceiling(monkeypatch, surface):
+    monkeypatch.setattr("mlxk2.core.server_base._default_max_tokens", 500)
+    assert _max_tokens_seen_by_runner(surface, max_tokens=7) == 7
+
+
+def test_vision_ceiling_precedence(monkeypatch):
+    """Same order for the vision ceiling, with its own default."""
+    monkeypatch.setattr("mlxk2.core.server_base._default_max_tokens", None)
+    assert get_effective_max_tokens_vision(None) == 2048
+    assert get_effective_max_tokens_vision(64) == 64
+    monkeypatch.setattr("mlxk2.core.server_base._default_max_tokens", 500)
+    assert get_effective_max_tokens_vision(None) == 500
+    assert get_effective_max_tokens_vision(64) == 64

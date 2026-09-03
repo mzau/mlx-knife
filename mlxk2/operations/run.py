@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from ..core.runner import MLXRunner
+from ..core.runner.token_limits import DEFAULT_MAX_TOKENS, ContextLengthExceeded, reported_finish_reason
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
 from ..operations.health import check_runtime_compatibility
@@ -59,6 +60,34 @@ def _get_system_memory_bytes() -> Optional[int]:
 def _format_bytes_gb(size_bytes: int) -> str:
     """Format bytes as human-readable GB string."""
     return f"{size_bytes / (1024**3):.1f} GB"
+
+
+def _note_finish(runner, result_info: Optional[dict], max_tokens: Optional[int], json_output: bool) -> None:
+    """Report how the generation ended: the JSON field, and on stderr when the budget cut it.
+
+    A cut answer must not look finished (#66). The notice names the bound that was
+    active — the ceiling (raise ``--max-tokens``) or the window (shorten the prompt).
+    """
+    reason = getattr(runner, "last_finish_reason", None)
+    if result_info is not None:
+        result_info["finish_reason"] = reported_finish_reason(reason)
+    if json_output or reason != "length":
+        return
+    generated = runner.last_completion_tokens
+    ceiling = max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS
+    if isinstance(runner.last_max_tokens, int) and runner.last_max_tokens < ceiling:
+        notice = (
+            f"[Output cut at {generated} tokens: prompt ({runner.last_prompt_tokens}) and output fill "
+            f"the model's context window ({runner._context_length}). Shorten the prompt to allow more.]"
+        )
+    elif max_tokens is not None:
+        notice = f"[Output cut at {generated} tokens (--max-tokens). Pass a larger --max-tokens to allow more.]"
+    else:
+        notice = (
+            f"[Output cut at {generated} tokens, the default max_tokens. "
+            f"Pass --max-tokens to allow more.]"
+        )
+    print(notice, file=sys.stderr, flush=True)
 
 
 def check_memory_before_load(
@@ -170,6 +199,7 @@ def _process_images_in_chunks(
     repetition_penalty: float,
     verbose: bool,
     json_output: bool = False,
+    result_info: Optional[dict] = None,
 ) -> str:
     """Process images in batches with isolated model instances per chunk.
 
@@ -185,6 +215,7 @@ def _process_images_in_chunks(
         max_tokens, temperature, top_p, repetition_penalty: Generation params
         verbose: Show chunk progress
         json_output: If True, suppress incremental output and return full result
+        result_info: Receives ``finish_reason`` aggregated over chunks (any "length" wins)
 
     Returns:
         Combined text with merged filename mappings (or empty if printed incrementally)
@@ -204,6 +235,7 @@ def _process_images_in_chunks(
 
     # Process each chunk with fresh runner (prevents state leakage)
     all_results = []
+    finish_reason = None
     for chunk_idx, chunk in enumerate(chunks, start=1):
         if verbose:
             start_img = (chunk_idx - 1) * chunk_size + 1
@@ -226,6 +258,9 @@ def _process_images_in_chunks(
                 image_id_map=image_id_map,  # Global numbering preserved
                 total_images=len(images),  # Enable chunk context line
             )
+            chunk_reason = reported_finish_reason(runner.last_finish_reason)
+            if chunk_reason == "length" or finish_reason is None:
+                finish_reason = chunk_reason
 
         # Incremental output for better UX (show results as they come)
         if not json_output:
@@ -237,6 +272,9 @@ def _process_images_in_chunks(
                 sys.stderr.close()
 
         all_results.append(chunk_result)
+
+    if result_info is not None:
+        result_info["finish_reason"] = finish_reason
 
     # Return combined results for json_output mode
     # For non-json mode, return empty since we already printed incrementally
@@ -263,6 +301,7 @@ def run_model(
     hide_reasoning: bool = False,
     language: Optional[str] = None,
     translate: Optional[str] = None,
+    result_info: Optional[dict] = None,
 ) -> Optional[str]:
     """Execute model with prompt - supports both single-shot and interactive modes.
 
@@ -278,6 +317,8 @@ def run_model(
         json_output: Return JSON format instead of printing
         verbose: Show detailed output
         hide_reasoning: Hide reasoning output for reasoning models (DeepSeek-R1, QwQ, etc.)
+        result_info: Optional dict that receives ``finish_reason`` (and ``error_type`` on a
+            typed reject) for the ``--json`` envelope
 
     Returns:
         Generated text on success, "Error: ..." string on failure (both modes)
@@ -650,6 +691,7 @@ def run_model(
                             top_p=top_p,
                             repetition_penalty=repetition_penalty,
                         )
+                        _note_finish(runner, result_info, max_tokens, json_output)
                 else:
                     # Multi-batch chunking - creates fresh runner per chunk
                     result = _process_images_in_chunks(
@@ -665,6 +707,7 @@ def run_model(
                         repetition_penalty=repetition_penalty,
                         verbose=verbose,
                         json_output=json_output,
+                        result_info=result_info,
                     )
             except Exception as e:
                 error_result = f"Error: {e}"
@@ -709,8 +752,17 @@ def run_model(
                     repetition_penalty=repetition_penalty,
                     use_chat_template=use_chat_template,
                     json_output=json_output,
-                    hide_reasoning=hide_reasoning
+                    hide_reasoning=hide_reasoning,
+                    result_info=result_info,
                 )
+    except ContextLengthExceeded as e:
+        # Pre-execution reject (#66): nothing was generated, the message says why
+        if result_info is not None:
+            result_info["error_type"] = "context_length_exceeded"
+        error_result = f"Error: {e}"
+        if not json_output:
+            print(error_result, file=sys.stderr)
+        return error_result
     except Exception as e:
         error_result = f"Error: {e}"
         if not json_output:
@@ -779,6 +831,7 @@ def interactive_chat(
                     print(token, end="", flush=True)
                     response_tokens.append(token)
                 response = "".join(response_tokens).strip()
+                _note_finish(runner, None, max_tokens, json_output=False)
             else:
                 # Batch mode
                 params = dict(
@@ -798,6 +851,7 @@ def interactive_chat(
                     except TypeError:
                         response = runner.generate_batch()
                 print(response)
+                _note_finish(runner, None, max_tokens, json_output=False)
             
             # Add assistant response to history
             conversation_history.append({"role": "assistant", "content": response})
@@ -828,7 +882,8 @@ def single_shot_generation(
     repetition_penalty: float = 1.1,
     use_chat_template: bool = True,
     json_output: bool = False,
-    hide_reasoning: bool = False
+    hide_reasoning: bool = False,
+    result_info: Optional[dict] = None,
 ) -> Optional[str]:
     """Single prompt generation."""
     if stream and not json_output:
@@ -849,6 +904,7 @@ def single_shot_generation(
 
             if not json_output:
                 print()  # Final newline
+            _note_finish(runner, result_info, max_tokens, json_output)
         except BrokenPipeError:
             # Downstream closed the pipe (e.g., `mlxk run model | head -1`)
             # This is expected Unix behavior - exit silently without error
@@ -868,6 +924,7 @@ def single_shot_generation(
             use_chat_template=use_chat_template,
             hide_reasoning=hide_reasoning,
         )
+        _note_finish(runner, result_info, max_tokens, json_output)
 
         if json_output:
             return result
@@ -899,6 +956,7 @@ def run_model_enhanced(
     hide_reasoning: bool = False,
     language: Optional[str] = None,
     translate: Optional[str] = None,
+    result_info: Optional[dict] = None,
 ) -> Optional[str]:
     """Enhanced run with additional parameters for future features.
     
@@ -945,4 +1003,5 @@ def run_model_enhanced(
         hide_reasoning=hide_reasoning,
         language=language,
         translate=translate,
+        result_info=result_info,
     )

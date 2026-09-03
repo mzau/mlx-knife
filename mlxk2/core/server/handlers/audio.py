@@ -32,7 +32,7 @@ async def handle_audio_chat_completion(
     temperature: Optional[float],
     stream: bool,
     get_audio_model_fn: Callable[[str, bool], "AudioRunner"],
-    emulate_sse_fn: Callable[[str, int, str, str], AsyncGenerator[str, None]],
+    emulate_sse_fn: Callable[[str, int, str, str, Optional[str]], AsyncGenerator[str, None]],
     count_tokens_fn: Callable[[str], int],
 ) -> Union[Dict[str, Any], StreamingResponse]:
     """Handle audio STT chat completion with AudioRunner (ADR-020).

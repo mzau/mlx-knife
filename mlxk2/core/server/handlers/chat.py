@@ -12,10 +12,12 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from threading import Event
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+
+from ..streaming import finish_reason_of, log_generation_end
 
 if TYPE_CHECKING:
     from ...runner import MLXRunner  # noqa: F401
@@ -28,6 +30,18 @@ def _get_logger():
     return get_logger()
 
 
+def ensure_generation_budget(runner, prompt: str, max_tokens: Optional[int], use_chat_template: bool) -> None:
+    """Raise ``ContextLengthExceeded`` now if the prompt fills the window.
+
+    Streaming answers 200 before the runner runs, so the runner's own reject would
+    land inside the SSE stream; asking first turns it into the 400 it is meant to
+    be. Runners without the method (mocks) are left to their generation path.
+    """
+    budget = getattr(runner, "generation_budget", None)
+    if callable(budget):
+        budget(prompt, max_tokens=max_tokens, use_chat_template=use_chat_template)
+
+
 class ChatHandlerContext:
     """Dependency container for chat handlers.
 
@@ -38,15 +52,15 @@ class ChatHandlerContext:
     def __init__(
         self,
         get_model_fn: Callable[[str, bool], Any],
-        get_effective_max_tokens_fn: Callable[[Any, Optional[int], bool], Optional[int]],
-        get_effective_max_tokens_vision_fn: Callable[[Any, Optional[int]], int],
+        get_effective_max_tokens_fn: Callable[[Optional[int]], int],
+        get_effective_max_tokens_vision_fn: Callable[[Optional[int]], int],
         count_tokens_fn: Callable[[str], int],
         format_messages_fn: Callable[[List[Any]], List[Dict[str, str]]],
         extract_text_fn: Callable[[List[Any]], str],
         filter_multimodal_fn: Callable[[List[Any]], List[Any]],
         messages_to_dicts_fn: Callable[[List[Any]], List[Dict[str, Any]]],
         generate_chat_stream_fn: Callable,
-        emulate_sse_fn: Callable[[str, int, str, str], AsyncGenerator[str, None]],
+        emulate_sse_fn: Callable[[str, int, str, str, Optional[str]], AsyncGenerator[str, None]],
         stream_vision_chunks_fn: Callable,
         process_vision_chunks_fn: Callable,
         shutdown_event: Event,
@@ -119,15 +133,16 @@ async def handle_text_chat_completion(
         # Extract text prompt from messages
         prompt = ctx.extract_text(messages)
 
-        # Vision model WITHOUT images: Use vision max_tokens logic (VisionRunner lacks _calculate_dynamic_max_tokens)
+        # Vision model WITHOUT images: the vision ceiling applies (stateless, no window guard)
         generated_text = runner.generate(
             prompt=prompt,
             images=None,
-            max_tokens=ctx.get_effective_max_tokens_vision(runner, max_tokens),
+            max_tokens=ctx.get_effective_max_tokens_vision(max_tokens),
             temperature=0.0,  # Greedy sampling to reduce hallucinations
             top_p=top_p or 0.9,
             repetition_penalty=repetition_penalty or 1.0,
         )
+        finish_reason = finish_reason_of(runner)
 
         prompt_tokens = ctx.count_tokens(prompt)
         completion_tokens = ctx.count_tokens(generated_text)
@@ -136,7 +151,7 @@ async def handle_text_chat_completion(
         if stream:
             logger.info("Vision model: emulating SSE stream (batch response as single event)")
             return StreamingResponse(
-                ctx.emulate_sse(completion_id, created, request_model, generated_text),
+                ctx.emulate_sse(completion_id, created, request_model, generated_text, finish_reason),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache"}
             )
@@ -153,7 +168,7 @@ async def handle_text_chat_completion(
                         "role": "assistant",
                         "content": generated_text
                     },
-                    "finish_reason": "stop"
+                    "finish_reason": finish_reason
                 }
             ],
             "usage": {
@@ -167,7 +182,11 @@ async def handle_text_chat_completion(
     if stream:
         # Streaming response (use filtered messages)
         message_dicts = ctx.format_messages(messages)
-        effective_max_tokens = ctx.get_effective_max_tokens(runner, max_tokens, True)
+        effective_max_tokens = ctx.get_effective_max_tokens(max_tokens)
+        # A full window must answer with a status, not inside the stream (#66)
+        ensure_generation_budget(
+            runner, runner._format_conversation(message_dicts), effective_max_tokens, use_chat_template=False
+        )
         return StreamingResponse(
             ctx.generate_chat_stream(
                 runner, message_dicts, request_model, effective_max_tokens,
@@ -189,13 +208,14 @@ async def handle_text_chat_completion(
 
     generated_text = runner.generate_batch(
         prompt=prompt,
-        max_tokens=ctx.get_effective_max_tokens(runner, max_tokens, True),
+        max_tokens=ctx.get_effective_max_tokens(max_tokens),
         temperature=temperature,
         top_p=top_p,
         repetition_penalty=repetition_penalty,
         use_chat_template=False,
         use_chat_stop_tokens=True
     )
+    log_generation_end(logger, runner, request_model, stream=False)
 
     # Token counting
     total_prompt = ctx.extract_text(messages)
@@ -214,7 +234,7 @@ async def handle_text_chat_completion(
                     "role": "assistant",
                     "content": generated_text
                 },
-                "finish_reason": "stop"
+                "finish_reason": finish_reason_of(runner)
             }
         ],
         "usage": {
@@ -328,7 +348,7 @@ async def handle_vision_chat_completion(
             )
         )
 
-    effective_max_tokens = ctx.get_effective_max_tokens_vision(runner, max_tokens)
+    effective_max_tokens = ctx.get_effective_max_tokens_vision(max_tokens)
 
     if len(images) <= chunk_size:
         # Single batch (no chunking)
@@ -342,6 +362,7 @@ async def handle_vision_chat_completion(
             repetition_penalty=repetition_penalty or 1.0,
             image_id_map=image_id_map if images else None,
         )
+        finish_reason = finish_reason_of(runner)
     else:
         # Multi-chunk processing
         if stream:
@@ -374,7 +395,7 @@ async def handle_vision_chat_completion(
                 headers={"Cache-Control": "no-cache"}
             )
         # Non-streaming multi-chunk (batch mode)
-        generated_text = ctx.process_vision_chunks(
+        generated_text, finish_reason = ctx.process_vision_chunks(
             model_path=runner.model_path,
             model_name=runner.model_name,
             prompt=prompt,
@@ -402,7 +423,7 @@ async def handle_vision_chat_completion(
     if stream:
         logger.info("Vision request: emulating SSE stream (single-chunk batch response)")
         return StreamingResponse(
-            ctx.emulate_sse(completion_id, created, request_model, generated_text),
+            ctx.emulate_sse(completion_id, created, request_model, generated_text, finish_reason),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"}
         )
@@ -419,7 +440,7 @@ async def handle_vision_chat_completion(
                     "role": "assistant",
                     "content": generated_text
                 },
-                "finish_reason": "stop"
+                "finish_reason": finish_reason
             }
         ],
         "usage": {
@@ -442,7 +463,7 @@ def process_vision_chunks_server(
     top_p: float,
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
-) -> str:
+) -> Tuple[str, Optional[str]]:
     """Process vision images in batches with isolated model instances per chunk.
 
     Each chunk creates a fresh VisionRunner to prevent state leakage between batches.
@@ -458,7 +479,8 @@ def process_vision_chunks_server(
         audio: Optional list of (filename, bytes) tuples for audio input
 
     Returns:
-        Combined text with merged filename mappings
+        Combined text with merged filename mappings, and the aggregated finish
+        reason: "length" if any chunk was cut, else what the chunks reported.
     """
     from ...vision_runner import VisionRunner
 
@@ -467,6 +489,7 @@ def process_vision_chunks_server(
 
     # Process each chunk with fresh runner
     all_results = []
+    finish_reason: Optional[str] = None
     for chunk in chunks:
         with VisionRunner(model_path, model_name, verbose=False) as runner:
             chunk_result = runner.generate(
@@ -480,6 +503,9 @@ def process_vision_chunks_server(
                 image_id_map=image_id_map,
                 total_images=len(images),
             )
+            chunk_reason = finish_reason_of(runner)
         all_results.append(chunk_result)
+        if chunk_reason == "length" or finish_reason is None:
+            finish_reason = chunk_reason
 
-    return "\n\n".join(all_results)
+    return "\n\n".join(all_results), finish_reason

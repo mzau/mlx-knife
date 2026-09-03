@@ -1,8 +1,8 @@
 # MLX-Knife 2.0 JSON API Specification
 
-**Specification Version:** 0.2.3
+**Specification Version:** 0.2.4
 **Status:** Stable (backward-compatible)
-**Released:** MLX-Knife 2.0.6
+**Released:** MLX-Knife 2.0.8
 
 > Based on [GitHub Issue #8](https://github.com/mzau/mlx-knife/issues/8) - Comprehensive JSON output support for all commands
 
@@ -1145,6 +1145,32 @@ Behavior:
 
 The `embedding` array is abbreviated (`bge-small-en-v1.5` emits 384 floats).
 
+### `mlxk run <model> "<prompt>" --json`
+
+Single-shot generation. Interactive mode (no prompt) has no JSON form.
+
+```json
+{
+  "status": "success",
+  "command": "run",
+  "data": {
+    "model": "Qwen2.5-Coder-1.5B-Instruct-4bit",
+    "prompt": "Count from 1 to 500, one number per line.",
+    "response": "1\n2\n3",
+    "finish_reason": "length"
+  },
+  "error": null
+}
+```
+
+`finish_reason` says how the generation ended (0.2.4):
+
+- `"stop"` — the model ended its turn (EOS or a stop sequence).
+- `"length"` — the generation budget cut the answer: `--max-tokens`, the tool's default ceiling, or what the model's context window still held after the prompt. The text is a prefix of what the model would have said.
+- `null` — no reason is known: audio transcription (no generation budget applies), or a backend that reported none.
+
+A prompt that fills the model's context window is rejected before anything is generated: `status: "error"`, `error.type: "context_length_exceeded"`, exit code 1. The message names the prompt length and the window.
+
 ## Error Handling
 
 **All errors follow consistent format with detailed error types:**
@@ -1155,6 +1181,7 @@ The `embedding` array is abbreviated (`bge-small-en-v1.5` emits 384 floats).
 - `ValidationError` - Invalid input (96 char limit, empty names)
 - `ambiguous_match` - Multiple models match pattern
 - `model_not_found` - No models match pattern
+- `context_length_exceeded` - `run`: the prompt fills the model's context window; nothing is left to generate (message carries prompt and window size)
 
 **Network Errors:**
 - `download_failed` - HuggingFace API errors, network timeouts
@@ -1294,6 +1321,7 @@ All commands use consistent exit codes for scripting:
 
 ## Version History
 
+- **0.2.4** (2.0.8): `run` data carries `finish_reason` — `"stop"` when the model ended its turn, `"length"` when the generation budget cut the answer, `null` when no reason is known (audio transcription). Added `context_length_exceeded` to the error types (`run` rejects a prompt that fills the model's context window before generating). Additive; no breaking changes.
 - **0.2.3** (2.0.7): Added `embed` to the `command` enum so `mlxk embed --json` renders the standard envelope (records under `data.records`). embed's default JSONL rendering is unchanged. Experimental (gated by `MLXK2_ENABLE_ALPHA_FEATURES=1`). Additive; no breaking changes.
 - **0.2.2** (2.0.6): Additive tightening — `content_hash` format documented (was: prose-only "SHA256 hash"); `pattern` constraint added to schema accepting both v2 (`sha256:<64-hex>`) and legacy v1 (`<64-hex>`) formats during the migration window. Reflects the v1→v2 format change introduced by ADR-025 (content_hash v2 algorithm) where the `sha256:` prefix entered the API output. Pre-2.0.6 (v1) workspaces continue to surface their legacy raw-hex value until migrated via `mlxk show <name> --recalc-hash`. No new fields, no breaking changes for consumers that treat `content_hash` as an opaque string.
 - **0.2.1** (2.0.5-beta.3): Added `data` schema definitions for `clone` and `convert` commands (if/then blocks with required fields)

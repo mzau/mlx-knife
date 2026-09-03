@@ -34,7 +34,7 @@ This pattern is **chosen, not TBD** — it shipped in 2.0.6 for Class A (STT / e
 
 ### Rejected alternatives (preserved for context)
 
-- **`VisionRunner(images=None)`-Fallback.** mlx-vlm `generate()`-defaults are 100–256 tokens (image-captioning-dimensioned; see `mlx_vlm/generate.py:235,820,1030,1195`); MLXRunner default is `calculate_dynamic_max_tokens(server_mode=False)` ≈ full context (~131k on Pixtral). 500–1300× discrepancy → text-only via VisionRunner produces reproducibly truncated outputs the user cannot diagnose. Pre-execution reject is the correct UX.
+- **`VisionRunner(images=None)`-Fallback.** The two runners generate under different ceilings: mlx-knife sets `2048` for vision explicitly on both surfaces (image-description-dimensioned; the same number mlx-vlm 0.6.10 itself falls back to via `DEFAULT_MAX_TOKENS` in `mlx_vlm/generate/dispatch.py`), while a text generation gets `min(32768, context_length − prompt)`. A 16× gap → text-only via VisionRunner produces reproducibly truncated outputs the user cannot diagnose, and the fallback leaves the show/run divergence untouched. Pre-execution reject is the correct UX.
 - **Try/catch recovery at the runner.** Runtime recovery does not solve the show/run divergence — `show` makes no try/catch call, would need its own logic. Pre-execution detection is the only single-source-of-truth variant.
 
 ---

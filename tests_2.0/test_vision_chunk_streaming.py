@@ -7,12 +7,14 @@ waiting for all chunks to finish.
 """
 
 import json
+from contextlib import contextmanager
 from typing import Iterator
 from unittest.mock import patch, MagicMock
 
 from fastapi.testclient import TestClient
 
 from mlxk2.core.server_base import app
+from mlxk2.core.vision_runner import VisionRunner
 
 
 def _iter_sse_lines(resp) -> Iterator[str]:
@@ -26,6 +28,40 @@ def _iter_sse_lines(resp) -> Iterator[str]:
             line = raw
         if line.strip():
             yield line
+
+
+# 1x1 PNG, small enough to inline; one image = one chunk = the emulated-SSE path
+PIXEL_PNG = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+@contextmanager
+def _wired_vision_stream(image_data_url, finish_reason):
+    """Stream a vision chat request through the real server wiring with a stub runner.
+
+    A real ``VisionRunner`` (constructing one loads nothing) so the handler's own
+    ``isinstance`` guard passes on its own terms; only ``generate`` is stubbed.
+    Patching ``isinstance`` wholesale instead would also make every other check in
+    those modules true, which is how a broken wrapper signature stayed invisible.
+    """
+    runner = VisionRunner("/mock/path", "mock-vision", verbose=False)
+    runner.generate = lambda **kwargs: "Single chunk response"
+    runner.last_finish_reason = finish_reason
+
+    content = [{"type": "text", "text": "Describe this image"}]
+    if image_data_url:
+        content.append({"type": "image_url", "image_url": {"url": image_data_url}})
+    payload = {
+        "model": "mock-vision-model",
+        "messages": [{"role": "user", "content": content}],
+        "stream": True,
+    }
+
+    with patch('mlxk2.core.server_base.get_or_load_model', return_value=runner):
+        with TestClient(app).stream("POST", "/v1/chat/completions", json=payload) as resp:
+            yield resp
 
 
 def _parse_sse_events(resp) -> list:
@@ -89,33 +125,30 @@ class TestVisionChunkStreamingSSEFormat:
             assert events[-1]["choices"][0]["finish_reason"] == "stop"
 
     def test_single_chunk_uses_emulated_sse(self):
-        """Single-chunk requests should use existing SSE emulation (batch response)."""
-        client = TestClient(app)
+        """Single-chunk requests should use existing SSE emulation (batch response).
 
-        mock_runner = MagicMock()
-        mock_runner.model_path = "/mock/path"
-        mock_runner.model_name = "mock-vision"
-        mock_runner.generate.return_value = "Single chunk response"
+        Drives the wired path, not the implementation: the handler reaches
+        ``_emulate_sse_stream`` through ``ChatHandlerContext``, so a signature that
+        drifts from ``streaming.emulate_sse_stream`` fails here as a 500.
+        """
+        with _wired_vision_stream(PIXEL_PNG, finish_reason="length") as resp:
+            assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.read()!r}"
 
-        with patch('mlxk2.core.server_base.get_or_load_model', return_value=mock_runner), \
-             patch('mlxk2.core.server_base.isinstance', side_effect=lambda obj, cls: True):
-            # 1 image = single chunk, uses _emulate_sse_stream
-            payload = {
-                "model": "mock-vision-model",
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Describe this image"},
-                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}},
-                    ]
-                }],
-                "stream": True,
-            }
+            events = _parse_sse_events(resp)
+            content = "".join(
+                e["choices"][0]["delta"].get("content", "") for e in events
+            )
+            assert content == "Single chunk response"
+            # The runner's stop reason has to survive the whole wiring, not just the impl
+            assert events[-1]["choices"][0]["finish_reason"] == "length"
 
-            with client.stream("POST", "/v1/chat/completions", json=payload) as resp:
-                # Should return 200 (either streaming or error is acceptable here
-                # since we're testing the routing, not the full integration)
-                assert resp.status_code in [200, 400, 500]
+    def test_text_on_vision_model_uses_emulated_sse(self):
+        """A vision model without images streams through the same wrapper (chat.py text path)."""
+        with _wired_vision_stream(None, finish_reason="stop") as resp:
+            assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.read()!r}"
+
+            events = _parse_sse_events(resp)
+            assert events[-1]["choices"][0]["finish_reason"] == "stop"
 
     def test_sse_format_compliance(self):
         """SSE events should follow OpenAI format."""
@@ -166,18 +199,48 @@ class TestVisionChunkStreamingSSEFormat:
                         assert "delta" in choice, "Missing 'delta' in choice"
 
 
+def _run_stream_vision_chunks(runner_cls, images) -> list:
+    """Drive _stream_vision_chunks with a stand-in VisionRunner; returns the raw SSE strings."""
+    import asyncio
+    from mlxk2.core.server_base import _stream_vision_chunks
+
+    async def run_generator():
+        events = []
+        # Patch at the source module where VisionRunner is defined
+        with patch('mlxk2.core.vision_runner.VisionRunner', runner_cls):
+            gen = _stream_vision_chunks(
+                model_path="/mock/path",
+                model_name="mock-model",
+                prompt="Test prompt",
+                images=images,
+                chunk_size=1,
+                image_id_map={},
+                max_tokens=100,
+                temperature=0.0,
+                top_p=0.9,
+                repetition_penalty=1.0,
+                completion_id="test-123",
+                created=1234567890,
+                model="test-model",
+            )
+            async for event in gen:
+                events.append(event)
+        return events
+
+    return asyncio.run(run_generator())
+
+
 class TestVisionChunkStreamingIntegration:
     """Integration tests that exercise the actual streaming function."""
 
     def test_stream_vision_chunks_generator_format(self):
         """Test _stream_vision_chunks yields valid SSE format."""
-        import asyncio
-        from mlxk2.core.server_base import _stream_vision_chunks
 
-        # Mock VisionRunner
+        # Mock VisionRunner. The stream reports the runner's last_finish_reason as-is:
+        # a runner that declares nothing yields null, so the mock says "stop" explicitly.
         class MockVisionRunner:
             def __init__(self, *args, **kwargs):
-                pass
+                self.last_finish_reason = None
 
             def __enter__(self):
                 return self
@@ -186,32 +249,12 @@ class TestVisionChunkStreamingIntegration:
                 pass
 
             def generate(self, **kwargs):
+                self.last_finish_reason = "stop"
                 return "Test output"
 
-        async def run_generator():
-            events = []
-            # Patch at the source module where VisionRunner is defined
-            with patch('mlxk2.core.vision_runner.VisionRunner', MockVisionRunner):
-                gen = _stream_vision_chunks(
-                    model_path="/mock/path",
-                    model_name="mock-model",
-                    prompt="Test prompt",
-                    images=[("img1.jpg", b"fake1"), ("img2.jpg", b"fake2")],
-                    chunk_size=1,
-                    image_id_map={},
-                    max_tokens=100,
-                    temperature=0.0,
-                    top_p=0.9,
-                    repetition_penalty=1.0,
-                    completion_id="test-123",
-                    created=1234567890,
-                    model="test-model",
-                )
-                async for event in gen:
-                    events.append(event)
-            return events
-
-        events = asyncio.run(run_generator())
+        events = _run_stream_vision_chunks(
+            MockVisionRunner, images=[("img1.jpg", b"fake1"), ("img2.jpg", b"fake2")]
+        )
 
         # Should have: role + 2 content events + final + [DONE]
         assert len(events) >= 4, f"Expected at least 4 events, got {len(events)}: {events}"
@@ -227,3 +270,33 @@ class TestVisionChunkStreamingIntegration:
         # Second-to-last should have finish_reason
         final = json.loads(events[-2][6:].strip())
         assert final["choices"][0]["finish_reason"] == "stop"
+
+    def test_stream_vision_chunks_one_cut_chunk_makes_final_length(self):
+        """A "length" from any chunk wins: a later "stop" does not overwrite it."""
+        reasons = {"cut.jpg": "length", "whole.jpg": "stop"}
+
+        class MockVisionRunner:
+            def __init__(self, *args, **kwargs):
+                self.last_finish_reason = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def generate(self, **kwargs):
+                # One fresh runner per chunk; the chunk's image says how it ended
+                self.last_finish_reason = reasons[kwargs["images"][0][0]]
+                return "Test output"
+
+        events = _run_stream_vision_chunks(
+            MockVisionRunner, images=[("cut.jpg", b"fake1"), ("whole.jpg", b"fake2")]
+        )
+
+        assert events[-1].strip() == "data: [DONE]"
+        final = json.loads(events[-2][6:].strip())
+        assert final["choices"][0]["finish_reason"] == "length"
+        # Both chunks still streamed their content before the verdict
+        content = [json.loads(e[6:]) for e in events[1:-2]]
+        assert [c["choices"][0]["finish_reason"] for c in content] == [None, None]

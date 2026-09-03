@@ -13,6 +13,17 @@
 
 ### Changed
 
+- A model whose `config.json` states no context window is reported as `null` by `/v1/models`
+  `context_length` and by the runner, where 4096 was invented before; with no window known there
+  is no window guard, only the 32768 ceiling. The vision default of 2048 tokens is now set
+  explicitly on the CLI as well as the server instead of being inherited from mlx-vlm.
+- JSON API 0.2.3 → 0.2.4 ([#67](https://github.com/mzau/mlx-knife/issues/67), part 1):
+  `run --json` data carries `finish_reason` (`"stop"` / `"length"` / `null`),
+  `context_length_exceeded` joins the error types, and the schema title is reconciled with the
+  spec — it said 0.2.2. A test now holds the four places the version lives (`mlxk2.spec`, the
+  schema title, the spec header and its newest Version History entry) to one value, importing
+  `jsonschema` hard so a broken `[test]` install fails instead of skipping. Additive; no
+  breaking change. Canonical text: `docs/json-api-specification.md` → Version History.
 - `mlx-audio` moves `0.4.4` → `0.4.8`. The regression that held the pin — 0.4.6 handed
   resampling to the decoder, whose stopband is far too shallow for an ASR front-end
   ([mlx-audio#870](https://github.com/Blaizzy/mlx-audio/issues/870)) — is fixed upstream and
@@ -31,13 +42,35 @@
   forward-looking statements and four pointers into the source are gone; HTTP **413** and
   **422** are documented (both were absent from the status list and both reported
   `internal_error`); `/health` is stated as liveness, not readiness; the audio size limit is
-  given once instead of as two contradicting figures. `scripts/check-handbook-contract.py`
-  checks the decidable part of that contract before a release commit.
+  given once instead of as two contradicting figures. It also answers what happens when a
+  streaming client closes the connection, which it never did: the generation stops, nothing is
+  logged for it, and the guarantee rests on the ASGI runtime rather than on code in this server.
+  `scripts/check-handbook-contract.py` checks the decidable part of that contract before a
+  release commit.
 - ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
   installed ruff version defaults to.
 
 ### Fixed
 
+- A stream that failed part-way reported `finish_reason: "error"` — a value the OpenAI enum does
+  not define — then carried on to emit a second, contradicting terminal chunk saying `"stop"`,
+  followed by `[DONE]`, so the stream also claimed to have completed. The failure now travels in a
+  top-level `error` **object** (`type` and `message`, the shape an HTTP error body has), the
+  choice keeps `finish_reason: null`, and the stream ends there. An OpenAI SDK client raises with
+  the actual message where it previously raised with a generic placeholder, because it reads that
+  key and expects an object. Tokens already sent stand. Canonical text: SERVER-HANDBOOK →
+  *Token Limits* → `finish_reason`.
+- The default generation budget ignored the prompt, and a cut answer said `"stop"`
+  ([#66](https://github.com/mzau/mlx-knife/issues/66)): `run` handed the model its whole
+  context window as `max_tokens` (262144 tokens on a 256K-context model), `serve` half of it,
+  and neither subtracted the prompt — prompt plus output could exceed the window, and when the
+  budget ran out the answer was reported as finished. Both surfaces now generate
+  `min(32768, window − prompt)`; an explicit `max_tokens` is clamped to the window too. A cut
+  is reported as `finish_reason: "length"` on the server and in `run --json`, and the CLI says
+  so on stderr, naming the bound that was active. A prompt that fills the window is rejected
+  before anything is generated: HTTP 400 `context_length_exceeded` carrying the prompt and
+  window sizes, `Error:` + exit 1 on the CLI. Canonical text: SERVER-HANDBOOK → Migration
+  Notes → *From 2.0.7 → 2.0.8*.
 - `mlxk run … --audio FILE --translate` sent Whisper the synthetic prompt
   `"Transcribe this audio."` as `initial_prompt`
   ([#61](https://github.com/mzau/mlx-knife/issues/61)) — decoder context pulling a

@@ -416,7 +416,7 @@ def main():
         metavar="N",
         help="Process images in batches of N (default: 1 for maximum safety)",
     )
-    run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate")
+    run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate (default 32768; always clamped to the model's context window minus the prompt)")
     run_parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature (default: 0.7, audio: 0.0)")
     run_parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
     run_parser.add_argument("--repetition-penalty", type=float, default=1.1, help="Repetition penalty (default: 1.1)")
@@ -431,7 +431,7 @@ def main():
     serve_parser.add_argument("--model", help="Specific model to pre-load (optional)")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind server to (default: 8000)")
     serve_parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to (default: 127.0.0.1)")
-    serve_parser.add_argument("--max-tokens", type=int, help="Default maximum tokens for generation")
+    serve_parser.add_argument("--max-tokens", type=int, help="Server-wide ceiling for generated tokens, text and vision (default 32768 / 2048); a request's max_tokens overrides it, the model's context window clamps both")
     serve_parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     serve_parser.add_argument("--log-level", default="info", help="Logging level (debug/info/warning/error, default: info)")
     serve_parser.add_argument("--log-json", action="store_true", help="Output logs in JSON format (for log aggregation)")
@@ -816,6 +816,7 @@ def main():
                 temperature = args.temperature
 
             # Handle run command with proper parameter mapping
+            run_info: dict = {}  # finish_reason / typed reject for the JSON envelope
             result_text = run_model_enhanced(
                 model_spec=args.model,
                 prompt=prompt_value,  # Can be None for interactive mode
@@ -834,6 +835,7 @@ def main():
                 hide_reasoning=getattr(args, "no_reasoning", False),
                 language=getattr(args, "language", None),
                 translate=getattr(args, "translate", None),
+                result_info=run_info,
             )
 
             # Detect errors from run_model_enhanced (returns "Error: ..." string on failure)
@@ -845,7 +847,7 @@ def main():
                     "command": "run",
                     "data": None,
                     "error": {
-                        "type": "execution_error",
+                        "type": run_info.get("error_type", "execution_error"),
                         "message": error_message
                     }
                 }
@@ -861,7 +863,9 @@ def main():
                     "data": {
                         "model": args.model,
                         "prompt": prompt_value,
-                        "response": result_text
+                        "response": result_text,
+                        # "stop" | "length" | null — a cut answer must not look finished (#66)
+                        "finish_reason": run_info.get("finish_reason"),
                     },
                     "error": None
                 }

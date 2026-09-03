@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from ...errors import ErrorType, MLXKError, error_envelope
+from ..runner.token_limits import ContextLengthExceeded
 
 # HTTP status -> ADR-004 error type (mirrors errors.ERROR_TYPE_TO_HTTP_STATUS in reverse).
 _STATUS_TO_ERROR_TYPE = {
@@ -68,7 +69,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(status_code=400, content=envelope)
 
 
+async def context_length_exceeded_handler(request: Request, exc: ContextLengthExceeded):
+    """The prompt fills the context window (#66): 400 with the two numbers a client needs.
+
+    Raised by the runner before any token is produced, on both the batch path and the
+    streaming pre-check, so it always arrives as a status, never inside an SSE stream.
+    """
+    request_id = getattr(request.state, "request_id", None)
+    error = MLXKError(
+        type=ErrorType.CONTEXT_LENGTH_EXCEEDED,
+        message=str(exc),
+        detail={"prompt_tokens": exc.prompt_tokens, "context_length": exc.context_length},
+        retryable=False,
+    )
+    envelope = error_envelope(error, request_id=request_id)
+    return JSONResponse(status_code=error.to_http_status(), content=envelope)
+
+
 def register_error_handlers(app: FastAPI) -> None:
-    """Register both ADR-004 exception handlers on a FastAPI app."""
+    """Register the ADR-004 exception handlers on a FastAPI app."""
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(ContextLengthExceeded, context_length_exceeded_handler)

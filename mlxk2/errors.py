@@ -16,6 +16,7 @@ class ErrorType(str, Enum):
     AMBIGUOUS_MATCH = "ambiguous_match"
     DOWNLOAD_FAILED = "download_failed"
     VALIDATION_ERROR = "validation_error"
+    CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"  # HTTP 400: prompt fills the context window, nothing left to generate
     PAYLOAD_TOO_LARGE = "payload_too_large"  # HTTP 413: Upload above the accepted size
     PUSH_OPERATION_FAILED = "push_operation_failed"
     SERVER_SHUTDOWN = "server_shutdown"
@@ -35,6 +36,7 @@ ERROR_TYPE_TO_HTTP_STATUS: Dict[ErrorType, int] = {
     ErrorType.AMBIGUOUS_MATCH: 400,
     ErrorType.DOWNLOAD_FAILED: 503,
     ErrorType.VALIDATION_ERROR: 400,
+    ErrorType.CONTEXT_LENGTH_EXCEEDED: 400,  # Pre-execution reject; the message carries prompt and window size
     ErrorType.PAYLOAD_TOO_LARGE: 413,  # Audio upload above the size limit
     ErrorType.PUSH_OPERATION_FAILED: 500,
     ErrorType.SERVER_SHUTDOWN: 503,

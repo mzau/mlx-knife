@@ -378,18 +378,16 @@ class TestMLXRunnerMemorySafety:
 class TestMLXRunnerDynamicTokens:
     """Test dynamic token limit functionality"""
 
-    def test_no_max_tokens_uses_dynamic(self, temp_cache_dir):
-        """Test that None max_tokens uses dynamic limit based on model context"""
+    def test_no_max_tokens_uses_window_minus_prompt(self, temp_cache_dir):
+        """Without max_tokens the budget is the window minus the prompt (8192 from the mock)"""
         model_name = "test-model"
 
         with mock_runner_environment(temp_cache_dir, model_name) as mocks:
-            with MLXRunner(model_name) as runner:
-                # Should calculate dynamic limit from context length (8192 from mock)
-                dynamic_limit = runner._calculate_dynamic_max_tokens()
+            mocks['mock_tokenizer'].encode.return_value = [1, 2, 3, 4, 5]
 
-                # Should be a reasonable fraction of context (server-mode default)
-                # Accept half-context on 8K models as reasonable
-                assert 1000 <= dynamic_limit <= 4096
+            with MLXRunner(model_name) as runner:
+                # Below the 32768 ceiling, so the window is what binds
+                assert runner.generation_budget("test") == 8187
 
     def test_respects_explicit_max_tokens(self, temp_cache_dir):
         """Test that explicit max_tokens is respected"""

@@ -145,10 +145,10 @@ class TestRunParameters:
         run_model(
             model_spec="test-model",
             prompt="test",
-            max_tokens=None  # Should use dynamic (full context)
+            max_tokens=None  # None reaches the runner, which applies the default ceiling
         )
         
-        # Should call with None max_tokens (dynamic calculation)
+        # The CLI passes None through; the runner resolves min(default, window - prompt)
         call_args = mock_runner_complete.generate_streaming.call_args
         assert call_args[1]['max_tokens'] is None
     

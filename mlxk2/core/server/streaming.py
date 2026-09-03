@@ -15,6 +15,22 @@ from collections.abc import AsyncGenerator
 from threading import Event
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from ...errors import internal_error
+from ..runner.token_limits import reported_finish_reason
+
+
+def _stream_error(payload: dict, exc: Exception) -> str:
+    """Terminal SSE event for a stream that failed part-way.
+
+    ``finish_reason`` stays ``None``: it says why the *model* stopped, and a backend
+    fault is not a generation outcome — OpenAI's enum has no value for it. The signal
+    is the ADR-004 ``error`` object, which is where an OpenAI client looks (its SDK
+    raises on this key and never reads the choice). The caller returns afterwards:
+    no trailing chunk, no ``[DONE]`` — the stream did not complete.
+    """
+    payload["error"] = internal_error(str(exc)).to_dict()
+    return f"data: {json.dumps(payload)}\n\n"
+
 if TYPE_CHECKING:
     from ..runner import MLXRunner
 
@@ -23,6 +39,33 @@ def _get_logger():
     """Lazy import logger to avoid circular dependencies."""
     from ...logging import get_logger
     return get_logger()
+
+
+def finish_reason_of(runner) -> Optional[str]:
+    """OpenAI ``finish_reason`` for the runner's last generation (None when it has none)."""
+    return reported_finish_reason(getattr(runner, "last_finish_reason", None))
+
+
+def log_generation_end(logger, runner, model: str, stream: bool) -> None:
+    """One structured line per text generation: what it cost and how it ended.
+
+    Makes ``finish_reason: length`` visible in the plain log and filterable under
+    ``--log-json``. Runners without the attributes (mocks) log nothing.
+    """
+    reason = getattr(runner, "last_finish_reason", None)
+    if reason is None and getattr(runner, "last_max_tokens", None) is None:
+        return
+    from ...context import get_request_id
+    logger.info(
+        f"Generation finished: {reported_finish_reason(reason) or 'unknown'}",
+        request_id=get_request_id(),
+        model=model,
+        stream=stream,
+        prompt_tokens=getattr(runner, "last_prompt_tokens", None),
+        completion_tokens=getattr(runner, "last_completion_tokens", None),
+        max_tokens=getattr(runner, "last_max_tokens", None),
+        finish_reason=reported_finish_reason(reason),
+    )
 
 
 async def generate_completion_stream(
@@ -142,7 +185,7 @@ async def generate_completion_stream(
         return
 
     except Exception as e:
-        error_response = {
+        yield _stream_error({
             "id": completion_id,
             "object": "text_completion",
             "created": created,
@@ -152,16 +195,16 @@ async def generate_completion_stream(
                     "index": 0,
                     "text": "",
                     "logprobs": None,
-                    "finish_reason": "error"
+                    "finish_reason": None
                 }
             ],
-            "error": str(e)
-        }
-        yield f"data: {json.dumps(error_response)}\n\n"
+        }, e)
+        return
 
     # Final response (skip if shutting down)
     if shutdown_event.is_set():
         return
+    log_generation_end(logger, runner, request_model, stream=True)
     final_response = {
         "id": completion_id,
         "object": "text_completion",
@@ -172,7 +215,7 @@ async def generate_completion_stream(
                 "index": 0,
                 "text": "",
                 "logprobs": None,
-                "finish_reason": "stop"
+                "finish_reason": finish_reason_of(runner)
             }
         ]
     }
@@ -311,7 +354,7 @@ async def generate_chat_stream(
                 if os.environ.get("MLXK2_DEBUG"):
                     print(f"[Server] MLX recovery warning: {recovery_error}")
 
-        error_response = {
+        yield _stream_error({
             "id": completion_id,
             "object": "chat.completion.chunk",
             "created": created,
@@ -320,16 +363,16 @@ async def generate_chat_stream(
                 {
                     "index": 0,
                     "delta": {},
-                    "finish_reason": "error"
+                    "finish_reason": None
                 }
             ],
-            "error": str(e)
-        }
-        yield f"data: {json.dumps(error_response)}\n\n"
+        }, e)
+        return
 
     # Final response (skip if shutting down)
     if shutdown_event.is_set():
         return
+    log_generation_end(logger, runner, request_model, stream=True)
     final_response = {
         "id": completion_id,
         "object": "chat.completion.chunk",
@@ -339,7 +382,7 @@ async def generate_chat_stream(
             {
                 "index": 0,
                 "delta": {},
-                "finish_reason": "stop"
+                "finish_reason": finish_reason_of(runner)
             }
         ]
     }
@@ -394,6 +437,7 @@ async def stream_vision_chunks(
     logger = _get_logger()
     chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
     total_images = len(images)
+    finish_reason: Optional[str] = None  # aggregated over chunks: any "length" wins
 
     # Initial role event
     initial_event = {
@@ -439,7 +483,7 @@ async def stream_vision_chunks(
         # NOTE: Pass chunk_images as argument to avoid closure late-binding issues
         def process_chunk(chunk_images):
             with VisionRunner(model_path, model_name, verbose=False) as runner:
-                return runner.generate(
+                text = runner.generate(
                     prompt=prompt,
                     images=chunk_images,
                     audio=audio,  # Pass audio with each chunk
@@ -450,24 +494,28 @@ async def stream_vision_chunks(
                     image_id_map=image_id_map,
                     total_images=total_images,
                 )
+                return text, finish_reason_of(runner)
 
         try:
-            chunk_result = await asyncio.to_thread(process_chunk, chunk)
+            chunk_result, chunk_reason = await asyncio.to_thread(process_chunk, chunk)
+            # One cut chunk makes the whole response a cut response
+            if chunk_reason == "length" or finish_reason is None:
+                finish_reason = chunk_reason
         except Exception as e:
             logger.error(f"Vision chunk {chunk_idx}/{len(chunks)} failed: {e}")
-            error_event = {
+            # The message goes in the error object, not into delta.content — a chat
+            # client renders content as something the model said.
+            yield _stream_error({
                 "id": completion_id,
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": model,
                 "choices": [{
                     "index": 0,
-                    "delta": {"content": f"\n\n[Error in chunk {chunk_idx}: {str(e)}]"},
-                    "finish_reason": "error"
+                    "delta": {},
+                    "finish_reason": None
                 }]
-            }
-            yield f"data: {json.dumps(error_event)}\n\n"
-            yield "data: [DONE]\n\n"
+            }, RuntimeError(f"vision chunk {chunk_idx}/{len(chunks)} failed: {e}"))
             return
 
         # Content event for this chunk (with separator for multi-chunk)
@@ -501,7 +549,7 @@ async def stream_vision_chunks(
         "choices": [{
             "index": 0,
             "delta": {},
-            "finish_reason": "stop"
+            "finish_reason": finish_reason
         }]
     }
     yield f"data: {json.dumps(final_event)}\n\n"
@@ -512,7 +560,8 @@ async def emulate_sse_stream(
     completion_id: str,
     created: int,
     model: str,
-    content: str
+    content: str,
+    finish_reason: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Emulate SSE streaming for vision models (batch response as SSE events).
 
@@ -524,6 +573,7 @@ async def emulate_sse_stream(
         created: Timestamp for SSE events
         model: Model name for SSE events
         content: Complete response content to stream
+        finish_reason: How the batch generation ended ("stop" | "length" | None)
     """
     # First chunk: role
     chunk1 = {
@@ -562,7 +612,7 @@ async def emulate_sse_stream(
         "choices": [{
             "index": 0,
             "delta": {},
-            "finish_reason": "stop"
+            "finish_reason": finish_reason
         }]
     }
     yield f"data: {json.dumps(chunk3)}\n\n"

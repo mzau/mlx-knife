@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..operations.workspace import is_workspace_path
+from .runner.token_limits import DEFAULT_MAX_TOKENS_VISION
 
 
 @dataclass
@@ -44,6 +45,12 @@ class VisionRunner:
         self._load_config = None
         self._apply_chat_template = None
         self._temp_files = []  # Track created temp files for cleanup
+        # How the last generate() ended, from mlx-vlm's result ("stop" | "length"),
+        # None when the backend reported none. Absent, not invented.
+        self.last_finish_reason: Optional[str] = None
+        self.last_prompt_tokens: Optional[int] = None
+        self.last_completion_tokens: Optional[int] = None
+        self.last_max_tokens: Optional[int] = None
 
     def __enter__(self):
         self.load_model()
@@ -191,7 +198,7 @@ class VisionRunner:
             prompt: Text prompt for generation
             images: List of (filename, bytes) tuples for images
             audio: List of (filename, bytes) tuples for audio files
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate (None: the documented vision default)
             temperature: Sampling temperature
             top_p: Top-p sampling
             repetition_penalty: Repetition penalty
@@ -217,12 +224,17 @@ class VisionRunner:
                 num_images=num_images, num_audios=num_audios
             )
 
-            # Build generation kwargs
+            # Build generation kwargs. The ceiling is set, not inherited from mlx-vlm,
+            # so CLI and server read the same number.
+            effective_max_tokens = max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS_VISION
+            self.last_finish_reason = None
+            self.last_prompt_tokens = None
+            self.last_completion_tokens = None
+            self.last_max_tokens = effective_max_tokens
             gen_kwargs = {
                 "verbose": self.verbose,
+                "max_tokens": effective_max_tokens,
             }
-            if max_tokens is not None:
-                gen_kwargs["max_tokens"] = max_tokens
             if temperature is not None:
                 gen_kwargs["temperature"] = temperature
             if top_p is not None:
@@ -239,6 +251,7 @@ class VisionRunner:
                 audio=audio_paths,  # List of audio file paths (None if no audio)
                 **gen_kwargs,
             )
+            self._record_outcome(result)
             normalized = self._normalize_result(result)
 
             # Add filename mapping (even for single images - enables cross-model workflows)
@@ -492,6 +505,14 @@ class VisionRunner:
         except Exception:
             # Silently fail (EXIF extraction is optional)
             return None
+
+    def _record_outcome(self, result) -> None:
+        """Keep what mlx-vlm's GenerationResult says about the run; strings only, no guesses."""
+        reason = getattr(result, "finish_reason", None)
+        self.last_finish_reason = reason if isinstance(reason, str) else None
+        for attr, key in (("prompt_tokens", "last_prompt_tokens"), ("generation_tokens", "last_completion_tokens")):
+            value = getattr(result, attr, None)
+            setattr(self, key, value if isinstance(value, int) and not isinstance(value, bool) else None)
 
     @staticmethod
     def _normalize_result(result) -> str:

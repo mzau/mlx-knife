@@ -159,7 +159,7 @@ class TestVisionServerE2E:
                     }
                 ],
                 "stream": True,  # Graceful degradation via SSE emulation
-                "max_tokens": 2048,  # Vision server default (stateless, no shift-window)
+                "max_tokens": 2048,  # Vision default on both surfaces (stateless, no window guard)
             }
 
             # Use streaming context for SSE response
@@ -218,7 +218,7 @@ class TestVisionServerE2E:
                 "messages": [
                     {"role": "user", "content": "What is 2 + 2? Answer with just the number."}
                 ],
-                "max_tokens": 2048,  # Vision server default (stateless, no shift-window)
+                "max_tokens": 2048,  # Vision default on both surfaces (stateless, no window guard)
                 "temperature": 0.0,
                 "stream": False,
             }
@@ -294,7 +294,7 @@ class TestVisionServerE2E:
                         ]
                     }
                 ],
-                "max_tokens": 2048,  # Vision server default (stateless, no shift-window)
+                "max_tokens": 2048,  # Vision default on both surfaces (stateless, no window guard)
                 "temperature": 0.1,
                 "stream": False,
             }

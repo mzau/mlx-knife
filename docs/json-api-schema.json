@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://example.com/mlxk-json-api.schema.json",
-  "title": "MLX-Knife 2.0 JSON API 0.2.2 (current)",
+  "title": "MLX-Knife 2.0 JSON API 0.2.4 (current)",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -286,6 +286,7 @@
                   "model": {"type": "string"},
                   "prompt": {"type": "string"},
                   "response": {"type": "string"},
+                  "finish_reason": {"type": ["string", "null"], "enum": ["stop", "length", null]},
                   "tokens_generated": {"type": "integer"},
                   "generation_time_s": {"type": "number"}
                 }

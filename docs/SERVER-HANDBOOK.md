@@ -1,11 +1,12 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.7 plus the unreleased tree state — the 2.0.8 dependency wave and the `serve`
-signal/teardown fix. Endpoint surface, request and response shapes are those of released 2.0.7;
-the [Migration Guide](#migration-guide) records what differs.
+**Version:** 2.0.7 plus the unreleased tree state — the 2.0.8 dependency wave, the `serve`
+signal/teardown fix, and the generation-budget rule (default `max_tokens`, `finish_reason:
+"length"`, HTTP 400 `context_length_exceeded`). Endpoint surface and request/response shapes are
+those of released 2.0.7; the [Migration Guide](#migration-guide) records what differs.
 **Scope:** what the server does today. Planned work, deferred features and target releases are
 deliberately absent — this is a contract, not a roadmap.
-**Last Updated:** 2026-08-07
+**Last Updated:** 2026-09-02
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -15,8 +16,8 @@ deliberately absent — this is a contract, not a roadmap.
 > returns the family string `mlx-knife-server-2.0` — and there is no capability negotiation, so
 > a client cannot select a version-specific contract at runtime even if one existed.
 >
-> The surface described here is current as of **2.0.7**. Older 2.0.x releases predate parts of
-> it — the Changelog at the end records when each endpoint appeared. Where behaviour genuinely
+> The surface described here is current as of **2.0.7** plus the unreleased 2.0.8 tree state.
+> Older 2.0.x releases predate parts of it — the Changelog at the end records when each endpoint appeared. Where behaviour genuinely
 > varies it is anchored inline rather than left to the reader, including the one case a client
 > cannot probe: container audio formats depend on tooling installed on the server host (see
 > [Audio Errors](#audio-errors)).
@@ -51,7 +52,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 
 Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
 
-> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints, request and response shapes are identical; what differs is the pin set and how `serve` shuts down. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
+> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints and request/response shapes are identical; what differs is the pin set, how `serve` shuts down, and the generation budget — the default `max_tokens`, `finish_reason: "length"` on a cut answer, and a 400 for a prompt that fills the context window. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
 
 ---
 
@@ -154,7 +155,7 @@ These are intentional design choices, not bugs:
 | Audio+Vision | Both processed | Audio silently ignored | mlx-vlm limitation |
 | Multi-audio | Supported | 1 per request | mlx-vlm limitation |
 | Error format | `{"error": {"message", "type", "code"}}` | ADR-004 envelope (see below) | Richer error context |
-| `max_completion_tokens` | Preferred | Not supported (use `max_tokens`) | Legacy compatibility |
+| `max_completion_tokens` | Preferred | Silently ignored — the request falls to `max_tokens`, else the default ceiling | Unknown request fields are dropped, not rejected |
 | HTTP 507 | Not used | Memory constraint | Explicit OOM prevention |
 
 ### Error Response Format
@@ -177,7 +178,8 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 
 | Type | HTTP | Meaning |
 |------|------|---------|
-| `validation_error` | 400 | Invalid request payload (e.g. too many images, malformed audio) |
+| `validation_error` | 400 | Invalid request payload (e.g. too many images, malformed audio, `max_tokens` below 1) |
+| `context_length_exceeded` | 400 | The prompt fills the model's context window; nothing is left to generate. The message names prompt tokens and window, `detail` carries both as `{"prompt_tokens", "context_length"}`; never retryable |
 | `access_denied` | 403 | File / cache permission denied |
 | `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
 | `ambiguous_match` | 400 | Model spec matches multiple cached models — disambiguate |
@@ -195,9 +197,10 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 
 (`bad_gateway` / `gateway_timeout` are raised only by the `serve --embed-backend` proxy; a backend's own `4xx`/`5xx` envelopes otherwise pass through verbatim.)
 
-**Status and type always agree.** The type is derived *from* the status by a fixed mapping, so routing
-on either one gives the same answer; the type is the more specific of the two, because three statuses
-carry more than one meaning (400, 500, 503) and two types share 501.
+**Status and type always agree.** A fixed mapping binds the two, so routing on either one gives the
+same answer; the type is the more specific of the two, because three statuses carry more than one
+meaning — 400 carries three (`validation_error`, `ambiguous_match`, `context_length_exceeded`), 500 and
+503 two each — and two types share 501.
 
 Three types describe a request the server declines rather than fails, and they say different things.
 `not_implemented` — the feature does not exist here. `unsupported_multimodal` — the model's class is
@@ -310,6 +313,10 @@ addition to `temperature` and `max_tokens`.
   }
 }
 ```
+
+`finish_reason` is `"stop"` when the model ended its turn, `"length"` when the generation budget cut
+the answer, and `null` when neither is known — see [Token Limits](#token-limits-text-vs-multimodal-models)
+for every case.
 
 ---
 
@@ -604,14 +611,14 @@ models follow alphabetically.
 - `object`: Always `"model"` (OpenAI-compatible)
 - `owned_by`: `"mlx-knife-2.0"` for cached models, `"workspace"` for workspace models
 - `permission`: Empty array (OpenAI legacy field)
-- `context_length`: Maximum context window in tokens (may be `null` if unavailable)
+- `context_length`: Maximum context window in tokens, read from the model's `config.json`; `null` when the config states none — then no window guard applies and the generation budget is the ceiling alone
 
 **Why context_length matters:**
 
 MLX Knife uses **client-side context management** (unlike OpenAI's server-side history):
 - **Vision models:** Fully stateless - client holds entire conversation history
-- **Text models:** Shift-window (context_length / 2 reserved for history on server)
-- **Clients need this** to manage conversation pruning and token budgets
+- **Text models:** The server keeps no history either; every request carries the whole conversation as the prompt. The default generation budget is `min(32768, context_length − prompt tokens)`, and a prompt that fills the window is rejected with **400** `context_length_exceeded` before any token is generated (see [Token Limits](#token-limits-text-vs-multimodal-models))
+- **Clients need this** to prune history so the prompt stays under the window, and to size their token budgets
 - **Load balancing:** BROKE Cluster and similar tools use this for scheduling decisions
 
 Note: LM Studio provides similar field as `max_context_length`.
@@ -654,7 +661,7 @@ See `examples/vision_pipe.sh` for a practical Vision→Text pipeline example (CL
 
 - **Stateless Server:** No server-side state required
 - **Sequential Images:** Only images from the **last user message** are processed (OpenAI API compliant)
-- **Each request is independent:** No "shift-window" context like text models (Metal memory limitations)
+- **Each request is independent:** The model sees only the last user message (Metal memory limitations); the generation budget is the 2048-token vision ceiling alone, with no context-window guard
 
 #### Stable Image IDs (History-Based)
 
@@ -760,34 +767,37 @@ When switching from Audio to Text model mid-conversation:
 
 ### Token Limits: Text vs Multimodal Models
 
-**Critical Difference:** Text and multimodal (Vision/Audio) models use different `max_tokens` strategies.
+`max_tokens` counts *generated* tokens. Text and multimodal (Vision/Audio) requests resolve it
+differently: text is guarded by the model's context window, multimodal is not.
 
 #### Text Models (MLXRunner)
 
-**Strategy:** Shift-window context management
-- Conversation history maintained in context buffer
-- Server reserves space for history
+**Rule:** generation budget = `min(ceiling, context_length − prompt tokens)` — on
+`/v1/chat/completions` and `/v1/completions` alike. The rule follows the loaded model's class, not
+the request: a vision-capable model answering a text-only chat uses the vision ceiling below.
 
-**Defaults:**
-- **Server:** `context_length / 2` (reserve half for history, half for generation)
-- **CLI:** `context_length` (full context, no reservation)
+- **Ceiling:** the request's `max_tokens`, else the operator ceiling, else **32768** (see
+  [Precedence](#precedence) below).
+- **Window guard:** whatever the ceiling, the budget is clamped to what the context window still
+  holds after the prompt — an explicit `max_tokens` too; the server never promises more than the
+  window holds. The prompt is counted as the model sees it (after the chat template on
+  `/v1/chat/completions`).
+- **Full window:** `context_length − prompt tokens ≤ 0` is rejected before any token is generated
+  with **400** `context_length_exceeded`; the error's `detail` carries `prompt_tokens` and
+  `context_length`. On `stream: true` the reject is still an HTTP status, never an SSE event.
+- **Unknown window:** when the model's `config.json` states no context length (`/v1/models`
+  reports `null`), there is no guard — the budget is the ceiling alone.
 
-**Example:**
-- Llama-3.2-3B (128K context) → Server default: 64K max_tokens
+**Example:** Llama-3.2-3B (128K context), 500-token prompt, no `max_tokens` → budget 32768.
+The same request with `"max_tokens": 200000` → budget 130572, the window's remainder.
 
 #### Vision/Audio Models (VisionRunner)
 
-**Strategy:** Stateless processing
-- Each request is independent (no conversation history in context)
-- Metal limitations prevent context preservation
+**Strategy:** stateless — each request is independent; with media, the model sees only the last
+user message. Applies to every request a vision model serves, media or not.
 
-**Defaults:**
-- **Server/CLI:** `2048` tokens (conservative, works for all models)
-
-**Rationale:**
-- No need for `/2` division (no history to reserve)
-- Multimodal inference is slow → 2048 adequate for descriptions/transcriptions
-- Prevents accidentally generating 64K+ tokens
+**Default:** **2048** tokens on server and CLI, set explicitly (not inherited from mlx-vlm).
+No window guard: the budget is the ceiling alone. The operator ceiling applies here too.
 
 **Override:**
 ```json
@@ -797,6 +807,45 @@ When switching from Audio to Text model mid-conversation:
   "max_tokens": 4096  // Explicit override
 }
 ```
+
+#### Precedence
+
+1. Request `max_tokens` (must be ≥ 1; `0` or negative → **400** `validation_error`)
+2. Operator ceiling: `mlxk serve --max-tokens N` or `MLXK2_MAX_TOKENS=N` — one server-wide
+   ceiling that replaces both defaults, text and vision
+3. Default: **32768** (text) / **2048** (vision, audio chat)
+
+Text budgets from every level are then clamped to the context window as above.
+
+#### finish_reason
+
+Every completion reports how it ended — batch responses in `choices[0].finish_reason`, streams in
+the final chunk before `data: [DONE]`:
+
+- `"stop"` — the model ended its turn (EOS or a `stop` sequence).
+- `"length"` — the generation budget cut the answer. This is the OpenAI value: a client can offer
+  the user a "continue", raise `max_tokens`, or shorten the prompt. On chunked vision requests one
+  cut chunk makes the whole response `"length"`.
+- `null` — no outcome was recorded: the backend ended the generation without reporting a reason,
+  or the stream failed part-way (see below).
+
+These are OpenAI's values; `content_filter`, `tool_calls` and `function_call` are never emitted.
+
+**A stream that fails part-way** keeps `finish_reason: null` — a backend fault is not a generation
+outcome — and carries the failure in a top-level `error` object instead, in the same shape as an
+HTTP error body:
+
+```json
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"...","choices":[{"index":0,"delta":{},"finish_reason":null}],"error":{"type":"internal_error","message":"..."}}
+```
+
+The tokens already sent stand; that event is the last one, and **no `[DONE]` follows** — the stream
+did not complete. An OpenAI client needs no special handling: its SDK raises on the `error` key.
+Batch responses never carry `error` in the body — they fail with an HTTP status.
+
+The server logs one line per text generation — `Generation finished: <reason>` with `request_id`,
+`model`, `stream`, `prompt_tokens`, `completion_tokens`, `max_tokens` and `finish_reason` — so a
+cut answer is visible operator-side as well.
 
 ---
 
@@ -858,7 +907,30 @@ data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345
 data: [DONE]
 ```
 
+The final chunk carries `"finish_reason": "length"` instead of `"stop"` when the generation budget
+cut the answer. A prompt that fills the context window never reaches the stream — it is rejected
+with HTTP 400 `context_length_exceeded` before the response starts.
+
 **Note:** `stream_options.include_usage` is not supported.
+
+#### Closing the connection
+
+A client that closes a streaming connection stops the generation. Measured: a 300-token
+generation that takes 56 seconds to completion, with the client killed after 3 seconds, had
+not finished 156 seconds later — the remaining 53 seconds of work were never done. The machine
+is freed, not just the client.
+
+Two consequences worth knowing:
+
+- **Nothing is logged for the abandoned generation.** The completion line a finished generation
+  writes never appears, so the server-side record shows the request starting and nothing else.
+  Tokens already delivered are the client's; there is no way to resume.
+- **The guarantee comes from the ASGI runtime, not from this server.** No code here watches for a
+  disconnect. The runtime finalizes the response generator when the connection drops, and that
+  closes the token generator. A deployment that buffers the response — a proxy that reads ahead,
+  for instance — can therefore keep the generation running after the client is gone.
+
+There is no explicit cancellation endpoint. Closing the connection is the way to abort.
 
 ### Embeddings Backend (embed-serve)
 
@@ -940,6 +1012,10 @@ MLXK2_LOG_LEVEL=info      # debug|info|warning|error
 MLXK2_ENABLE_PIPES=1              # Unix pipe integration (beta, 2.0.4-beta.1)
 MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha: embed, embed-serve, serve --embed-backend
 
+# Generation ceiling for max_tokens (text and vision) — normally set for you by
+# `serve --max-tokens N`. Text budgets stay clamped to the context window minus the prompt.
+MLXK2_MAX_TOKENS=4096
+
 # Embeddings proxy (ADR-015) — normally set for you by `serve --embed-backend URL`,
 # but can be set directly. When unset, POST /v1/embeddings on serve returns 501.
 MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
@@ -1003,7 +1079,7 @@ python -m mlxk2.core.server_base
 - **200 OK:** Request successful
 
 ### Client Errors (4xx)
-- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures, ambiguous model spec; for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
+- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`; ambiguous model spec — `ambiguous_match`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
 - **403 Forbidden:** File or cache permission denied (`access_denied`)
 - **404 Not Found:** Model not found in cache or workspace
 - **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints) (`payload_too_large`)
@@ -1247,9 +1323,9 @@ batch. Reduce the batch size or retry.
 | **Audio size (both endpoints)** | **50 MB** (52,428,800 bytes) | **Measured in raw bytes, codec-agnostic. WAV @ 16 kHz mono 16-bit caps at ~27 min; compressed formats fit much more (verified: 55 min MP3 transcription via Whisper stays under the limit). Whisper handles long audio robustly; multimodal chat audio is bounded by `max_tokens` only (see Audio Support caveat).** |
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
-| Vision max_tokens | 2048 (default) | Stateless, slow inference |
+| Vision max_tokens | 2048 (default) | Stateless, slow inference; set explicitly on server and CLI |
 | Audio max_tokens | 2048 (default) | Stateless, like Vision |
-| Text max_tokens | context_length/2 | Shift-window reservation |
+| Text max_tokens | 32768 (default), clamped to context_length − prompt | Runaway guard |
 
 ---
 
@@ -1382,8 +1458,17 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 
 > Unreleased. This records what the tree carries beyond released 2.0.7.
 
-**Endpoint surface:** unchanged. **Request and response shapes:** unchanged — nothing on the wire
-moves.
+**Endpoint surface:** unchanged. **Response shapes** move in two places: `finish_reason` gains
+`"length"`, and the `error` a failed stream carries is an object where it was a string. A new **400**
+error type `context_length_exceeded` exists. Request shapes are unchanged. See *Generation budget*
+below.
+
+**Two rejects stop looking like faults.** An audio upload above the size limit (**413**) and
+`POST /v1/audio/translations` against a model that cannot translate (**422**) now carry
+`payload_too_large` and `capability_not_supported`. Both statuses were already correct; the
+`error.type` beside them said `internal_error`, so a client routing on the type could not tell a
+deliberate reject from a server fault. A client that special-cased `internal_error` on those two
+statuses should drop that branch.
 
 **Process behaviour changed.** `mlxk serve` takes the same teardown path for Ctrl-C, `SIGTERM` and
 `SIGHUP`, and a server whose supervisor is killed stops itself instead of holding the port. Exit
@@ -1416,15 +1501,39 @@ images can drop the allowance they were told to plan for in 2.0.6.
 |--------|---------------------|
 | Torch-free install | Packaging only. No endpoint or schema change, and no change to which model types are gated — those gates never keyed on torch. |
 | Model listing follows the pin set | `/v1/models` stays the authority on what this server can run; a dependency wave can shift which models qualify. No API contract change. Per-model detail lives in `docs/MODEL-COVERAGE.md`, not here. |
+| More vision models are listed | A check withheld every checkpoint carrying `temporal_patch_size` while transformers reported 5.x. Those models load and answer correctly, so it is gone and they appear. A client that hard-coded the shorter list should re-read `/v1/models`. |
 
-**Client updates required:** none.
+**Generation budget** ([#66](https://github.com/mzau/mlx-knife/issues/66)) — for **text**,
+`min(ceiling, context_length − prompt tokens)`, the same rule the CLI applies. Vision and audio
+keep their own ceiling with no window guard; see
+[Token Limits](#token-limits-text-vs-multimodal-models):
+
+| Change | 2.0.7 | 2.0.8 | Effect on clients |
+|--------|-------|-------|-------------------|
+| Text default `max_tokens` | `context_length / 2` | `min(32768, context_length − prompt tokens)` | On a 128K model: 65536 → 32768. The halving was a static reservation for history under the name "shift-window"; the reservation is now exact — the prompt that is actually there. |
+| Explicit `max_tokens` | passed through | clamped to `context_length − prompt tokens` | Never more than the window holds. |
+| `finish_reason` | `"stop"`, or `"error"` on a failed stream | `"stop"`, `"length"`, or `null` | A cut answer is reported as such. `"error"` is gone — it was never an OpenAI value. |
+| Failed stream | `finish_reason: "error"`, `error` a message string, then a second chunk saying `"stop"` and `[DONE]` | `finish_reason: null`, `error` an object (`type`, `message`), stream ends there | The only breaking change in this release. |
+| Prompt fills the window | budget ignored the prompt; prompt + output could exceed the window | **400** `context_length_exceeded` before any token | `detail.prompt_tokens` / `detail.context_length` say how much to shorten. |
+| `max_tokens` below 1 | accepted | **400** `validation_error` | |
+| `/v1/models` `context_length` | `4096` when `config.json` states no window | `null` | The number was invented; `null` means "no window guard". |
+| Vision / audio-chat default | 2048 on the server, inherited from mlx-vlm on the CLI | 2048, set explicitly on both | No wire change. |
+| `max_completion_tokens` | ignored | ignored | Unchanged — use `max_tokens`. |
+
+**Client updates required:**
+- Handle `finish_reason: "length"` — offer "continue", raise `max_tokens`, or shorten the prompt.
+- Drop any branch keyed on `finish_reason: "error"`, and read a failed stream's `error` as an object
+  rather than a string. An OpenAI SDK client needs no change: it raises on the `error` key either way.
+- Accept `null` for `/v1/models` `context_length`; deserializing it as a non-nullable integer breaks.
+- Handle **400** `context_length_exceeded` by shortening history; `detail` carries the two numbers.
+- Clients that relied on the 64K default on 128K models must pass `max_tokens` explicitly (still
+  clamped to the window's remainder).
 
 ---
 
 ## References
 
 - **Architecture Principles:** `docs/ARCHITECTURE.md`
-- **Testing Details:** `docs/TESTING-DETAILS.md`
 - **Verified Multimodal Coverage:** `docs/MODEL-COVERAGE.md` (per-release operation × model_type matrix)
 
 ### ADRs (development decisions)
@@ -1739,6 +1848,20 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ## Changelog
 
+- **Unreleased:** 2.0.8 — generation budget, `finish_reason`, stream failures
+  - **CHANGED:** default text `max_tokens` is `min(32768, context_length − prompt tokens)`; an explicit value is clamped to the window too.
+  - **NEW:** `finish_reason: "length"` when the budget cut the answer.
+  - **NEW: 400** `context_length_exceeded` — prompt fills the window, rejected before any token; `detail` carries `prompt_tokens` and `context_length`. A status even on `stream: true`.
+  - **CHANGED:** `max_tokens` below 1 → **400** `validation_error`.
+  - **CHANGED:** `/v1/models` `context_length` is `null` when the config states no window (was a hard-coded `4096`).
+  - **CHANGED:** a failed stream carries a top-level `error` object, keeps `finish_reason: null`, and ends.
+  - **DOCUMENTED:** closing a streaming connection stops the generation; nothing is logged for it. Behaviour unchanged.
+  - **FIXED:** **413** and **422** carry `payload_too_large` / `capability_not_supported`; both reported `internal_error` before, so a deliberate reject looked like a server fault.
+  - **FIXED:** `/v1/models` lists vision models it wrongly withheld — a check rejected every checkpoint carrying `temporal_patch_size` under transformers 5.x, and those models load and answer correctly.
+  - **CHANGED:** `mlxk serve` takes one teardown path for Ctrl-C, `SIGTERM` and `SIGHUP`, and stops itself if its supervisor dies. Exit `143` on signal, `137` when forced.
+  - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (~1 GB smaller install).
+  - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.
+
 - **2026-06-18:** 2.0.7 stable — embeddings model identity
   - **NEW:** the `/v1/embeddings` response (and `embed-serve` `/health`) carries
     `system_fingerprint` = `hash.device` — a change-detection token so a RAG client detects a
@@ -1802,6 +1925,7 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ---
 
-**📝 Note:** This handbook tracks the server and changes when the server changes. `Last Updated` is
-maintained by hand; an automated consumer should compare a content hash, which is the only reliable
-drift signal.
+**📝 Note:** This handbook tracks the server and changes when the server changes. The Changelog above
+is the record of what changed and when; `Last Updated` is maintained by hand and is the weaker of
+the two. Neither is reachable from the running server — see *Which server does this describe?* at
+the top.

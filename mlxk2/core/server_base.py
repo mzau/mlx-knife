@@ -10,7 +10,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,13 +19,14 @@ from pydantic import BaseModel, Field
 
 from .cache import get_current_model_cache, hf_to_cache_dir
 from .runner import MLXRunner
+from .runner.token_limits import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TOKENS_VISION, ContextLengthExceeded
 from .model_resolution import resolve_model_for_operation
 from .capabilities import Backend
 from ..operations.common import detect_audio_backend
 from ..tools.vision_adapter import MAX_AUDIO_SIZE_BYTES
 from .. import __version__
 from ..logging import get_logger, set_log_level, uvicorn_log_config
-from ..context import generate_request_id
+from ..context import generate_request_id, set_request_id
 
 # Import extracted modules (Phase 1 refactoring)
 from .server.streaming import (
@@ -33,6 +34,8 @@ from .server.streaming import (
     generate_chat_stream as _generate_chat_stream_impl,
     stream_vision_chunks as _stream_vision_chunks_impl,
     emulate_sse_stream as _emulate_sse_stream_impl,
+    finish_reason_of,
+    log_generation_end,
 )
 from .server.handlers.models import handle_list_models as _handle_list_models_impl
 from .server.handlers.audio import (
@@ -41,6 +44,7 @@ from .server.handlers.audio import (
 )
 from .server.handlers.chat import (
     ChatHandlerContext,
+    ensure_generation_budget,
     handle_text_chat_completion as _handle_text_chat_completion_impl,
     handle_vision_chat_completion as _handle_vision_chat_completion_impl,
     process_vision_chunks_server as _process_vision_chunks_server_impl,
@@ -53,7 +57,7 @@ from .server.error_handlers import register_error_handlers
 from .server.handlers.embed_proxy import proxy_embeddings, PROXY_TIMEOUT
 
 # Global configuration
-_default_max_tokens: Optional[int] = None  # Use dynamic model-aware limits by default
+_default_max_tokens: Optional[int] = None  # Operator ceiling (serve --max-tokens / MLXK2_MAX_TOKENS); None = DEFAULT_MAX_TOKENS
 # Global shutdown flag to interrupt in-flight generations promptly
 _shutdown_event = threading.Event()
 # Pre-load model specification (set via environment MLXK2_PRELOAD_MODEL)
@@ -72,7 +76,7 @@ logger = get_logger()
 class CompletionRequest(BaseModel):
     model: str
     prompt: Union[str, List[str]]
-    max_tokens: Optional[int] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1)  # 0 generates nothing, negative is unbounded in mlx-lm
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 0.9
     stream: Optional[bool] = False
@@ -89,7 +93,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
-    max_tokens: Optional[int] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1)  # 0 generates nothing, negative is unbounded in mlx-lm
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 0.9
     stream: Optional[bool] = False
@@ -178,7 +182,7 @@ async def generate_completion_stream(
 
     Delegates to extracted streaming module (Phase 1 refactoring).
     """
-    max_tokens = get_effective_max_tokens(runner, request.max_tokens, server_mode=True)
+    max_tokens = get_effective_max_tokens(request.max_tokens)
     stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
 
     async for chunk in _generate_completion_stream_impl(
@@ -206,7 +210,7 @@ async def generate_chat_stream(
     Delegates to extracted streaming module (Phase 1 refactoring).
     """
     message_dicts = format_chat_messages_for_runner(messages)
-    max_tokens = get_effective_max_tokens(runner, request.max_tokens, server_mode=True)
+    max_tokens = get_effective_max_tokens(request.max_tokens)
     stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
 
     async for chunk in _generate_chat_stream_impl(
@@ -232,47 +236,31 @@ def format_chat_messages_for_runner(messages: List[ChatMessage]) -> List[Dict[st
     return [{"role": msg.role, "content": msg.content} for msg in messages]
 
 
-def get_effective_max_tokens(runner: MLXRunner, requested_max_tokens: Optional[int], server_mode: bool) -> Optional[int]:
-    """Get effective max tokens for TEXT models with server DoS protection.
+def get_effective_max_tokens(requested_max_tokens: Optional[int]) -> int:
+    """The text generation ceiling for one request: request > operator > default.
 
-    Text models use shift-window context management:
-    - server_mode=True: context_length / 2 (reserve half for history)
-    - server_mode=False: context_length (full context for CLI)
-
-    Priority: requested_max_tokens > _default_max_tokens (from --max-tokens CLI) > dynamic calculation
+    This is policy only. The runner clamps whatever number it receives to what the
+    model's context window still holds after the prompt, and rejects when nothing
+    is left — the same rule the CLI applies, so both surfaces answer alike (#66).
     """
     if requested_max_tokens is not None:
         return requested_max_tokens
-    elif _default_max_tokens is not None:
-        # Use server-wide default from CLI --max-tokens flag
+    if _default_max_tokens is not None:
         return _default_max_tokens
-    else:
-        # Use runner's dynamic calculation with server_mode flag
-        return runner._calculate_dynamic_max_tokens(server_mode=server_mode)
+    return DEFAULT_MAX_TOKENS
 
 
-def get_effective_max_tokens_vision(runner, requested_max_tokens: Optional[int]) -> int:
-    """Get effective max tokens for VISION models (stateless, no shift-window).
+def get_effective_max_tokens_vision(requested_max_tokens: Optional[int]) -> int:
+    """The vision generation ceiling for one request: request > operator > default.
 
-    Vision models don't maintain conversation history in context (Metal limitations).
-    Each request is stateless, so we can use a larger portion of context.
-
-    Strategy:
-    - Use 2048 as conservative default (works for all vision models)
-    - Vision models typically have large context (128K+), but generation is slow
-    - 2048 tokens ≈ 1500 words, enough for detailed image descriptions
-
-    Priority: requested_max_tokens > _default_max_tokens (from --max-tokens CLI) > 2048 default
+    Vision requests are stateless and slow; the default is set explicitly rather
+    than inherited from mlx-vlm, so it reads the same on the CLI and here.
     """
     if requested_max_tokens is not None:
         return requested_max_tokens
-    elif _default_max_tokens is not None:
-        # Use server-wide default from CLI --max-tokens flag
+    if _default_max_tokens is not None:
         return _default_max_tokens
-
-    # Conservative default for vision (stateless, no history to reserve)
-    # Vision inference is slow, so we don't want to generate 64K tokens by default
-    return 2048
+    return DEFAULT_MAX_TOKENS_VISION
 
 
 def count_tokens(text: str) -> int:
@@ -585,6 +573,7 @@ async def add_request_id_middleware(request: Request, call_next):
     """Add request_id to all requests for correlation."""
     request_id = generate_request_id()
     request.state.request_id = request_id
+    set_request_id(request_id)  # handlers without the Request object read it from the context
 
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
@@ -667,7 +656,10 @@ async def create_completion(request: CompletionRequest):
             prompt = request.prompt
 
         if request.stream:
-            # Streaming response
+            # A full window must answer with a status, not inside the stream (#66)
+            ensure_generation_budget(
+                runner, prompt, get_effective_max_tokens(request.max_tokens), use_chat_template=False
+            )
             return StreamingResponse(
                 generate_completion_stream(runner, prompt, request),
                 media_type="text/event-stream",
@@ -680,12 +672,13 @@ async def create_completion(request: CompletionRequest):
 
             generated_text = runner.generate_batch(
                 prompt=prompt,
-                max_tokens=get_effective_max_tokens(runner, request.max_tokens, server_mode=True),
+                max_tokens=get_effective_max_tokens(request.max_tokens),
                 temperature=request.temperature,
                 top_p=request.top_p,
                 repetition_penalty=request.repetition_penalty,
                 use_chat_template=False
             )
+            log_generation_end(logger, runner, request.model, stream=False)
 
             prompt_tokens = count_tokens(prompt)
             completion_tokens = count_tokens(generated_text)
@@ -699,7 +692,7 @@ async def create_completion(request: CompletionRequest):
                         "index": 0,
                         "text": generated_text,
                         "logprobs": None,
-                        "finish_reason": "stop"
+                        "finish_reason": finish_reason_of(runner)
                     }
                 ],
                 usage={
@@ -712,6 +705,8 @@ async def create_completion(request: CompletionRequest):
     except HTTPException as http_exc:
         # Preserve intended HTTP status codes from inner helpers
         raise http_exc
+    except ContextLengthExceeded:
+        raise  # deliberate 400, rendered by its own handler
     except Exception as e:
         # Map unexpected errors to 500
         raise HTTPException(status_code=500, detail=str(e))
@@ -764,6 +759,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
     except HTTPException as http_exc:
         # Preserve intended HTTP status codes from inner helpers
         raise http_exc
+    except ContextLengthExceeded:
+        raise  # deliberate 400, rendered by its own handler
     except ValueError as ve:
         # Validation errors from VisionHTTPAdapter
         raise HTTPException(status_code=400, detail=str(ve))
@@ -828,7 +825,7 @@ def _process_vision_chunks_server(
     top_p: float,
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
-) -> str:
+) -> Tuple[str, Optional[str]]:
     """Process vision images in batches with isolated model instances per chunk.
 
     Delegates to extracted chat handler module (Phase 1 refactoring).
@@ -916,17 +913,20 @@ async def _emulate_sse_stream(
     completion_id: str,
     created: int,
     model: str,
-    content: str
+    content: str,
+    finish_reason: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Emulate SSE streaming for vision models (batch response as SSE events).
 
-    Delegates to extracted streaming module (Phase 1 refactoring).
+    Delegates to extracted streaming module (Phase 1 refactoring). The default
+    keeps callers that report no stop reason (audio chat) on four arguments.
     """
     async for chunk in _emulate_sse_stream_impl(
         completion_id=completion_id,
         created=created,
         model=model,
         content=content,
+        finish_reason=finish_reason,
     ):
         yield chunk
 
@@ -1203,7 +1203,7 @@ def _request_global_interrupt() -> None:
 def run_server(
     host: str = "127.0.0.1",
     port: int = 8000,
-    max_tokens: int = 2000,
+    max_tokens: Optional[int] = None,  # None: the documented per-modality defaults apply
     reload: bool = False,
     log_level: str = "info",
     preload_model: Optional[str] = None
@@ -1228,6 +1228,8 @@ def run_server(
         import uvicorn  # type: ignore
     except Exception as e:
         raise RuntimeError("uvicorn is required to run the server; install with 'pip install fastapi uvicorn'.") from e
+    if max_tokens is not None and max_tokens < 1:
+        raise ValueError(f"--max-tokens must be at least 1 (got {max_tokens})")
     global _default_max_tokens
     _default_max_tokens = max_tokens
 
@@ -1247,7 +1249,13 @@ def run_server(
 
     logger.info(f"Starting MLX Knife Server 2.0 on http://{host}:{port}")
     logger.info(f"API docs available at http://{host}:{port}/docs")
-    logger.info(f"Default max tokens: {'model-aware dynamic limits' if max_tokens is None else max_tokens}")
+    if max_tokens is None:
+        logger.info(
+            f"Default max_tokens: {DEFAULT_MAX_TOKENS} (text) / {DEFAULT_MAX_TOKENS_VISION} (vision), "
+            "clamped to the model's context window minus the prompt"
+        )
+    else:
+        logger.info(f"Default max_tokens: {max_tokens} (operator ceiling, clamped to the model's context window minus the prompt)")
     logger.info("Press Ctrl-C to stop the server")
 
     # Enable access logs only at debug/info level (reduces noise at warning/error)
