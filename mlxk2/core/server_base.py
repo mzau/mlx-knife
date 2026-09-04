@@ -947,6 +947,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
     Delegates to extracted chat handler module (Phase 1 refactoring).
     """
     ctx = _create_chat_handler_context()
+    stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
     result = await _handle_vision_chat_completion_impl(
         ctx=ctx,
         request_model=request.model,
@@ -957,6 +958,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
         repetition_penalty=request.repetition_penalty,
         stream=request.stream,
         chunk_size_request=request.chunk,
+        stop=stop,
         runner=runner,
     )
     # Return StreamingResponse directly or convert dict to Pydantic model

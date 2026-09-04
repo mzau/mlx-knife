@@ -58,6 +58,11 @@
   rejected with **422** `capability_not_supported` before anything is generated — the promise that
   lets `/v1/models` carry no per-model capability label at all. Canonical text: SERVER-HANDBOOK →
   *Models* and *HTTP Status Codes*.
+- `mlxk serve --json` printed its `starting` envelope before checking its options, so a rejected
+  `--chunk`, `--embed-backend` or `--max-tokens` put **two** JSON documents on stdout: a reader
+  that parses the first one sees a server coming up, and `json.load` fails on the pair. The options
+  are checked before anything is printed. The envelope's `max_tokens` now reports the ceiling that
+  will apply — it named the flag, so an operator who set `MLXK2_MAX_TOKENS` was shown `null`.
 - Router rejects carry the ADR-004 envelope. An unmatched path (**404**) and a wrong method
   (**405**) are raised by Starlette's router before any endpoint runs, as the base
   `HTTPException` — whose class hierarchy does not include FastAPI's subclass, the one our
@@ -66,8 +71,8 @@
   `method_not_allowed`; the 405 keeps its `Allow` header. Canonical text: SERVER-HANDBOOK →
   *Error Types* and *HTTP Status Codes*.
 - `stop` reached neither batch surface. `generate_batch` has no such parameter, so the field was
-  accepted by the request model and dropped, and the client received the whole answer. Both batch
-  paths now cut the text at the first matching sequence, remove it, and report
+  accepted by the request model and dropped, and the client received the whole answer. Every batch
+  surface — text, completions and vision — now cuts the text at the first matching sequence, removes it, and reports
   `finish_reason: "stop"` — the tokens generated past the cut still count in `usage`. A stream that
   ends on a stop sequence reports `"stop"` as well, where it had begun reporting `null`: breaking
   out of the loop leaves the runner without a recorded exit. The check there is still per token, so
@@ -86,6 +91,8 @@
 - Feature gates opened for **any** non-empty value, so `MLXK2_ENABLE_PIPES=0` and
   `MLXK2_ENABLE_ALPHA_FEATURES=0` switched the feature **on** — the check was plain truthiness.
   They now read the value: `1`, `true`, `yes` and `on` open a gate, everything else keeps it shut.
+  `MLXK2_DEBUG`, which decides whether streaming errors are printed, had the same defect and the
+  same fix.
 - `mlxk serve --max-tokens N` and `MLXK2_MAX_TOKENS=N` reached no request on the text and vision
   paths. `serve` supervises, and uvicorn imports `server_base` a second time under its real name:
   the ceiling was set on the module copy that starts the server, never on the copy that answers,

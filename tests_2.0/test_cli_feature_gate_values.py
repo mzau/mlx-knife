@@ -42,3 +42,15 @@ def test_zero_blocks_the_command_end_to_end():
     )
     assert result.returncode == 1
     assert GATE in (result.stdout + result.stderr)
+
+
+# --- the same rule, for the switch that is not a feature gate ----------------
+
+@pytest.mark.parametrize("value,expected", [("1", True), ("on", True), ("0", False),
+                                            ("false", False), ("", False)])
+def test_the_debug_switch_reads_its_value_too(monkeypatch, value, expected):
+    """`MLXK2_DEBUG=0` used to turn streaming debug output on — same bug, third switch."""
+    from mlxk2.core.server.streaming import _debug_enabled
+
+    monkeypatch.setenv("MLXK2_DEBUG", value)
+    assert _debug_enabled() is expected

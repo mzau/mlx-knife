@@ -164,6 +164,46 @@ def _run_supervised_uvicorn(
                     pass
 
 
+def validate_serve_options(
+    max_tokens: Optional[int] = None,
+    chunk: int = 1,
+    embed_backend: Optional[str] = None,
+) -> Optional[int]:
+    """Check what `serve` was asked for, and report the ceiling that will apply.
+
+    Side-effect free on purpose: the CLI runs this *before* it prints anything, so a
+    rejected option cannot be preceded by a "starting" envelope. `start_server` runs it
+    too, for callers that skip the CLI.
+
+    Returns the operator ceiling in force — the flag if given, else MLXK2_MAX_TOKENS.
+    """
+    from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
+    if chunk < 1:
+        raise ValueError(
+            f"chunk size must be at least 1 (got: {chunk})."
+        )
+    if chunk > MAX_SAFE_CHUNK_SIZE:
+        raise ValueError(
+            f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
+            f"This limit is based on empirically tested performance."
+        )
+
+    # The child would otherwise die on this, and it only knows the environment variable's
+    # wording, never the flag's. An exported MLXK2_MAX_TOKENS is the operator's other way in.
+    if max_tokens is not None and max_tokens < 1:
+        raise ValueError(f"--max-tokens must be at least 1 (got {max_tokens})")
+    ceiling = max_tokens if max_tokens is not None else _operator_ceiling_from_env()
+
+    if embed_backend is not None:
+        from urllib.parse import urlparse
+        parsed = urlparse(embed_backend)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                f"--embed-backend must be an http(s) URL with a host (got: {embed_backend!r})"
+            )
+    return ceiling
+
+
 def start_server(
     model: Optional[str] = None,
     port: int = 8000,
@@ -194,26 +234,8 @@ def start_server(
                serve proxies POST /v1/embeddings to it (the embed model is never loaded
                here). The URL is validated fail-fast; the backend is NOT probed at startup.
     """
-    # Validate chunk size
-    from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
-    if chunk < 1:
-        raise ValueError(
-            f"chunk size must be at least 1 (got: {chunk})."
-        )
-    if chunk > MAX_SAFE_CHUNK_SIZE:
-        raise ValueError(
-            f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
-            f"This limit is based on empirically tested performance."
-        )
-
-    # Fail fast here, beside the other flag checks: a bad ceiling would otherwise kill the
-    # child, and the child only knows the environment variable's wording, not the flag's.
-    if max_tokens is not None and max_tokens < 1:
-        raise ValueError(f"--max-tokens must be at least 1 (got {max_tokens})")
-    if max_tokens is None:
-        # An exported MLXK2_MAX_TOKENS is the operator's other way in, and it reaches the
-        # child unchanged. Validate it in its own wording rather than let the child trip.
-        _operator_ceiling_from_env()
+    ceiling = validate_serve_options(max_tokens=max_tokens, chunk=chunk, embed_backend=embed_backend)
+    del ceiling  # start_server exports the flag itself; the value is for the caller's report
 
     # ADR-015 D2: --embed-backend is the single source of truth for the proxy. Validate the URL
     # fail-fast, then bridge it to the server subprocess via env (MLXK2_EMBED_BACKEND) —
@@ -221,12 +243,6 @@ def start_server(
     # (no run_server() signature change needed). When the flag is absent, clear any ambient value
     # so an exported env var can't silently enable (and thereby un-gate) the proxy.
     if embed_backend is not None:
-        from urllib.parse import urlparse
-        parsed = urlparse(embed_backend)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(
-                f"--embed-backend must be an http(s) URL with a host (got: {embed_backend!r})"
-            )
         os.environ["MLXK2_EMBED_BACKEND"] = embed_backend
     else:
         os.environ.pop("MLXK2_EMBED_BACKEND", None)

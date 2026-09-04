@@ -35,6 +35,14 @@ if TYPE_CHECKING:
     from ..runner import MLXRunner
 
 
+def _debug_enabled() -> bool:
+    """MLXK2_DEBUG, read by value: `=0` has to switch debugging off, not on.
+
+    Same rule as the CLI's feature gates — a switch that opens on `0` is not a switch.
+    """
+    return os.environ.get("MLXK2_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _get_logger():
     """Lazy import logger to avoid circular dependencies."""
     from ...logging import get_logger
@@ -388,20 +396,20 @@ async def generate_chat_stream(
 
     except Exception as e:
         # Optional debug logging for chat streaming errors
-        if os.environ.get("MLXK2_DEBUG"):
+        if _debug_enabled():
             print(f"[DEBUG] Exception in chat streaming: {type(e).__name__}: {e}")
 
         # Try MLX recovery for any exception that might be interrupt-related
         if "interrupt" in str(e).lower() or "keyboard" in str(e).lower():
-            if os.environ.get("MLXK2_DEBUG"):
+            if _debug_enabled():
                 print("[Server] Detected interrupt-like exception, attempting MLX recovery...")
             try:
                 import mlx.core as mx
                 mx.clear_cache()
-                if os.environ.get("MLXK2_DEBUG"):
+                if _debug_enabled():
                     print("[Server] MLX state recovered after exception")
             except Exception as recovery_error:
-                if os.environ.get("MLXK2_DEBUG"):
+                if _debug_enabled():
                     print(f"[Server] MLX recovery warning: {recovery_error}")
 
         yield _stream_error({

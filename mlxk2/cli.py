@@ -895,6 +895,17 @@ def main():
                 sys.exit(1)
 
             # Handle serve command
+            # Lazy import to avoid hard dependency on FastAPI/uvicorn at import time
+            from .operations.serve import start_server, validate_serve_options
+
+            # Check the options before anything is printed: a rejected one must not be
+            # preceded by a "starting" envelope that a --json reader takes for a live server.
+            operator_ceiling = validate_serve_options(
+                max_tokens=getattr(args, "max_tokens", None),
+                chunk=getattr(args, "chunk", 1),
+                embed_backend=embed_backend,
+            )
+
             if args.json:
                 # JSON startup info
                 server_info = {
@@ -904,7 +915,7 @@ def main():
                         "host": args.host,
                         "port": args.port,
                         "model": getattr(args, "model", None),
-                        "max_tokens": getattr(args, "max_tokens", None),
+                        "max_tokens": operator_ceiling,  # what will apply: flag, else MLXK2_MAX_TOKENS
                         "embed_backend": embed_backend,
                     },
                     "error": None
@@ -916,8 +927,6 @@ def main():
                 os.environ["MLXK2_LOG_JSON"] = "1"
 
             # Start server (this will run indefinitely)
-            # Lazy import to avoid hard dependency on FastAPI/uvicorn at import time
-            from .operations.serve import start_server
             start_server(
                 model=getattr(args, "model", None),
                 port=args.port,

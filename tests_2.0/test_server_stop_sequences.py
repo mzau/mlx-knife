@@ -6,6 +6,7 @@ sequences are now applied to the finished text — the answer ends where OpenAI 
 ends. Streams keep their own, weaker handling (C3b).
 """
 
+import asyncio
 import json
 from unittest.mock import patch
 
@@ -113,3 +114,24 @@ def test_a_stream_without_a_match_keeps_the_runners_reason(surface):
         if line != "data: [DONE]"
     ]
     assert reasons[-1] == "length"
+
+
+def test_the_vision_surface_is_handed_the_sequences():
+    """It had no `stop` parameter at all — a vision batch answer ignored the field."""
+    from unittest.mock import AsyncMock
+
+    from mlxk2.core.server_base import ChatCompletionRequest, _handle_vision_chat_completion
+
+    response = {
+        "id": "chatcmpl-x", "created": 0, "model": "m",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"},
+                     "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    request = ChatCompletionRequest(
+        model="m", messages=[{"role": "user", "content": "hi"}], stop="STOP"
+    )
+    with patch("mlxk2.core.server_base._handle_vision_chat_completion_impl",
+               new=AsyncMock(return_value=response)) as impl:
+        asyncio.run(_handle_vision_chat_completion(request))
+    assert impl.await_args.kwargs["stop"] == ["STOP"]

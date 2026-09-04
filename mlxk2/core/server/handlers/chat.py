@@ -142,7 +142,8 @@ async def handle_text_chat_completion(
             top_p=top_p or 0.9,
             repetition_penalty=repetition_penalty or 1.0,
         )
-        finish_reason = finish_reason_of(runner)
+        generated_text, stopped = apply_stop_sequences(generated_text, stop)
+        finish_reason = "stop" if stopped else finish_reason_of(runner)
 
         usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
 
@@ -245,6 +246,7 @@ async def handle_vision_chat_completion(
     repetition_penalty: float,
     stream: bool,
     chunk_size_request: Optional[int],
+    stop: Optional[List[str]] = None,
     runner: Any = None,
 ) -> Union[Dict[str, Any], StreamingResponse]:
     """Handle vision/audio chat completion with images or audio (ADR-012 Phase 3, ADR-019 Phase 4).
@@ -405,7 +407,9 @@ async def handle_vision_chat_completion(
         output_length=len(generated_text)
     )
 
-    # Token counting
+    generated_text, stopped = apply_stop_sequences(generated_text, stop)
+    if stopped:
+        finish_reason = "stop"
     usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
 
     # Graceful degradation: emulate SSE for stream=true (single-chunk only)
