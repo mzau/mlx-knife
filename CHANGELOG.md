@@ -54,6 +54,17 @@
   example against a parser (four carried `//` comments). The README no longer shows `MLXK2_HOST`
   and `MLXK2_PORT` as a way to bind the server: the supervisor sets both from the flags on every
   start, so an exported value never reaches it.
+- The rest of that audit is corrected by hand. The error table marks the five types the server never
+  emits (`access_denied`, `ambiguous_match`, `download_failed`, `push_operation_failed`,
+  `unsupported_multimodal`) as CLI-only, and the precedence paragraph names the two statuses that
+  carry two types, 400 and 404; a model spec that matches several models is answered **404**
+  `model_not_found`, and the 501 causes listed are the server's own. The audio SSE emulation is three
+  events and `[DONE]`, not one; access logs go to stderr with and without `--log-json`; the 2.0.4
+  pins read `==`; the 2.0.7 changelog entry carries the tag date; `prompt` is on the transcription
+  form table; the vision example no longer advertises a `temperature` the vision paths fix at 0.0;
+  the torch-free re-verification names the models it covered, and the install shrinks by 524 MB
+  (36 %), not 1 GB — the same two corrections in ARCHITECTURE. README states the operator
+  ceiling's contract: a whole number of at least 1, or `serve` refuses to start; the flag wins.
 - ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
   installed ruff version defaults to.
 

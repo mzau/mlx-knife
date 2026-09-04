@@ -193,7 +193,7 @@ mlxk serve --port 8080
 | 🔬 `embed-serve` | **Experimental** - single-model embeddings HTTP backend (`/v1/embeddings`); pairs with `serve --embed-backend`; requires `MLXK2_ENABLE_ALPHA_FEATURES=1` |
 | 🔒 `pipe mode` | **Beta feature** - Unix pipes with `mlxk run <model> - ...`; requires `MLXK2_ENABLE_PIPES=1` |
 
-**Generation budget.** Without `--max-tokens`, one generation emits at most 32768 tokens and never more than the model's context window minus the prompt; an explicit `--max-tokens` is clamped to the window as well. An answer the budget cut is announced on stderr and reported as `finish_reason: "length"` (`run --json` and the server). A prompt that fills the window is rejected before anything is generated. Vision requests default to 2048 tokens. `serve` applies the same rule; `serve --max-tokens` or `MLXK2_MAX_TOKENS` set the server-wide ceiling.
+**Generation budget.** Without `--max-tokens`, one generation emits at most 32768 tokens and never more than the model's context window minus the prompt; an explicit `--max-tokens` is clamped to the window as well. An answer the budget cut is announced on stderr and reported as `finish_reason: "length"` (`run --json` and the server). A prompt that fills the window is rejected before anything is generated. Vision requests default to 2048 tokens. `serve` applies the same rule; `serve --max-tokens` or `MLXK2_MAX_TOKENS` set the server-wide ceiling — a whole number of at least 1, or `serve` refuses to start, and the flag wins over the variable.
 
 ## Model References
 
@@ -1036,7 +1036,7 @@ Control server behavior without command-line flags:
 | `MLXK2_HOST` | Server bind address — set by `serve --host` on every start; an exported value does not apply | `127.0.0.1` | 2.0.0 |
 | `MLXK2_PORT` | Server port — set by `serve --port` on every start; an exported value does not apply | `8000` | 2.0.0 |
 | `MLXK2_PRELOAD_MODEL` | Model to load at startup (set by `--model` flag) | (none) | 2.0.0-beta |
-| `MLXK2_MAX_TOKENS` | Server-wide ceiling for text and vision generation, same as `serve --max-tokens`; text stays clamped to the model's context window minus the prompt | `32768` text / `2048` vision | 2.0.4 |
+| `MLXK2_MAX_TOKENS` | Server-wide ceiling for text and vision generation, same as `serve --max-tokens` (the flag wins); a whole number of at least 1, or `serve` refuses to start; text stays clamped to the model's context window minus the prompt | `32768` text / `2048` vision | 2.0.4 |
 | `MLXK2_RELOAD` | Enable Uvicorn auto-reload (development only) | `0` (disabled) | 2.0.0 |
 
 ### Vision Processing

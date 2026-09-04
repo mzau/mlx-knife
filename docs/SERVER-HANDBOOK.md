@@ -174,25 +174,25 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 }
 ```
 
-**Error types** (every type the server emits):
+**Error types** (the taxonomy is shared with the CLI; rows marked *CLI only* have no server path and never appear in a response):
 
 | Type | HTTP | Meaning |
 |------|------|---------|
 | `validation_error` | 400 | Invalid request payload (e.g. an image over 20 MB or more than 50 MB of images in one request, malformed audio, `max_tokens` below 1) |
 | `context_length_exceeded` | 400 | The prompt fills the model's context window; nothing is left to generate. The message names prompt tokens and window, `detail` carries both as `{"prompt_tokens", "context_length"}`; never retryable |
-| `access_denied` | 403 | File / cache permission denied |
+| `access_denied` | 403 | File / cache permission denied — *CLI only*; no server path raises 403 |
 | `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
 | `not_found` | 404 | No endpoint matches the request path — most often a base URL that already ends in `/v1` |
 | `method_not_allowed` | 405 | The endpoint exists, but not for this method; the response carries an `Allow` header |
-| `ambiguous_match` | 400 | Model spec matches multiple cached models — disambiguate |
+| `ambiguous_match` | 400 | Model spec matches multiple cached models — *CLI only*; the server answers such a spec with 404 `model_not_found` |
 | `payload_too_large` | 413 | Audio upload above the 50 MB limit, on either audio endpoint |
 | `capability_not_supported` | 422 | The request is well-formed and the feature exists, but *this* model cannot serve it — a request carrying images or audio while the loaded model is text-only, or `/v1/audio/translations` against a model that cannot translate |
-| `download_failed` | 503 | HF download failed mid-stream |
-| `push_operation_failed` | 500 | `/v1/push`-style operation failed (CLI-only path; not user-reachable on the server today) |
+| `download_failed` | 503 | HF download failed mid-stream — *CLI only*; the server never downloads |
+| `push_operation_failed` | 500 | `mlxk push` failed — *CLI only* |
 | `server_shutdown` | 503 | Lifespan shutdown in progress; new requests are rejected |
 | `insufficient_memory` | 507 | Model exceeds the memory threshold (ADR-016) |
-| `not_implemented` | 501 | Known capability class, but the feature is not implemented (e.g. STT quantization) |
-| `unsupported_multimodal` | 501 | Model uses a multimodal class outside the verified-multimodal list (ADR-023) |
+| `not_implemented` | 501 | The server cannot run this: a missing dependency, Python below 3.10 for a vision model, an audio model of unknown backend, a checkpoint the runtime reports incompatible, or `/v1/embeddings` without `--embed-backend` |
+| `unsupported_multimodal` | 501 | Model uses a multimodal class outside the verified-multimodal list (ADR-023) — *CLI only* (`convert --quantize`); a server response never carries it |
 | `bad_gateway` | 502 | Embed backend (`serve --embed-backend`) unreachable / connection failed / connect-timeout (retryable; ADR-015) |
 | `gateway_timeout` | 504 | Embed backend read-timeout on a slow / large batch (retryable; ADR-015) |
 | `internal_error` | 500 | Unexpected backend failure |
@@ -200,9 +200,9 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 (`bad_gateway` / `gateway_timeout` are raised only by the `serve --embed-backend` proxy; a backend's own `4xx`/`5xx` envelopes otherwise pass through verbatim.)
 
 **Status and type always agree.** A fixed mapping binds the two, so routing on either one gives the
-same answer; the type is the more specific of the two, because three statuses carry more than one
-meaning — 400 carries three (`validation_error`, `ambiguous_match`, `context_length_exceeded`), 500 and
-503 two each — and two types share 501.
+same answer; the type is the more specific of the two where a status carries two meanings — 400
+(`validation_error`, `context_length_exceeded`) and 404 (`model_not_found`, `not_found`). Every other
+status maps to exactly one type.
 
 Three types describe a request the server declines rather than fails, and they say different things.
 `not_implemented` — the feature does not exist here. `unsupported_multimodal` — the model's class is
@@ -247,7 +247,6 @@ whisper-turbo or `.en` variant is the case you will meet (see
     }
   ],
   "max_tokens": 2048,
-  "temperature": 0.4,
   "chunk": 1
 }
 ```
@@ -284,7 +283,9 @@ whisper-turbo or `.en` variant is the case you will meet (see
 **Also honored** (standard OpenAI sampling fields): `top_p` (default `0.9`) and
 `repetition_penalty` (default `1.1`, an mlx-knife-leaning default), in addition to `temperature`
 and `max_tokens`. `temperature` defaults to **0.7**, and to **0.0** against an audio model on any
-surface — transcription is not a creative task. An explicit value always wins.
+surface — transcription is not a creative task. An explicit value always wins, except on the vision
+paths, where `temperature` is fixed at 0.0 (greedy decoding, to keep descriptions from drifting) and
+the value sent is ignored; `top_p` and `repetition_penalty` do apply there.
 
 `stop` (string or list of strings) ends the answer at the first sequence that matches; the
 sequence itself is removed. The match is against the model's text: the image-metadata header
@@ -909,7 +910,7 @@ cut answer is visible operator-side as well.
 - **Format:** OpenAI-compatible SSE with per-chunk deltas
 
 #### Audio Models
-- ⚠️ **Batch mode only:** Single SSE event with complete response
+- ⚠️ **Batch mode only:** the answer is generated whole, then emitted as three `data:` events (role, content, `finish_reason`) and `[DONE]`
 - **Reason:** Single audio per request, no chunking needed
 - **Format:** Same as Vision single-image mode
 
@@ -1075,9 +1076,9 @@ MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
   and stops itself, so neither the model nor the port is left behind. Not covered: a server
   wedged inside a native call — no in-process mechanism can end that, only an external
   supervisor or the OS
-- Logs go to stderr — application *and* access logs, so stdout stays clean for data
-- `--log-json` produces 100% JSON output. Without it Uvicorn's defaults apply and access logs
-  land on stdout instead; `--log-json` is what makes the separation complete
+- Logs go to stderr — application *and* access logs, with and without `--log-json` — so stdout
+  stays clean for data
+- `--log-json` produces 100% JSON output; without it Uvicorn's plain format applies
 - **Note:** No auto-restart on crashes (use systemd/supervisor for production)
 
 **Start:**
@@ -1121,20 +1122,17 @@ python -m mlxk2.core.server_base
 - **200 OK:** Request successful
 
 ### Client Errors (4xx)
-- **400 Bad Request:** Invalid input (e.g., an oversized image or request, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`; ambiguous model spec — `ambiguous_match`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
-- **403 Forbidden:** File or cache permission denied (`access_denied`)
-- **404 Not Found:** Model not found in cache or workspace (`model_not_found`); no endpoint matches the request path (`not_found`)
+- **400 Bad Request:** Invalid input (e.g., an oversized image or request, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
+- **404 Not Found:** Model not found in cache or workspace, or a spec that matches several models (`model_not_found`); no endpoint matches the request path (`not_found`)
 - **405 Method Not Allowed:** The endpoint exists, but not for this method (`method_not_allowed`); the response carries an `Allow` header. `HEAD` is not accepted where only `GET` is declared
 - **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints) (`payload_too_large`)
 - **422 Unprocessable Entity:** The model cannot serve the request (`capability_not_supported`): a request carrying images or audio while the loaded model is text-only — the modality is rejected, never silently dropped — or `POST /v1/audio/translations` against an audio model that cannot translate
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
-- **501 Not Implemented:** Feature not supported. Sub-causes:
-  - `not_implemented` — known capability class, feature missing (e.g. STT quantization); also returned by `POST /v1/embeddings` when `serve` has no `--embed-backend` configured (ADR-015)
-  - `unsupported_multimodal` — model uses a multimodal class outside the verified-multimodal list (ADR-023)
+- **501 Not Implemented:** The server cannot run this (`not_implemented`): a missing dependency (mlx-lm, mlx-vlm or mlx-audio absent), Python below 3.10 for a vision model, an audio model of unknown backend, a checkpoint the runtime reports incompatible, or `POST /v1/embeddings` when `serve` has no `--embed-backend` configured (ADR-015)
 - **502 Bad Gateway:** Embed backend unreachable / connection refused / connect-timeout (`bad_gateway`, **retryable**; `serve --embed-backend` proxy, ADR-015)
-- **503 Service Unavailable:** Server shutting down (`server_shutdown`) or HF download failed (`download_failed`)
+- **503 Service Unavailable:** Server shutting down (`server_shutdown`, retryable)
 - **504 Gateway Timeout:** Embed backend read-timeout on a slow / large batch (`gateway_timeout`, **retryable**; `serve --embed-backend` proxy, ADR-015)
 - **507 Insufficient Storage:** Memory constraints violated (vision/audio model >70% RAM, ADR-016)
 
@@ -1162,7 +1160,6 @@ python -m mlxk2.core.server_base
 ### Concurrent Requests
 - **Current:** Sequential processing (one request at a time)
 - **Reason:** Metal backend, single GPU
-- **Future:** May add request queuing
 
 ---
 
@@ -1398,8 +1395,8 @@ batch. Reduce the batch size or retry.
 | Memory checks (Vision) | None | 70% RAM limit | HTTP 507 possible |
 
 **New Dependencies (auto-installed):**
-- `mlx-vlm>=0.3.10` (Vision + Gemma-3n audio)
-- `mlx-audio>=0.3.1` (Whisper STT)
+- `mlx-vlm==0.3.10` (Vision + Gemma-3n audio)
+- `mlx-audio==0.3.1` (Whisper STT)
 - `python-multipart>=0.0.9` (file uploads)
 
 **Client Updates Required:**
@@ -1535,11 +1532,12 @@ See [Supervised Mode](#supervised-mode-default).
 
 **Why `torch` + `torchvision` go away:** mlx-vlm #1011 — the Pixtral / Mistral-Small-3.1 processor
 pulling torch in as a base dependency — is resolved as of `mlx-vlm 0.6.4`. The sunset marker they
-carried since 2.0.6 (ADR-023 Workaround-Sunset Policy) is therefore retired. The verified vision
-set (`pixtral`, `mistral3`, `mllama`, `gemma4`) was re-verified torch-free.
+carried since 2.0.6 (ADR-023 Workaround-Sunset Policy) is therefore retired. Re-verified torch-free
+in the 2.0.8 dependency wave: `pixtral`, `mistral3` and `gemma4`, plus `qwen2_5_vl` and `qwen3_5`,
+verified for the first time under it; `mllama` keeps its 2.0.6 verification.
 
-**Install size impact:** the base install shrinks by roughly 1 GB. Operators on size-constrained
-images can drop the allowance they were told to plan for in 2.0.6.
+**Install size impact:** the base install shrinks by 524 MB (36 %, measured against a fresh 2.0.7
+install). Operators on size-constrained images can drop the allowance they were told to plan for in 2.0.6.
 
 **Behavior changes:**
 
@@ -1806,6 +1804,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | `file` | ✅ | Audio file. **WAV/MP3/FLAC always accepted**; M4A/AAC, OGG/Opus, WebM are best-effort — they need `ffmpeg` + `ffprobe` on the server host, which the client cannot detect |
 | `model` | ✅ | Model ID (e.g., `whisper-large`, full HF path) |
 | `language` | ❌ | Language code (`en`, `de`, etc.). Auto-detect if omitted. |
+| `prompt` | ❌ | Optional context to guide transcription |
 | `response_format` | ❌ | `json` (default), `text`, `verbose_json` |
 | `temperature` | ❌ | Sampling temperature (default: 0.0) |
 
@@ -1910,16 +1909,14 @@ When switching from Vision or Audio to Text model mid-conversation:
   - **FIXED:** **413** and **422** carry `payload_too_large` / `capability_not_supported`; both reported `internal_error` before, so a deliberate reject looked like a server fault.
   - **FIXED:** `/v1/models` lists vision models it wrongly withheld — a check rejected every checkpoint carrying `temporal_patch_size` under transformers 5.x, and those models load and answer correctly.
   - **CHANGED:** `mlxk serve` takes one teardown path for Ctrl-C, `SIGTERM` and `SIGHUP`, and stops itself if its supervisor dies. Exit `143` on signal, `137` when forced.
-  - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (~1 GB smaller install).
+  - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (524 MB smaller install).
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.
 
-- **2026-06-18:** 2.0.7 stable — embeddings model identity
+- **2026-07-24:** 2.0.7 stable — embeddings + audio translation, embeddings model identity
   - **NEW:** the `/v1/embeddings` response (and `embed-serve` `/health`) carries
     `system_fingerprint` = `hash.device` — a change-detection token so a RAG client detects a
     model/revision/device swap; `model` stays the clean `org/name` selector (= `/v1/models` id).
     Additive field (standard on OpenAI chat/completions). ADR-015 §Model Identity.
-
-- **2026-06-17:** 2.0.7 stable — embeddings + audio translation
   - **NEW:** `/v1/embeddings` (OpenAI Embeddings API), served by the new `mlxk embed-serve`
     backend (separate single-model process; ADR-015). Experimental — requires
     `MLXK2_ENABLE_ALPHA_FEATURES=1`.

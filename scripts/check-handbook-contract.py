@@ -85,6 +85,8 @@ ROADMAP_PHRASES = [
     "not yet",
     "planned for",
     "coming in",
+    "future:",
+    "may add",
 ]
 
 failures: list[str] = []
