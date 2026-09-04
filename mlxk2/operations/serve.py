@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 from ..core.parent_watch import PARENT_ALIVE_FD_ENV
-from ..core.server_base import run_server
+from ..core.server_base import _operator_ceiling_from_env, run_server
 
 # Every stop signal must reach the same teardown. Before issue #60 only SIGINT did, so
 # `kill`, a shell trap or launchd killed the supervisor and left the child holding the port.
@@ -205,6 +205,15 @@ def start_server(
             f"chunk size too large (max: {MAX_SAFE_CHUNK_SIZE} for Metal API stability). "
             f"This limit is based on empirically tested performance."
         )
+
+    # Fail fast here, beside the other flag checks: a bad ceiling would otherwise kill the
+    # child, and the child only knows the environment variable's wording, not the flag's.
+    if max_tokens is not None and max_tokens < 1:
+        raise ValueError(f"--max-tokens must be at least 1 (got {max_tokens})")
+    if max_tokens is None:
+        # An exported MLXK2_MAX_TOKENS is the operator's other way in, and it reaches the
+        # child unchanged. Validate it in its own wording rather than let the child trip.
+        _operator_ceiling_from_env()
 
     # ADR-015 D2: --embed-backend is the single source of truth for the proxy. Validate the URL
     # fail-fast, then bridge it to the server subprocess via env (MLXK2_EMBED_BACKEND) —

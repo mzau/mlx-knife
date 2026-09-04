@@ -825,11 +825,18 @@ No window guard: the budget is the ceiling alone. The operator ceiling applies h
 #### Precedence
 
 1. Request `max_tokens` (must be ≥ 1; `0` or negative → **400** `validation_error`)
-2. Operator ceiling: `mlxk serve --max-tokens N` or `MLXK2_MAX_TOKENS=N` — one server-wide
-   ceiling that replaces both defaults, text and vision
-3. Default: **32768** (text) / **2048** (vision, audio chat)
+2. Operator ceiling: `mlxk serve --max-tokens N`, else `MLXK2_MAX_TOKENS=N` — one server-wide
+   ceiling that replaces both defaults, text and vision. The flag wins over the environment.
+   It must be a whole number ≥ 1; anything else refuses the start with one line, naming
+   whichever of the two was used
+3. Default: **32768** (text) / **2048** (vision)
 
 Text budgets from every level are then clamped to the context window as above.
+
+**Audio stands outside this chain.** Both `/v1/audio/*` endpoints always ask for **4096** tokens,
+and a chat request against an audio model passes its own `max_tokens` through unclamped, falling
+back to 4096. The operator ceiling reaches neither. The number is nominal in any case: the
+transcription backend produces the whole transcript regardless of the budget it is handed.
 
 #### finish_reason
 
@@ -1027,8 +1034,9 @@ MLXK2_LOG_LEVEL=info      # debug|info|warning|error
 MLXK2_ENABLE_PIPES=1              # Unix pipe integration (beta, 2.0.4-beta.1)
 MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha: embed, embed-serve, serve --embed-backend
 
-# Generation ceiling for max_tokens (text and vision) — normally set for you by
-# `serve --max-tokens N`. Text budgets stay clamped to the context window minus the prompt.
+# Generation ceiling for max_tokens (text and vision; audio is not covered) — normally set for
+# you by `serve --max-tokens N`, which wins over this variable. A whole number >= 1, or the
+# server refuses to start. Text budgets stay clamped to the context window minus the prompt.
 MLXK2_MAX_TOKENS=4096
 
 # Embeddings proxy (ADR-015) — normally set for you by `serve --embed-backend URL`,
@@ -1342,7 +1350,7 @@ batch. Reduce the batch size or retry.
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
 | Vision max_tokens | 2048 (default) | Stateless, slow inference; set explicitly on server and CLI |
-| Audio max_tokens | 2048 (default) | Stateless, like Vision |
+| Audio max_tokens | 4096, and the operator ceiling does not apply | Nominal — the transcription backend produces the whole transcript regardless |
 | Text max_tokens | 32768 (default), clamped to context_length − prompt | Runaway guard |
 
 ---

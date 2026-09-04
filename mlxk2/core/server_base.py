@@ -62,22 +62,27 @@ from .server.handlers.embed_proxy import proxy_embeddings, PROXY_TIMEOUT
 def _operator_ceiling_from_env() -> Optional[int]:
     """The operator ceiling (``serve --max-tokens`` / ``MLXK2_MAX_TOKENS``), or None.
 
-    Read at import, not only in run_server(): ``mlxk serve`` supervises, and uvicorn
-    imports this module a second time under its real name. The copy that answers
-    requests is not the copy run_server() configured, so a ceiling set only there
-    never reached a single request.
+    Called from the lifespan hook, not at import. ``mlxk serve`` supervises, and uvicorn
+    imports this module a second time under its real name, so the copy that answers
+    requests is not the copy run_server() configured — reading in lifespan lands in the
+    right one. Reading at import would land there too, but also in every other process
+    that imports this module: the supervisor parent before it exports the flag,
+    ``embed-serve``, and the test collection.
     """
     raw = os.environ.get("MLXK2_MAX_TOKENS")
     if not raw:
         return None
-    ceiling = int(raw)
+    try:
+        ceiling = int(raw)
+    except ValueError:
+        raise ValueError(f"MLXK2_MAX_TOKENS must be a whole number (got {raw!r})") from None
     if ceiling < 1:
         raise ValueError(f"MLXK2_MAX_TOKENS must be at least 1 (got {ceiling})")
     return ceiling
 
 
 # Global configuration
-_default_max_tokens: Optional[int] = _operator_ceiling_from_env()  # None = DEFAULT_MAX_TOKENS
+_default_max_tokens: Optional[int] = None  # Operator ceiling, read in lifespan; None = per-modality defaults
 # Global shutdown flag to interrupt in-flight generations promptly
 _shutdown_event = threading.Event()
 # Pre-load model specification (set via environment MLXK2_PRELOAD_MODEL)
@@ -502,7 +507,7 @@ async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatC
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
-    global _model_manager, _preload_model, _embed_backend, _embed_proxy_client
+    global _model_manager, _preload_model, _embed_backend, _embed_proxy_client, _default_max_tokens
 
     # Configure log level early (from environment if subprocess mode)
     import os
@@ -513,6 +518,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize ModelManager singleton (Phase 2 refactoring)
     _model_manager = ModelManager(_shutdown_event)
+
+    # The operator ceiling, in the copy that answers requests
+    _default_max_tokens = _operator_ceiling_from_env()
 
     # Pre-load model with probe/policy validation (if specified)
     preload_spec = os.environ.get("MLXK2_PRELOAD_MODEL")
@@ -1251,7 +1259,7 @@ def _request_global_interrupt() -> None:
 def run_server(
     host: str = "127.0.0.1",
     port: int = 8000,
-    max_tokens: Optional[int] = None,  # None: the documented per-modality defaults apply
+    max_tokens: Optional[int] = None,  # None: MLXK2_MAX_TOKENS decides, else the per-modality defaults
     reload: bool = False,
     log_level: str = "info",
     preload_model: Optional[str] = None
@@ -1278,13 +1286,12 @@ def run_server(
         raise RuntimeError("uvicorn is required to run the server; install with 'pip install fastapi uvicorn'.") from e
     if max_tokens is not None and max_tokens < 1:
         raise ValueError(f"--max-tokens must be at least 1 (got {max_tokens})")
-    global _default_max_tokens
-    if max_tokens is None:
-        max_tokens = _default_max_tokens  # ambient MLXK2_MAX_TOKENS, already read at import
-    else:
-        # uvicorn re-imports this module below; the environment is what that copy reads.
-        _default_max_tokens = max_tokens
+    if max_tokens is not None:
+        # The lifespan hook reads the environment in the copy that serves; this is how an
+        # explicit argument reaches it, whether or not uvicorn re-imports the module.
         os.environ["MLXK2_MAX_TOKENS"] = str(max_tokens)
+    else:
+        max_tokens = _operator_ceiling_from_env()  # for the startup line below
 
     # Check for log level from environment (subprocess mode)
     env_log_level = os.environ.get("MLXK2_LOG_LEVEL")
@@ -1361,18 +1368,14 @@ if __name__ == "__main__":
     log_level = os.environ.get("MLXK2_LOG_LEVEL", "info")
     preload_model = os.environ.get("MLXK2_PRELOAD_MODEL")
 
-    # Optional: max_tokens and reload (rarely used in supervised mode)
-    max_tokens = None
-    if max_tokens_str := os.environ.get("MLXK2_MAX_TOKENS"):
-        max_tokens = int(max_tokens_str)
-
+    # MLXK2_MAX_TOKENS is deliberately not read here: the lifespan hook reads it in the
+    # copy uvicorn imports, which is the one that answers requests.
     reload = os.environ.get("MLXK2_RELOAD", "0") == "1"
 
     # Start server with full configuration support
     run_server(
         host=host,
         port=port,
-        max_tokens=max_tokens,
         reload=reload,
         log_level=log_level,
         preload_model=preload_model,

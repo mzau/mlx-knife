@@ -86,12 +86,14 @@
 - Feature gates opened for **any** non-empty value, so `MLXK2_ENABLE_PIPES=0` and
   `MLXK2_ENABLE_ALPHA_FEATURES=0` switched the feature **on** — the check was plain truthiness.
   They now read the value: `1`, `true`, `yes` and `on` open a gate, everything else keeps it shut.
-- `mlxk serve --max-tokens N` and `MLXK2_MAX_TOKENS=N` reached no request. `serve` supervises,
-  and uvicorn imports `server_base` a second time under its real name: the ceiling was set on
-  the module copy that starts the server, never on the copy that answers, while the startup
-  line reported the value it had accepted. The serving process now reads the ceiling from the
-  environment itself, and a value below 1 fails the server instead of being ignored. Canonical
-  text: SERVER-HANDBOOK → *Token Limits* → *Precedence*.
+- `mlxk serve --max-tokens N` and `MLXK2_MAX_TOKENS=N` reached no request on the text and vision
+  paths. `serve` supervises, and uvicorn imports `server_base` a second time under its real name:
+  the ceiling was set on the module copy that starts the server, never on the copy that answers,
+  while the startup line reported the value it had accepted. It is now read where the rest of the
+  per-process configuration is read, in the lifespan hook of the copy that serves. A ceiling below
+  1 or one that is not a whole number is refused before the server starts, naming whichever of the
+  two the operator used. The audio paths still generate on a fixed budget and are not covered by
+  the ceiling. Canonical text: SERVER-HANDBOOK → *Token Limits* → *Precedence*.
 - A stream that failed part-way reported `finish_reason: "error"` — a value the OpenAI enum does
   not define — then carried on to emit a second, contradicting terminal chunk saying `"stop"`,
   followed by `[DONE]`, so the stream also claimed to have completed. The failure now travels in a
