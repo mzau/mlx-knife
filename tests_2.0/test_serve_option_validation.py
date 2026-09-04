@@ -3,7 +3,8 @@
 The CLI printed the `starting` envelope first and let `start_server` raise afterwards, so
 a rejected option produced *two* JSON documents on stdout: a reader that parses the first
 one believes a server is coming up. That held for every option `start_server` validates —
-`--chunk`, `--embed-backend` and, since the ceiling moved into the parent, `--max-tokens`.
+`--chunk`, `--embed-backend`, `--max-tokens` since the ceiling moved into the parent, and
+a `--model` that does not resolve, the last one to move ahead of the envelope.
 """
 
 import json
@@ -31,9 +32,10 @@ def _documents(stdout: str) -> list:
     return found
 
 
-def _serve(args, env_overrides=None):
+def _serve(args, env_overrides=None, drop=()):
     env = dict(os.environ, MLXK2_ENABLE_ALPHA_FEATURES="1")
-    env.pop(GATE, None)
+    for key in (GATE, *drop):
+        env.pop(key, None)
     env.update(env_overrides or {})
     return subprocess.run(
         [sys.executable, "-m", "mlxk2.cli", "serve", "--port", "1", "--json"] + args,
@@ -89,3 +91,42 @@ def test_the_validator_has_no_side_effects(monkeypatch):
     validate_serve_options(max_tokens=7, embed_backend="http://127.0.0.1:8002")
     assert GATE not in os.environ
     assert "MLXK2_EMBED_BACKEND" not in os.environ
+
+
+# --- the model is checked before the envelope too -----------------------------
+
+def _cache_with(root, *names):
+    """A bare HF cache holding just these models — enough for resolution, nothing else."""
+    from mlxk2.core.cache import hf_to_cache_dir
+
+    for name in names:
+        snapshot = root / "hub" / hf_to_cache_dir(name) / "snapshots" / "0"
+        snapshot.mkdir(parents=True)
+        (snapshot / "config.json").write_text("{}")
+
+
+# "alpha" matches both models in the cache below; "does-not-exist" matches none
+REFUSED = [("does-not-exist", "not found"), ("alpha", "Ambiguous")]
+
+
+@pytest.mark.parametrize("spec,wording", REFUSED)
+def test_a_model_that_does_not_resolve_yields_one_error_document(tmp_path, spec, wording):
+    """`run` refuses these specs; `serve --json` refused them after announcing a start."""
+    _cache_with(tmp_path, "org/alpha-one", "org/alpha-two")
+    result = _serve(
+        ["--model", spec], {"HF_HOME": str(tmp_path)}, drop=("MLXK_WORKSPACE_HOME",)
+    )
+    documents = _documents(result.stdout)
+    assert len(documents) == 1, documents
+    assert documents[0]["status"] == "error"
+    assert wording in documents[0]["error"]["message"]
+    assert result.returncode == 1
+
+
+@pytest.mark.parametrize("spec,wording", REFUSED)
+def test_the_validator_refuses_a_model_that_does_not_resolve(tmp_path, monkeypatch, spec, wording):
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
+    _cache_with(tmp_path, "org/alpha-one", "org/alpha-two")
+    with pytest.raises(ValueError, match=wording):
+        validate_serve_options(model=spec)

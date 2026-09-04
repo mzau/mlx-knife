@@ -168,6 +168,7 @@ def validate_serve_options(
     max_tokens: Optional[int] = None,
     chunk: int = 1,
     embed_backend: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Optional[int]:
     """Check what `serve` was asked for, and report the ceiling that will apply.
 
@@ -177,6 +178,21 @@ def validate_serve_options(
 
     Returns the operator ceiling in force — the flag if given, else MLXK2_MAX_TOKENS.
     """
+    # The model is refused with the options: it was the one check still made after the
+    # envelope, so a --model that did not resolve announced a start first.
+    if model:
+        from ..core.model_resolution import resolve_model_for_operation
+        from .workspace import is_explicit_path
+        resolved_name, _, ambiguous = resolve_model_for_operation(model)
+        if ambiguous:
+            raise ValueError(
+                f"Ambiguous model specification '{model}'. Could be: {ambiguous}"
+            )
+        if not resolved_name:
+            if is_explicit_path(model):
+                raise ValueError(f"Workspace not found: {model}")
+            raise ValueError(f"Model not found in cache: {model}")
+
     from ..tools.vision_adapter import MAX_SAFE_CHUNK_SIZE
     if chunk < 1:
         raise ValueError(
@@ -234,7 +250,9 @@ def start_server(
                serve proxies POST /v1/embeddings to it (the embed model is never loaded
                here). The URL is validated fail-fast; the backend is NOT probed at startup.
     """
-    ceiling = validate_serve_options(max_tokens=max_tokens, chunk=chunk, embed_backend=embed_backend)
+    ceiling = validate_serve_options(
+        max_tokens=max_tokens, chunk=chunk, embed_backend=embed_backend, model=model
+    )
     del ceiling  # start_server exports the flag itself; the value is for the caller's report
 
     # ADR-015 D2: --embed-backend is the single source of truth for the proxy. Validate the URL
@@ -253,20 +271,7 @@ def start_server(
     # Suppress tqdm progress bars in server mode (must be set before tqdm import)
     os.environ["TQDM_DISABLE"] = "1"
     if model:
-        # Pre-validate model specification before starting server (consistency with run.py)
-        from ..core.model_resolution import resolve_model_for_operation
-        from .workspace import is_explicit_path
-        resolved_name, _, ambiguous = resolve_model_for_operation(model)
-        if ambiguous:
-            raise ValueError(
-                f"Ambiguous model specification '{model}'. Could be: {ambiguous}"
-            )
-        if not resolved_name:
-            # Model not found - give appropriate error message
-            if is_explicit_path(model):
-                raise ValueError(f"Workspace not found: {model}")
-            else:
-                raise ValueError(f"Model not found in cache: {model}")
+        # Already known to resolve (validate_serve_options); the child loads it in lifespan
         os.environ["MLXK2_PRELOAD_MODEL"] = model
     if max_tokens is not None:
         os.environ["MLXK2_MAX_TOKENS"] = str(max_tokens)

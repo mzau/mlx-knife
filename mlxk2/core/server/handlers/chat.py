@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Un
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..streaming import apply_stop_sequences, finish_reason_of, log_generation_end, usage_of
+from ...runner.token_limits import apply_stop_sequences
+from ..streaming import finish_reason_of, log_generation_end, stopped_on_sequence, usage_of
 
 if TYPE_CHECKING:
     from ...runner import MLXRunner  # noqa: F401
@@ -353,6 +354,7 @@ async def handle_vision_chat_completion(
             top_p=top_p or 0.9,
             repetition_penalty=repetition_penalty or 1.0,
             image_id_map=image_id_map if images else None,
+            stop=stop,
         )
         finish_reason = finish_reason_of(runner)
     else:
@@ -382,6 +384,7 @@ async def handle_vision_chat_completion(
                     model=request_model,
                     shutdown_event=ctx.shutdown_event,
                     audio=effective_audio,
+                    stop=stop,
                 ),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache"}
@@ -399,6 +402,7 @@ async def handle_vision_chat_completion(
             top_p=top_p or 0.9,
             repetition_penalty=repetition_penalty or 1.0,
             audio=effective_audio,
+            stop=stop,
         )
 
     logger.info(
@@ -407,9 +411,8 @@ async def handle_vision_chat_completion(
         output_length=len(generated_text)
     )
 
-    generated_text, stopped = apply_stop_sequences(generated_text, stop)
-    if stopped:
-        finish_reason = "stop"
+    # The runner applied `stop` to the model's text, ahead of the filename header it
+    # prepends; cutting the finished text here would cut through that header.
     usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
 
     # Graceful degradation: emulate SSE for stream=true (single-chunk only)
@@ -452,6 +455,7 @@ def process_vision_chunks_server(
     top_p: float,
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
+    stop: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[str]]:
     """Process vision images in batches with isolated model instances per chunk.
 
@@ -466,10 +470,13 @@ def process_vision_chunks_server(
         image_id_map: Pre-computed global image IDs
         max_tokens, temperature, top_p, repetition_penalty: Generation params
         audio: Optional list of (filename, bytes) tuples for audio input
+        stop: Stop sequences, handed to the runner for each chunk; a match ends the
+              answer there and no later chunk is generated
 
     Returns:
         Combined text with merged filename mappings, and the aggregated finish
-        reason: "length" if any chunk was cut, else what the chunks reported.
+        reason: "stop" if a stop sequence matched, "length" if any chunk was cut,
+        else what the chunks reported.
     """
     from ...vision_runner import VisionRunner
 
@@ -491,9 +498,14 @@ def process_vision_chunks_server(
                 repetition_penalty=repetition_penalty,
                 image_id_map=image_id_map,
                 total_images=len(images),
+                stop=stop,
             )
             chunk_reason = finish_reason_of(runner)
+            stopped = stopped_on_sequence(runner)
         all_results.append(chunk_result)
+        if stopped:
+            finish_reason = "stop"
+            break
         if chunk_reason == "length" or finish_reason is None:
             finish_reason = chunk_reason
 

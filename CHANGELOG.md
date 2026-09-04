@@ -59,9 +59,10 @@
   lets `/v1/models` carry no per-model capability label at all. Canonical text: SERVER-HANDBOOK →
   *Models* and *HTTP Status Codes*.
 - `mlxk serve --json` printed its `starting` envelope before checking its options, so a rejected
-  `--chunk`, `--embed-backend` or `--max-tokens` put **two** JSON documents on stdout: a reader
-  that parses the first one sees a server coming up, and `json.load` fails on the pair. The options
-  are checked before anything is printed. The envelope's `max_tokens` now reports the ceiling that
+  `--chunk`, `--embed-backend` or `--max-tokens`, or a `--model` that did not resolve, put **two**
+  JSON documents on stdout: a reader that parses the first one sees a server coming up, and
+  `json.load` fails on the pair. The options, the model included, are checked before anything is
+  printed. The envelope's `max_tokens` now reports the ceiling that
   will apply — it named the flag, so an operator who set `MLXK2_MAX_TOKENS` was shown `null`.
 - Router rejects carry the ADR-004 envelope. An unmatched path (**404**) and a wrong method
   (**405**) are raised by Starlette's router before any endpoint runs, as the base
@@ -73,11 +74,15 @@
 - `stop` reached neither batch surface. `generate_batch` has no such parameter, so the field was
   accepted by the request model and dropped, and the client received the whole answer. Every batch
   surface — text, completions and vision — now cuts the text at the first matching sequence, removes it, and reports
-  `finish_reason: "stop"` — the tokens generated past the cut still count in `usage`. A stream that
-  ends on a stop sequence reports `"stop"` as well, where it had begun reporting `null`: breaking
-  out of the loop leaves the runner without a recorded exit. The check there is still per token, so
-  a sequence split across two of them is not seen. Canonical text: SERVER-HANDBOOK →
-  *Chat Completions* → sampling fields.
+  `finish_reason: "stop"` — the tokens generated past the cut still count in `usage`. On the
+  vision paths the runner applies the sequences to the model's text, ahead of the image-metadata
+  header it prepends: cut on the finished text, a `"\n\n"` ended the answer inside that header.
+  A chunked vision stream, a batch answer per chunk, cuts each chunk's text the same way and
+  generates no chunk past the match; it had returned before the cut. A stream that ends on a stop sequence
+  reports `"stop"` as well, where it had begun reporting `null`: breaking out of the loop leaves
+  the runner without a recorded exit. The check there is still per token, so a sequence split
+  across two of them is not seen. Canonical text: SERVER-HANDBOOK → *Chat Completions* →
+  sampling fields.
 - The sampling temperature followed the request model instead of the surface. `temperature`
   defaulted to `0.7` there, which made "unset" indistinguishable from an explicit `0.7`, so a
   default chat request against Whisper or Voxtral transcribed at `0.7` while the two audio file

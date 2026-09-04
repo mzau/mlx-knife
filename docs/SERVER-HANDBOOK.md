@@ -287,14 +287,18 @@ and `max_tokens`. `temperature` defaults to **0.7**, and to **0.0** against an a
 surface — transcription is not a creative task. An explicit value always wins.
 
 `stop` (string or list of strings) ends the answer at the first sequence that matches; the
-sequence itself is removed. What that costs differs by surface:
+sequence itself is removed. The match is against the model's text: the image-metadata header
+that precedes a vision answer is not searched. What that costs differs by surface:
 
 - **Batch:** the sequences are applied to the finished text, so the answer ends where OpenAI says
   it ends and `finish_reason` is `"stop"` — but the tokens generated past the cut were generated,
-  and still count in `usage`.
+  and still count in `usage`. A chunked vision stream is a batch answer per chunk: the chunk's
+  text is cut the same way, and no later chunk is generated.
 - **Stream:** each token is checked as it is emitted, and the terminal chunk reports `"stop"`. The
   check is per token, so a sequence split across two of them is not seen, and the token carrying a
   match has already been sent — the answer ends one token late rather than exactly at the sequence.
+- **Dedicated STT (Whisper, Voxtral) through chat completions:** the transcript is returned whole;
+  `stop` is not applied on that path.
 
 **Default chunk size:**
 1. Request parameter `chunk` (highest priority)
@@ -843,8 +847,8 @@ transcription backend produces the whole transcript regardless of the budget it 
 Every completion reports how it ended — batch responses in `choices[0].finish_reason`, streams in
 the final chunk before `data: [DONE]`:
 
-- `"stop"` — the model ended its turn (EOS), or a `stop` sequence matched on a batch
-  response. In a stream a `stop` sequence ends the answer but reports `null`.
+- `"stop"` — the model ended its turn (EOS), or a `stop` sequence matched; a stream that ends on
+  a sequence reports it in the final chunk as well.
 - `"length"` — the generation budget cut the answer. This is the OpenAI value: a client can offer
   the user a "continue", raise `max_tokens`, or shorten the prompt. On chunked vision requests one
   cut chunk makes the whole response `"length"`.

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 # The tool's generation ceiling per single request, text and vision. A statement
 # about mlx-knife, not about any model: "one generation emits at most N tokens;
@@ -126,3 +126,19 @@ def reported_finish_reason(reason: Optional[str]) -> Optional[str]:
     if reason == FINISH_INTERRUPTED:
         return FINISH_STOP
     return None
+
+
+def apply_stop_sequences(text: str, stop: Optional[Sequence[str]]) -> Tuple[str, bool]:
+    """Cut a batch answer at the first stop sequence, and say whether one matched.
+
+    Neither ``generate_batch`` nor mlx-vlm takes a ``stop``, so the sequences are applied
+    to the finished text — the answer ends where OpenAI says it ends, but the tokens past
+    the cut were generated and still count towards ``usage``. Token streams break out of
+    their loop instead.
+    """
+    if not stop:
+        return text, False
+    cuts = [text.find(s) for s in stop if s and s in text]
+    if not cuts:
+        return text, False
+    return text[:min(cuts)], True

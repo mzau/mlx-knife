@@ -898,9 +898,10 @@ def main():
             # Lazy import to avoid hard dependency on FastAPI/uvicorn at import time
             from .operations.serve import start_server, validate_serve_options
 
-            # Check the options before anything is printed: a rejected one must not be
-            # preceded by a "starting" envelope that a --json reader takes for a live server.
+            # Check the options, model included, before anything is printed: a rejected
+            # one must not be preceded by a "starting" envelope that reads as a live server.
             operator_ceiling = validate_serve_options(
+                model=getattr(args, "model", None),
                 max_tokens=getattr(args, "max_tokens", None),
                 chunk=getattr(args, "chunk", 1),
                 embed_backend=embed_backend,

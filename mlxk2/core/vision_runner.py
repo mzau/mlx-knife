@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..operations.workspace import is_workspace_path
-from .runner.token_limits import DEFAULT_MAX_TOKENS_VISION
+from .runner.token_limits import DEFAULT_MAX_TOKENS_VISION, FINISH_STOP, apply_stop_sequences
 
 
 @dataclass
@@ -51,6 +51,8 @@ class VisionRunner:
         self.last_prompt_tokens: Optional[int] = None
         self.last_completion_tokens: Optional[int] = None
         self.last_max_tokens: Optional[int] = None
+        # True when generate() cut the text at one of the stop sequences it was handed
+        self.last_stopped_on_sequence: bool = False
 
     def __enter__(self):
         self.load_model()
@@ -191,6 +193,7 @@ class VisionRunner:
         repetition_penalty: float = 1.0,
         image_id_map: Optional[Dict[str, int]] = None,
         total_images: Optional[int] = None,
+        stop: Optional[Sequence[str]] = None,
     ) -> str:
         """Generate a response with optional images and audio. Non-streaming.
 
@@ -205,6 +208,8 @@ class VisionRunner:
             image_id_map: Optional mapping of content_hash -> image_id for stable
                          numbering across requests. If None, uses request-scoped IDs.
             total_images: Total number of images in full batch (for chunking context)
+            stop: Stop sequences; the text is cut at the first match, before the
+                  filename mapping is prepended, and last_stopped_on_sequence says so
         """
         # Prepare image and audio file paths
         image_paths = self._prepare_images(images)
@@ -231,6 +236,7 @@ class VisionRunner:
             self.last_prompt_tokens = None
             self.last_completion_tokens = None
             self.last_max_tokens = effective_max_tokens
+            self.last_stopped_on_sequence = False
             gen_kwargs = {
                 "verbose": self.verbose,
                 "max_tokens": effective_max_tokens,
@@ -253,6 +259,12 @@ class VisionRunner:
             )
             self._record_outcome(result)
             normalized = self._normalize_result(result)
+
+            # Stop sequences apply to the model's text, never to the filename mapping
+            # prepended below: a "\n\n" would otherwise cut the header and leave no answer.
+            normalized, self.last_stopped_on_sequence = apply_stop_sequences(normalized, stop)
+            if self.last_stopped_on_sequence:
+                self.last_finish_reason = FINISH_STOP
 
             # Add filename mapping (even for single images - enables cross-model workflows)
             if images:

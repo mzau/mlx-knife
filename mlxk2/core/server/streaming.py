@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from threading import Event
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from ...errors import internal_error
 from ..runner.token_limits import reported_finish_reason
@@ -54,19 +54,9 @@ def finish_reason_of(runner) -> Optional[str]:
     return reported_finish_reason(getattr(runner, "last_finish_reason", None))
 
 
-def apply_stop_sequences(text: str, stop: Optional[List[str]]) -> Tuple[str, bool]:
-    """Cut a batch answer at the first stop sequence, and say whether one matched.
-
-    ``generate_batch`` takes no ``stop``, so the sequences are applied to the finished
-    text — the answer ends where OpenAI says it ends, but the tokens past the cut were
-    generated and still count towards ``usage``. Streams break out of the loop instead.
-    """
-    if not stop:
-        return text, False
-    cuts = [text.find(s) for s in stop if s and s in text]
-    if not cuts:
-        return text, False
-    return text[:min(cuts)], True
+def stopped_on_sequence(runner) -> bool:
+    """Whether the runner cut its last generation at a stop sequence it was handed."""
+    return bool(getattr(runner, "last_stopped_on_sequence", False))
 
 
 def _counted(runner, attribute: str, text: str, estimate) -> int:
@@ -465,12 +455,15 @@ async def stream_vision_chunks(
     model: str,
     shutdown_event: Event,
     audio: Optional[List[tuple]] = None,
+    stop: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
 
     Unlike _process_vision_chunks_server() which waits for all chunks,
     this yields SSE events immediately after each chunk finishes.
     Uses asyncio.to_thread() to keep the event loop responsive.
+    Each chunk's text is a batch answer, so the runner applies ``stop`` to it whole; a
+    match ends the response there and no later chunk is generated.
 
     Args:
         model_path: Path to model snapshot directory
@@ -485,6 +478,7 @@ async def stream_vision_chunks(
         model: Model name for SSE events
         shutdown_event: Thread event to check for shutdown
         audio: Optional list of (filename, bytes) tuples for audio input
+        stop: Stop sequences, handed to the runner for each chunk
 
     Yields:
         SSE event strings (data: {...}\n\n format)
@@ -551,14 +545,12 @@ async def stream_vision_chunks(
                     repetition_penalty=repetition_penalty,
                     image_id_map=image_id_map,
                     total_images=total_images,
+                    stop=stop,
                 )
-                return text, finish_reason_of(runner)
+                return text, finish_reason_of(runner), stopped_on_sequence(runner)
 
         try:
-            chunk_result, chunk_reason = await asyncio.to_thread(process_chunk, chunk)
-            # One cut chunk makes the whole response a cut response
-            if chunk_reason == "length" or finish_reason is None:
-                finish_reason = chunk_reason
+            chunk_result, chunk_reason, stopped = await asyncio.to_thread(process_chunk, chunk)
         except Exception as e:
             logger.error(f"Vision chunk {chunk_idx}/{len(chunks)} failed: {e}")
             # The message goes in the error object, not into delta.content — a chat
@@ -576,8 +568,16 @@ async def stream_vision_chunks(
             }, RuntimeError(f"vision chunk {chunk_idx}/{len(chunks)} failed: {e}"))
             return
 
+        # The runner cut the chunk's text at the sequence (before its filename header),
+        # which ends the answer here and outranks the reason of any earlier chunk.
+        # Otherwise one cut chunk makes the whole response a cut response.
+        if stopped:
+            finish_reason = "stop"
+        elif chunk_reason == "length" or finish_reason is None:
+            finish_reason = chunk_reason
+
         # Content event for this chunk (with separator for multi-chunk)
-        separator = "\n\n" if chunk_idx < len(chunks) else ""
+        separator = "" if stopped or chunk_idx == len(chunks) else "\n\n"
         content_event = {
             "id": completion_id,
             "object": "chat.completion.chunk",
@@ -597,6 +597,8 @@ async def stream_vision_chunks(
             total_chunks=len(chunks),
             output_length=len(chunk_result)
         )
+        if stopped:
+            break
 
     # Final event with finish_reason
     final_event = {

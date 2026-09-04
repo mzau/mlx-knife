@@ -34,11 +34,11 @@ from .server.streaming import (
     generate_chat_stream as _generate_chat_stream_impl,
     stream_vision_chunks as _stream_vision_chunks_impl,
     emulate_sse_stream as _emulate_sse_stream_impl,
-    apply_stop_sequences,
     finish_reason_of,
     log_generation_end,
     usage_of,
 )
+from .runner.token_limits import apply_stop_sequences
 from .server.handlers.models import handle_list_models as _handle_list_models_impl
 from .server.handlers.audio import (
     handle_audio_chat_completion as _handle_audio_chat_completion_impl,
@@ -881,6 +881,7 @@ def _process_vision_chunks_server(
     top_p: float,
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
+    stop: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[str]]:
     """Process vision images in batches with isolated model instances per chunk.
 
@@ -898,6 +899,7 @@ def _process_vision_chunks_server(
         top_p=top_p,
         repetition_penalty=repetition_penalty,
         audio=audio,
+        stop=stop,
     )
 
 
@@ -916,6 +918,7 @@ async def _stream_vision_chunks(
     created: int,
     model: str,
     audio: Optional[List[tuple]] = None,
+    stop: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
 
@@ -937,6 +940,7 @@ async def _stream_vision_chunks(
         model=model,
         shutdown_event=_shutdown_event,
         audio=audio,
+        stop=stop,
     ):
         yield chunk
 
