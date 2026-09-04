@@ -24,6 +24,8 @@ class ErrorType(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"  # HTTP 501: Feature not supported
     UNSUPPORTED_MULTIMODAL = "unsupported_multimodal"  # ADR-023: Model type outside verified multimodal list
     CAPABILITY_NOT_SUPPORTED = "capability_not_supported"  # HTTP 422: This model cannot do it
+    NOT_FOUND = "not_found"  # HTTP 404: no endpoint matches the request path
+    METHOD_NOT_ALLOWED = "method_not_allowed"  # HTTP 405: the endpoint exists, the method does not
     INTERNAL_ERROR = "internal_error"
     BAD_GATEWAY = "bad_gateway"  # HTTP 502: upstream backend unreachable (ADR-015 D2 embed proxy)
     GATEWAY_TIMEOUT = "gateway_timeout"  # HTTP 504: upstream backend timed out (ADR-015 D2 embed proxy)
@@ -44,6 +46,8 @@ ERROR_TYPE_TO_HTTP_STATUS: Dict[ErrorType, int] = {
     ErrorType.NOT_IMPLEMENTED: 501,  # Feature not supported
     ErrorType.UNSUPPORTED_MULTIMODAL: 501,  # ADR-023: Model type outside verified multimodal list
     ErrorType.CAPABILITY_NOT_SUPPORTED: 422,  # Request is well-formed, this model cannot serve it
+    ErrorType.NOT_FOUND: 404,  # Router reject: no endpoint for this path
+    ErrorType.METHOD_NOT_ALLOWED: 405,  # Router reject: wrong method on an existing endpoint
     ErrorType.INTERNAL_ERROR: 500,
     ErrorType.BAD_GATEWAY: 502,  # ADR-015 D2: embed backend unreachable
     ErrorType.GATEWAY_TIMEOUT: 504,  # ADR-015 D2: embed backend read-timeout

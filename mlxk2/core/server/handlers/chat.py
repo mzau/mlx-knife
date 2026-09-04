@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Un
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..streaming import finish_reason_of, log_generation_end
+from ..streaming import apply_stop_sequences, finish_reason_of, log_generation_end, usage_of
 
 if TYPE_CHECKING:
     from ...runner import MLXRunner  # noqa: F401
@@ -144,8 +144,7 @@ async def handle_text_chat_completion(
         )
         finish_reason = finish_reason_of(runner)
 
-        prompt_tokens = ctx.count_tokens(prompt)
-        completion_tokens = ctx.count_tokens(generated_text)
+        usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
 
         # Graceful degradation: emulate SSE for stream=true
         if stream:
@@ -171,11 +170,7 @@ async def handle_text_chat_completion(
                     "finish_reason": finish_reason
                 }
             ],
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens
-            }
+            "usage": usage
         }
 
     # Text model: use MLXRunner
@@ -217,10 +212,9 @@ async def handle_text_chat_completion(
     )
     log_generation_end(logger, runner, request_model, stream=False)
 
-    # Token counting
+    generated_text, stopped = apply_stop_sequences(generated_text, stop)
     total_prompt = ctx.extract_text(messages)
-    prompt_tokens = ctx.count_tokens(total_prompt)
-    completion_tokens = ctx.count_tokens(generated_text)
+    usage = usage_of(runner, total_prompt, generated_text, ctx.count_tokens)
 
     return {
         "id": completion_id,
@@ -234,14 +228,10 @@ async def handle_text_chat_completion(
                     "role": "assistant",
                     "content": generated_text
                 },
-                "finish_reason": finish_reason_of(runner)
+                "finish_reason": "stop" if stopped else finish_reason_of(runner)
             }
         ],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
-        }
+        "usage": usage
     }
 
 
@@ -416,8 +406,7 @@ async def handle_vision_chat_completion(
     )
 
     # Token counting
-    prompt_tokens = ctx.count_tokens(prompt)
-    completion_tokens = ctx.count_tokens(generated_text)
+    usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
 
     # Graceful degradation: emulate SSE for stream=true (single-chunk only)
     if stream:
@@ -443,11 +432,7 @@ async def handle_vision_chat_completion(
                 "finish_reason": finish_reason
             }
         ],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
-        }
+        "usage": usage
     }
 
 

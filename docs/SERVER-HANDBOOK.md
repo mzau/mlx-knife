@@ -182,9 +182,11 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 | `context_length_exceeded` | 400 | The prompt fills the model's context window; nothing is left to generate. The message names prompt tokens and window, `detail` carries both as `{"prompt_tokens", "context_length"}`; never retryable |
 | `access_denied` | 403 | File / cache permission denied |
 | `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
+| `not_found` | 404 | No endpoint matches the request path — most often a base URL that already ends in `/v1` |
+| `method_not_allowed` | 405 | The endpoint exists, but not for this method; the response carries an `Allow` header |
 | `ambiguous_match` | 400 | Model spec matches multiple cached models — disambiguate |
 | `payload_too_large` | 413 | Audio upload above the 50 MB limit, on either audio endpoint |
-| `capability_not_supported` | 422 | The request is well-formed and the feature exists, but *this* model cannot serve it |
+| `capability_not_supported` | 422 | The request is well-formed and the feature exists, but *this* model cannot serve it — a request carrying images or audio while the loaded model is text-only, or `/v1/audio/translations` against a model that cannot translate |
 | `download_failed` | 503 | HF download failed mid-stream |
 | `push_operation_failed` | 500 | `/v1/push`-style operation failed (CLI-only path; not user-reachable on the server today) |
 | `server_shutdown` | 503 | Lifespan shutdown in progress; new requests are rejected |
@@ -279,9 +281,20 @@ whisper-turbo or `.en` variant is the case you will meet (see
 **mlx-knife Extension Parameters:**
 - `chunk` (integer, optional): Batch size for vision processing (default: 1). Controls how many images are processed per inference session. Higher values may trigger OOM on resource-constrained systems. Maximum: 5 (enforced by server).
 
-**Also honored** (standard OpenAI sampling fields): `top_p` (default `0.9`), `stop` (string or
-list of strings), and `repetition_penalty` (default `1.1`, an mlx-knife-leaning default) in
-addition to `temperature` and `max_tokens`.
+**Also honored** (standard OpenAI sampling fields): `top_p` (default `0.9`) and
+`repetition_penalty` (default `1.1`, an mlx-knife-leaning default), in addition to `temperature`
+and `max_tokens`. `temperature` defaults to **0.7**, and to **0.0** against an audio model on any
+surface — transcription is not a creative task. An explicit value always wins.
+
+`stop` (string or list of strings) ends the answer at the first sequence that matches; the
+sequence itself is removed. What that costs differs by surface:
+
+- **Batch:** the sequences are applied to the finished text, so the answer ends where OpenAI says
+  it ends and `finish_reason` is `"stop"` — but the tokens generated past the cut were generated,
+  and still count in `usage`.
+- **Stream:** each token is checked as it is emitted, and the terminal chunk reports `"stop"`. The
+  check is per token, so a sequence split across two of them is not seen, and the token carrying a
+  match has already been sent — the answer ends one token late rather than exactly at the sequence.
 
 **Default chunk size:**
 1. Request parameter `chunk` (highest priority)
@@ -577,7 +590,8 @@ models follow alphabetically.
 
 > **No per-model capability label and no `dimensions` field.** Entries carry no capability
 > label (e.g. `chat` / `+vision` / `+audio`) — an unsupported modality is signalled at
-> **request** time with HTTP **501**, not advertised here — and no embedding `dimensions`
+> **request** time with HTTP **422** `capability_not_supported`, not advertised here — and no
+> embedding `dimensions`
 > (read it from the first `/v1/embeddings` response: the returned vector's length).
 
 **Response:**
@@ -822,7 +836,8 @@ Text budgets from every level are then clamped to the context window as above.
 Every completion reports how it ended — batch responses in `choices[0].finish_reason`, streams in
 the final chunk before `data: [DONE]`:
 
-- `"stop"` — the model ended its turn (EOS or a `stop` sequence).
+- `"stop"` — the model ended its turn (EOS), or a `stop` sequence matched on a batch
+  response. In a stream a `stop` sequence ends the answer but reports `null`.
 - `"length"` — the generation budget cut the answer. This is the OpenAI value: a client can offer
   the user a "continue", raise `max_tokens`, or shorten the prompt. On chunked vision requests one
   cut chunk makes the whole response `"length"`.
@@ -1008,7 +1023,7 @@ MLXK2_PORT=8000
 MLXK2_LOG_JSON=1          # JSON logs (production)
 MLXK2_LOG_LEVEL=info      # debug|info|warning|error
 
-# Feature gates
+# Feature gates — open only for 1 / true / yes / on; every other value, 0 included, keeps them shut
 MLXK2_ENABLE_PIPES=1              # Unix pipe integration (beta, 2.0.4-beta.1)
 MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha: embed, embed-serve, serve --embed-backend
 
@@ -1081,9 +1096,10 @@ python -m mlxk2.core.server_base
 ### Client Errors (4xx)
 - **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`; ambiguous model spec — `ambiguous_match`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
 - **403 Forbidden:** File or cache permission denied (`access_denied`)
-- **404 Not Found:** Model not found in cache or workspace
+- **404 Not Found:** Model not found in cache or workspace (`model_not_found`); no endpoint matches the request path (`not_found`)
+- **405 Method Not Allowed:** The endpoint exists, but not for this method (`method_not_allowed`); the response carries an `Allow` header. `HEAD` is not accepted where only `GET` is declared
 - **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints) (`payload_too_large`)
-- **422 Unprocessable Entity:** `POST /v1/audio/translations` only — an audio model that cannot translate (`capability_not_supported`)
+- **422 Unprocessable Entity:** The model cannot serve the request (`capability_not_supported`): a request carrying images or audio while the loaded model is text-only — the modality is rejected, never silently dropped — or `POST /v1/audio/translations` against an audio model that cannot translate
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
@@ -1249,9 +1265,11 @@ mlxk list | grep +audio
 
 **Symptom:** Transcription includes unexpected languages (Arabic, Hindi, etc.)
 
-**Cause:** Temperature too high (default text temperature 0.7 causes drift)
+**Cause:** A non-zero sampling temperature. Every audio surface defaults to `0.0` (greedy),
+`/v1/chat/completions` against an audio model included, so drift means the request set
+`temperature` itself.
 
-**Solution:** Use temperature 0.0 for audio:
+**Solution:** Drop `temperature` from the request, or send it as `0.0`:
 ```json
 {
   "temperature": 0.0

@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from fastapi import HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from ..streaming import usage_of
+
 if TYPE_CHECKING:
     from ...audio_runner import AudioRunner
 
@@ -29,7 +31,7 @@ async def handle_audio_chat_completion(
     request_model: str,
     messages: List[Dict[str, Any]],
     max_tokens: Optional[int],
-    temperature: Optional[float],
+    temperature: float,
     stream: bool,
     get_audio_model_fn: Callable[[str, bool], "AudioRunner"],
     emulate_sse_fn: Callable[[str, int, str, str, Optional[str]], AsyncGenerator[str, None]],
@@ -89,7 +91,7 @@ async def handle_audio_chat_completion(
         audio=list(audio),
         prompt=prompt or "Transcribe this audio.",
         max_tokens=max_tokens or 4096,
-        temperature=temperature or 0.0,
+        temperature=temperature,
     )
 
     logger.info(
@@ -98,9 +100,8 @@ async def handle_audio_chat_completion(
         output_length=len(generated_text)
     )
 
-    # Token counting
-    prompt_tokens = count_tokens_fn(prompt or "")
-    completion_tokens = count_tokens_fn(generated_text)
+    # The audio backend reports no token counts, so these stay an estimate.
+    usage = usage_of(runner, prompt or "", generated_text, count_tokens_fn)
 
     # Emulate SSE for stream=true
     if stream:
@@ -126,11 +127,7 @@ async def handle_audio_chat_completion(
                 "finish_reason": "stop"
             }
         ],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens
-        }
+        "usage": usage
     }
 
 

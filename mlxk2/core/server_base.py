@@ -34,8 +34,10 @@ from .server.streaming import (
     generate_chat_stream as _generate_chat_stream_impl,
     stream_vision_chunks as _stream_vision_chunks_impl,
     emulate_sse_stream as _emulate_sse_stream_impl,
+    apply_stop_sequences,
     finish_reason_of,
     log_generation_end,
+    usage_of,
 )
 from .server.handlers.models import handle_list_models as _handle_list_models_impl
 from .server.handlers.audio import (
@@ -95,7 +97,7 @@ class CompletionRequest(BaseModel):
     model: str
     prompt: Union[str, List[str]]
     max_tokens: Optional[int] = Field(default=None, ge=1)  # 0 generates nothing, negative is unbounded in mlx-lm
-    temperature: Optional[float] = 0.7
+    temperature: Optional[float] = None
     top_p: Optional[float] = 0.9
     stream: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = None
@@ -112,7 +114,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     max_tokens: Optional[int] = Field(default=None, ge=1)  # 0 generates nothing, negative is unbounded in mlx-lm
-    temperature: Optional[float] = 0.7
+    temperature: Optional[float] = None
     top_p: Optional[float] = 0.9
     stream: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = None
@@ -208,7 +210,7 @@ async def generate_completion_stream(
         prompt=prompt,
         request_model=request.model,
         max_tokens=max_tokens,
-        temperature=request.temperature,
+        temperature=get_effective_temperature(request.temperature),
         top_p=request.top_p,
         repetition_penalty=request.repetition_penalty,
         stop=stop,
@@ -236,7 +238,7 @@ async def generate_chat_stream(
         messages=message_dicts,
         request_model=request.model,
         max_tokens=max_tokens,
-        temperature=request.temperature,
+        temperature=get_effective_temperature(request.temperature),
         top_p=request.top_p,
         repetition_penalty=request.repetition_penalty,
         stop=stop,
@@ -266,6 +268,24 @@ def get_effective_max_tokens(requested_max_tokens: Optional[int]) -> int:
     if _default_max_tokens is not None:
         return _default_max_tokens
     return DEFAULT_MAX_TOKENS
+
+
+# Sampling defaults per surface. Same rule as the CLI (`run --temperature`, unset):
+# transcription is not a creative task, so it stays greedy unless the caller says otherwise.
+DEFAULT_TEMPERATURE = 0.7
+DEFAULT_TEMPERATURE_AUDIO = 0.0
+
+
+def get_effective_temperature(requested: Optional[float], *, audio: bool = False) -> float:
+    """The sampling temperature for one request: the request's, else the surface's default.
+
+    The request model leaves it unset rather than defaulting to 0.7, because a fixed
+    model-level default makes the two indistinguishable — and then the audio surface
+    cannot have a default of its own.
+    """
+    if requested is not None:
+        return requested
+    return DEFAULT_TEMPERATURE_AUDIO if audio else DEFAULT_TEMPERATURE
 
 
 def get_effective_max_tokens_vision(requested_max_tokens: Optional[int]) -> int:
@@ -467,7 +487,7 @@ async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatC
         request_model=request.model,
         messages=message_dicts,
         max_tokens=request.max_tokens,
-        temperature=request.temperature,
+        temperature=get_effective_temperature(request.temperature, audio=True),
         stream=request.stream,
         get_audio_model_fn=get_or_load_audio_model,
         emulate_sse_fn=_emulate_sse_stream,
@@ -691,15 +711,18 @@ async def create_completion(request: CompletionRequest):
             generated_text = runner.generate_batch(
                 prompt=prompt,
                 max_tokens=get_effective_max_tokens(request.max_tokens),
-                temperature=request.temperature,
+                temperature=get_effective_temperature(request.temperature),
                 top_p=request.top_p,
                 repetition_penalty=request.repetition_penalty,
                 use_chat_template=False
             )
             log_generation_end(logger, runner, request.model, stream=False)
 
-            prompt_tokens = count_tokens(prompt)
-            completion_tokens = count_tokens(generated_text)
+            generated_text, stopped = apply_stop_sequences(
+                generated_text,
+                request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None),
+            )
+            usage = usage_of(runner, prompt, generated_text, count_tokens)
 
             return CompletionResponse(
                 id=completion_id,
@@ -710,14 +733,10 @@ async def create_completion(request: CompletionRequest):
                         "index": 0,
                         "text": generated_text,
                         "logprobs": None,
-                        "finish_reason": finish_reason_of(runner)
+                        "finish_reason": "stop" if stopped else finish_reason_of(runner)
                     }
                 ],
-                usage={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens
-                }
+                usage=usage
             )
 
     except HTTPException as http_exc:
@@ -764,6 +783,17 @@ async def create_chat_completion(request: ChatCompletionRequest):
         # - Vision model + no media → Text path (text-only on vision model)
         # - Text model + images/audio → Text path (filters multimodal history)
         # - Text model + no media → Text path (normal text processing)
+        if (has_images or has_audio) and not is_vision_model:
+            # ADR-024: a modality this model does not have is a reject, not a silent drop.
+            # The text path would answer about the text alone, and the client would never
+            # learn its image was thrown away — which is also what lets /v1/models carry no
+            # capability label: the modality is answered for at request time (§I7).
+            modality = "images" if has_images else "audio"
+            raise HTTPException(
+                status_code=422,
+                detail=f"Model '{request.model}' is a text model and cannot process {modality}",
+            )
+
         if is_vision_model and (has_images or has_audio):
             # === VISION/AUDIO PATH (ADR-012 Phase 3, ADR-019 Phase 4) ===
             # Vision model with images/audio → full vision/audio processing
@@ -818,7 +848,7 @@ async def _handle_text_chat_completion(request: ChatCompletionRequest, runner: A
         request_model=request.model,
         messages=request.messages,
         max_tokens=request.max_tokens,
-        temperature=request.temperature,
+        temperature=get_effective_temperature(request.temperature),
         top_p=request.top_p,
         repetition_penalty=request.repetition_penalty,
         stream=request.stream,
@@ -914,7 +944,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
         request_model=request.model,
         messages=request.messages,
         max_tokens=request.max_tokens,
-        temperature=request.temperature,
+        temperature=get_effective_temperature(request.temperature),
         top_p=request.top_p,
         repetition_penalty=request.repetition_penalty,
         stream=request.stream,

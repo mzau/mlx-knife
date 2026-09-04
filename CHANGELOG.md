@@ -52,6 +52,40 @@
 
 ### Fixed
 
+- A request carrying images or audio for a text-only model answered **200** with the media
+  silently dropped: it was routed to the text path, which filters the image parts out and replies
+  about the text alone, so the client never learned its image had been thrown away. It is now
+  rejected with **422** `capability_not_supported` before anything is generated — the promise that
+  lets `/v1/models` carry no per-model capability label at all. Canonical text: SERVER-HANDBOOK →
+  *Models* and *HTTP Status Codes*.
+- Router rejects carry the ADR-004 envelope. An unmatched path (**404**) and a wrong method
+  (**405**) are raised by Starlette's router before any endpoint runs, as the base
+  `HTTPException` — whose class hierarchy does not include FastAPI's subclass, the one our
+  handler was registered for. Both left as `{"detail": ...}`: no error type, no `request_id` to
+  match against a log line. Two server-only error types are new, `not_found` and
+  `method_not_allowed`; the 405 keeps its `Allow` header. Canonical text: SERVER-HANDBOOK →
+  *Error Types* and *HTTP Status Codes*.
+- `stop` reached neither batch surface. `generate_batch` has no such parameter, so the field was
+  accepted by the request model and dropped, and the client received the whole answer. Both batch
+  paths now cut the text at the first matching sequence, remove it, and report
+  `finish_reason: "stop"` — the tokens generated past the cut still count in `usage`. A stream that
+  ends on a stop sequence reports `"stop"` as well, where it had begun reporting `null`: breaking
+  out of the loop leaves the runner without a recorded exit. The check there is still per token, so
+  a sequence split across two of them is not seen. Canonical text: SERVER-HANDBOOK →
+  *Chat Completions* → sampling fields.
+- The sampling temperature followed the request model instead of the surface. `temperature`
+  defaulted to `0.7` there, which made "unset" indistinguishable from an explicit `0.7`, so a
+  default chat request against Whisper or Voxtral transcribed at `0.7` while the two audio file
+  endpoints correctly used `0.0`. It is now unset by default and resolved per surface — `0.7` for
+  generation, `0.0` for audio — the rule the CLI has always applied.
+- `usage` reported a word-count estimate (`len(text.split()) * 1.3`) on every surface: a reply the
+  ceiling cut at five tokens came back as `completion_tokens: 2`, contradicting the
+  `Generation finished` line logged beside it, which uses the runner's real numbers. Text and
+  vision responses now carry those numbers; the audio backend records none, so there the estimate
+  stands, as it does on `/v1/embeddings`.
+- Feature gates opened for **any** non-empty value, so `MLXK2_ENABLE_PIPES=0` and
+  `MLXK2_ENABLE_ALPHA_FEATURES=0` switched the feature **on** — the check was plain truthiness.
+  They now read the value: `1`, `true`, `yes` and `on` open a gate, everything else keeps it shut.
 - `mlxk serve --max-tokens N` and `MLXK2_MAX_TOKENS=N` reached no request. `serve` supervises,
   and uvicorn imports `server_base` a second time under its real name: the ceiling was set on
   the module copy that starts the server, never on the copy that answers, while the startup

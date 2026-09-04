@@ -170,6 +170,15 @@ from .output.human import (
 )
 
 
+def _feature_gate_open(name: str) -> bool:
+    """Is an experimental feature gate open? Only an explicit yes opens it.
+
+    Plain truthiness would open the gate for ``MLXK2_ENABLE_PIPES=0`` — which is how an
+    operator turns a switch off — so the value is read, not just its presence.
+    """
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def format_json_output(data: Dict[str, Any]) -> str:
     """Format output as JSON."""
     return json.dumps(data, indent=2)
@@ -713,7 +722,7 @@ def main():
             # Support both positional prompt and --prompt flag (UX improvement)
             # IMPORTANT: Check for stdin ("-") FIRST before applying prompt_flag precedence
             prompt_value = None
-            pipes_enabled = bool(os.getenv("MLXK2_ENABLE_PIPES"))
+            pipes_enabled = _feature_gate_open("MLXK2_ENABLE_PIPES")
 
             # Normalize positional args
             positional_prompt = args.prompt if isinstance(args.prompt, list) else ([args.prompt] if args.prompt is not None else [])
@@ -877,7 +886,7 @@ def main():
             # ADR-015 D2: --embed-backend is experimental. Gate ONLY when the flag is present;
             # plain `serve` stays ungated (stable).
             embed_backend = getattr(args, "embed_backend", None)
-            if embed_backend and not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+            if embed_backend and not _feature_gate_open("MLXK2_ENABLE_ALPHA_FEATURES"):
                 result = handle_error(
                     "CommandError",
                     "serve --embed-backend is experimental and requires MLXK2_ENABLE_ALPHA_FEATURES=1",
@@ -942,7 +951,7 @@ def main():
                         verbose=getattr(args, "verbose", False))
         elif args.command == "embed":
             # Experimental surface (ADR-015) — reject before importing the operation.
-            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+            if not _feature_gate_open("MLXK2_ENABLE_ALPHA_FEATURES"):
                 result = handle_error(
                     "CommandError",
                     "embed is experimental and requires MLXK2_ENABLE_ALPHA_FEATURES=1",
@@ -980,7 +989,7 @@ def main():
             sys.exit(0 if result.get("status") == "success" else 1)
         elif args.command == "embed-serve":
             # Experimental surface (ADR-015 Slice D1) — reject before importing the operation.
-            if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
+            if not _feature_gate_open("MLXK2_ENABLE_ALPHA_FEATURES"):
                 result = handle_error(
                     "CommandError",
                     "embed-serve is experimental and requires MLXK2_ENABLE_ALPHA_FEATURES=1",

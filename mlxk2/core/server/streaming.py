@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from threading import Event
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from ...errors import internal_error
 from ..runner.token_limits import reported_finish_reason
@@ -44,6 +44,48 @@ def _get_logger():
 def finish_reason_of(runner) -> Optional[str]:
     """OpenAI ``finish_reason`` for the runner's last generation (None when it has none)."""
     return reported_finish_reason(getattr(runner, "last_finish_reason", None))
+
+
+def apply_stop_sequences(text: str, stop: Optional[List[str]]) -> Tuple[str, bool]:
+    """Cut a batch answer at the first stop sequence, and say whether one matched.
+
+    ``generate_batch`` takes no ``stop``, so the sequences are applied to the finished
+    text — the answer ends where OpenAI says it ends, but the tokens past the cut were
+    generated and still count towards ``usage``. Streams break out of the loop instead.
+    """
+    if not stop:
+        return text, False
+    cuts = [text.find(s) for s in stop if s and s in text]
+    if not cuts:
+        return text, False
+    return text[:min(cuts)], True
+
+
+def _counted(runner, attribute: str, text: str, estimate) -> int:
+    """One real token count, or the estimate when the runner has none.
+
+    The value must be an int, not merely present: a runner that recorded nothing leaves
+    ``None``, and a test double answers every attribute with another mock.
+    """
+    counted = getattr(runner, attribute, None)
+    return counted if isinstance(counted, int) else estimate(text)
+
+
+def usage_of(runner, prompt: str, generated: str, estimate) -> Dict[str, int]:
+    """Token counts for one completion: the runner's own numbers where it has them.
+
+    The text and vision runners record what they actually encoded and generated; the
+    audio backend does not, so there the word-count estimate stands, as it does on
+    ``/v1/embeddings``. Reporting the estimate everywhere made the response contradict
+    the ``Generation finished`` line logged beside it, which always used the real ones.
+    """
+    prompt_tokens = _counted(runner, "last_prompt_tokens", prompt, estimate)
+    completion_tokens = _counted(runner, "last_completion_tokens", generated, estimate)
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
 
 
 def log_generation_end(logger, runner, model: str, stream: bool) -> None:
@@ -115,6 +157,7 @@ async def generate_completion_stream(
     yield f"data: {json.dumps(initial_response)}\n\n"
 
     # Stream tokens
+    stopped_on_sequence = False
     try:
         token_count = 0
         for token in runner.generate_streaming(
@@ -151,6 +194,9 @@ async def generate_completion_stream(
             if stop:
                 stop_sequences = stop if isinstance(stop, list) else [stop]
                 if any(s in token for s in stop_sequences):
+                    # Breaking abandons the generator, so the runner never records an exit
+                    # and finish_reason_of() would answer null. The sequence *is* the reason.
+                    stopped_on_sequence = True
                     break
 
     except KeyboardInterrupt:
@@ -215,7 +261,7 @@ async def generate_completion_stream(
                 "index": 0,
                 "text": "",
                 "logprobs": None,
-                "finish_reason": finish_reason_of(runner)
+                "finish_reason": "stop" if stopped_on_sequence else finish_reason_of(runner)
             }
         ]
     }
@@ -273,6 +319,7 @@ async def generate_chat_stream(
     yield f"data: {json.dumps(initial_response)}\n\n"
 
     # Stream tokens
+    stopped_on_sequence = False
     try:
         for token in runner.generate_streaming(
             prompt=prompt,
@@ -306,6 +353,9 @@ async def generate_chat_stream(
             if stop:
                 stop_sequences = stop if isinstance(stop, list) else [stop]
                 if any(s in token for s in stop_sequences):
+                    # Breaking abandons the generator, so the runner never records an exit
+                    # and finish_reason_of() would answer null. The sequence *is* the reason.
+                    stopped_on_sequence = True
                     break
 
     except KeyboardInterrupt:
@@ -382,7 +432,7 @@ async def generate_chat_stream(
             {
                 "index": 0,
                 "delta": {},
-                "finish_reason": finish_reason_of(runner)
+                "finish_reason": "stop" if stopped_on_sequence else finish_reason_of(runner)
             }
         ]
     }

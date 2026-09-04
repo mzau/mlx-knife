@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ...errors import ErrorType, MLXKError, error_envelope
 from ..runner.token_limits import ContextLengthExceeded
@@ -29,6 +30,28 @@ _STATUS_TO_ERROR_TYPE = {
     504: ErrorType.GATEWAY_TIMEOUT,  # ADR-015 D2: embed backend read-timeout
     507: ErrorType.INSUFFICIENT_MEMORY,
 }
+
+
+# The router rejects a request before any endpoint runs, so these two never reach the
+# handler registered for FastAPI's subclass.
+_ROUTER_ERROR_TYPES = {404: ErrorType.NOT_FOUND, 405: ErrorType.METHOD_NOT_ALLOWED}
+
+
+async def router_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Give the router's own rejects the ADR-004 envelope.
+
+    Starlette's router raises the *base* HTTPException for an unmatched path (404) or a
+    wrong method (405). Its MRO does not contain FastAPI's subclass, so the handler
+    below never sees them and they leave as ``{"detail": ...}`` — no type, no request_id.
+    The 405 keeps its ``Allow`` header, which is the only useful part of that answer.
+    """
+    error = MLXKError(
+        type=_ROUTER_ERROR_TYPES.get(exc.status_code, ErrorType.INTERNAL_ERROR),
+        message=exc.detail,
+        retryable=False,
+    )
+    envelope = error_envelope(error, request_id=getattr(request.state, "request_id", None))
+    return JSONResponse(status_code=exc.status_code, content=envelope, headers=exc.headers)
 
 
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -89,5 +112,6 @@ async def context_length_exceeded_handler(request: Request, exc: ContextLengthEx
 def register_error_handlers(app: FastAPI) -> None:
     """Register the ADR-004 exception handlers on a FastAPI app."""
     app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, router_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(ContextLengthExceeded, context_length_exceeded_handler)
