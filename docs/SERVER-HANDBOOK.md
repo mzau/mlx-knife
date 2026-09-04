@@ -178,7 +178,7 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 
 | Type | HTTP | Meaning |
 |------|------|---------|
-| `validation_error` | 400 | Invalid request payload (e.g. too many images, malformed audio, `max_tokens` below 1) |
+| `validation_error` | 400 | Invalid request payload (e.g. an image over 20 MB or more than 50 MB of images in one request, malformed audio, `max_tokens` below 1) |
 | `context_length_exceeded` | 400 | The prompt fills the model's context window; nothing is left to generate. The message names prompt tokens and window, `detail` carries both as `{"prompt_tokens", "context_length"}`; never retryable |
 | `access_denied` | 403 | File / cache permission denied |
 | `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
@@ -361,7 +361,7 @@ Use this endpoint for **direct file upload** transcription with STT models (Whis
 
 **Request (multipart/form-data):**
 ```bash
-curl -X POST http://localhost:8080/v1/audio/transcriptions \
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@audio.wav" \
   -F "model=whisper-large" \
   -F "language=en" \
@@ -439,7 +439,7 @@ language. Only **multilingual, non-turbo** Whisper variants support it.
 
 **Request (multipart/form-data):**
 ```bash
-curl -X POST http://localhost:8080/v1/audio/translations \
+curl -X POST http://localhost:8000/v1/audio/translations \
   -F "file=@german-news.mp3" \
   -F "model=mlx-community/whisper-large-v3-4bit"
 ```
@@ -668,12 +668,12 @@ See `examples/vision_pipe.sh` for a practical Vision→Text pipeline example (CL
 
 **Supported:**
 - ✅ Base64 data URLs (`data:image/jpeg;base64,...`)
-- ✅ Multiple images (up to 5 per request)
+- ✅ Multiple images (no count limit; processed in chunks of up to 5, see `chunk`)
 - ✅ Formats: JPEG, PNG, GIF, WebP
 
 **Limits:**
 - **Per-image:** 20 MB max
-- **Count:** 5 images max per request
+- **Per request:** 50 MB of images in total; the count is not limited — images are processed in chunks of up to 5
 
 **Important Characteristics:**
 
@@ -720,7 +720,7 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 **Direct file upload** for STT models (Whisper, Voxtral). Recommended for pure transcription.
 
 ```bash
-curl -X POST http://localhost:8080/v1/audio/transcriptions \
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@audio.wav" \
   -F "model=whisper-large"
 ```
@@ -817,12 +817,12 @@ user message. Applies to every request a vision model serves, media or not.
 **Default:** **2048** tokens on server and CLI, set explicitly (not inherited from mlx-vlm).
 No window guard: the budget is the ceiling alone. The operator ceiling applies here too.
 
-**Override:**
+**Override** — an explicit `max_tokens` in the request:
 ```json
 {
   "model": "mlx-community/gemma-3n-E2B-it-4bit",
   "messages": [...],
-  "max_tokens": 4096  // Explicit override
+  "max_tokens": 4096
 }
 ```
 
@@ -1026,11 +1026,13 @@ degradation).
 ### Environment Variables
 
 ```bash
-# Server binding
-MLXK2_HOST=0.0.0.0
+# Server binding — `serve` sets these from --host and --port on every start, so an exported
+# value does not apply; the values shown are the flag defaults. Use the flags.
+MLXK2_HOST=127.0.0.1
 MLXK2_PORT=8000
 
-# Logging
+# Logging — --log-level sets MLXK2_LOG_LEVEL the same way, so an exported value does not
+# apply; an exported MLXK2_LOG_JSON=1 does apply without --log-json
 MLXK2_LOG_JSON=1          # JSON logs (production)
 MLXK2_LOG_LEVEL=info      # debug|info|warning|error
 
@@ -1043,8 +1045,21 @@ MLXK2_ENABLE_ALPHA_FEATURES=1     # Alpha: embed, embed-serve, serve --embed-bac
 # server refuses to start. Text budgets stay clamped to the context window minus the prompt.
 MLXK2_MAX_TOKENS=4096
 
-# Embeddings proxy (ADR-015) — normally set for you by `serve --embed-backend URL`,
-# but can be set directly. When unset, POST /v1/embeddings on serve returns 501.
+# Set for you by a flag; an exported value applies when the flag is absent
+MLXK2_PRELOAD_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit   # serve --model: load at startup, refuse to start if it cannot run
+MLXK2_VISION_CHUNK_SIZE=1         # serve --chunk: images per vision inference, 1-5; a request's `chunk` wins
+MLXK2_RELOAD=1                    # serve --reload: uvicorn auto-reload, development only
+
+# Environment only — no flag sets these
+MLXK_WORKSPACE_HOME=/path/to/workspaces   # workspace models resolve by name and appear in /v1/models
+MLXK2_EXIF_METADATA=0             # drop the EXIF columns (location, date, camera) from the vision filename header
+MLXK2_VISION_METADATA_CONTEXT=0   # do not prepend image metadata to the vision prompt
+MLXK2_AUDIO_SEGMENTS=1            # append a segment table (start, end, text) to transcripts
+MLXK2_DEBUG=1                     # print stream-error diagnostics to stdout
+
+# Embeddings proxy (ADR-015) — set for you by `serve --embed-backend URL` and cleared without
+# the flag, so an exported value cannot enable the proxy on its own. When unset,
+# POST /v1/embeddings on serve returns 501.
 MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
 ```
 
@@ -1106,7 +1121,7 @@ python -m mlxk2.core.server_base
 - **200 OK:** Request successful
 
 ### Client Errors (4xx)
-- **400 Bad Request:** Invalid input (e.g., too many images, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`; ambiguous model spec — `ambiguous_match`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
+- **400 Bad Request:** Invalid input (e.g., an oversized image or request, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`; ambiguous model spec — `ambiguous_match`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
 - **403 Forbidden:** File or cache permission denied (`access_denied`)
 - **404 Not Found:** Model not found in cache or workspace (`model_not_found`); no endpoint matches the request path (`not_found`)
 - **405 Method Not Allowed:** The endpoint exists, but not for this method (`method_not_allowed`); the response carries an `Allow` header. `HEAD` is not accepted where only `GET` is declared
@@ -1159,7 +1174,7 @@ mlx-knife itself requires Python 3.10+ (`requires-python >=3.10`), so a normal `
 cannot land on 3.9. This 501 only appears when running from a source checkout on an unsupported
 interpreter.
 
-**Symptom:** HTTP 501 "Vision/Audio models require Python 3.10+"
+**Symptom:** HTTP 501 "Vision models require Python 3.10+"
 
 **Solution:**
 ```bash
@@ -1174,7 +1189,7 @@ pip install mlx-knife
 
 ### Memory Constraint Errors (HTTP 507)
 
-**Symptom:** `Model requires XGB but only YGB available (70% of system RAM)`
+**Symptom:** `Model size (X GB) exceeds 70% of system memory (Y GB). Vision models crash with Metal OOM due to Vision Encoder overhead.`
 
 **Solutions:**
 1. Use smaller quantized model (e.g., 4-bit instead of 8-bit)
@@ -1187,12 +1202,12 @@ pip install mlx-knife
 
 **Cause:** Default `max_tokens: 2048` might be too low for complex descriptions
 
-**Solution:**
+**Solution:** raise `max_tokens` in the request:
 ```json
 {
   "model": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
   "messages": [...],
-  "max_tokens": 4096  // Increase limit
+  "max_tokens": 4096
 }
 ```
 
@@ -1200,7 +1215,7 @@ pip install mlx-knife
 
 **Common causes:**
 - Image size > 20 MB per image
-- More than 5 images per request
+- More than 50 MB of images in one request
 - Unsupported format (use JPEG, PNG, GIF, WebP)
 - External URLs (not supported, use Base64 data URLs)
 - Invalid Base64 encoding
@@ -1262,13 +1277,13 @@ or restrict uploads to WAV, MP3 and FLAC, which never touch an external tool.
 
 #### Audio Model Not Found
 
-**Symptom:** `Model does not support audio input`
+**Symptom:** `Model 'xxx' does not support audio inputs (no audio capability detected)`
 
 **Cause:** Model lacks audio capability
 
 **Solution:** Use an audio-capable model:
 ```bash
-mlxk list | grep +audio
+mlxk list | grep audio    # dedicated STT models list as `audio`, multimodal ones as `chat+audio`
 ```
 
 **Note:** Some HuggingFace models may require `mlxk convert --repair-index` before use.
@@ -1297,7 +1312,7 @@ mlxk list | grep +audio
 **Solution:** Use the correct model type:
 ```bash
 # For transcription endpoint: STT models
-curl -X POST http://localhost:8080/v1/audio/transcriptions \
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@audio.wav" \
   -F "model=whisper-large"
 
@@ -1346,7 +1361,8 @@ batch. Reduce the batch size or retry.
 
 | Resource | Limit | Reason |
 |----------|-------|--------|
-| Images per request | 5 | Metal OOM prevention |
+| Images per request | No limit; processed in chunks | Chunking keeps each Metal batch small |
+| Images per chunk | 5 (`chunk` maximum) | Metal API stability (tested) |
 | Image size | 20 MB | Metal OOM prevention |
 | Total image size | 50 MB | Metal OOM prevention |
 | **Audio per request (chat)** | **1** | **mlx-vlm limitation** |
@@ -1710,7 +1726,7 @@ Same image content = same ID (content-hash based).
    ```json
    {
      "messages": [
-       {"role": "user", "content": "describe"},  // No Base64!
+       {"role": "user", "content": "describe"},
        {"role": "assistant", "content": "Beach...\n\n| 1 | image_5733332c.jpeg |"},
        {"role": "user", "content": "What color?"},
        {"role": "assistant", "content": "Blue."},
@@ -1776,7 +1792,7 @@ For direct STT transcription with dedicated models (Whisper, Voxtral), use the `
 
 **Request (multipart/form-data):**
 ```bash
-curl -X POST http://localhost:8080/v1/audio/transcriptions \
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "file=@audio.wav" \
   -F "model=whisper-large" \
   -F "language=en" \
@@ -1793,16 +1809,21 @@ curl -X POST http://localhost:8080/v1/audio/transcriptions \
 | `response_format` | ❌ | `json` (default), `text`, `verbose_json` |
 | `temperature` | ❌ | Sampling temperature (default: 0.0) |
 
-**Response Formats:**
+**Response Formats** — `json` (default):
 
 ```json
-// json (default)
 {"text": "Hello world."}
+```
 
-// verbose_json
+`verbose_json`:
+
+```json
 {"task": "transcribe", "language": "en", "duration": 2.5, "text": "Hello world."}
+```
 
-// text
+`text`:
+
+```text
 Hello world.
 ```
 

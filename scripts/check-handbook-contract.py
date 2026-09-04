@@ -12,12 +12,20 @@ undocumented for a whole release line. This checks the parts that are mechanical
   pointers      no source paths or code constants leak into the contract
   language      no roadmap wording (the handbook states what is, not what may come)
   anchors       every internal link resolves
+  env vars      every variable the server reads is in the environment block and vice versa;
+                the binding variables show the flag defaults
+  limits        the Limits table agrees with the constants behind it
+  symptoms      quoted error messages in Troubleshooting are ones the code produces
+  ports         example URLs use the default port, or one the handbook starts with --port
+  json blocks   every ```json block parses (a // comment is not JSON)
 
-Run from anywhere; exits 1 on the first failing rule with the offending items named.
+Run from anywhere; exits 1 with every failing rule and its offending items named. An optional
+path checks another copy of the handbook — the previous commit's, to show a rule red.
 Deliberately not a pytest: this is a release step, run before the final commit.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -31,6 +39,41 @@ ERRORS = ROOT / "mlxk2/errors.py"
 SERVER_SOURCES = sorted(
     {*(ROOT / "mlxk2/core").glob("server*.py"), *(ROOT / "mlxk2/core/server").rglob("*.py")}
 )
+
+CLI = ROOT / "mlxk2/cli.py"
+VISION_ADAPTER = ROOT / "mlxk2/tools/vision_adapter.py"
+TOKEN_LIMITS = ROOT / "mlxk2/core/runner/token_limits.py"
+
+# What runs inside the server process besides the HTTP surface: the runners the handlers
+# call and the logging setup. A variable read here is one the server's operator can set.
+RUNTIME_SOURCES = SERVER_SOURCES + [
+    ROOT / "mlxk2/core/vision_runner.py",
+    ROOT / "mlxk2/core/audio_runner.py",
+    ROOT / "mlxk2/logging.py",
+]
+ENV_READ = re.compile(
+    r"""os\.(?:environ\.get|getenv)\(\s*["'](MLXK2?_[A-Z0-9_]+)["']"""
+    r"""|os\.environ\[\s*["'](MLXK2?_[A-Z0-9_]+)["']\s*\](?!\s*=[^=])"""
+)
+# The supervisor sets these from the flag on every start, so the value the block shows has
+# to be the flag's default — an exported value never reaches the server.
+FLAG_MIRRORS = {"MLXK2_HOST": "--host", "MLXK2_PORT": "--port", "MLXK2_LOG_LEVEL": "--log-level"}
+
+MIB = 1024 * 1024
+# Limits-table rows and the constant each must agree with; the divisor renders bytes as MB.
+LIMITS = {
+    "Image size": (VISION_ADAPTER, "MAX_IMAGE_SIZE_BYTES", MIB),
+    "Total image size": (VISION_ADAPTER, "MAX_TOTAL_IMAGE_SIZE_BYTES", MIB),
+    "Images per chunk": (VISION_ADAPTER, "MAX_SAFE_CHUNK_SIZE", 1),
+    "Audio size": (VISION_ADAPTER, "MAX_AUDIO_SIZE_BYTES", MIB),
+    "Vision max_tokens": (TOKEN_LIMITS, "DEFAULT_MAX_TOKENS_VISION", 1),
+    "Text max_tokens": (TOKEN_LIMITS, "DEFAULT_MAX_TOKENS", 1),
+}
+# Rows the code bounds with no number at all, so the row may not carry one either.
+UNBOUNDED_ROWS = ("Images per request",)
+
+# What a quoted error message may leave out: the parts the code fills in at runtime.
+PLACEHOLDERS = re.compile(r"xxx|[XYN] ?GB|\.\.\.|<[^>]+>|\{[^}]+\}")
 
 # Wording that promises rather than describes. `not_implemented` (the error type) is not a
 # match — the underscore keeps it out of "not yet".
@@ -156,11 +199,147 @@ def rule_anchors(hb: str) -> str:
     return f"{len(links)} internal links resolve"
 
 
+def serve_flag_default(flag: str) -> str:
+    """The argparse default `mlxk serve` gives a flag, as the string an operator would export."""
+    match = re.search(
+        rf"""serve_parser\.add_argument\(\s*["']{flag}["'][^)]*?default=("[^"]*"|'[^']*'|[\w.]+)""",
+        CLI.read_text(),
+        re.S,
+    )
+    return match.group(1).strip("\"'") if match else ""
+
+
+def rule_env_vars(hb: str) -> str:
+    block = re.search(r"### Environment Variables\s*```bash\n(.*?)```", hb, re.S)
+    if not block:
+        fail("env vars", "no ```bash block under '### Environment Variables'")
+        return "block missing"
+    documented = dict(re.findall(r"^(MLXK2?_[A-Z0-9_]+)=(\S*)", block.group(1), re.M))
+
+    read = set()
+    for src in RUNTIME_SOURCES:
+        read |= {a or b for a, b in ENV_READ.findall(src.read_text())}
+    if missing := sorted(read - documented.keys()):
+        fail("env vars", f"read by the server but absent from the environment block: {missing}")
+
+    code = "\n".join(p.read_text() for p in ROOT.glob("mlxk2/**/*.py"))
+    if phantom := sorted(n for n in documented if f'"{n}"' not in code and f"'{n}'" not in code):
+        fail("env vars", f"in the environment block but named nowhere in the code: {phantom}")
+
+    for name, flag in FLAG_MIRRORS.items():
+        default = serve_flag_default(flag)
+        if name in documented and documented[name] != default:
+            fail("env vars", f"{name} shows {documented[name]!r}; `serve {flag}` defaults to {default!r}")
+    return f"{len(read)} read by the server, {len(documented)} in the block"
+
+
+def _constant(path: Path, name: str) -> int:
+    match = re.search(rf"^{name}\s*=\s*([0-9][0-9 *]*)", path.read_text(), re.M)
+    if not match:
+        raise LookupError(f"{name} is not defined in {path.relative_to(ROOT)}")
+    return eval(match.group(1), {"__builtins__": {}})  # digits and '*' only, by the regex
+
+
+def rule_limits(hb: str) -> str:
+    table = re.search(r"^\| Resource \| Limit \| Reason \|\n\|[-| ]+\|\n((?:\|.*\|\n)+)", hb, re.M)
+    if not table:
+        fail("limits", "no table with a 'Resource | Limit | Reason' header")
+        return "table missing"
+    rows = {}
+    for line in table.group(1).splitlines():
+        cells = [c.strip().strip("*").strip() for c in line.strip("|").split("|")]
+        rows[cells[0]] = cells[1]
+
+    def limit_of(label):
+        return next((v for k, v in rows.items() if k.startswith(label)), None)
+
+    for label, (path, name, divisor) in LIMITS.items():
+        row = limit_of(label)
+        if row is None:
+            fail("limits", f"no row starting with {label!r}")
+            continue
+        number = re.search(r"\d[\d,]*", row)
+        stated = int(number.group(0).replace(",", "")) if number else None
+        expected = _constant(path, name) // divisor
+        if stated != expected:
+            fail("limits", f"{label}: the handbook says {stated}, the code says {expected}")
+    for label in UNBOUNDED_ROWS:
+        row = limit_of(label)
+        if row is None:
+            fail("limits", f"no row starting with {label!r}")
+        elif re.search(r"\d", row):
+            fail("limits", f"{label}: the code sets no number, the handbook shows {row!r}")
+    return f"{len(LIMITS) + len(UNBOUNDED_ROWS)} rows checked against the code"
+
+
+def _runtime_text() -> str:
+    """The source as a message reads once formatted: implicit string concatenations joined,
+    f-string fields removed — the parts only the runtime knows."""
+    text = "\n".join(p.read_text() for p in sorted(ROOT.glob("mlxk2/**/*.py")))
+    text = re.sub(r'"\s*\n\s*f?"', "", text)
+    return re.sub(r"\{[^{}]*\}", "", text)
+
+
+def rule_symptoms(hb: str) -> str:
+    source = _runtime_text()
+    quoted, wrong = 0, []
+    for lineno, line in enumerate(hb.splitlines(), 1):
+        if not line.startswith("**Symptom:**"):
+            continue
+        for backticked, double_quoted in re.findall(r"`([^`]+)`|\"([^\"]+)\"", line):
+            text = backticked or double_quoted
+            if len(text.split()) < 3:
+                continue  # an endpoint or a flag, not a message
+            quoted += 1
+            if PLACEHOLDERS.sub("", text) not in source:
+                wrong.append(f"line {lineno}: {text!r}")
+    if wrong:
+        fail("symptoms", "quoted messages the code does not produce — " + "; ".join(wrong))
+    return f"{quoted - len(wrong)} of {quoted} quoted messages found in the code"
+
+
+def rule_ports(hb: str) -> str:
+    default = serve_flag_default("--port")
+    declared = {default} | set(re.findall(r"--port (\d+)", hb))
+    stray = []
+    for lineno, line in enumerate(hb.splitlines(), 1):
+        for port in re.findall(r"(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)", line):
+            if port not in declared:
+                stray.append(f"line {lineno}: {port}")
+    if stray:
+        fail("ports", f"URLs on a port no --port in the handbook starts (default {default}): " + "; ".join(stray))
+    return f"default {default}, {len(declared) - 1} more started with --port"
+
+
+def _parses(text: str) -> bool:
+    try:
+        json.loads(text)
+        return True
+    except ValueError:
+        return False
+
+
+def rule_json_blocks(hb: str) -> str:
+    bad = []
+    for match in re.finditer(r"```json\n(.*?)```", hb, re.S):
+        body = re.sub(r"^data: ", "", match.group(1), flags=re.M)  # an SSE event is JSON after its prefix
+        body = body.replace("{...}", "{}").replace("[...]", "[]")
+        body = re.sub(r'(?<!")\.\.\.(?!")', "null", body)  # a bare ... stands for a value
+        lines = [line for line in body.splitlines() if line.strip()]
+        if not (_parses(body) or all(_parses(line) for line in lines)):
+            bad.append(f"line {hb[: match.start()].count(chr(10)) + 1}")
+    if bad:
+        fail("json blocks", "```json blocks that do not parse (a // comment is not JSON): " + ", ".join(bad))
+    total = len(re.findall(r"```json", hb))
+    return f"{total - len(bad)} of {total} blocks parse"
+
+
 def main() -> int:
-    if not HANDBOOK.exists():
-        print(f"ERROR: {HANDBOOK} not found", file=sys.stderr)
+    handbook_path = Path(sys.argv[1]) if len(sys.argv) > 1 else HANDBOOK
+    if not handbook_path.exists():
+        print(f"ERROR: {handbook_path} not found", file=sys.stderr)
         return 2
-    handbook = HANDBOOK.read_text()
+    handbook = handbook_path.read_text()
 
     rules = [
         ("routes", rule_routes),
@@ -170,8 +349,13 @@ def main() -> int:
         ("pointers", rule_pointers),
         ("language", rule_language),
         ("anchors", rule_anchors),
+        ("env vars", rule_env_vars),
+        ("limits", rule_limits),
+        ("symptoms", rule_symptoms),
+        ("ports", rule_ports),
+        ("json blocks", rule_json_blocks),
     ]
-    print(f"SERVER-HANDBOOK contract check ({HANDBOOK.relative_to(ROOT)})\n")
+    print(f"SERVER-HANDBOOK contract check ({handbook_path})\n")
     for name, rule in rules:
         before = len(failures)
         summary = rule(handbook)

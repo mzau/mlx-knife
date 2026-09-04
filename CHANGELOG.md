@@ -46,7 +46,14 @@
   streaming client closes the connection, which it never did: the generation stops, nothing is
   logged for it, and the guarantee rests on the ASGI runtime rather than on code in this server.
   `scripts/check-handbook-contract.py` checks the decidable part of that contract before a
-  release commit.
+  release commit. Five more of its rules hold what a full audit found drifting: the environment
+  block against the variables the server reads (seven were effective and unnamed; the binding
+  variables showed an address `serve` never uses), the Limits table against its constants (the
+  image count per request is not limited — five is the chunk), quoted error messages against the
+  code (three were paraphrases or inventions), example ports against the default, and every JSON
+  example against a parser (four carried `//` comments). The README no longer shows `MLXK2_HOST`
+  and `MLXK2_PORT` as a way to bind the server: the supervisor sets both from the flags on every
+  start, so an exported value never reaches it.
 - ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
   installed ruff version defaults to.
 

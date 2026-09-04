@@ -1033,8 +1033,8 @@ Control server behavior without command-line flags:
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|
-| `MLXK2_HOST` | Server bind address | `127.0.0.1` | 2.0.0 |
-| `MLXK2_PORT` | Server port | `8000` | 2.0.0 |
+| `MLXK2_HOST` | Server bind address — set by `serve --host` on every start; an exported value does not apply | `127.0.0.1` | 2.0.0 |
+| `MLXK2_PORT` | Server port — set by `serve --port` on every start; an exported value does not apply | `8000` | 2.0.0 |
 | `MLXK2_PRELOAD_MODEL` | Model to load at startup (set by `--model` flag) | (none) | 2.0.0-beta |
 | `MLXK2_MAX_TOKENS` | Server-wide ceiling for text and vision generation, same as `serve --max-tokens`; text stays clamped to the model's context window minus the prompt | `32768` text / `2048` vision | 2.0.4 |
 | `MLXK2_RELOAD` | Enable Uvicorn auto-reload (development only) | `0` (disabled) | 2.0.0 |
@@ -1060,8 +1060,8 @@ mlxk run pixtral --chunk 5 --image photos/*.jpg "Describe images"  # Uses 5, not
 ### Server Configuration Examples
 
 ```bash
-# Custom host/port binding
-MLXK2_HOST=0.0.0.0 MLXK2_PORT=9000 mlxk serve
+# Custom host/port binding (the flags; the variables are set from them)
+mlxk serve --host 0.0.0.0 --port 9000
 
 # Preload model for faster first request
 MLXK2_PRELOAD_MODEL="mlx-community/Qwen2.5-3B-Instruct-4bit" mlxk serve
@@ -1129,7 +1129,7 @@ When multiple sources define the same setting, precedence order is:
 **Example:**
 ```bash
 # CLI flag wins over environment variable
-MLXK2_PORT=9000 mlxk serve --port 8080  # Uses port 8080, not 9000
+MLXK2_MAX_TOKENS=1024 mlxk serve --max-tokens 4096  # Ceiling 4096, not 1024
 ```
 
 
