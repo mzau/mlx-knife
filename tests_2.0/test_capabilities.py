@@ -323,6 +323,66 @@ class TestDetectVisionCapabilityTruthyDict:
         assert detect_vision_capability(tmp_path, config) is True
 
 
+class TestServerProbeUsesTheListDetector:
+    """One vision detector for every surface: list/health/run and the server probe.
+
+    qwen2_5_vl and qwen3_5 are verified vision types outside VISION_MODEL_TYPES. They
+    reach the vision runtime through a truthy vision_config, and both carry the checkpoint
+    markers (temporal_patch_size, video_preprocessor_config.json) that a second,
+    server-only detector read as "video model, not vision".
+    """
+
+    @staticmethod
+    def _write(tmp_path, config, preprocessor=None, video=False):
+        (tmp_path / "config.json").write_text(json.dumps(config))
+        if preprocessor is not None:
+            (tmp_path / "preprocessor_config.json").write_text(json.dumps(preprocessor))
+        if video:
+            (tmp_path / "video_preprocessor_config.json").write_text(json.dumps({"temporal_patch_size": 2}))
+
+    def test_common_reexports_the_core_detector(self):
+        from mlxk2.core import capabilities as core
+        from mlxk2.operations import common
+        assert common.detect_vision_capability is core.detect_vision_capability
+
+    def test_qwen3_5_shape_is_vision_for_the_server_probe(self, tmp_path):
+        assert "qwen3_5" not in VISION_MODEL_TYPES
+        config = {"model_type": "qwen3_5", "vision_config": {"depth": 27}}
+        self._write(
+            tmp_path, config,
+            preprocessor={"processor_class": "Qwen3VLProcessor", "temporal_patch_size": 2},
+            video=True,
+        )
+
+        caps = probe_model_capabilities(tmp_path, "Qwen3.8-27B-nvfp4")
+
+        assert caps.is_vision is True
+        caps.python_version = (3, 10, 0)
+        caps.mlx_vlm_available = True
+        caps.memory_ratio = 0.5
+        policy = select_backend_policy(caps, context="server", has_images=True)
+        assert policy.backend == Backend.MLX_VLM
+        assert policy.decision == PolicyDecision.ALLOW
+
+    def test_qwen2_5_vl_shape_is_vision_for_the_server_probe(self, tmp_path):
+        assert "qwen2_5_vl" not in VISION_MODEL_TYPES
+        config = {"model_type": "qwen2_5_vl", "vision_config": {"depth": 32}}
+        self._write(
+            tmp_path, config,
+            preprocessor={"processor_class": "Qwen2_5_VLProcessor", "temporal_patch_size": 2},
+        )
+
+        assert probe_model_capabilities(tmp_path, "Qwen2.5-VL-32B-Instruct-4bit").is_vision is True
+
+    def test_video_markers_without_vision_config_stay_non_vision(self, tmp_path):
+        """The checkpoint-marker exclusion is untouched: it decides only when config.json says nothing."""
+        config = {"model_type": "llama"}
+        self._write(tmp_path, config, preprocessor={"temporal_patch_size": 2}, video=True)
+
+        assert detect_vision_capability(tmp_path, config) is False
+        assert probe_model_capabilities(tmp_path, "test/text-model").is_vision is False
+
+
 class TestHelperFunctions:
     """Tests for helper functions."""
 

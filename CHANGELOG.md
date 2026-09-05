@@ -76,6 +76,13 @@
   rejected with **422** `capability_not_supported` before anything is generated — the promise that
   lets `/v1/models` carry no per-model capability label at all. Canonical text: SERVER-HANDBOOK →
   *Models* and *HTTP Status Codes*.
+- The server probed vision with a detector of its own. It lacked the `vision_config` branch
+  `list` decides by, and it read `temporal_patch_size` / `video_preprocessor_config.json` as
+  "video model, not vision", so a vision model outside the type whitelist whose checkpoint carries
+  those markers — `qwen2_5_vl`, `qwen3_5` — was loaded on the text backend: in 2.0.7 a **200**
+  with the image dropped, and with the reject above a **422** for a model `/v1/models` lists as
+  vision. One detector now serves `list`, `health`, `run` and the server; `list` output is
+  unchanged.
 - `mlxk serve --json` printed its `starting` envelope before checking its options, so a rejected
   `--chunk`, `--embed-backend` or `--max-tokens`, or a `--model` that did not resolve, put **two**
   JSON documents on stdout: a reader that parses the first one sees a server coming up, and

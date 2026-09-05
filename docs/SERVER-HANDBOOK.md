@@ -1908,6 +1908,7 @@ When switching from Vision or Audio to Text model mid-conversation:
   - **DOCUMENTED:** closing a streaming connection stops the generation; nothing is logged for it. Behaviour unchanged.
   - **FIXED:** **413** and **422** carry `payload_too_large` / `capability_not_supported`; both reported `internal_error` before, so a deliberate reject looked like a server fault.
   - **FIXED:** `/v1/models` lists vision models it wrongly withheld — a check rejected every checkpoint carrying `temporal_patch_size` under transformers 5.x, and those models load and answer correctly.
+  - **FIXED:** a vision model outside the type whitelist (`qwen2_5_vl`, `qwen3_5`) is served by the vision backend. The server's own probe called it text-only, so an image request got an answer with the image dropped in 2.0.7 and, after the reject above, a **422**. The server now decides with the detector behind `mlxk list`.
   - **CHANGED:** `mlxk serve` takes one teardown path for Ctrl-C, `SIGTERM` and `SIGHUP`, and stops itself if its supervisor dies. Exit `143` on signal, `137` when forced.
   - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (524 MB smaller install).
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.

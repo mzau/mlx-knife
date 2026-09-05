@@ -120,7 +120,7 @@ probe/
 | `detect_framework()` | `common.py` | MLX vs PyTorch vs GGUF |
 | `detect_model_type()` | `common.py` | chat, base, audio, embedding |
 | `detect_capabilities()` | `common.py` | text-generation, chat, vision, audio, audio-translate-en, embeddings (authoritative: `Capability` enum, `capabilities.py`) |
-| `detect_vision_capability()` | `common.py` | vision_config, preprocessor_config |
+| `detect_vision_capability()` | `capabilities.py` (re-exported by `common.py`) | vision_config, model_type, preprocessor_config — the one detector behind `list`, `health`, `run` and the server probe |
 | `detect_audio_capability()` | `common.py` | audio_config, WhisperFeatureExtractor |
 | `detect_audio_translate_en_capability()` | `capabilities.py` | Whisper translate→English sub-capability (#54): multilingual non-turbo only |
 | `detect_audio_backend()` | `common.py` | MLX_AUDIO (STT) vs MLX_VLM (multimodal) |
@@ -347,9 +347,10 @@ API:
 
 The core probe/policy implementation lives in `mlxk2/core/capabilities.py`:
 
-- `probe_model_capabilities(model_path)` → Capability detection (`capabilities.py:429`)
-- `select_backend_policy(capabilities, context)` → Backend selection (`capabilities.py:564`)
-- `classify_convert_target(config)` → Single-dispatcher for `convert --quantize` (`capabilities.py:164`)
+- `detect_vision_capability(model_path, config)` → the vision decision every surface shares (`capabilities.py:568`)
+- `probe_model_capabilities(model_path)` → Capability detection (`capabilities.py:578`)
+- `select_backend_policy(capabilities, context)` → Backend selection (`capabilities.py:721`)
+- `classify_convert_target(config)` → Single-dispatcher for `convert --quantize` (`capabilities.py:250`)
 
 Workspace Model implementation (ADR-022, ADR-025):
 

@@ -22,6 +22,7 @@ from ..core.capabilities import (
     VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES,
     Capability, Backend, extract_chat_template,
     detect_audio_translate_en_capability, classify_embedder,
+    detect_vision_capability,
 )
 
 
@@ -224,74 +225,6 @@ def detect_model_type(hf_name: str, config: Optional[Dict[str, Any]], tok_hints:
     if "instruct" in name or "chat" in name:
         return "chat"
     return "base"
-
-
-def detect_vision_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bool:
-    """Detect whether the model snapshot supports vision inputs.
-
-    Video models (AutoVideoProcessor) are excluded as they require PyTorch/Torchvision.
-    mlx-vlm only supports image vision models (AutoImageProcessor).
-
-    Note: skip_vision flag indicates vision components can be skipped for text-only
-    inference, but does NOT mean the model lacks vision capabilities.
-    """
-    try:
-        if isinstance(config, dict):
-            # Check for vision_config presence (Mistral-Small 3.1 has vision_config with skip_vision).
-            # Require truthy dict: empty {} stub doesn't denote a real vision tower.
-            vision_config = config.get("vision_config")
-            if isinstance(vision_config, dict) and vision_config:
-                # Vision config present = vision model (even if skip_vision=true)
-                return True
-
-            mt = config.get("model_type")
-            if isinstance(mt, str) and mt.lower() in VISION_MODEL_TYPES:
-                return True
-
-            if config.get("image_processor"):
-                return True
-
-            preprocessor_cfg = config.get("preprocessor_config")
-            if isinstance(preprocessor_cfg, dict):
-                # Exclude video processors (requires PyTorch/Torchvision)
-                if preprocessor_cfg.get("processor_class") == "AutoVideoProcessor":
-                    return False
-                return True
-
-        if _has_any(
-            probe,
-            (
-                "preprocessor_config.json",
-                "processor_config.json",
-                "image_processor_config.json",
-                "**/preprocessor_config.json",
-                "**/processor_config.json",
-                "**/image_processor_config.json",
-            ),
-        ):
-            # Check if it's a video processor (requires PyTorch/Torchvision)
-            # Video models have video_preprocessor_config.json or temporal_patch_size
-            if (probe / "video_preprocessor_config.json").exists():
-                return False
-
-            preprocessor_path = probe / "preprocessor_config.json"
-            if preprocessor_path.exists():
-                try:
-                    import json
-                    with open(preprocessor_path) as f:
-                        preprocessor_data = json.load(f)
-                    if isinstance(preprocessor_data, dict):
-                        # Video model indicators
-                        if preprocessor_data.get("processor_class") == "AutoVideoProcessor":
-                            return False
-                        if "temporal_patch_size" in preprocessor_data:
-                            return False
-                except Exception:
-                    pass
-            return True
-    except Exception:
-        return False
-    return False
 
 
 def detect_audio_capability(probe: Path, config: Optional[Dict[str, Any]]) -> bool:

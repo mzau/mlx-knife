@@ -451,11 +451,18 @@ def _has_any(path: Path, patterns: Tuple[str, ...]) -> bool:
 def _detect_vision_from_config(config: Optional[Dict[str, Any]]) -> bool:
     """Detect vision capability from config.json content.
 
-    Video models (AutoVideoProcessor) are excluded as they require PyTorch/Torchvision.
-    mlx-vlm only supports image vision models (AutoImageProcessor).
+    A truthy `vision_config` returns first, so the video exclusion below decides only for a
+    config that declares no vision tower and no whitelisted type. That exclusion is what is
+    left of the torch premise measurement disproved in 2.0.8; it is kept, not defended.
     """
     if not isinstance(config, dict):
         return False
+
+    # A truthy vision_config is the signal for the types outside VISION_MODEL_TYPES
+    # (qwen2_5_vl, qwen3_5, mistral3 even with skip_vision); an empty {} stub is no tower.
+    vision_config = config.get("vision_config")
+    if isinstance(vision_config, dict) and vision_config:
+        return True
 
     # Check model_type
     mt = config.get("model_type")
@@ -559,6 +566,16 @@ def _check_text_runtime_compatibility(model_path: Path, model_name: str, config:
         return True, None
 
 
+def detect_vision_capability(model_path: Path, config: Optional[Dict[str, Any]]) -> bool:
+    """The one vision detector behind `list`, `health`, `run` and the server probe.
+
+    `operations.common` re-exports it. A second implementation without the
+    `vision_config` branch is what sent qwen2_5_vl / qwen3_5 to the text backend on
+    the server while `list` called them vision.
+    """
+    return _detect_vision_from_config(config) or _detect_vision_from_files(model_path)
+
+
 def probe_model_capabilities(
     model_path: Path,
     model_name: str,
@@ -602,11 +619,7 @@ def probe_model_capabilities(
     if caps.config_valid and caps.config:
         caps.model_type = caps.config.get("model_type")
 
-    # Detect vision capability (from config AND files)
-    caps.is_vision = (
-        _detect_vision_from_config(caps.config) or
-        _detect_vision_from_files(model_path)
-    )
+    caps.is_vision = detect_vision_capability(model_path, caps.config)
 
     # Detect chat capability
     if caps.config_valid and caps.config:
