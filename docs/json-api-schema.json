@@ -32,7 +32,8 @@
       "properties": {
         "name": {"type": "string"},
         "status": {"type": "string", "enum": ["healthy", "unhealthy"]},
-        "reason": {"type": "string"}
+        "reason": {"type": "string"},
+        "managed": {"type": "boolean", "description": "Workspace entries only (0.2.4): the workspace has a valid sentinel, so its provenance metadata can be trusted. An unmanaged third-party directory is still health-checked. Absent for cache entries."}
       },
       "required": ["name", "status", "reason"],
       "additionalProperties": false
@@ -52,6 +53,7 @@
           "items": {"type": "string"},
           "description": "Model capabilities. Values are not normative - see mlxk2/core/capabilities.py Capability enum for currently detected values."
         },
+        "context_length": {"type": ["integer", "null"], "minimum": 1, "description": "Context window the checkpoint states, top level or text_config (0.2.4). null when it states none - never invented, because W-P would turn a made-up number into a guard over the prompt."},
         "health": {"type": "string", "enum": ["healthy", "unhealthy"]},
         "runtime_compatible": {"type": "boolean"},
         "reason": {"type": ["string", "null"]},
@@ -59,7 +61,7 @@
         "origin": {"type": ["string", "null"], "description": "Source HF repo for workspaces (from sentinel). null for cache models."},
         "content_hash": {"type": ["string", "null"], "pattern": "^(sha256:[0-9a-f]{64}|[0-9a-f]{64})$", "description": "Aggregate content hash of workspace files. v2 (ADR-025, 2.0.6+) format: 'sha256:<64-hex>' — the 'sha256:' prefix is part of the value (algorithm-self-describing for future hash_algorithm bumps). v1 (2.0.5) format: raw '<64-hex>' without prefix; v1 workspaces continue to surface their legacy hash until migrated via 'mlxk show <name> --recalc-hash'. Pattern accepts both formats during the migration window. null for cache models."},
         "hash_modified": {"type": ["string", "null"], "description": "ISO8601 timestamp when content_hash was computed. null for cache models."},
-        "clean": {"type": ["boolean", "null"], "description": "Workspace clean indicator: true=unchanged since clone, false=modified, null=unknown/cache model."},
+        "clean": {"type": ["boolean", "null"], "description": "Workspace content unchanged since content_hash was last pinned (clone or convert, re-pinned by 'mlxk show <name> --recalc-hash'), as far as the hash detects. Says nothing about health or runnability. null when there is no v2 baseline to compare against: cache model, unmanaged directory, pre-v2 sentinel, corrupt index."},
         "display_name": {"type": ["string", "null"], "description": "Human-friendly display name for workspaces. Relative path for relative patterns, absolute path for absolute patterns. null for cache models."},
         "quantization": {"type": ["object", "null"], "description": "Quantization info from config.json (bits, group_size). null for non-quantized models."}
       },
@@ -67,7 +69,7 @@
         "name", "hash", "size_bytes", "last_modified", "framework",
         "model_type", "capabilities", "health", "runtime_compatible", "cached"
       ],
-      "description": "Extended in 0.2.0 (ADR-022): added origin, content_hash, hash_modified, clean fields for workspace-first paradigm. All nullable (null for cache models). clean=true means workspace unchanged since clone, clean=false means modified. Extended in 0.2.2 (ADR-025): content_hash format gained 'sha256:' prefix in v2 algorithm; pattern constraint documented."
+      "description": "Extended in 0.2.0 (ADR-022): added origin, content_hash, hash_modified, clean fields for workspace-first paradigm. All nullable (null for cache models). clean=true means workspace unchanged since its content_hash was last pinned, clean=false means modified. Extended in 0.2.2 (ADR-025): content_hash format gained 'sha256:' prefix in v2 algorithm; pattern constraint documented."
     },
     "fileEntry": {
       "type": "object",
@@ -126,7 +128,8 @@
                 "additionalProperties": false,
                 "properties": {
                   "models": {"type": "array", "items": {"$ref": "#/definitions/modelObject"}},
-                  "count": {"type": "integer", "minimum": 0}
+                  "count": {"type": "integer", "minimum": 0},
+                  "system": {"$ref": "#/definitions/systemObject"}
                 },
                 "required": ["models", "count"]
               }

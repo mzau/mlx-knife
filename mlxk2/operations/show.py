@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
+from ..core.runner.token_limits import get_model_context_length
 from ..core.model_resolution import resolve_model_for_operation
 from .common import build_model_object
 from .workspace import is_workspace_path, read_workspace_metadata, update_workspace_hash
@@ -80,8 +81,11 @@ def extract_model_metadata(model_path):
                 metadata["quantization"] = f"{quant['bits']}bit"
         
         # Size parameters
-        if "max_position_embeddings" in config:
-            metadata["context_length"] = config["max_position_embeddings"]
+        # Top level first, then text_config: reading max_position_embeddings here
+        # reported nothing for multimodal checkpoints, which state it one level down.
+        context_length = get_model_context_length(str(model_path))
+        if context_length is not None:
+            metadata["context_length"] = context_length
         if "vocab_size" in config:
             metadata["vocab_size"] = config["vocab_size"]
         if "hidden_size" in config:

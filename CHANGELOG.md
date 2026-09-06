@@ -17,13 +17,17 @@
   `context_length` and by the runner, where 4096 was invented before; with no window known there
   is no window guard, only the 32768 ceiling. The vision default of 2048 tokens is now set
   explicitly on the CLI as well as the server instead of being inherited from mlx-vlm.
-- JSON API 0.2.3 → 0.2.4 ([#67](https://github.com/mzau/mlx-knife/issues/67), part 1):
+- JSON API 0.2.3 → 0.2.4 ([#67](https://github.com/mzau/mlx-knife/issues/67)):
   `run --json` data carries `finish_reason` (`"stop"` / `"length"` / `null`),
   `context_length_exceeded` joins the error types, and the schema title is reconciled with the
   spec — it said 0.2.2. A test now holds the four places the version lives (`mlxk2.spec`, the
   schema title, the spec header and its newest Version History entry) to one value, importing
   `jsonschema` hard so a broken `[test]` install fails instead of skipping. Additive; no
-  breaking change. Canonical text: `docs/json-api-specification.md` → Version History.
+  breaking change. `list --json` also carries the `system` object that only `version --json`
+  had; the model object carries `context_length`; health entries for workspaces carry
+  `managed` on every branch (one of three did, outside the schema). The `clean` description
+  now says "since the last pin" (`clone`, `convert`, `--recalc-hash`), not "since clone";
+  behaviour unchanged. Canonical text: `docs/json-api-specification.md` → Version History.
 - `mlx-audio` moves `0.4.4` → `0.4.8`. The regression that held the pin — 0.4.6 handed
   resampling to the decoder, whose stopband is far too shallow for an ASR front-end
   ([mlx-audio#870](https://github.com/Blaizzy/mlx-audio/issues/870)) — is fixed upstream and

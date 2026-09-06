@@ -510,6 +510,19 @@ def _load_config_json(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
+def build_system_object() -> Optional[Dict[str, Any]]:
+    """The envelope's ``system`` block: what this node has, not what a model needs.
+
+    Carried by ``version --json`` since 0.1.6 and by ``list`` / ``health`` since
+    0.2.4 — "does this model fit here" cost two calls before. ``None`` where the
+    figure is unavailable, never a zero standing in for unknown.
+    """
+    from ..core.capabilities import _get_system_memory_bytes
+
+    memory_bytes = _get_system_memory_bytes()
+    return {"memory_total_bytes": memory_bytes} if memory_bytes is not None else None
+
+
 def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[Path]) -> Dict[str, Any]:
     """Build the common model object for list/show using unified detection.
 
@@ -522,6 +535,7 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     """
     from ..operations.health import is_model_healthy, check_runtime_compatibility, health_check_workspace
     from ..operations.workspace import is_workspace_path, read_workspace_metadata, is_workspace_clean
+    from ..core.runner.token_limits import get_model_context_length
 
     # Compute commit hash if selected path is a snapshot dir
     commit_hash: Optional[str] = None
@@ -633,6 +647,10 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         "framework": framework,
         "model_type": model_type,
         "capabilities": capabilities,
+        # The window the checkpoint states; None when it states none (0.2.4).
+        # Read through the same function the runner budgets with, rather than a
+        # second reading of the same keys — one rule for W, wherever it is asked.
+        "context_length": get_model_context_length(str(probe)),
         "health": "healthy" if healthy else "unhealthy",
         "runtime_compatible": runtime_compatible,
         "reason": reason,

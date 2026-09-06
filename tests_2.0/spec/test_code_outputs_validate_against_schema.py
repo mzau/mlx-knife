@@ -69,6 +69,36 @@ def test_health_output_matches_schema(mock_models, isolated_cache):
 
 
 @pytest.mark.spec
+def test_health_workspace_entries_match_schema(mock_models, isolated_cache, workspace_home):
+    """The three workspace branches of health: explicit path, resolved name, whole home.
+
+    2.0.7 emitted ``managed`` on the explicit-path branch while the schema forbade it,
+    and no test saw it. Every branch now emits the same entry shape, and the entry
+    carries no identity fields — those stay on list/show.
+    """
+    from mlxk2.operations.health import health_check_operation
+    validator = _get_validator()
+
+    ws = workspace_home / "test-model-bf16"
+    for label, payload in (
+        ("path", health_check_operation(str(ws))),
+        ("name", health_check_operation("test-model-bf16")),
+        ("all", health_check_operation()),
+    ):
+        errors = sorted(validator.iter_errors(payload), key=lambda e: e.path)
+        assert not errors, f"health ({label}) output invalid: {errors[0].message} at {'/'.join(map(str, errors[0].path)) or '<root>'}"
+        assert payload["status"] == "success", label
+        assert "system" not in payload["data"], label
+        entries = payload["data"]["healthy"] + payload["data"]["unhealthy"]
+        for entry in entries:
+            assert not {"content_hash", "clean"} & set(entry), (label, entry)
+        workspace_entries = [e for e in entries if e["name"] in (str(ws.resolve()), ws.name)]
+        assert workspace_entries, label
+        for entry in workspace_entries:
+            assert isinstance(entry.get("managed"), bool), (label, entry)
+
+
+@pytest.mark.spec
 def test_rm_output_matches_schema(monkeypatch, mock_models, isolated_cache):
     from mlxk2.operations.rm import rm_operation
     validator = _get_validator()

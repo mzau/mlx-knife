@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
 from ..core.cache import get_current_model_cache, cache_dir_to_hf
-from .common import build_model_object
+from .common import build_model_object, build_system_object
 from .workspace import find_matching_workspaces, is_explicit_path, is_workspace_path, get_workspace_home
 
 
@@ -93,7 +93,8 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
             "command": "list",
             "data": {
                 "models": models,
-                "count": len(models)
+                "count": len(models),
+                "system": build_system_object()
             },
             "error": None
         }
@@ -122,7 +123,8 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
             "command": "list",
             "data": {
                 "models": models,
-                "count": len(models)
+                "count": len(models),
+                "system": build_system_object()
             },
             "error": None
         }
@@ -155,7 +157,8 @@ def list_models(pattern: str = None) -> Dict[str, Any]:
         "command": "list",
         "data": {
             "models": models,
-            "count": len(models)
+            "count": len(models),
+            "system": build_system_object()
         },
         "error": None
     }

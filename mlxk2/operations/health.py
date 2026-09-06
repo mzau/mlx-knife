@@ -521,6 +521,23 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
         return False, str(e) if str(e) else "Runtime check failed"
 
 
+def _workspace_health_entry(name: str, workspace_path: Path) -> Tuple[dict, bool]:
+    """One shape for every workspace entry `health` reports.
+
+    Three call sites built this dict and only one carried ``managed``, outside
+    the schema. Identity (``content_hash``, ``clean``) stays on ``list``/``show``:
+    health is status, and ``clean`` is drift since the last pin, not health.
+    """
+    healthy, reason, managed = health_check_workspace(workspace_path)
+    entry = {
+        "name": name,
+        "status": "healthy" if healthy else "unhealthy",
+        "reason": reason,
+        "managed": managed,
+    }
+    return entry, healthy
+
+
 def health_check_operation(model_pattern=None):
     """Health check operation for JSON API with model resolution support.
 
@@ -530,7 +547,8 @@ def health_check_operation(model_pattern=None):
     - No pattern: Check all cached models
 
     Returns minimal format per JSON API Schema 0.1.5:
-    - healthy/unhealthy arrays contain: {name, status, reason}
+    - healthy/unhealthy arrays contain: {name, status, reason}; workspace entries
+      add `managed` (0.2.4)
     - Uses same integrity checks as list/show (_check_snapshot_health)
     """
     result = {
@@ -553,14 +571,7 @@ def health_check_operation(model_pattern=None):
         if model_pattern and is_workspace_path(model_pattern):
             # This is a workspace directory - use workspace health check
             workspace_path = Path(model_pattern).resolve()
-            healthy, reason, managed = health_check_workspace(workspace_path)
-
-            model_info = {
-                "name": str(workspace_path),
-                "status": "healthy" if healthy else "unhealthy",
-                "reason": reason,
-                "managed": managed
-            }
+            model_info, healthy = _workspace_health_entry(str(workspace_path), workspace_path)
 
             result["data"]["summary"]["total"] = 1
             if healthy:
@@ -594,12 +605,7 @@ def health_check_operation(model_pattern=None):
             # (from MLXK_WORKSPACE_HOME fuzzy match). Detect and delegate.
             resolved_path = Path(resolved_name)
             if resolved_path.is_absolute() and is_workspace_path(str(resolved_path)):
-                healthy, reason, managed = health_check_workspace(resolved_path)
-                model_info = {
-                    "name": resolved_path.name,
-                    "status": "healthy" if healthy else "unhealthy",
-                    "reason": reason
-                }
+                model_info, healthy = _workspace_health_entry(resolved_path.name, resolved_path)
                 result["data"]["summary"]["total"] = 1
                 if healthy:
                     result["data"]["healthy"].append(model_info)
@@ -628,12 +634,7 @@ def health_check_operation(model_pattern=None):
             if workspace_home:
                 for ws_dir in sorted(workspace_home.iterdir(), key=lambda x: x.name):
                     if ws_dir.is_dir() and is_workspace_path(str(ws_dir)):
-                        healthy, reason, managed = health_check_workspace(ws_dir)
-                        model_info = {
-                            "name": ws_dir.name,
-                            "status": "healthy" if healthy else "unhealthy",
-                            "reason": reason
-                        }
+                        model_info, healthy = _workspace_health_entry(ws_dir.name, ws_dir)
                         if healthy:
                             result["data"]["healthy"].append(model_info)
                             result["data"]["summary"]["healthy_count"] += 1

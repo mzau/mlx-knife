@@ -150,6 +150,10 @@ All commands that return model information use the same minimal model object.
 - `runtime_compatible`: `true` | `false` (0.1.5+, always present).
 - `reason`: `string | null` (0.1.5+, describes first problem found, null when both checks pass).
 - `cached`: `true` for cache-managed models (HuggingFace cache), `false` for workspace paths (user-managed local directories).
+- `origin`: `string | null` (0.2.0) — source HuggingFace repo of a workspace, from its sentinel. `null` for cache models.
+- `content_hash`: `string | null` (0.2.0) — aggregate hash of the workspace content as last pinned; format in the schema (`sha256:<64-hex>` since v2, ADR-025). `null` for cache models.
+- `hash_modified`: `string | null` (0.2.0) — ISO-8601 UTC timestamp when `content_hash` was computed. `null` for cache models.
+- `clean`: `boolean | null` (0.2.0) — the workspace content is unchanged since its `content_hash` was last pinned, by `clone` or `convert`, or re-pinned by `show <name> --recalc-hash`, as far as the hash detects. It says nothing about health or runnability; those are `health` and `runtime_compatible`. `null` when there is no v2 baseline to compare against: cache model, unmanaged directory, pre-v2 sentinel, corrupt index.
 
 Notes:
 - No human-readable `size` field; only `size_bytes`.
@@ -1321,7 +1325,7 @@ All commands use consistent exit codes for scripting:
 
 ## Version History
 
-- **0.2.4** (2.0.8): `run` data carries `finish_reason` — `"stop"` when the model ended its turn, `"length"` when the generation budget cut the answer, `null` when no reason is known (audio transcription). Added `context_length_exceeded` to the error types (`run` rejects a prompt that fills the model's context window before generating). Additive; no breaking changes.
+- **0.2.4** (2.0.8): `list --json` carries the `system` object (`memory_total_bytes`) that only `version --json` had, so "does this model fit on this node" is one call instead of two. The model object carries `context_length` — the window the checkpoint states, read at the top level or in `text_config`, `null` when it states none; `show --json` read only the top-level key before and reported nothing for multimodal checkpoints. Health entries for workspaces carry `managed` on every branch — one of the three emitted it before, outside the schema. The `clean` description is made precise: unchanged since `content_hash` was last pinned (`clone`, `convert`, `show --recalc-hash`), not only since clone; behaviour unchanged. `run` data carries `finish_reason` — `"stop"` when the model ended its turn, `"length"` when the generation budget cut the answer, `null` when no reason is known (audio transcription). Added `context_length_exceeded` to the error types (`run` rejects a prompt that fills the model's context window before generating). Additive; no breaking changes.
 - **0.2.3** (2.0.7): Added `embed` to the `command` enum so `mlxk embed --json` renders the standard envelope (records under `data.records`). embed's default JSONL rendering is unchanged. Experimental (gated by `MLXK2_ENABLE_ALPHA_FEATURES=1`). Additive; no breaking changes.
 - **0.2.2** (2.0.6): Additive tightening — `content_hash` format documented (was: prose-only "SHA256 hash"); `pattern` constraint added to schema accepting both v2 (`sha256:<64-hex>`) and legacy v1 (`<64-hex>`) formats during the migration window. Reflects the v1→v2 format change introduced by ADR-025 (content_hash v2 algorithm) where the `sha256:` prefix entered the API output. Pre-2.0.6 (v1) workspaces continue to surface their legacy raw-hex value until migrated via `mlxk show <name> --recalc-hash`. No new fields, no breaking changes for consumers that treat `content_hash` as an opaque string.
 - **0.2.1** (2.0.5-beta.3): Added `data` schema definitions for `clone` and `convert` commands (if/then blocks with required fields)
