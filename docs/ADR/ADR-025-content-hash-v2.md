@@ -4,6 +4,7 @@
 **Created:** 2026-04-19
 **Drafted:** 2026-04-20
 **Accepted:** 2026-04-20
+**Updated:** 2026-09-07 — the "Threat model" section is reworded as drift detection against a baseline the local author pinned. The mechanism is unchanged. The old vocabulary ("tamper detector", "security property", "local attacker") suggested a guarantee `clean` never made and had begun to read as a verification primitive; `--recalc-hash` is now named for what it is, the author's re-pin.
 **Related:** ADR-018 (Convert Operation), ADR-022 (Workspace-First Paradigm), Issue [#52](https://github.com/mzau/mlx-knife/issues/52) (label `bug`, `2.0.x-branch`)
 **Target:** 2.0.6
 
@@ -457,18 +458,29 @@ no "is this v2 or v3?" guessing.
 
 ---
 
-## Threat model
+## What the hash detects, and what it does not
 
-content_hash v2 is a **post-download tamper detector** for the files
-mlx-knife manages on behalf of the user. Stating the threat model
-explicitly keeps the "everything full-content" design readable — it
-is a security property, not just an integrity nicety.
+content_hash v2 is a **drift detector against a baseline the local
+author pinned**. `clone` and `convert` set the baseline of the
+workspace they create; `mlxk show <name> --recalc-hash` re-pins it
+after a deliberate edit, such as a hand-applied
+`processor_config.json` fix. From that moment on, `Clean: ✓` means: the workspace content is unchanged
+since the last pin, as far as the hash detects (§1 coverage). It is
+an identity statement about the files. It says nothing about health,
+runnability, or whether the model works — those are separate checks
+(`health`, `runtime_compatible`, and execution itself), and none of
+them implies another.
 
-### In scope — attacks v2 detects
+Stating the scope explicitly keeps the "everything full-content"
+design readable: the files below are the ones a loader reads and, in
+common configurations, executes, so a silent change to any of them is
+exactly what `Clean: ✗` is there to surface.
+
+### In scope — changes v2 detects
 
 Files inside a workspace that mlx-* / transformers subsequently
-**loads and, in common configurations, executes**. If a local process
-or remote sync quietly swaps one of these post-clone, v2 flips
+**load and, in common configurations, execute**. If a local process
+or a remote sync changes one of these after the last pin, v2 flips
 `Clean: ✗` on the next `mlxk ls`:
 
 - `config.json` with `auto_map` / `architectures` entries +
@@ -484,24 +496,24 @@ or remote sync quietly swaps one of these post-clone, v2 flips
 
 The v1 algorithm missed the Jinja templates, processor configs, and
 tokenizer *content* entirely (it only hashed tokenizer filename +
-size). These are the precise files most interesting to an attacker
-who wants code execution on a user who runs `mlxk run` or loads the
-model via transformers. Closing this gap is the primary driver for
-"everything full-content" in §1 — not aesthetic thoroughness.
+size). These are the files whose silent change matters most to a
+user who runs `mlxk run` or loads the model via transformers.
+Closing this gap is the primary driver for "everything full-content"
+in §1 — not aesthetic thoroughness.
 
-### Out of scope — what v2 does not protect against
+### Out of scope — what v2 does not claim
 
-- **Pre-download tampering** (malicious HuggingFace repo). v2 hashes
-  what was downloaded; if the upstream ships poisoned files, the
-  hash faithfully captures the poison as "clean". Defense lives in
-  `source_revision` pinning + HF-upstream trust (signed commits,
-  LFS hash verification), which are upstream concerns.
-- **Local attacker with filesystem write + ability to run
-  `--recalc-hash`.** Such an attacker refreezes the hash after
-  tampering; `Clean: ✓` will lie. No content hash can defend against
-  this — content hashes detect drift from a baseline, they do not
-  authenticate the baseline. Defense lives at the OS permissions
-  layer.
+- **Upstream identity.** v2 hashes what was downloaded. Whether the
+  download matches the HuggingFace repository is a different
+  question, answered by `source_revision` pinning and HF-upstream
+  trust (signed commits, LFS hash verification), which are upstream
+  concerns.
+- **Authenticating the baseline.** `--recalc-hash` is the author's
+  tool: whoever can write the workspace can re-pin it, and `Clean: ✓`
+  then measures against the new state. A content hash detects drift
+  from a baseline; it does not vouch for who set it. Keeping unwanted
+  writers out of a workspace is the job of filesystem permissions,
+  not of the hash.
 - **sha256 collisions.** Not computationally feasible at current
   attack economics; not considered.
 
@@ -518,9 +530,9 @@ the content_hash code path.
 ### Safetensors tensor bytes — a deliberate non-coverage
 
 Safetensors files are hashed header-only (§1). Tensor data is not
-read. An attacker who modifies tensor bytes — for example, a subtle
-weight perturbation to induce targeted misclassification — is **not
-detected** by v2 content_hash.
+read. A change to tensor bytes that leaves the header intact — for
+example, a subtle weight perturbation — is **not detected** by v2
+content_hash.
 
 This is a deliberate trade, not an oversight:
 
@@ -528,15 +540,14 @@ This is a deliberate trade, not an oversight:
   snapshot pin (`source_revision`) already guarantee at download
   time. Recomputing it locally on every `mlxk ls` would add
   minute-scale I/O to a status command for no additional trust.
-- Post-download tensor tampering requires local filesystem write,
-  which already falls into the out-of-scope "local attacker"
-  category above.
-- The header hash still catches *structural* tampering — added or
-  removed tensors, reshaping, dtype changes. A post-download swap
-  that replaces weights with structurally different weights is
-  caught.
+- Changing tensor bytes after the pin requires local filesystem
+  write, and whoever has that can also re-pin (see "Authenticating
+  the baseline" above). The hash was never the barrier there.
+- The header hash still catches *structural* changes — added or
+  removed tensors, reshaping, dtype changes. A post-pin swap that
+  replaces weights with structurally different weights is caught.
 
-If a future threat model ever demands tensor-byte coverage, it
+If a future requirement ever demands tensor-byte coverage, it
 becomes a new per-file `strategy: "full-content"` for safetensors
 entries and bumps `hash_algorithm` per §9.
 

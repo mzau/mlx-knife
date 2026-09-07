@@ -851,13 +851,13 @@ mlxk pull "model-name" --force-resume
 | Column | Meaning |
 |--------|---------|
 | `Name` | Model identifier (compact form; workspaces use `display_name`) |
-| `Hash` | First 7 chars of content hash |
+| `Hash` | First 7 chars of the identity hash: the HuggingFace commit for cache models, the content hash for workspaces |
 | `Size` | Combined weights + config size |
 | `Modified` | Last filesystem modification |
 | `Src` | `cache` · `ws` (clean workspace) · `ws*` (modified) · `ws?` (v1 legacy — run `mlxk show <name> --recalc-hash` to migrate) |
 | `Type` | Capability label (e.g. `chat`, `chat+vision`, `audio`) |
 
-**`--verbose` (or `--all`) adds** the `Clean` column (workspace integrity: `✓` clean · `✗` modified · `—` cache or migration-pending) and the `Framework` column (`MLX` / `PyTorch` / `GGUF`).
+**`--verbose` (or `--all`) adds** the `Clean` column (`✓` unchanged since the content hash was last pinned by `clone`, `convert`, or `mlxk show <name> --recalc-hash` · `✗` modified since · `—` cache or migration-pending; it says nothing about health or runnability) and the `Framework` column (`MLX` / `PyTorch` / `GGUF`).
 
 **`--health` adds** health diagnostics. In compact mode this is a single `Health` column; in verbose mode it splits into `Integrity`, `Runtime`, and `Reason`.
 

@@ -2,6 +2,7 @@
 
 **Status:** Draft (Discussion)
 **Created:** 2026-02-06
+**Updated:** 2026-09-07 — Phase 1.5 shipped in 2.0.5-beta.1 with a different `clean` than this draft planned: not the `.hf_cache/` state, but drift since `content_hash` was last pinned (`clone`, `convert`, `--recalc-hash`). `hash_modified` shipped as the ISO-8601 timestamp of that pin, not a boolean. The definitions below are corrected to what shipped; algorithm and coverage are ADR-025's.
 **Related:** ADR-018 (Convert Operation), SECURITY.md
 **Target:** 2.0.5
 
@@ -208,18 +209,20 @@ ADR-018 defines workspace operations (clone, convert, push) and the workspace se
 
 ### Phase 1.5: Content Hash & Clean Indicator (2.0.5-beta.1)
 
-**Goal:** Track workspace integrity and runtime artifact state
+**Goal:** Give a workspace a pinned identity (`content_hash`) and show drift from it (`clean`)
 
 **Features:**
 
-1. **Content Hash** — SHA256 of workspace files (excluding `.hf_cache/`, `.mlxk_workspace.json`)
-   - Computed after `clone` and `convert`
-   - Stored in `.mlxk_workspace.json` as `content_hash`
-   - `hash_modified: true` when current hash differs from stored
+1. **Content Hash** — aggregate hash of the workspace files (excluding `.hf_cache/`, `.mlxk_workspace.json`)
+   - Computed after `clone` and `convert`; re-pinned by `mlxk show <name> --recalc-hash`
+   - Stored in `.mlxk_workspace.json` as `content_hash`, with `hash_modified` as the ISO-8601 timestamp of that computation
+   - Algorithm and coverage: ADR-025 (v2, 2.0.6). The sketch under "Content Hash" below is the v1 design
 
-2. **Clean Indicator** — Shows if `.hf_cache/` contains runtime artifacts
-   - `clean`: `.hf_cache/` empty or non-existent
-   - `dirty`: `.hf_cache/` contains downloaded artifacts
+2. **Clean Indicator** — the workspace content is unchanged since `content_hash` was last pinned, as far as the hash detects
+   - `clean: true`: unchanged since the last pin (`clone`, `convert`, or `--recalc-hash`)
+   - `clean: false`: modified since — a deliberate edit and an unintended change look the same
+   - `clean: null`: no v2 baseline to compare against (cache model, unmanaged directory, pre-v2 sentinel)
+   - Says nothing about health or runnability. As shipped; the draft's `.hf_cache/` reading was not built
 
 **UX:**
 
@@ -430,7 +433,7 @@ New fields in `modelObject`:
   "source": "workspace",
   "origin": "mlx-community/whisper-large-v3-mlx",
   "content_hash": "sha256:a1b2c3...",
-  "hash_modified": false,
+  "hash_modified": "2026-02-08T10:30:05Z",
   "clean": true,
   "cached": false
 }
@@ -441,8 +444,8 @@ New fields in `modelObject`:
 | `source` | `"cache" \| "workspace"` | Where model lives |
 | `origin` | `string \| null` | HF origin (from sentinel) |
 | `content_hash` | `string \| null` | SHA256 of workspace content |
-| `hash_modified` | `boolean` | True if hash changed since clone/convert |
-| `clean` | `boolean \| null` | `.hf_cache/` empty (workspace only, null for cache) |
+| `hash_modified` | `string \| null` | ISO-8601 timestamp when `content_hash` was last pinned |
+| `clean` | `boolean \| null` | Unchanged since `content_hash` was last pinned, as far as the hash detects (workspace only, null for cache) |
 
 **Breaking Changes:** None (additive)
 
@@ -450,10 +453,10 @@ New fields in `modelObject`:
 | Field | Status | Notes |
 |-------|--------|-------|
 | `source` | ✅ Done | Via `cached` field (Phase 1) |
-| `origin` | 🔜 Phase 1.5 | From `.mlxk_workspace.json` |
-| `content_hash` | 🔜 Phase 1.5 | Computed on clone |
-| `hash_modified` | 🔜 Phase 1.5 | Compare stored vs current |
-| `clean` | 🔜 Phase 1.5 | Check `.hf_cache/` state |
+| `origin` | ✅ 2.0.5-beta.1 | From `.mlxk_workspace.json` |
+| `content_hash` | ✅ 2.0.5-beta.1 | Computed on clone/convert; v2 algorithm in 2.0.6 (ADR-025) |
+| `hash_modified` | ✅ 2.0.5-beta.1 | Timestamp of the last pin |
+| `clean` | ✅ 2.0.5-beta.1 | Drift since the last pin (ADR-025 §6) |
 
 ---
 
