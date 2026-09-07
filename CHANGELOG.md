@@ -83,10 +83,9 @@
 - The server probed vision with a detector of its own. It lacked the `vision_config` branch
   `list` decides by, and it read `temporal_patch_size` / `video_preprocessor_config.json` as
   "video model, not vision", so a vision model outside the type whitelist whose checkpoint carries
-  those markers — `qwen2_5_vl`, `qwen3_5` — was loaded on the text backend: in 2.0.7 a **200**
-  with the image dropped, and with the reject above a **422** for a model `/v1/models` lists as
-  vision. One detector now serves `list`, `health`, `run` and the server; `list` output is
-  unchanged.
+  those markers — `qwen2_5_vl`, `qwen3_5` — was loaded on the text backend: a **200** with the
+  image dropped, for a model `/v1/models` lists as vision. One detector now serves `list`,
+  `health`, `run` and the server; `list` output is unchanged.
 - `mlxk serve --json` printed its `starting` envelope before checking its options, so a rejected
   `--chunk`, `--embed-backend` or `--max-tokens`, or a `--model` that did not resolve, put **two**
   JSON documents on stdout: a reader that parses the first one sees a server coming up, and
@@ -104,14 +103,11 @@
   accepted by the request model and dropped, and the client received the whole answer. Every batch
   surface — text, completions and vision — now cuts the text at the first matching sequence, removes it, and reports
   `finish_reason: "stop"` — the tokens generated past the cut still count in `usage`. On the
-  vision paths the runner applies the sequences to the model's text, ahead of the image-metadata
-  header it prepends: cut on the finished text, a `"\n\n"` ended the answer inside that header.
-  A chunked vision stream, a batch answer per chunk, cuts each chunk's text the same way and
-  generates no chunk past the match; it had returned before the cut. A stream that ends on a stop sequence
-  reports `"stop"` as well, where it had begun reporting `null`: breaking out of the loop leaves
-  the runner without a recorded exit. The check there is still per token, so a sequence split
-  across two of them is not seen. Canonical text: SERVER-HANDBOOK → *Chat Completions* →
-  sampling fields.
+  vision paths the sequences apply to the model's text, not to the image-metadata header the
+  runner prepends. A chunked vision stream, a batch answer per chunk, cuts each chunk's text the
+  same way and generates no chunk past the match. On the stream the check is still per token, so
+  a sequence split across two of them is not seen. Canonical text: SERVER-HANDBOOK → *Chat
+  Completions* → sampling fields.
 - The sampling temperature followed the request model instead of the surface. `temperature`
   defaulted to `0.7` there, which made "unset" indistinguishable from an explicit `0.7`, so a
   default chat request against Whisper or Voxtral transcribed at `0.7` while the two audio file
@@ -204,6 +200,12 @@
   makes them due rather than a release number (convention in `docs/ADR/README.md`).
 - ADR-014's CLI-symmetry table named a `--show-reasoning` flag that has never existed; the
   shipped one is `--no-reasoning`.
+- `clean` was defined three ways: ADR-022 still described the `.hf_cache/` state its draft
+  planned, README called the `Clean` column "workspace integrity", and ADR-025's threat model
+  called the hash a security property. All now say one thing — the workspace content is unchanged
+  since `content_hash` was last pinned by `clone`, `convert` or `show --recalc-hash`, as far as the
+  hash detects; nothing about health or runnability — and `--recalc-hash` is named for what it is,
+  the author's re-pin. ADR-016's audit note names `list` alone for the `system` block.
 - `MLXK2_EXIF_METADATA` was described backwards in two places: a `vision_runner` docstring
   said `=1` enables EXIF extraction, and ADR-017 called the flag opt-in. The code reads
   `!= "0"` — extraction is on by default and `=0` is what turns it off. The wrong docstring
