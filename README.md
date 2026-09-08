@@ -49,27 +49,26 @@ produce a broken workspace).
 - **Unix Pipes (Beta)** - Chain models without temp files (`cat | mlx-run model -`)
 - **Privacy** - No background network or telemetry; explicit HuggingFace interactions only
 
-## What's New in 2.0.7
+## What's New in 2.0.8
 
-The **feature** release (2.0.6 was integrity and capability-honesty fixes; 2.0.7 adds new capabilities):
+The **bugfix** release (in development): 2.0.7 added capabilities, 2.0.8 makes the ones
+already there honest.
 
-- **Embeddings (experimental)** — vectors for semantic search and RAG, on-device:
-  `mlxk embed` (JSONL, pipe-first), `mlxk embed-serve` (OpenAI-compatible
-  `POST /v1/embeddings`, in its own process), and `mlxk serve --embed-backend URL`
-  so a client uses **one base URL** for chat and embeddings. Gated by
-  `MLXK2_ENABLE_ALPHA_FEATURES=1` while the surface settles — see
-  [Embeddings](#embeddings-experimental).
-- **Whisper translation** — multilingual speech → English, via
-  `mlxk run … --audio FILE --translate` or `POST /v1/audio/translations`. Models
-  that can't translate (whisper-turbo, `.en`, non-Whisper STT) are rejected up
-  front — never a silent transcription.
-- **Runnable examples** —
-  [`examples/`](https://github.com/mzau/mlx-knife/tree/main/examples/) ships pipe
-  chains, model routing, and a RAG server you can point a browser chat client at.
+- **The generation budget holds.** `--max-tokens` and `max_tokens` mean the same on CLI and
+  server: at most 32768 tokens (2048 for vision), never more than the context window minus
+  the prompt. A cut answer reports `finish_reason: "length"`; a prompt that fills the window
+  is refused before the first token.
+- **Nothing is dropped in silence.** An image or audio file sent to a text-only model is
+  rejected with **422** instead of answered as though it had been read, `stop` sequences cut
+  batch answers, and token counts come from the runner instead of a word-count estimate.
+- **More vision models run.** `qwen2_vl` / `qwen2_5_vl` / `qwen3_5` checkpoints load and
+  answer correctly, so they are served as vision again — and `mlxk list` and the server now
+  agree on which models can see.
+- **`serve` stops when you stop it.** Ctrl-C, `SIGTERM` and `SIGHUP` share one teardown
+  path, and no server process survives its supervisor.
 
-Plus: embedding models are labelled correctly in `mlxk list` / `show`; the MLX stack
-moves to mlx-vlm 0.6.2 / mlx-audio 0.4.4. Full detail:
-[CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md).
+The MLX stack moves to mlx-vlm 0.6.10 / mlx-audio 0.4.8 / transformers 5.14.1 — torch-free,
+a 524 MB (36 %) smaller install.
 
 ## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
