@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..operations.workspace import is_workspace_path
+from .remote_code import reject_untrusted_model_code
 
 
 # WORKAROUND: mlx-audio#645 — bridge, retires via tests_2.0/test_audio_bridge_canary.py
@@ -104,6 +105,10 @@ class AudioRunner:
 
         Supports both HF cache models and workspace paths.
         """
+        # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+        # No mlx-audio branch reads model_file; here so the guarantee has no backend exception.
+        reject_untrusted_model_code(self.model_path)
+
         # Suppress HF progress bars during loading (pull shows them)
         prev_pbar = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
         os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"

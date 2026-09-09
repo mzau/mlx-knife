@@ -24,6 +24,7 @@ from ..core.capabilities import (
     detect_audio_translate_en_capability, classify_embedder,
     detect_vision_capability,
 )
+from ..core.remote_code import MODEL_FILE_REASON, declared_model_file
 
 
 @dataclass
@@ -579,6 +580,11 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
         # Non-MLX frameworks not supported (PyTorch, GGUF, etc.)
         runtime_compatible = False
         runtime_reason = f"Incompatible framework: {framework}"
+    elif declared_model_file(config) is not None:
+        # Above the modality branches: audio and embeddings never reach
+        # check_runtime_compatibility, and this is not runnable on any axis (CVE-2026-5843).
+        runtime_compatible = False
+        runtime_reason = MODEL_FILE_REASON
     elif has_audio and audio_backend is not None:
         # Audio models: check based on backend (ADR-020)
         runtime_compatible, runtime_reason = audio_runtime_compatibility(audio_backend, probe, framework)

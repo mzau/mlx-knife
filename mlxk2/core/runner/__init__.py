@@ -16,6 +16,7 @@ from typing import Optional
 from ..cache import get_current_model_cache, hf_to_cache_dir
 from ..model_resolution import resolve_model_for_operation
 from ..reasoning import ReasoningExtractor, StreamingReasoningParser
+from ..remote_code import reject_untrusted_model_code
 from ...operations.workspace import is_workspace_path
 from .token_limits import (
     FINISH_INTERRUPTED,
@@ -223,6 +224,10 @@ class MLXRunner:
         else:
             # Non path-like cache (likely a Mock in unit tests) → pass a synthetic path to load()
             model_path = Path("/mock") / hf_to_cache_dir(resolved_name) / "snapshots" / (commit_hash or "mock")
+
+        # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+        # Outside the try below, which would rewrap it as "Failed to load model from ...".
+        reject_untrusted_model_code(model_path)
 
         if self.verbose:
             print(f"Loading model from {model_path}...")

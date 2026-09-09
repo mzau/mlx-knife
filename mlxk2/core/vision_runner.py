@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..operations.workspace import is_workspace_path
+from .remote_code import reject_untrusted_model_code
 from .runner.token_limits import DEFAULT_MAX_TOKENS_VISION, FINISH_STOP, apply_stop_sequences
 
 
@@ -77,6 +78,11 @@ class VisionRunner:
 
     def load_model(self):
         import os
+
+        # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+        # Cannot fire on the 0.6.10 pin, which has no model_file branch — the versions that do
+        # execute it with no gate of their own, so this has to be here before a bump.
+        reject_untrusted_model_code(self.model_path)
 
         # Suppress HF progress bars during vision model loading (pull shows them)
         # Scoped suppression: restore previous state after loading

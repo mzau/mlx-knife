@@ -38,6 +38,7 @@ from .health import health_check_workspace
 from .clone import _check_apfs_and_warn
 from ..core.cache import get_current_cache_root
 from ..core.capabilities import classify_convert_target
+from ..core.remote_code import reject_untrusted_model_code
 from ..errors import ErrorType, unsupported_multimodal_error
 from mlxk2 import __version__
 
@@ -65,6 +66,10 @@ def _quantize_text_model(source: Path, target: Path, bits: int, group_size: int 
         from mlx_lm import convert as mlx_lm_convert
     except ImportError:
         raise ValueError("mlx-lm not installed. Install with: pip install mlx-lm")
+
+    # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+    # mlx_lm.convert() loads the source to quantize it, so it reaches the same exec.
+    reject_untrusted_model_code(source)
 
     logger.info(f"Quantizing {source} → {target} ({bits}-bit, group_size={group_size})")
 
@@ -100,6 +105,9 @@ def _quantize_vision_model(source: Path, target: Path, bits: int, group_size: in
         from mlx_vlm import convert as mlx_vlm_convert
     except ImportError:
         raise ValueError("mlx-vlm not installed. Install with: pip install mlx-vlm")
+
+    # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+    reject_untrusted_model_code(source)
 
     logger.info(f"Quantizing vision model {source} → {target} ({bits}-bit, group_size={group_size})")
 

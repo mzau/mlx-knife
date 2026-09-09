@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from .cache import get_current_model_cache, hf_to_cache_dir
 from .model_resolution import resolve_model_for_operation
+from .remote_code import reject_untrusted_model_code
 from .encoders.pooling import infer_pool_and_family, encoder_prefix
 from ..operations.workspace import is_workspace_path
 
@@ -125,6 +126,8 @@ class EmbeddingRunner:
             _mx.set_default_device(_mx.cpu)
 
         model_path = self._resolve_model_path()
+        # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+        reject_untrusted_model_code(model_path)
         config = self._read_config(model_path)
         model_type = str(config.get("model_type", "")).lower()
         if model_type == "bert":

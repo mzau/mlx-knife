@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Security
+
+- A checkpoint whose `config.json` declares `model_file` is refused before any backend is
+  called. mlx-lm imports and executes that file from inside the checkpoint to build the
+  model's architecture (CVE-2026-5843); upstream put the same key behind
+  `trust_remote_code`, and no release carries it — the pinned 0.31.3 executes
+  unconditionally, as does every mlx-vlm that has the branch. The refusal is
+  unconditional: there is no flag, option or environment variable that enables it. It
+  covers `run`, `serve`, `embed`, `embed-serve` and `convert --quantize`; `list` and `show`
+  report such a model as not runnable with the same reason, so no surface calls it
+  compatible while the runner refuses it. A canary says when the mlx-lm half of the guard
+  becomes redundant — the mlx-vlm half has no upstream gate to wait for.
+
+  This closes the `model_file` mechanism only. Python a checkpoint declares through
+  transformers' `auto_map` is a separate surface and is not covered: mlx-vlm forces
+  `trust_remote_code=True` for the model types it ships processors for, and mlx-audio
+  hardcodes it in its STT loaders, so the vision and audio paths can still execute
+  checkpoint-supplied code. Tracked separately.
+
 ## [2.0.8-beta.1] - 2026-09-08
 
 ### Added

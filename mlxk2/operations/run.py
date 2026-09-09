@@ -15,6 +15,7 @@ from ..core.runner import MLXRunner
 from ..core.runner.token_limits import DEFAULT_MAX_TOKENS, ContextLengthExceeded, reported_finish_reason
 from ..core.cache import get_current_model_cache, hf_to_cache_dir
 from ..core.model_resolution import resolve_model_for_operation
+from ..core.remote_code import UntrustedModelCodeError, reject_untrusted_model_code
 from ..operations.health import check_runtime_compatibility
 from ..operations.common import (
     _load_config_json,
@@ -491,6 +492,17 @@ def run_model(
         # Pre-flight check failed - let the runner handle it
         # This preserves backward compatibility with tests and edge cases
         pass
+
+    # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+    # Outside the pre-flight try above, whose `except Exception: pass` would make this a silent
+    # pass-through. The runners refuse too; this is the readable line (ADR-024 Class A form).
+    try:
+        reject_untrusted_model_code(model_path)
+    except UntrustedModelCodeError as exc:
+        error_result = f"Error: {exc}"
+        if not json_output:
+            print(error_result, file=sys.stderr)
+        return error_result
 
     if images and not is_vision_model:
         if not resolved_name or model_path is None:

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
+from ..core.remote_code import MODEL_FILE_REASON, declared_model_file
 from .workspace import is_workspace_path, get_workspace_home
 
 logger = logging.getLogger(__name__)
@@ -430,7 +431,8 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
     Gate logic:
     1. Framework must be "MLX" (GGUF/PyTorch → incompatible)
     2. Weight files must use mlx-lm compatible naming (not legacy formats)
-    3. model_type must be supported by current mlx-lm version
+    3. config.json must not ask for its own Python to be executed (CVE-2026-5843)
+    4. model_type must be supported by current mlx-lm version
 
     Returns:
         (is_compatible, reason): reason is None if compatible, error message otherwise
@@ -481,11 +483,19 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
     try:
         with open(config_path) as f:
             config = json.load(f)
-        model_type = config.get("model_type")
-        if not model_type:
-            return False, "config.json missing model_type field"
     except (OSError, json.JSONDecodeError) as e:
         return False, f"Failed to read config.json: {e}"
+
+    # Gate 3: a checkpoint mlx-knife refuses to load is not runnable, and saying so here is
+    # what keeps `show`/`list` from advertising what `run` rejects (ADR-024).
+    # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
+    if declared_model_file(config) is not None:
+        return False, MODEL_FILE_REASON
+
+    # Gate 4: model_type support check via mlx-lm
+    model_type = config.get("model_type")
+    if not model_type:
+        return False, "config.json missing model_type field"
 
     # Check if mlx-lm supports this model_type
     try:
