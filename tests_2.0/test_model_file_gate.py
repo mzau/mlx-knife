@@ -226,6 +226,27 @@ def test_convert_refuses_before_calling_the_backend(
     backend.convert.assert_not_called()
 
 
+def test_convert_reports_the_refusal_as_a_refusal(tmp_path):
+    """The operation wrapped the reject in ``Quantization failed:`` and a ``ValueError`` —
+    that claims mlx-knife tried and failed, where it declined. The envelope carries the
+    refusal as raised, and nothing is left behind at the target."""
+    from mlxk2.operations.convert import convert_operation
+
+    source = _checkpoint(tmp_path, {"model_type": "llama", "model_file": "arch.py"}, name="src")
+    target = tmp_path / "out"
+    backend = MagicMock()
+
+    with patch.dict(sys.modules, {"mlx_lm": backend}):
+        result = convert_operation(str(source), str(target), "quantize", {"bits": 4})
+
+    backend.convert.assert_not_called()
+    assert result["status"] == "error"
+    assert result["error"]["type"] == "UntrustedModelCodeError"
+    assert not result["error"]["message"].startswith("Quantization failed")
+    assert "'arch.py'" in result["error"]["message"]
+    assert not target.exists()
+
+
 # -- one truth across the surfaces ----------------------------------------------------
 
 def test_runtime_compatibility_carries_the_reason(tmp_path):

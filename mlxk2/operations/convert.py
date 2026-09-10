@@ -38,7 +38,7 @@ from .health import health_check_workspace
 from .clone import _check_apfs_and_warn
 from ..core.cache import get_current_cache_root
 from ..core.capabilities import classify_convert_target
-from ..core.remote_code import reject_untrusted_model_code
+from ..core.remote_code import UntrustedModelCodeError, reject_untrusted_model_code
 from ..errors import ErrorType, unsupported_multimodal_error
 from mlxk2 import __version__
 
@@ -454,6 +454,9 @@ def convert_operation(
                 result["data"]["bits"] = bits
                 result["data"]["group_size"] = group_size
 
+            except UntrustedModelCodeError:
+                # A refusal, not a failure: nothing was written, and the reason stands as is.
+                raise
             except Exception as e:
                 # Cleanup on failure
                 if dst.exists():
