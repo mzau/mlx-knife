@@ -18,6 +18,8 @@ they live in ``tmp_path``, never in a cache or workspace of the machine running 
 """
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -326,3 +328,60 @@ def test_run_returns_the_reject_instead_of_raising(tmp_path):
     assert result.startswith("Error: ")
     assert "arch.py" in result
     runner_cls.assert_not_called()
+
+
+# -- end to end: the shipped CLI, and a payload that would leave a trace ----------------
+# The tests above prove the order with mocks; these run the real entry point on a
+# checkpoint whose module, if anything ever imports it, writes a marker.
+
+_PAYLOAD = 'import pathlib; pathlib.Path(__file__).with_name("EXECUTED.marker").write_text("ran\\n")\n'
+
+_ARMED = {
+    "llama": {"hidden_size": 8, "num_hidden_layers": 1, "intermediate_size": 16,
+              "num_attention_heads": 2, "rms_norm_eps": 1e-05, "vocab_size": 32},
+    # embed classifies before it loads; a llama config would never reach the gate there
+    "bert": {"hidden_size": 384, "num_hidden_layers": 2, "max_position_embeddings": 512,
+             "vocab_size": 32},
+}
+
+
+def _armed_checkpoint(root: Path, model_type: str) -> Path:
+    """A weights file so health passes and the gate is what has to stop the command. Its
+    bytes never matter: mlx-lm imports ``model_file`` before it reads a single weight."""
+    config = {"model_type": model_type, "model_file": "arch.py",
+              "quantization": {"group_size": 64, "bits": 4}, **_ARMED[model_type]}
+    path = _checkpoint(root, config, name=f"armed-{model_type}")
+    (path / "arch.py").write_text(_PAYLOAD, encoding="utf-8")
+    (path / "model.safetensors").write_bytes(b"\0" * 64)
+    return path
+
+
+@pytest.mark.parametrize(
+    "model_type, argv",
+    [
+        ("llama", ["run", "{cp}", "hi", "--max-tokens", "5"]),
+        ("llama", ["convert", "{cp}", "{out}", "--quantize", "4"]),
+        ("bert", ["embed", "{cp}", "hi"]),
+    ],
+    ids=["run", "convert", "embed"],
+)
+def test_real_cli_refuses_and_the_payload_never_runs(tmp_path, model_type, argv):
+    """The marker is the assertion; the message only shows that the gate — not health, not
+    the embedder classifier — is what stopped the command."""
+    cp = _armed_checkpoint(tmp_path, model_type)
+    out = tmp_path / "out"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("MLXK", "HF_"))}
+    env["HF_HOME"] = str(tmp_path / "hf")
+    if argv[0] == "embed":
+        env["MLXK2_ENABLE_ALPHA_FEATURES"] = "1"
+
+    done = subprocess.run(
+        [sys.executable, "-m", "mlxk2.cli", *(a.format(cp=cp, out=out) for a in argv)],
+        text=True, capture_output=True, env=env, timeout=120,
+    )
+    output = done.stdout + done.stderr
+
+    assert not (cp / "EXECUTED.marker").exists(), f"checkpoint code ran:\n{output}"
+    assert "mlx-knife refuses to execute it" in output, output
+    assert done.returncode != 0, output
+    assert not out.exists()
