@@ -30,7 +30,6 @@ MLX Knife uses external libraries to load and run models. These libraries may do
 **What this means:**
 - Downloading a model with `pull` does not guarantee fully offline use
 - Some models may need additional downloads when first run
-- We recommend models from `mlx-community/*` but cannot guarantee third-party behavior
 
 **For offline environments:**
 Test each model while online before relying on offline use. Use `mlxk clone` to create a local workspace for better isolation.
@@ -60,8 +59,33 @@ We will acknowledge receipt within 48 hours and work on a fix.
 ### Model Downloads (`mlxk pull`)
 - **Source**: Models are downloaded from HuggingFace only
 - **Verification**: HuggingFace provides checksums for file integrity
-- **Risk**: Malicious models could theoretically exist on HuggingFace
-- **Mitigation**: Only download models from trusted organizations (e.g., `mlx-community`)
+- **Content**: `pull` downloads a repository as published; mlx-knife makes no judgement about
+  what it contains (see *Code in Model Directories*)
+
+### Code in Model Directories
+
+A model directory is not necessarily data. Besides weights and JSON configs it can contain
+Python, in two ways: a config declares it — `model_file` in `config.json`, or `auto_map` in
+`config.json` or another JSON config such as `tokenizer_config.json` or `processor_config.json`
+— or `*.py` files are simply shipped without any config naming them.
+
+- **Refused**: a model whose `config.json` declares `model_file`. With the mlx-lm version
+  mlx-knife pins, loading such a model executes that file (CVE-2026-5843). mlx-knife refuses it
+  before any backend is called, in `run`, `serve`, `embed`, `embed-serve` and
+  `convert --quantize`; `list` and `show` report it as not runnable, with the reason. No flag,
+  option or environment variable enables it.
+- **Not prevented**: code declared through `auto_map`. For many model types, the pinned mlx-vlm
+  and mlx-audio switch on transformers' remote-code loading themselves, and the pinned
+  transformers offers no setting that overrides this from outside. On the vision and audio
+  paths, mlx-knife cannot stop that code from running when such a model is loaded or converted.
+- **What you can see beforehand**: the keys that declare code and any shipped `*.py` files are
+  in the model directory before anything runs. `mlxk show <model> --files` lists the files,
+  `--config` prints `config.json`; the other configs are plain JSON files next to it. An
+  `auto_map` entry can also point to code in another repository — that code is not in the
+  directory.
+- **Where mlx-knife's part ends**: because mlx-knife cannot control what a backend library
+  executes on those paths, it makes no statement about whether a particular model is safe to
+  run, and it does not certify models. Whether to run a model is decided by whoever chooses it.
 
 ### API Server (`mlxk server`)
 ```bash
@@ -146,7 +170,8 @@ The 2.0 alpha introduces an alpha upload capability. Treat it as opt‑in, with 
 ## Security Best Practices
 
 ### For Users:
-1. **Download models only from trusted sources** (prefer `mlx-community/*`)
+1. **Download models only from sources you trust**, and look at what a model directory
+   contains before running it (see *Code in Model Directories*)
 2. **Keep the API server local** unless you need network access
 3. **Monitor disk usage** - models can be large
 4. **Review model cards** on HuggingFace before downloading
@@ -164,6 +189,11 @@ The 2.0 alpha introduces an alpha upload capability. Treat it as opt‑in, with 
 We provide security updates for the versions below. 2.0.7 is a feature release and
 carries no security fixes over 2.0.6; it does add new network surfaces, both
 experimental and opt-in (see *Embeddings Backend* above).
+
+mlx-knife up to and including 2.0.8b1, installed with mlx-lm 0.31.0 or later, executes the file
+a model's `config.json` names in `model_file` when it loads that model through mlx-lm
+(CVE-2026-5843); this includes 2.0.6 and 2.0.7 below. The refusal described in
+*Code in Model Directories* ships in the 2.0.8 pre-release (`pip install --pre mlx-knife`).
 
 | Version | Security Support |
 | ------- | ---------------- |

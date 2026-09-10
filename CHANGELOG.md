@@ -21,6 +21,10 @@
   hardcodes it in its STT loaders, so the vision and audio paths can still execute
   checkpoint-supplied code. Tracked separately.
 
+- `SECURITY.md` gains *Code in Model Directories*: what mlx-knife refuses, what it cannot
+  prevent, and what can be seen before a model loads. Its recommendations of a specific
+  organization as a download source are removed.
+
 ## [2.0.8-beta.1] - 2026-09-08
 
 ### Added
