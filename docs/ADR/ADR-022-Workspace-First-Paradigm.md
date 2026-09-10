@@ -517,7 +517,7 @@ def compute_workspace_hash(workspace_path: Path) -> str:
 
 ---
 
-## Code-Findings (Session 2026-02-08)
+## Code Findings (2026-02-08)
 
 ### Bug 1: PyTorch Warning bei Workspace-Pfaden
 

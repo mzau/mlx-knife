@@ -34,7 +34,7 @@ except ImportError:
 from .server_context import LocalServer
 from .test_utils import should_skip_model
 
-# Match the request timeout used by the other E2E tests (server_e2e Session 22).
+# Match the request timeout used by the other E2E tests (test_server_e2e.py).
 SERVER_REQUEST_TIMEOUT = 45.0
 
 # Opt-in markers (same set as test_server_e2e.py).

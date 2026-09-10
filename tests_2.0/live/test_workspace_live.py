@@ -106,7 +106,7 @@ def temp_target():
 
 
 class TestCloneShorthand:
-    """Test clone shorthand with MLXK_WORKSPACE_HOME (D. in smoke tests).
+    """Test clone shorthand with MLXK_WORKSPACE_HOME.
 
     NOTE: These tests validate path RESOLUTION only, not actual cloning
     (which requires a real HF model download). Full clone E2E is in
@@ -150,7 +150,7 @@ class TestCloneShorthand:
 
 
 class TestConvertBareNames:
-    """Test convert with bare names via MLXK_WORKSPACE_HOME (D2. in smoke tests)."""
+    """Test convert with bare names via MLXK_WORKSPACE_HOME."""
 
     def test_convert_bare_source_resolves(self, source_model):
         """Bare source name resolves to MLXK_WORKSPACE_HOME/name."""

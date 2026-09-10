@@ -522,7 +522,7 @@ class TestSequentialImageExtraction:
 
 class TestAssignImageIdsFromHistory:
     """
-    Tests for history-based image ID assignment (Session 32: Option D).
+    Tests for history-based image ID assignment.
 
     The conversation history IS the session - no server-side state needed.
     IDs are assigned chronologically based on content hash for deduplication.

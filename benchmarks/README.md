@@ -54,8 +54,6 @@ benchmarks/
 - v0.x = Test infrastructure ("Was the test run clean?")
 - v1.x = Model benchmarks ("How good is the model?")
 
-See `schemas/LEARNINGS-FOR-v1.0.md` for details.
-
 ## Recent Reports
 
 Latest baseline reports are in `reports/` directory:

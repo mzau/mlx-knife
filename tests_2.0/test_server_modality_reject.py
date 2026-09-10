@@ -1,12 +1,12 @@
-"""A modality the model does not have is a reject, not a silent drop (audit C7, §I6/§I7).
+"""A modality the model does not have is a reject, not a silent drop.
 
 The server routed "text model + images" to the text path, which filters the image parts
 out and answers 200 about the text alone — the client never learned its image was
 dropped. The handbook promises the opposite, and that promise is what lets `/v1/models`
 carry no capability label at all: the modality is answered for at request time.
 
-422, not 501: SMOKE I6 calls for a 4xx, and OpenAI answers 400 here. A 5xx would invite
-clients to retry a request that cannot ever succeed.
+422, not 501: the request is at fault, so it is a 4xx, and OpenAI answers 400 here. A 5xx
+would invite clients to retry a request that cannot ever succeed.
 """
 
 from unittest.mock import Mock, patch

@@ -177,7 +177,7 @@ def fresh_v2_workspace(chv2_workspace_home) -> Path:
 
 @pytest.fixture(scope="session")
 def broken_multishard_workspace(chv2_workspace_home) -> Path:
-    """Clone VISION_MODEL, copy to *-broken, remove index → §B-Prep equivalent.
+    """Clone VISION_MODEL, copy to *-broken, remove its index.
 
     Heavy fixture (vision model clone). Tests using it skip cleanly if the
     clone fails or the model turns out to be single-shard (no index.json).
@@ -225,7 +225,7 @@ def broken_multishard_workspace(chv2_workspace_home) -> Path:
 
 
 # =========================================================================
-# §A — Fresh Clones & Converts
+# Fresh Clones & Converts
 # =========================================================================
 
 
@@ -338,14 +338,14 @@ def test_a10_show_long_form_prefix_plus_16_hex(fresh_v2_workspace):
 
 
 # =========================================================================
-# §B — Coverage Gap Regression (Issue #52)
+# Coverage Gap Regression (Issue #52)
 # =========================================================================
 
 
 def test_b1_to_b6_repair_creates_different_hash(
     broken_multishard_workspace, chv2_workspace_home
 ):
-    """§B1–§B6 condensed: --repair-index produces a target whose content_hash
+    """--repair-index produces a target whose content_hash
     differs from the source's, and the target is itself clean.
 
     This is the closing condition for Issue #52: pre-fix, source and target

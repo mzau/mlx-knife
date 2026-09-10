@@ -67,7 +67,7 @@ def _run_supervised_uvicorn(
     env["MLXK2_PORT"] = str(port)
     env["MLXK2_LOG_LEVEL"] = log_level
 
-    # Suppress transformers/tokenizers noise in server subprocess (Session 89 + Session 90 fix)
+    # Suppress transformers/tokenizers noise in server subprocess
     # IMPORTANT: Set in subprocess ENV, NOT in global __init__.py (breaks huggingface_hub downloads)
     env["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
     env["TOKENIZERS_PARALLELISM"] = "false"  # Prevent fork warning in uvicorn/multiprocessing

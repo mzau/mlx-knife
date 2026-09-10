@@ -1,4 +1,4 @@
-"""The operator ceiling reaches the process that answers requests (audit C1).
+"""The operator ceiling reaches the process that answers requests.
 
 `mlxk serve` supervises, and uvicorn imports `server_base` a second time under its real
 name, so the copy that answers is not the copy `run_server()` configured. The ceiling is

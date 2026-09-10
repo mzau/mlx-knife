@@ -239,7 +239,7 @@ class TestVisionServerE2E:
     def test_vision_to_text_model_switch_filters_images(self, vision_portfolio, text_portfolio):
         """Vision→Text model switch should filter image_url content from history.
 
-        Tests the multimodal history filtering feature (Session 26):
+        Tests the multimodal history filtering feature:
         - User starts conversation with Vision model + images
         - User switches to Text model (same conversation history)
         - Server should filter out image_url content, preserve text

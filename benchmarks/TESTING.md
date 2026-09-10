@@ -315,5 +315,3 @@ mlx-benchmark --model llama-3.2-3b --contribute
 ```
 
 No pytest, no fixtures, no conftest.py - just simple CLI for community contributions.
-
-See `schemas/LEARNINGS-FOR-v1.0.md` for design notes.

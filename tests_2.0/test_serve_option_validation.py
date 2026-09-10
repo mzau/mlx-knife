@@ -1,4 +1,4 @@
-"""`serve` checks its options before it announces anything (audit C1 review, R-02).
+"""`serve` checks its options before it announces anything.
 
 The CLI printed the `starting` envelope first and let `start_server` raise afterwards, so
 a rejected option produced *two* JSON documents on stdout: a reader that parses the first

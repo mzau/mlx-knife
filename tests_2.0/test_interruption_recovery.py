@@ -14,8 +14,8 @@ from mlxk2.operations.run import interactive_chat
 class MockDetokenizer:
     """Mock detokenizer that mimics BPEStreamingDetokenizer behavior.
 
-    Used by unit tests to mock tokenizer.detokenizer after Session 60 changes.
-    Session 60 switched from tokenizer.decode() to tokenizer.detokenizer for
+    Used by unit tests to mock tokenizer.detokenizer.
+    The runner switched from tokenizer.decode() to tokenizer.detokenizer for
     proper BPE space marker (Ġ U+0120) conversion.
     """
     def __init__(self, decode_func):
@@ -110,7 +110,7 @@ class TestInterruptionRecovery:
         mock_tokenizer.encode.return_value = [1, 2, 3]
         # Mock decode for compatibility
         mock_tokenizer.decode.return_value = "Hello world"
-        # Mock detokenizer (Session 60 BPE fix)
+        # Mock detokenizer (BPE fix)
         mock_tokenizer.detokenizer = MockDetokenizer(lambda tokens: "Hello world")
         mock_load.return_value = (mock_model, mock_tokenizer)
 

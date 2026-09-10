@@ -1,4 +1,4 @@
-"""`stop` reaches the batch surfaces (audit C3a).
+"""`stop` reaches the batch surfaces.
 
 `generate_batch` has no `stop` parameter, so the field was accepted by the request model
 and then dropped: a client got the full answer and `finish_reason` from the runner. The

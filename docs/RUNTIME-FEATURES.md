@@ -1,6 +1,6 @@
 # Runtime Features — Internal Technical Reference
 
-Status: working draft, 2026-05-05 (Iter 1 landed; the iteration log is kept internally, not in the public tree).
+Status: working draft, 2026-05-05.
 Captures the conceptual model that informs ADR-024 (extended) and the
 capability-layer refactor planned for 2.0.6 / 2.0.7.
 
@@ -328,7 +328,7 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 **Fix path.** Replace key-existence checks with truthy-dict / truthy-value checks. Apply symmetrically to `detect_vision_capability` for the Granite-Speech case (per existing memory `project_capability_label_bugs`).
 
-**Fix path validated 2026-05-06 (2.0.6 surgical patch).** Step 1 (`common.py:299`) switched to `isinstance(audio_config, dict) and bool(audio_config)`. `detect_vision_capability` (`common.py:233`) symmetric pull: `isinstance(vision_config, dict) and bool(vision_config)` — resolves §A.3 (`vision_config: {}` empty-dict edge). Step 4 (`audio_seq_length` at `common.py:328`) **dropped entirely** after empirical correction: the Gemma4 processor template ships `audio_seq_length=750` for every variant including audio-null ones, so the truthy-value predicate alone was insufficient (the value *is* truthy even when the model has no audio tower). No real audio model in the portfolio relies on this signal as standalone — all caught by Step 1 (truthy `audio_config`) or Step 2 (model_type substring). Effect verified on gemma-4-{26b-a4b-it-4bit, 31b-bf16} (audio tag dropped); regression-anchors gemma-4-e4b-it-4bit (`chat+vision+audio` preserved via truthy `audio_config`) and gemma-3n-{E2B,E2B-it} (audio preserved). **Lesson for Iter 2/3:** the original truthy-predicate framing was sound for `audio_config` (a dict-typed marker) but insufficient for `audio_seq_length` (an int-typed processor parameter that template-inheritance can keep truthy independent of architecture). When future Class C/D fixes derive predicates from `[CURRENT]` empirics, validate against real config files before declaring the predicate complete.
+**Fix path validated 2026-05-06 (2.0.6 surgical patch).** Step 1 (`common.py:299`) switched to `isinstance(audio_config, dict) and bool(audio_config)`. `detect_vision_capability` (`common.py:233`) symmetric pull: `isinstance(vision_config, dict) and bool(vision_config)` — resolves §A.3 (`vision_config: {}` empty-dict edge). Step 4 (`audio_seq_length` at `common.py:328`) **dropped entirely** after empirical correction: the Gemma4 processor template ships `audio_seq_length=750` for every variant including audio-null ones, so the truthy-value predicate alone was insufficient (the value *is* truthy even when the model has no audio tower). No real audio model in the portfolio relies on this signal as standalone — all caught by Step 1 (truthy `audio_config`) or Step 2 (model_type substring). Effect verified on gemma-4-{26b-a4b-it-4bit, 31b-bf16} (audio tag dropped); regression-anchors gemma-4-e4b-it-4bit (`chat+vision+audio` preserved via truthy `audio_config`) and gemma-3n-{E2B,E2B-it} (audio preserved). **Lesson:** the original truthy-predicate framing was sound for `audio_config` (a dict-typed marker) but insufficient for `audio_seq_length` (an int-typed processor parameter that template-inheritance can keep truthy independent of architecture). When future Class C/D fixes derive predicates from `[CURRENT]` empirics, validate against real config files before declaring the predicate complete.
 
 ### Class C — Loader gap (mlx-lm cannot load text-only)
 
@@ -355,7 +355,7 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 **Fix path.** Implement reachability layer 2 as a probe that combines an auto-discovered `model_type` allowlist with config-shape filters. Use the same probe as the single source of truth for: (a) routing in `run.py`, (b) the health-aggregator's text-load gate in `common.py:645`, (c) the `text` capability label.
 
-[ADR-024](ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) is the implementation decision record for this. The Class A instantiation (STT / Embedding pre-execution-reject) shipped in 2.0.6 (`2de2f21`, smoke §P). Class C extends the same pattern with the `MLX_LM_TEXT_LOADER_TYPES` allowlist + show/run alignment in `common.py:645-647`.
+[ADR-024](ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) is the implementation decision record for this. The Class A instantiation (STT / Embedding pre-execution-reject) shipped in 2.0.6 (`2de2f21`). Class C extends the same pattern with the `MLX_LM_TEXT_LOADER_TYPES` allowlist + show/run alignment in `common.py:645-647`.
 
 **Slot:** DEFER 2.1 (tracking: [Issue #53](https://github.com/mzau/mlx-knife/issues/53)).
 
@@ -372,7 +372,7 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 **Fix path.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` or `audio-in` as reachable. The result for base+multimodal is: text-only reachable (if loader passes), media-in not reachable. The `-it` sibling variant remains reachable for media.
 
-**Slot:** DEFER 2.1 (tied to the Iter 2/3 reachability work — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet, design lives in the Iter 2/3 plan).
+**Slot:** DEFER 2.1 (tied to the reachability work — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet).
 
 ---
 
@@ -470,7 +470,7 @@ implementation can pick up exactly where this discussion stops.
 - **Update triggers:** new bug class identified; new audio task class enters mlxk's scope; reachability probe form changes; visibility policy changes.
 - **Implementation triggers (separate sessions):** when the reachability refactor or any of the four bug-class fixes lands, `docs/ARCHITECTURE.md` is updated as part of the same patch series so its description of the live pipeline stays current.
 - **Audience:** maintainers and contributors. Not user-facing. README and SERVER-HANDBOOK remain the user-facing references.
-- **Provisional default:** target-side content in this document (probe forms, discriminator pseudocode, visibility policy, reachability semantics) is provisional pending POC implementation experience. Revision following observation of upstream behaviour and `mlxk`'s user-facing surface is the expected mode, not a regression. The marker convention defined in §0.2 distinguishes `[TARGET]` provisional content from `[CURRENT]` observations and `[POLICY]` ADR-anchored decisions; iteration progress is tracked in a separate internal iteration log.
+- **Provisional default:** target-side content in this document (probe forms, discriminator pseudocode, visibility policy, reachability semantics) is provisional pending POC implementation experience. Revision following observation of upstream behaviour and `mlxk`'s user-facing surface is the expected mode, not a regression. The marker convention defined in §0.2 distinguishes `[TARGET]` provisional content from `[CURRENT]` observations and `[POLICY]` ADR-anchored decisions.
 
 ---
 

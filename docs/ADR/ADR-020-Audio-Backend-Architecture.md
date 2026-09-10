@@ -701,7 +701,6 @@ pip install mlx-knife[all]  # Same as Beta.8
 
 ### Documentation
 - **ADR-019:** Beta.8 mlx-vlm audio implementation (archived)
-- **mlx-audio-migration-plan.md:** Phase 1-5 implementation details (local, not published)
 - **docs/guides/AUDIO-TRANSCRIPTION.md:** User guide (created in Phase 4)
 
 ### Upstream Projects

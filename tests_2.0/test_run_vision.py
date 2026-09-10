@@ -79,7 +79,7 @@ def test_run_vision_routes_to_vision_runner(monkeypatch, isolated_cache):
         lambda path, name, context="cli", has_images=False: _make_vision_policy(path, name)
     )
 
-    # Session 146: Vision models now only route to VisionRunner when images are present
+    # Vision models only route to VisionRunner when images are present
     # Pass a dummy image to trigger vision path
     image_bytes = b"dummy"
     result = run_model(
@@ -168,7 +168,7 @@ def test_vision_adds_filename_mapping_for_multiple_images():
     result = VisionRunner._add_filename_mapping("Images 1 and 3 show motorboats.", images)
 
     # Updated for ADR-017 Phase 1: Collapsible HTML table with EXIF columns (enabled by default)
-    # Session 75: Metadata moved to BEGINNING for better UX in chunking scenarios
+    # Metadata moved to BEGINNING for better UX in chunking scenarios
     # Hashes: sha256(b"data1")[:8] = 5b41362b, etc.
     expected = """<details>
 <summary>📸 Image Metadata (3 images)</summary>
@@ -194,7 +194,7 @@ def test_vision_no_mapping_for_single_image():
     result = VisionRunner._add_filename_mapping("A dog.", images)
 
     # Updated for ADR-017 Phase 1: Collapsible HTML table with EXIF columns (enabled by default)
-    # Session 75: Metadata moved to BEGINNING for better UX in chunking scenarios
+    # Metadata moved to BEGINNING for better UX in chunking scenarios
     # Hash: sha256(b"data")[:8] = 3a6eb079
     expected = """<details>
 <summary>📸 Image Metadata (1 image)</summary>
@@ -211,7 +211,7 @@ A dog."""
 
 
 def test_vision_text_only_routing_condition():
-    """Session 146: Vision routing uses 'if images' check, so empty list routes to text path.
+    """Vision routing uses 'if images' check, so empty list routes to text path.
 
     This is a simple unit test that verifies the routing logic condition.
     The actual E2E behavior is tested in tests_2.0/live/test_vision_e2e_live.py.

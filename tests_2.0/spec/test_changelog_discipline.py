@@ -99,8 +99,8 @@ def test_newest_released_section_is_byte_identical_to_its_tag():
 
     at_tag = _sections(_git("show", f"{tag}:CHANGELOG.md")).get(label)
     if at_tag is None:
-        # The tag points somewhere that has no such section — CLAUDE.md records one
-        # lightweight tag that does. It cannot be the authority for what it lacks.
+        # The tag points somewhere that has no such section — a mislabeled lightweight tag
+        # can do that. It cannot be the authority for what it lacks.
         pytest.skip(f"tag {tag} carries no [{label}] section")
 
     assert at_tag == sections[label], (

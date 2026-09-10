@@ -1,6 +1,6 @@
 # ADR-024: Pre-Execution Capability-Mismatch Reject
 
-**Status:** Partially Implemented — Class A (STT / Embedding) shipped 2.0.6 (`2de2f21`, smoke §P). Class C (Loader Gap) + Class D (Invocation Gap) deferred.
+**Status:** Partially Implemented — Class A (STT / Embedding) shipped 2.0.6 (`2de2f21`). Class C (Loader Gap) + Class D (Invocation Gap) deferred.
 **Created:** 2026-04-19
 **Updated:** 2026-05-11 — title widened from "Vision-only Pre-Execution Routing" to reflect the scope of the pattern as actually shipped in 2.0.6; status promoted from "Proposed (stub)" to "Partially Implemented"; Class A shipped section added; Decision section retro'd — the pattern-choice was made implicitly when `2de2f21` landed.
 **Related:** ADR-020 (Audio Backend Architecture), ADR-022 (Workspace-First Paradigm), ADR-023 (Text-First + Verified Multimodal), [Issue #53](https://github.com/mzau/mlx-knife/issues/53)
@@ -30,7 +30,7 @@ Need a deterministic, pre-execution capability detection (no try/catch recovery)
 
 **Pattern: pre-execution typed reject.** Inside `mlxk run`, before the runner is invoked, classify the model's capability via the existing detection layer (`detect_model_type` in `common.py`) and emit a typed error whenever the requested invocation form is incompatible with that capability. Reject UX form: short error, concrete hint, JSON-mode result-string clean.
 
-This pattern is **chosen, not TBD** — it shipped in 2.0.6 for Class A (STT / embedding) via `2de2f21` and is verified in Smoke-Test §P. Class C + D extend the same pattern to additional mismatch axes.
+This pattern is **chosen, not TBD** — it shipped in 2.0.6 for Class A (STT / embedding) via `2de2f21`. Class C + D extend the same pattern to additional mismatch axes.
 
 ### Rejected alternatives (preserved for context)
 
@@ -72,7 +72,7 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 **Discriminator.** `detect_model_type` uses substring matching (Class A surgical patch in same commit: `STT_MODEL_TYPES = {"whisper", "vibevoice", "voxtral"}`, substring match in `common.py:202`). Result: `vibevoice_asr` matches `vibevoice`, `whisper-large-v3-turbo-4bit` matches `whisper`, etc.
 
-**JSON-mode behaviour.** The reject is returned as the result string; callers receive a clean payload, no exception propagation. Verified in Smoke-Test §P5.
+**JSON-mode behaviour.** The reject is returned as the result string; callers receive a clean payload, no exception propagation.
 
 **Affected models in current portfolio (regression anchors).**
 - STT: `whisper-large-v3-turbo-{4,8}bit`, `VibeVoice-ASR-{4,8}bit`
@@ -126,7 +126,7 @@ if not audio and not images and resolved_name and model_path is not None and cfg
 
 **Symptom.** A base model with `vision_config`/`audio_config` truthy lets `--image`/`--audio` through to the runner and either errors late ("0 audio tokens in the text and N tokens from audio embeddings") or produces base-continuation off the metadata header — not a useful answer. Cause: multimodal grounded chat presupposes a chat template emitting media-placeholder tokens; base models lack such templates.
 
-**Implementation sketch.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` / `audio-in` as reachable. When the probe fails: pre-execution reject from `mlxk run` with hint to use the `-it` sibling variant; `show`/`list` report media-axes as not reachable. Layer 3 design lives in the Iter 2/3 reachability plan (`[POLICY]`-driven reframe per ADR-023 §4 No-Silent-Degradation).
+**Implementation sketch.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` / `audio-in` as reachable. When the probe fails: pre-execution reject from `mlxk run` with hint to use the `-it` sibling variant; `show`/`list` report media-axes as not reachable. Layer 3 is a `[POLICY]`-driven reframe per ADR-023 §4 No-Silent-Degradation.
 
 ---
 
@@ -145,10 +145,10 @@ For Class C to ship:
 - [ ] `MLX_LM_TEXT_LOADER_TYPES` auto-discovery in `capabilities.py`, with explicit non-loader-module exclude list.
 - [ ] `mlxk run` Class C reject in `run.py:462-486` region — typed error, JSON-clean.
 - [ ] `mlxk show` no longer reports `runtime incompatible` for mllama / gemma3n / gemma-4-e4b — `runtime_compatible = True` with `"healthy, vision-only — use --image"` reason.
-- [ ] Smoke-Test §K transitions from `DEFER 2.1` to `ok`.
+- [ ] The Class C acceptance check passes.
 - [ ] Set-difference audit of `VISION_MODEL_TYPES \ MLX_LM_TEXT_LOADER_TYPES` in CHANGELOG: explicit list of newly-rejected model_types per release.
 
-For Class D to ship (gated on Iter 2/3 reachability layer 3):
+For Class D to ship (gated on reachability layer 3):
 
 - [ ] Chat-template-with-media-placeholder probe in `capabilities.py`.
 - [ ] `mlxk run --image` / `--audio` reject for base+multimodal in `run.py`.
@@ -160,5 +160,5 @@ For Class D to ship (gated on Iter 2/3 reachability layer 3):
 ## Notes / Provenance
 
 - The original 2026-04-19 ADR draft framed the problem strictly as "Vision-only routing" with the mllama empirical case. The 2026-05-11 update widens the title to reflect what actually shipped (Class A) and what the pattern actually covers.
-- The Class A landing in `2de2f21` was treated at commit time as a "UX-Gate STT/Embedding-Reject" (per CHANGELOG and Smoke-Test §P labelling), not as an ADR-024 instantiation. Both framings describe the same mechanism — this ADR is the architectural record connecting them.
+- The Class A landing in `2de2f21` was treated at commit time as a "UX-Gate STT/Embedding-Reject" (per its CHANGELOG labelling), not as an ADR-024 instantiation. Both framings describe the same mechanism — this ADR is the architectural record connecting them.
 - Class B (audio/vision key-FP) is recorded here for completeness only. Its fix is detection-layer, not routing-layer; the canonical record is RUNTIME-FEATURES.md §5 Class B.

@@ -1,4 +1,4 @@
-"""A feature gate reads its value, not just its presence (audit C8).
+"""A feature gate reads its value, not just its presence.
 
 `MLXK2_ENABLE_PIPES=0` and `MLXK2_ENABLE_ALPHA_FEATURES=0` used to *open* the gate: the
 check was plain truthiness, and a non-empty string is truthy. Setting a switch to `0` is

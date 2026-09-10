@@ -594,7 +594,7 @@ class TestCloneOperationIntegration:
             assert not real_temp_cache.exists()
 
     def test_clone_operation_health_check_failure(self, tmp_path):
-        """Test clone operation continues despite health check failure (Session 59).
+        """Test clone operation continues despite health check failure.
 
         Unhealthy models must be clonable for community repair workflow.
         """
@@ -623,7 +623,7 @@ class TestCloneOperationIntegration:
 
             mock_health.return_value = (False, "Model is corrupted")
 
-            # Need to mock clone and sentinel too (Session 59: unhealthy doesn't block)
+            # Need to mock clone and sentinel too (unhealthy doesn't block)
             with patch('mlxk2.operations.clone._apfs_clone_directory') as mock_clone, \
                  patch('mlxk2.operations.clone.write_workspace_sentinel'):
 
@@ -631,7 +631,7 @@ class TestCloneOperationIntegration:
 
                 result = clone_operation(model_spec, target_dir)
 
-                # Session 59 fix: Should succeed despite unhealthy
+                # Should succeed despite unhealthy
                 assert result["status"] == "success"
                 assert result["data"]["clone_status"] == "success"
 
@@ -1042,7 +1042,7 @@ class TestCloneEdgeCases:
 
 
 class TestUnhealthyModelClone:
-    """Test that unhealthy models can still be cloned (Session 59 fix).
+    """Test that unhealthy models can still be cloned.
 
     Critical for community repair workflow:
     - mlx-vlm #624 affected models have broken index.json

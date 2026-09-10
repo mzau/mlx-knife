@@ -1,4 +1,4 @@
-"""Router rejects carry the ADR-004 envelope (audit C2).
+"""Router rejects carry the ADR-004 envelope.
 
 404 (no route matches) and 405 (wrong method) are raised by Starlette's router before
 any endpoint runs, as the *base* HTTPException. FastAPI's subclass — which every one of

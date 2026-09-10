@@ -16,8 +16,8 @@ from mlxk2.core.runner import MLXRunner
 class MockDetokenizer:
     """Mock detokenizer that mimics BPEStreamingDetokenizer behavior.
 
-    Used by unit tests to mock tokenizer.detokenizer after Session 60 changes.
-    Session 60 switched from tokenizer.decode() to tokenizer.detokenizer for
+    Used by unit tests to mock tokenizer.detokenizer.
+    The runner switched from tokenizer.decode() to tokenizer.detokenizer for
     proper BPE space marker (Ġ U+0120) conversion.
     """
     def __init__(self, decode_func):
@@ -256,7 +256,7 @@ class TestMLXRunnerStopTokens:
                     # Fallback for other cases
                     return ""
                 mocks['mock_tokenizer'].decode.side_effect = mock_decode
-                # Mock detokenizer (Session 60 BPE fix)
+                # Mock detokenizer (BPE fix)
                 mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
 
                 with MLXRunner(model_name) as runner:
@@ -287,7 +287,7 @@ class TestMLXRunnerStopTokens:
                         return "Response\nHuman: rest"
                     return ""
                 mocks['mock_tokenizer'].decode.side_effect = mock_decode
-                # Mock detokenizer (Session 60 BPE fix)
+                # Mock detokenizer (BPE fix)
                 mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
 
                 with MLXRunner(model_name) as runner:
@@ -325,7 +325,7 @@ class TestMLXRunnerStopTokens:
                     return "Hello world!"
                 return ""
             mocks['mock_tokenizer'].decode.side_effect = mock_decode
-            # Mock detokenizer (Session 60 BPE fix)
+            # Mock detokenizer (BPE fix)
             mocks['mock_tokenizer'].detokenizer = MockDetokenizer(mock_decode)
 
             with MLXRunner(model_name) as runner:

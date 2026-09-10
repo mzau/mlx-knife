@@ -16,8 +16,8 @@ from mlxk2.operations.run import run_model, interactive_chat
 class MockDetokenizer:
     """Mock detokenizer that mimics BPEStreamingDetokenizer behavior.
 
-    Used by unit tests to mock tokenizer.detokenizer after Session 60 changes.
-    Session 60 switched from tokenizer.decode() to tokenizer.detokenizer for
+    Used by unit tests to mock tokenizer.detokenizer.
+    The runner switched from tokenizer.decode() to tokenizer.detokenizer for
     proper BPE space marker (Ġ U+0120) conversion.
     """
     def __init__(self, decode_func):

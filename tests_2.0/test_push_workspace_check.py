@@ -76,7 +76,7 @@ def test_check_only_lfs_pointer_detected(tmp_path):
 
 
 class TestPushAmbiguousWorkspace:
-    """Tests for ambiguous workspace pattern handling (Session 103)."""
+    """Tests for ambiguous workspace pattern handling."""
 
     def test_push_ambiguous_prefix_pattern(self, tmp_path):
         """Ambiguous prefix pattern should return clear error with matches list."""

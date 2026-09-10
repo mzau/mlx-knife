@@ -324,7 +324,7 @@ def run_model(
     Returns:
         Generated text on success, "Error: ..." string on failure (both modes)
     """
-    # Suppress transformers/tokenizers noise (Session 89 + Session 90 fix)
+    # Suppress transformers/tokenizers noise
     # Set ENV variables for subprocess/tokenizer
     os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"

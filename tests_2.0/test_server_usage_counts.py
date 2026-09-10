@@ -1,4 +1,4 @@
-"""`usage` reports what the runner counted, not a word estimate (audit C9).
+"""`usage` reports what the runner counted, not a word estimate.
 
 Every surface used to report `len(text.split()) * 1.3`: a reply the ceiling cut at five
 tokens came back as `completion_tokens: 2`, contradicting the `Generation finished` line

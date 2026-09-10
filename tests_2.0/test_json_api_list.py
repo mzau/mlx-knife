@@ -118,7 +118,7 @@ def test_list_empty_cache(isolated_cache, monkeypatch):
 
 
 class TestListWorkspacePrefix:
-    """Test list_models() with workspace path patterns (Session 103)."""
+    """Test list_models() with workspace path patterns."""
 
     def test_list_workspace_exact_match(self, tmp_path):
         """Test list_models with exact workspace path."""

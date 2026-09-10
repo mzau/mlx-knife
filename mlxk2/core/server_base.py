@@ -795,7 +795,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
             # ADR-024: a modality this model does not have is a reject, not a silent drop.
             # The text path would answer about the text alone, and the client would never
             # learn its image was thrown away — which is also what lets /v1/models carry no
-            # capability label: the modality is answered for at request time (§I7).
+            # capability label: the modality is answered for at request time.
             modality = "images" if has_images else "audio"
             raise HTTPException(
                 status_code=422,
@@ -1273,7 +1273,7 @@ def run_server(
     """Run the MLX Knife server 2.0."""
     import os
 
-    # Suppress transformers/tokenizers noise (Session 89 + Session 90 fix)
+    # Suppress transformers/tokenizers noise
     # ENV variables already set by serve.py subprocess, but set logging programmatically
     # IMPORTANT: Do NOT import transformers in global scope (breaks huggingface_hub downloads)
     try:

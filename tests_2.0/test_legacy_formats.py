@@ -94,7 +94,7 @@ def test_modern_model_safetensors_passes_legacy_gate(isolated_cache):
 
 
 def test_vision_dual_backend_logic():
-    """Session 149: Vision models require BOTH mlx-vlm AND mlx-lm for full runtime compatibility.
+    """Vision models require BOTH mlx-vlm AND mlx-lm for full runtime compatibility.
 
     This tests the logic from common.py lines 550-563:
     - Vision models need mlx-vlm for image processing

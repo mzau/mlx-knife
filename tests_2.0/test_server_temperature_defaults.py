@@ -1,4 +1,4 @@
-"""The sampling default follows the surface, not the request model (audit C5).
+"""The sampling default follows the surface, not the request model.
 
 `temperature` used to default to 0.7 in the request model, which made "unset" and "the
 caller asked for 0.7" indistinguishable — so a default chat request against Whisper or

@@ -290,7 +290,7 @@ ans  = c.chat.completions.create(model="chat-model", messages=[{"role": "user", 
 ```
 
 **Why this is a use case, not just an endpoint:** it *is* the realistic embed-serve smoke test
-(Slice D → SMOKE §B). Acceptance asserts: OpenAI-compatible response shape (`data[].embedding`,
+for Slice D. Acceptance asserts: OpenAI-compatible response shape (`data[].embedding`,
 `usage`), `serve`'s `/v1/embeddings` proxy actually reaches the warm `embed-serve` backend, vectors
 **match the CLI path** (same model/text/device → same vector, the same-model rule), and a coherent
 RAG answer end-to-end. It is also the **nChat client-RAG template** — consumer-side; the client itself is

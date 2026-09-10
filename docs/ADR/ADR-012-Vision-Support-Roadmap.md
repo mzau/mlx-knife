@@ -204,7 +204,7 @@ class VisionHTTPAdapter:
 - No hard limit - fail fast with clear error message
 - Metal OOM → HTTP 507 "Too many images for available memory. Try 3-5 images. Per-image overhead varies by model/resolution."
 - No batching (each HTTP request is independent; OpenAI API typically sends ≤10-16 images per request)
-- Stable image IDs via history-based reconstruction (Session 32): Server scans `messages[]` history and assigns IDs chronologically using content-hash deduplication
+- Stable image IDs via history-based reconstruction: Server scans `messages[]` history and assigns IDs chronologically using content-hash deduplication
 - Rationale: Per-image memory overhead varies by model/resolution/system RAM - no universal limit possible
 
 **Deferred:**
@@ -285,11 +285,11 @@ Both `mlxk serve` (mlx-lm) and `mlx_vlm.server` use FastAPI:
    - Vision models: `preprocessor_config.json` required
    - Chat models: `tokenizer.json` required if `tokenizer_config.json` exists
    - 8 new health check tests
-5. ~~**Phase 3**: Server integration~~ ✅ (2.0.4-beta.1, Sessions 23-24)
+5. ~~**Phase 3**: Server integration~~ ✅ (2.0.4-beta.1)
    - VisionHTTPAdapter with OpenAI-compatible Base64 image support
    - Multimodal history filtering (Vision→Text model switching)
    - SSE graceful degradation (non-streaming mlx-vlm backend)
-6. ~~**Phase 4**: Documentation + remove alpha gate~~ ✅ (2.0.4-beta.1, Session 16)
+6. ~~**Phase 4**: Documentation + remove alpha gate~~ ✅ (2.0.4-beta.1)
 
 **Completed effort:**
 - Phase 0 (backend research): ✅

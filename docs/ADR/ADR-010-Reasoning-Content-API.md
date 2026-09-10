@@ -353,7 +353,7 @@ the pretty rendering moves to the client where it belongs.
   control-reporting surface (#51). Decision 3 closes the flag semantics; it does not open
   this.
 - **System-prompt-based activation** — #33, orthogonal, unblocked from this work.
-- **Function/tool-call reasoning traces** — #39 / ADR-027. Harmony's `commentary` channel
+- **Function/tool-call reasoning traces** — #39. Harmony's `commentary` channel
   is recognised by the reader but not interpreted here.
 - **User-defined custom tags** — markers come from the model, not user injection.
 - **Generation-length / repetition heuristics** — explicitly rejected as the lever.

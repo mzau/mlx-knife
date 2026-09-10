@@ -469,7 +469,7 @@ def pytest_generate_tests(metafunc):
     This hook runs during test collection (before test execution).
     Enables process-per-model isolation: each model runs in separate pytest process.
 
-    Architecture Decision (Session 56):
+    Architecture Decision:
     - Prevents memory leak accumulation (71GB swap with 20 models in one process)
     - OS-level cleanup between models (process exit guarantees full cleanup)
     - Reflects real-world usage (users never load 20+ models sequentially)
@@ -698,7 +698,7 @@ class TestStopTokensEmpiricalMapping:
     def test_empirical_mapping_single_model(self, model_key_param, portfolio_models, request):
         """Document tokenizer configs and empirically observed stop tokens (ONE model per test).
 
-        ARCHITECTURE DECISION (Session 56):
+        ARCHITECTURE DECISION:
         - Each model runs in SEPARATE pytest process (process isolation)
         - OS guarantees complete memory cleanup between models
         - Prevents memory leak accumulation (71GB swap with 20 models in one process)

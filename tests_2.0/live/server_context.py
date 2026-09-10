@@ -34,7 +34,7 @@ def _get_available_memory_gb() -> float:
     IMPORTANT: We do NOT count "inactive" pages because Metal/GPU cache may hold
     them even though macOS reports them as "reclaimable". This was causing false
     positives where Memory Gates reported 20+ GB available but Pixtral failed
-    with "Broken pipe" due to actual memory pressure. (Session 136 fix)
+    with "Broken pipe" due to actual memory pressure.
     """
     try:
         result = subprocess.run(
@@ -101,7 +101,7 @@ def _wait_for_memory_release(
     This function actively waits until enough memory is free before
     allowing the next test to start.
 
-    Uses TWO indicators for robust detection (Session 136 finding):
+    Uses TWO indicators for robust detection:
     1. vm.memory_pressure == 0 (macOS kernel says system is relaxed)
     2. Available memory >= min_free_gb (enough free+speculative pages)
 

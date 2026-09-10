@@ -1282,7 +1282,7 @@ def _get_macos_system_health() -> Dict[str, Any]:
                 ["degraded_swap"] = swap usage detected (memory pressure)
                 ["degraded_zombies"] = zombie processes detected
 
-    Quality Thresholds (empirically derived from Session 43 analysis):
+    Quality Thresholds (empirically derived):
         - Swap: >100 MB indicates memory pressure (beta2→beta3: 1.8 GB swap = +3.4% slowdown)
         - Zombies: >0 indicates stuck processes (REGRESSION-2025-12-08: 14 zombies = +90% slowdown)
     """

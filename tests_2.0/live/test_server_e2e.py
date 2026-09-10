@@ -39,7 +39,7 @@ from .test_utils import (
 )
 # text_portfolio fixture is provided by conftest.py (Portfolio Separation)
 
-# Server request timeout (increased from 30s to 45s in Session 22)
+# Server request timeout (increased from 30s to 45s)
 # Accounts for: baseline (15s) + probe/policy overhead (2.7s) + generation + safety margin
 SERVER_REQUEST_TIMEOUT = 45.0
 # /v1/models can be slower due to cache scans + runtime checks

@@ -270,7 +270,7 @@ Current workflow incomplete for local testing:
 ```bash
 mlxk clone model ./ws
 mlxk convert ./ws ./ws-fixed --repair-index
-mlxk health ./ws-fixed    # ✅ Works (Session 59)
+mlxk health ./ws-fixed    # ✅ Works
 mlxk run ./ws-fixed "test" # ❌ Fails (needs HF model ID)
 mlxk show ./ws-fixed       # ❌ Fails (needs HF model ID)
 ```
@@ -364,7 +364,7 @@ Extend `run`, `show`, `server` to accept workspace paths (like `health` already 
 - ✅ `mlxk run ./workspace "prompt"` - Direct testing
 - ✅ `mlxk show ./workspace` - Metadata inspection
 - ✅ `mlxk server --model ./workspace` - Local dev/testing
-- ✅ `mlxk health ./workspace` - Already works (Session 59)
+- ✅ `mlxk health ./workspace` - Already works
 
 **OpenAI API Compatibility:**
 - `/v1/models` response includes workspace with `"owned_by": "workspace"`
@@ -782,7 +782,7 @@ Only implement repairs that are:
   - Conditional cleanup based on workspace health
   - UX parity with pull operation
   - `--force-resume` flag for non-interactive use
-  - **Status:** Complete (Sessions 67-70, beta.6)
+  - **Status:** Complete (beta.6)
 
 - [x] **Phase 0c (2.0.4-beta.6):** ✅ Workspace run/show/server support
   - Direct workspace execution: `mlxk run ./workspace "prompt"`
@@ -791,7 +791,7 @@ Only implement repairs that are:
   - Central implementation in `resolve_model_for_operation()` + runners
   - Server: `/v1/models` shows workspace with `"owned_by": "workspace"`
   - **Files:** `model_resolution.py`, `runner/__init__.py`, `vision_runner.py`, `show.py`, `server_base.py`
-  - **Status:** Complete (Sessions 68-69, beta.6)
+  - **Status:** Complete (beta.6)
 
 - [x] **Phase 1 (2.0.4-beta.5):** ✅ `--repair-index` for safetensors index/shard mismatch
   - `rebuild_safetensors_index()` primitive

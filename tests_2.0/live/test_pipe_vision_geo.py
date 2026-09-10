@@ -1,4 +1,4 @@
-"""Vision→Geo pipe integration test (Session 72-75 validation).
+"""Vision→Geo pipe integration test.
 
 Simple smoke test for the complete pipeline:
 - Vision model with chunking (--chunk 1) for geo-test images
@@ -90,14 +90,14 @@ def _run_cli(args: list[str], stdin: str | None = None, timeout: int = 600) -> t
 
 
 class TestVisionGeoPipeline:
-    """Integration test for Vision→Geo pipeline (Sessions 72-75)."""
+    """Integration test for Vision→Geo pipeline."""
 
     @pytest.fixture(scope="class")
     def vision_model_id(self, vision_portfolio):
         """Get vision model from portfolio (pixtral preferred)."""
         # TODO: Use vision_portfolio when more vision models are viable
         # Currently only pixtral works reliably (blacklist filters others)
-        # Session 133: Support any available pixtral variant (4bit, 8bit, etc.)
+        # Support any available pixtral variant (4bit, 8bit, etc.)
         for key, info in vision_portfolio.items():
             model_id = info.get("id", "")
             if "pixtral" in model_id.lower():
@@ -109,7 +109,7 @@ class TestVisionGeoPipeline:
     def text_model_id(self, text_portfolio):
         """Get best (largest) eligible text model from portfolio (RAM-aware).
 
-        Sequential loading strategy (Session 73): Vision model unloads first
+        Sequential loading strategy: Vision model unloads first
         (~12GB freed), then text model loads. Pick largest available for quality.
         """
         model = _pick_best_eligible_text_model(text_portfolio)
@@ -135,7 +135,7 @@ class TestVisionGeoPipeline:
     def test_vision_batch_processing_chunk_1(self, check_prerequisites, vision_model_id, request):
         """Test vision batch processing with chunk=1 (incremental output).
 
-        Validates: ADR-012 Phase 1c, Sessions 73-75 fixes, Session 93 chunk streaming
+        Validates: ADR-012 Phase 1c, the pipe fixes, chunk streaming
         PASSED: Process succeeds, output not empty, all chunks processed
         """
         image_paths = [str(p) for p in GEO_IMAGES]
@@ -155,7 +155,7 @@ class TestVisionGeoPipeline:
         assert code == 0, f"Vision phase failed: exit={code}\nstderr={stderr}"
         assert stdout.strip(), "Vision output is empty"
 
-        # Session 93: With chunk=1, no image numbers in metadata (hallucination fix)
+        # With chunk=1, no image numbers in metadata (hallucination fix)
         # Instead, verify all chunks were processed by checking chunk markers
         chunk_markers = sum(1 for i in range(1, 10) if f"Chunk {i}/9" in stdout)
         assert chunk_markers == 9, f"Only {chunk_markers}/9 chunks found (expected all chunks processed)"
@@ -163,7 +163,7 @@ class TestVisionGeoPipeline:
     def test_vision_to_geo_pipe(self, check_prerequisites, vision_model_id, text_model_id, request):
         """Test complete Vision→Geo pipeline.
 
-        Validates: Session 73 pipe stdin + --prompt, complete integration
+        Validates: pipe stdin + --prompt, complete integration
         PASSED: Both phases succeed, geo output mentions location concepts
         """
         import time
@@ -229,7 +229,7 @@ class TestVisionGeoPipeline:
 
         # Log Text phase as sub-test
         # Note: size_gb lookup from portfolio would be ideal, but hardcoded for Mixtral-8x7B as fallback
-        # TODO: Extract size_gb from portfolio when available (Session 80 follow-up)
+        # TODO: Extract size_gb from portfolio when available
         if request.config.report_file:
             # Best-effort size_gb lookup (Mixtral-8x7B is 24.5GB, but might vary by quantization)
             text_size_gb = 24.5 if "mixtral" in text_model_id.lower() else 0
@@ -261,7 +261,7 @@ class TestVisionGeoPipeline:
         assert has_location_terms, f"Geo output lacks location terms (pipe may have failed):\n{geo_stdout[:300]}"
 
     def test_vision_chunk_isolation_no_hallucination(self, check_prerequisites, vision_model_id, request):
-        """Test chunk isolation with chunk=1 (Session 73 regression test).
+        """Test chunk isolation with chunk=1 (regression test).
 
         Validates: Fresh VisionRunner per chunk, no state leakage
         PASSED: Process succeeds, both images mentioned separately

@@ -40,7 +40,7 @@ def get_available_memory_bytes() -> Optional[int]:
     IMPORTANT: We do NOT count "inactive" pages because Metal/GPU cache may hold
     them even though macOS reports them as "reclaimable". This was causing false
     positives where Memory Gates reported sufficient memory but models failed
-    with OOM/Broken pipe due to actual memory pressure. (Session 136 fix)
+    with OOM/Broken pipe due to actual memory pressure.
 
     Returns:
         Available memory in bytes, or None if unavailable.
@@ -111,7 +111,7 @@ def wait_for_memory_release(
     Metal GPU cache is released asynchronously. This function waits
     until enough memory is available before loading the next model.
 
-    Uses TWO indicators for robust detection (Session 136 finding):
+    Uses TWO indicators for robust detection:
     1. vm.memory_pressure == 0 (macOS kernel says system is relaxed)
     2. Available memory >= required_bytes (enough free+speculative pages)
 
