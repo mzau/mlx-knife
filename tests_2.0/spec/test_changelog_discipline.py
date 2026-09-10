@@ -1,9 +1,9 @@
 """CHANGELOG discipline: the top section tells the truth, released sections stay frozen.
 
-Two rules that were kept by hand until one of them slipped — the 2.0.8-beta.1 release commit
-shipped with `[Unreleased]` still standing as the version heading, and the section was never
-folded. In a published release `[Unreleased]` is simply wrong: the cut renames it, and the
-first commit after the cut creates a fresh one. That is recurring mechanics, so it belongs in
+Two rules that were kept by hand until one of them nearly slipped — the 2.0.8-beta.1 release
+commit was first built with `[Unreleased]` still standing as the version heading, and only
+caught before it was published. In a published release `[Unreleased]` is simply wrong: the
+cut renames it, and the first commit after the cut creates a fresh one. That is recurring mechanics, so it belongs in
 the tree as a test rather than in a planning document.
 
 This sits beside the JSON API version triple rather than inside it: the triple holds the
