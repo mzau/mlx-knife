@@ -80,6 +80,5 @@ def reject_untrusted_model_code(model_path: Optional[Union[str, Path]]) -> None:
 
     raise UntrustedModelCodeError(
         f"The model at {model_path} requires importing and running a custom module "
-        f"({model_file!r}) to build its architecture. mlx-knife does not execute "
-        f"model-supplied code."
+        f"({model_file!r}). mlx-knife refuses to execute it."
     )
