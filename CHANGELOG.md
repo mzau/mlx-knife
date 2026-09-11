@@ -25,6 +25,15 @@
   prevent, and what can be seen before a model loads. Its recommendations of a specific
   organization as a download source are removed.
 
+### Changed
+
+- Supported Python widens from 3.10–3.12 to **3.10–3.14**. The boundary was never mlx-knife's:
+  `mlx-audio` is a base dependency with no audio-free install variant, and `miniaudio` beneath
+  it published no macOS-ARM wheel above 3.12, so an install fell back to a build from source
+  and failed. Wheels now cover the whole range, and every supported version installs without a
+  C compiler or the macOS SDK. Classifiers, the multi-version matrix and the documented
+  boundary follow; `requires-python` is unchanged at `>=3.10`.
+
 ## [2.0.8-beta.1] - 2026-09-08
 
 ### Added

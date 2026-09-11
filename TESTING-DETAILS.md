@@ -906,8 +906,9 @@ HF_HOME=/path/to/cache pytest -m live_e2e -n auto  # ← NEVER DO THIS!
 
 ## Python Version Verification Results
 
-The supported set is what [`test-multi-python.sh`](test-multi-python.sh) actually builds and
-runs — it is the single source of truth, and [README](README.md) states the same boundary:
+The supported set is what has actually been built and run, not what the classifiers claim —
+[`test-multi-python.sh`](test-multi-python.sh) is how it is measured, and [README](README.md)
+states the same boundary:
 
 | Python Version | Status | Reason |
 |----------------|--------|--------|
@@ -915,7 +916,18 @@ runs — it is the single source of truth, and [README](README.md) states the sa
 | 3.10.x         | ✅ Supported | text + vision + audio |
 | 3.11.x         | ✅ Supported | text + vision + audio |
 | 3.12.x         | ✅ Supported | text + vision + audio |
-| 3.13+          | ❌ Not supported | miniaudio has no pre-built macOS-ARM wheel; the base install needs a C compiler + macOS SDK. mlx-audio is a base dependency, not an extra |
+| 3.13.x         | ✅ Supported | text + vision + audio; verified in a separate run, see the note below |
+| 3.14.x         | ✅ Supported | text + vision + audio |
+
+Every supported version installs from wheels alone — no C compiler and no macOS SDK. The
+boundary moved up when `miniaudio` began publishing macOS-ARM wheels for the whole range;
+before that, `mlx-audio` (a base dependency, not an extra) made 3.13+ fail at install time.
+
+The matrix only covers interpreters that are on `PATH` under the names it probes
+(`python3.10` … `python3.14`); one that is missing is reported as *Not Available* and does not
+fail the run. A versioned install that keeps its interpreter off `PATH` — which is how 3.13 is
+commonly installed alongside a newer default — therefore has to be verified by pointing a venv
+at it directly.
 
 Per-version pass/skip counts are **not carried here**: they move with every test added and
 with the environment (see the note under Test Results above). Re-measure at release with

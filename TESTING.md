@@ -292,7 +292,7 @@ pytest -m live_stop_tokens -v
 
 ## Python Version Compatibility
 
-**Tests validated on Python 3.10-3.12** (Python 3.9 not supported since 2.0.4)
+**Tests validated on Python 3.10-3.14** (Python 3.9 not supported since 2.0.4)
 
 Multi-version testing:
 ```bash

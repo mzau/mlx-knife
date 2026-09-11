@@ -42,7 +42,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 ```
 
 **Requirements (2.0.8 pin set):**
-- Python 3.10–3.12. macOS/ARM has no 3.13 wheel for `miniaudio`, and `mlx-audio` is a **base** dependency — there is no audio-free install variant, so 3.13 fails at install time.
+- Python 3.10–3.14. Every version in that range installs from wheels alone — `mlx-audio` is a **base** dependency, so an interpreter without a macOS-ARM `miniaudio` wheel would fail at install time; there is no audio-free install variant.
 - `mlx>=0.30.0,<0.32.1`
 - `mlx-lm==0.31.3` (text backend)
 - `mlx-vlm==0.6.10` (vision + multimodal audio)
@@ -411,7 +411,7 @@ A man said to the universe, Sir, I exist.
 - Whisper: `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`
 - Voxtral: `mlx-community/Voxtral-Mini-3B-2507-bf16` (upstream tokenizer issues)
 
-**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.12).
+**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.14).
 
 **Translation:** for audio-to-English translation, use the dedicated
 [`POST /v1/audio/translations`](#post-v1audiotranslations) endpoint (or the CLI
@@ -493,7 +493,7 @@ client.audio.translations.create(
 | Not an audio model at all | **400** | a text or vision model |
 | Audio model that cannot translate | **422** | whisper-turbo (reduced decoder), `whisper-*.en` (no `<\|translate\|>` token), non-Whisper STT (Voxtral, VibeVoice) |
 
-**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.12).
+**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.14).
 
 ---
 
@@ -1175,7 +1175,7 @@ interpreter.
 
 **Solution:**
 ```bash
-# Upgrade Python (3.10-3.12 required)
+# Upgrade Python (3.10-3.14 required)
 pyenv install 3.10
 pyenv local 3.10
 
@@ -1322,12 +1322,12 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 **Symptom:** `STT models require mlx-audio`
 
 **Cause:** `mlx-audio` is a base dependency, so this only appears when the install is
-incomplete — most commonly on **Python 3.13 / macOS-ARM**, where the `miniaudio` wheel is
-missing and the build fails.
+incomplete — an interrupted `pip install`, or an interpreter outside the supported range, where
+no macOS-ARM `miniaudio` wheel exists and the build from source fails.
 
 **Solution:**
 ```bash
-# Use Python 3.10-3.12, then reinstall
+# Use Python 3.10-3.14, then reinstall
 pip install --force-reinstall mlx-knife
 ```
 
@@ -1838,7 +1838,7 @@ Hello world.
 - Use `multipart/form-data` content type (not `application/json`)
 - File field name must be `file`
 - Maximum file size: 50 MB — see [Limits Summary](#limits-summary) for what that means per format
-- Requires `mlx-audio` on the server — included in the base install (Python 3.10–3.12)
+- Requires `mlx-audio` on the server — included in the base install (Python 3.10–3.14)
 
 ### Embeddings: Model Identity & Change Detection
 

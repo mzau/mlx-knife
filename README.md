@@ -10,7 +10,7 @@
 
 [![GitHub Release](https://img.shields.io/badge/stable-2.0.7-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Python 3.10-3.12](https://img.shields.io/badge/python-3.10--3.12-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10-3.14](https://img.shields.io/badge/python-3.10--3.14-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 
 **Release Notes:** See [CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md) for detailed changes, fixes, and migration guides.
@@ -85,7 +85,7 @@ Robust handling of SIGPIPE and early pipe termination (`| head`, `| grep -m1`).
 
 ## Requirements
 - macOS with Apple Silicon
-- Python 3.10-3.12 (see Python Compatibility below)
+- Python 3.10-3.14 (see Python Compatibility below)
 - 8GB+ RAM recommended + RAM to run LLM
 
 ## ⚖️ Model Usage and Licenses
@@ -109,9 +109,8 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ### Python Compatibility
 
-✅ **Python 3.10 - 3.12** - Full support (Text + Vision + Audio)
+✅ **Python 3.10 - 3.14** - Full support (Text + Vision + Audio)
 ❌ **Python 3.9** - Use version 2.0.3 (text + cache management only)
-❌ **Python 3.13+** - Not supported (miniaudio lacks pre-built wheels)
 
 **Recommended:** Python 3.10 or 3.11 for best compatibility.
 
@@ -126,7 +125,7 @@ pip install mlx-knife
 mlxk --version  # → mlxk 2.0.7
 ```
 
-**Requirements:** macOS Apple Silicon, Python 3.10-3.12
+**Requirements:** macOS Apple Silicon, Python 3.10-3.14
 **Includes:** Text, Vision, Audio (Whisper STT), EXIF metadata, Unix pipes
 
 ### 2. Developer Installation
@@ -140,7 +139,7 @@ mlxk --version  # → mlxk 2.0.7
 pytest -v
 ```
 
-**Requirements:** macOS Apple Silicon, Python 3.10-3.12
+**Requirements:** macOS Apple Silicon, Python 3.10-3.14
 
 ### Migrating from 1.x
 
