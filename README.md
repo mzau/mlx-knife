@@ -54,6 +54,12 @@ produce a broken workspace).
 The **bugfix** release (in development): 2.0.7 added capabilities, 2.0.8 makes the ones
 already there honest.
 
+- **A checkpoint that names its own Python in `model_file` is refused.** Loading it would
+  execute that file (CVE-2026-5843); `run`, `serve`, `embed`, `embed-serve` and
+  `convert --quantize` stop before any backend is called, and `list` / `show` report the
+  model as not runnable, with the reason.
+  Code declared through `auto_map` is a separate mechanism that mlx-knife cannot prevent —
+  see [SECURITY.md](https://github.com/mzau/mlx-knife/blob/main/SECURITY.md#code-in-model-directories).
 - **The generation budget holds.** `--max-tokens` and `max_tokens` mean the same on CLI and
   server: at most 32768 tokens (2048 for vision), never more than the context window minus
   the prompt. A cut answer reports `finish_reason: "length"`; a prompt that fills the window
@@ -68,7 +74,7 @@ already there honest.
   path, and no server process survives its supervisor.
 
 The MLX stack moves to mlx-vlm 0.6.10 / mlx-audio 0.4.8 / transformers 5.14.1 — torch-free,
-a 524 MB (36 %) smaller install.
+a 524 MB (36 %) smaller install — and Python 3.10–3.14 are supported.
 
 ## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:

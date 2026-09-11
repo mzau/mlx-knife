@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.8-beta.2] - 2026-09-11
 
 ### Security
 
