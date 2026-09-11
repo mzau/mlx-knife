@@ -37,6 +37,7 @@ benchmarks/
 | `validate_reports.py` | Schema validation of JSONL files |
 | `tools/memmon.py` | Memory + CPU + GPU monitoring (200ms sampling) |
 | `tools/memplot.py` | Interactive 3-row timeline (Memory/CPU/GPU, HTML) |
+| `tools/chronos_gauge.py` | `mlxk serve` against `mlx_lm.server`, measured by mlx-chronos (TTFT, throughput, RAM) — [TESTING-DETAILS.md](../TESTING-DETAILS.md#server-overhead-gauge-mlx-chronos) |
 
 ## Schema
 

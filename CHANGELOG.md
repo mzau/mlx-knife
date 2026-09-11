@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `benchmarks/tools/chronos_gauge.py` measures `mlxk serve` against `mlx_lm.server` with
+  [mlx-chronos](https://github.com/igurss/mlx-chronos): the same protocol against both servers,
+  one after the other on the same model and port — time to first token, request and decode
+  throughput, RAM — printed side by side with their ratio. mlx-chronos runs from its own virtual
+  environment and never enters the development or test environment. The gauge refuses a busy GPU
+  and any model mlxk would not run. Setup and how to read the table: TESTING-DETAILS →
+  *Server Overhead Gauge (mlx-chronos)*.
+
 ## [2.0.8-beta.2] - 2026-09-11
 
 ### Security

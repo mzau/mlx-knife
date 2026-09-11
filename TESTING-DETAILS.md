@@ -1059,6 +1059,69 @@ Goal: Gated/private/not-found repos must not pollute the cache and should fail f
 - Scope: OpenAI-compatible endpoints (minimal smoke); no real models required.
 - Optional for local verification; in CI currently "nice to have" (Backlog, not part of the 2.0 Guide).
 
+## Server Overhead Gauge (mlx-chronos)
+
+`benchmarks/tools/chronos_gauge.py` measures `mlxk serve` against `mlx_lm.server` with
+[mlx-chronos](https://github.com/igurss/mlx-chronos), a benchmark suite for local inference
+servers. For one text model it starts each server in turn on the same port, runs the same chronos
+protocol against it and prints both results side by side with their ratio: time to first token
+(cold, and with a repeated prompt), request and decode throughput, system RAM peak. Output quality
+is not measured.
+
+### Setup
+
+mlx-chronos lives in its own virtual environment and is only called through its command line. It
+never enters the development or test environment, so installing it changes no test result:
+
+```bash
+python3 -m venv venv-chronos
+venv-chronos/bin/pip install "mlx-chronos[thermal]==0.4.1"
+venv-chronos/bin/pip install --no-deps "mlx-lm==<mlx-lm version of the development environment>"
+```
+
+chronos refuses to run its `mlx-lm` engine unless the `mlx-lm` package is installed in its own
+environment, and records that version; it never imports it, so `--no-deps` pulls in no MLX. The
+gauge compares both versions and prints the exact command when they differ.
+
+### Run
+
+From the development environment, with the model in the Hugging Face cache:
+
+```bash
+python benchmarks/tools/chronos_gauge.py --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
+```
+
+Both servers run with `HF_HUB_OFFLINE=1`. Results go to
+`benchmarks/reports/chronos/<timestamp>-<model>/` — chronos JSON per server, server and chronos
+logs, `summary.json`, `summary.md` — and stay local. Options: `--port` (default 8080),
+`--profile baseline|sustained`, `--trials`, `--pause` (seconds between the two runs, default 60),
+`--max-gpu-busy`, `--chronos` (or `MLXK_CHRONOS_BIN`).
+
+### What the gauge refuses
+
+- **A model mlxk would not run, or one that is not text-only.** `mlx_lm.server` executes a
+  checkpoint's `model_file` unconditionally; mlxk reports such a model as not runnable, so the
+  reference server never loads one.
+- **A busy GPU.** Before each server it samples `Device Utilization %` through `ioreg` and stops
+  above `--max-gpu-busy` (default 10 %). A game, or a video stream in a browser tab, slows every
+  step that waits on the GPU; a run beside one measures that application.
+- **A port that is already in use.**
+
+### Reading the table
+
+- **Compare the ratio, not the absolute numbers.** The reference runs in the same session, so the
+  ratio holds across machines, thermal state and changes to the instrument.
+- **`token counts`** says whether chronos took the token count from the server's `usage` or
+  estimated it from words. `mlxk serve` sends no `usage` in streamed responses (see
+  SERVER-HANDBOOK), so its throughput is a word estimate and its decode throughput is `n/a`. If
+  that changes, the throughput figure moves for that reason alone.
+- **`repetition_penalty`:** chronos sends none, so `mlxk serve` applies its default of 1.1 and
+  `mlx_lm.server` none; the generated text can differ.
+- **RAM** is the system-wide peak. chronos finds the `mlx_lm.server` process by name, not the
+  `mlxk serve` child process that holds the model, so per-process RSS is not comparable.
+- **Never submit these results** to the mlx-chronos leaderboard: both runs carry the `mlx-lm`
+  engine label.
+
 ## Known Warnings
 
 - urllib3 LibreSSL notice on macOS Python 3.9
