@@ -13,7 +13,7 @@ The 2026-02 framing treated MCP as the cure for three mlx-knife "limitations" �
 
 A 2026-06 direction note corrected this to "Option D": an in-process `mlxk mcp serve` exposing four stateless atoms (`generate`, `vision`, `transcribe`, `embed`). That fixed the orchestration error but left one assumption unexamined — that the surface has to live *inside* mlx-knife.
 
-It does not. And the symptom was visible all along: MCP has been sliding since beta.9 (2.0.6 → 2.0.7-stretch → 2.1 → post-2.1) because it never earned a slot against work that mattered more. A feature that never wins a slot is a feature in the wrong place.
+It does not. And the symptom was visible all along: MCP has been sliding since beta.9 (2.0.6 → 2.0.7-stretch → ever later) because it never earned a slot against work that mattered more. A feature that never wins a slot is a feature in the wrong place.
 
 ## Decision
 
@@ -88,4 +88,4 @@ The "✅ RECOMMENDED" marker Option A once carried is historical. Option A is th
 
 **Empirical data worth keeping (2026-04-16, 26 min of audio).** Whisper-large-v3-turbo-8bit: complete transcription in 71 s, no diarization. VibeVoice-ASR-8bit: roughly 19:30 of 26:00, minutes of processing, GPU pinned throughout — but diarization excellent (Speaker 0/1 cleanly separated). Chunking is mandatory for VibeVoice on long-form audio (~10–15 min chunks, with overlap for speaker continuity). This is why UC1 was interesting, and it remains the strongest case for a local `transcribe` tool: an MCP host genuinely cannot do this itself.
 
-**Superseded roadmap.** The old status header promised *2.0.7 experimental, gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`, 2.1 stable promotion*, over a timeline with "2.0.6 = RAG + MCP prototype". None of it happened: 2.0.6 shipped without a prototype, and the alpha gate was only ever implemented for embeddings — it never covered MCP, despite what `docs/ARCHITECTURE.md` claimed until 2026-07-14.
+**Superseded roadmap.** The old status header promised *2.0.7 experimental, gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`*, then a stable promotion, over a timeline with "2.0.6 = RAG + MCP prototype". None of it happened: 2.0.6 shipped without a prototype, and the alpha gate was only ever implemented for embeddings — it never covered MCP, despite what `docs/ARCHITECTURE.md` claimed until 2026-07-14.

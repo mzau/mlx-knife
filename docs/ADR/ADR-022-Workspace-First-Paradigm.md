@@ -299,7 +299,7 @@ phi-3-mini        | cache | —     | 2.1GB
 1. **Should `pull` warn about workspace-first?** → No, just document
 2. **Auto-create .hf_cache/?** → Yes, automatic
 3. **Workspace health include .hf_cache scan?** → Yes, with `--verbose`
-4. **Archive format?** → Deferred to 2.0.6+
+4. **Archive format?** → Deferred
 
 ---
 
@@ -326,7 +326,7 @@ mlxk run whisper-large-v3
 - `mlxk2/operations/list.py` — include MLXK_WORKSPACE_HOME in scan
 - `mlxk2/core/model_resolution.py` — search MLXK_WORKSPACE_HOME first
 
-**Future:** `MLXK_MODEL_PATH` for multi-path search (2.0.6+)
+**Future:** `MLXK_MODEL_PATH` for multi-path search (not built)
 
 ---
 

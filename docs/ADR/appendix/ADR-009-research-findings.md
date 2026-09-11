@@ -10,7 +10,7 @@
 
 **Problem:** Models generieren andere Stop-Tokens als konfiguriert, Reasoning-Content nicht API-konform
 **Root Cause (gefunden 2025-10-21):** HuggingFace tokenizer configs unvollständig + unser Code nutzt falsche API
-**Lösung:** 2-Phasen Approach (Beta.6: Stop-Token-Fix, 2.1+: Reasoning-API)
+**Lösung:** 2-Phasen Approach (Beta.6: Stop-Token-Fix, danach Reasoning-API → ADR-010)
 
 ---
 
@@ -208,7 +208,7 @@ response.choices[0].message.content            # Final answer
 - Validate stop token detection
 - Measure before/after behavior
 
-### Phase 2: 2.0.1+ - Reasoning API (Enhancement)
+### Phase 2: Reasoning API (Enhancement)
 
 **Goal:** API-standard-konforme Reasoning-Unterstützung
 
@@ -259,7 +259,7 @@ data: {"choices":[{"delta":{"reasoning":"step 1..."}}]}
 - 📅 **Status:** Implementierung anstehend
 
 **Problem 2 (Future):** Reasoning API
-- 📋 **2.0.1+:** Separate `reasoning_content` field
+- 📋 **Danach:** Separate `reasoning_content` field (→ ADR-010)
 - 📅 **Status:** Konzept definiert, Implementation später
 
 ## Offene Fragen (für später)

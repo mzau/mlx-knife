@@ -55,7 +55,7 @@ def _runnable_view():
         m for m in models
         if m.get("health") == "healthy" and m.get("runtime_compatible")
         # Embedders are runnable via `mlxk embed` but a bare `serve` can't serve them, so
-        # /v1/models omits them (ADR-015; the GET /v1/models embed-merge is deferred to 2.1).
+        # /v1/models omits them (ADR-015; the GET /v1/models embed-merge is deferred).
         # Match serve's predicate exactly (handlers/models.py): exclude "embeddings" capability.
         and "embeddings" not in (m.get("capabilities") or [])
     ]

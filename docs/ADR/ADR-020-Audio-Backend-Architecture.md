@@ -740,9 +740,9 @@ pip install mlx-knife[all]  # Same as Beta.8
 - ✅ --language parameter (Whisper optimization)
 
 ### Nice to Have (Future)
-- ⏸️ SRT/VTT subtitle format output (2.0.6+)
-- ⏸️ Speaker diarization output format (VibeVoice-ASR, 2.0.6+)
-- ⏸️ Streaming transcription (word-by-word, 2.1+)
+- ⏸️ SRT/VTT subtitle format output
+- ⏸️ Speaker diarization output format (VibeVoice-ASR)
+- ⏸️ Streaming transcription (word-by-word)
 - ⏸️ Separate benchmark project (WER/CER metrics, external)
 
 ---

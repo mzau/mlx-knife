@@ -561,7 +561,7 @@ def run_model(
     # cryptic "Model type 'X' not supported" loader error. Covers STT-only (Whisper,
     # VibeVoice-ASR, Voxtral) via Class-A substring classification, and embedding-only
     # models. Class C loader gaps (mllama text-only, gemma3n base text-only) report
-    # `text-generation` capability today and are deferred to 2.1+ reachability refactor.
+    # `text-generation` capability today and are deferred to the reachability refactor (#53).
     if not audio and not images and resolved_name and model_path is not None and cfg is not None:
         tok = read_tokenizer_hints(model_path)
         mt = detect_model_type(resolved_name, cfg, tok, model_path)

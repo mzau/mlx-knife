@@ -130,8 +130,8 @@ def test_models_endpoint_excludes_embedders(monkeypatch):
     """ADR-015 Slice C: serve /v1/models hides runnable embedders.
 
     bge/qwen3-embedders become runtime_compatible=True (so `mlxk list` shows them), but serve's
-    chat-surface /v1/models must not advertise them — the embed-backend merge is deferred to 2.1
-    and the response carries no capability field, so listing them would be a list↔verb contradiction.
+    chat-surface /v1/models must not advertise them — the embed-backend merge is deferred and the
+    response carries no capability field, so listing them would be a list↔verb contradiction.
     """
     monkeypatch.delenv("MLXK_WORKSPACE_HOME", raising=False)
     client = TestClient(app)

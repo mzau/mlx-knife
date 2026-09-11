@@ -357,7 +357,7 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 [ADR-024](ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) is the implementation decision record for this. The Class A instantiation (STT / Embedding pre-execution-reject) shipped in 2.0.6 (`2de2f21`). Class C extends the same pattern with the `MLX_LM_TEXT_LOADER_TYPES` allowlist + show/run alignment in `common.py:645-647`.
 
-**Slot:** DEFER 2.1 (tracking: [Issue #53](https://github.com/mzau/mlx-knife/issues/53)).
+**Slot:** deferred (tracking: [Issue #53](https://github.com/mzau/mlx-knife/issues/53)).
 
 ### Class D — Invocation gap (base + media-input is unreachable)
 
@@ -372,7 +372,7 @@ to a distinct fix path; they cannot be collapsed into one patch.
 
 **Fix path.** Reachability layer 3 must probe for chat-template-with-media-placeholder before reporting `vision-in` or `audio-in` as reachable. The result for base+multimodal is: text-only reachable (if loader passes), media-in not reachable. The `-it` sibling variant remains reachable for media.
 
-**Slot:** DEFER 2.1 (tied to the reachability work — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet).
+**Slot:** deferred (tied to the reachability work — Class D rephrase from „reachable=∅" to „policy-rejected per ADR-023 §4"; no ADR yet).
 
 ---
 
@@ -460,7 +460,7 @@ implementation can pick up exactly where this discussion stops.
 
 5. **`--healthy` filter flag.** Inverse of `--all`: filter models where `health = healthy` (regardless of reachability). Plausibly useful, but no concrete user request yet. Tracked as opportunistic.
 
-6. **TTS pipeline.** §4.5 notes that TTS is a pipeline gap, not a label gap. The decision whether 2.0.7+ adds a `tts` `model_type` peer to `base`/`chat`/`audio` plus an audio-output CLI mode is open and orthogonal to this document.
+6. **TTS pipeline.** §4.5 notes that TTS is a pipeline gap, not a label gap. The decision whether to add a `tts` `model_type` peer to `base`/`chat`/`audio` plus an audio-output CLI mode is open and orthogonal to this document.
 
 ---
 

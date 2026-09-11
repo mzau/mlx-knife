@@ -2,7 +2,7 @@
 
 **Status:** Accepted — Phase 1+2 (2.0.4-beta.1) and Phase 2b (2.0.4-beta.9) implemented. Phase 3 deferred → Issue #46.
 **Created:** 2025-12-05
-**Updated:** 2026-07-14 — audited against the tree. Three decisions had been taken *in code* and never recorded here (switch-gate thresholds, two-indicator polling, `inactive` exclusion); they are written up below. One item goes the other way: the JSON-API surface is narrower than this ADR intended and is now marked `[TARGET]` for 2.0.8 rather than downgraded to match the code.
+**Updated:** 2026-09-11 — the `[TARGET]` below is met: `list --json` carries `system` since 2.0.8-beta.1 (JSON API 0.2.4). 2026-07-14 — audited against the tree. Three decisions had been taken *in code* and never recorded here (switch-gate thresholds, two-indicator polling, `inactive` exclusion); they are written up below. One item went the other way: the JSON-API surface was narrower than this ADR intended and was marked `[TARGET]` rather than downgraded to match the code.
 **Context:** Vision models crash with Metal OOM without warning
 
 ## Problem
@@ -44,7 +44,7 @@ Add `system.memory_total_bytes` to API responses. This is a **hardware fact** (f
 }
 ```
 
-**`[TARGET]` — not yet true (2.0.8).** As shipped, the field is carried by the **`version` command only** (`mlxk --version --json`). `list` does not emit it. That makes the node's self-description incomplete in the way that matters: a consumer building a roster gets *model sizes* from `list --json`, but must make a second call to learn the *node's RAM* — so "does this model fit on this node?" cannot be answered from one response. The intent above (system info alongside the model list) is the right target; carrying it on `list --json` is an additive JSON-API change and belongs in 2.0.8, not in a release under smoke-test. **`list` only (decided 2026-09-07):** health entries carry no sizes, so the fit question cannot be answered from `health --json` either way; a `system` block there would be a value without a reader.
+**`[TARGET]` — met in 2.0.8-beta.1 (JSON API 0.2.4).** Until then the field was carried by the **`version` command only** (`mlxk --version --json`); `list` did not emit it. That left the node's self-description incomplete in the way that matters: a consumer building a roster got *model sizes* from `list --json`, but had to make a second call to learn the *node's RAM* — so "does this model fit on this node?" could not be answered from one response. `list --json` now carries the same `system` object, an additive JSON-API change. **`list` only (decided 2026-09-07):** health entries carry no sizes, so the fit question cannot be answered from `health --json` either way; a `system` block there would be a value without a reader.
 
 ### Memory Thresholds (mlx-knife internal)
 

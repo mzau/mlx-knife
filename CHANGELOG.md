@@ -359,7 +359,7 @@
   is configured, **502** when the backend is unreachable, **504** on backend
   read-timeout (502/504 are retryable); backend `4xx/5xx` responses pass
   through verbatim. `GET /v1/models` does not yet advertise the backend's
-  embedders (discovery merge deferred to 2.1).
+  embedders (discovery merge deferred).
 - **Whisper speech→English translation — `mlxk run <model> --audio FILE
   --translate [LANG]` and `POST /v1/audio/translations`**
   ([#54](https://github.com/mzau/mlx-knife/issues/54)). The server endpoint
@@ -405,7 +405,7 @@
   (`xlm-roberta`/`modernbert`/`nomic_bert`) report `False` with a "not
   vendored" reason. `mlxk run <embedder>` rejects pre-execution pointing to
   `mlxk embed`. Serve's `/v1/models` deliberately hides embedders (the
-  embed-backend merge is deferred to 2.1); `mlxk list` shows them.
+  embed-backend merge is deferred); `mlxk list` shows them.
 - **Server `/v1/models` now lists workspace models**
   ([#58](https://github.com/mzau/mlx-knife/issues/58), closes an ADR-022
   workspace-first gap). The endpoint previously scanned only the HF cache,
@@ -630,20 +630,19 @@
   - **[ADR-018](docs/ADR/ADR-018-Convert-Operation.md)** Phase status
     updated: Phase 2 (quantize + v1 content_hash) shipped 2.0.5,
     Phase 3 (content_hash v2 via ADR-025) shipped 2.0.6, Phase 4
-    (`--repair` unified detection-driven) deferred 2.1.
+    (`--repair` unified detection-driven) deferred.
   - **[ADR-024](docs/ADR/ADR-024-Pre-Execution-Capability-Mismatch-Reject.md)**
     (Partially Implemented) — Pre-Execution Capability-Mismatch
     Reject pattern; Class A (STT / Embedding) shipped 2.0.6 (the
     `mlxk run` pre-execution gate documented above), Class C
     (Loader Gap, [#53](https://github.com/mzau/mlx-knife/issues/53))
-    + Class D (base + media Invocation Gap) deferred 2.1. Title
+    + Class D (base + media Invocation Gap) deferred. Title
     widened from the original "Vision-only Pre-Execution Routing"
     stub to reflect actual pattern scope.
   - **[ADR-015](docs/ADR/ADR-015-Embeddings-API.md)** target pinned
-    to 2.0.7 experimental (gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`),
-    2.1 stable promotion.
+    to 2.0.7 experimental (gated via `MLXK2_ENABLE_ALPHA_FEATURES=1`).
   - **[`docs/RUNTIME-FEATURES.md`](docs/RUNTIME-FEATURES.md)** §5
-    Class C + Class D fix-paths tagged with `Slot: DEFER 2.1`;
+    Class C + Class D fix-paths tagged as deferred;
     ADR-024 link target updated to the renamed file.
   - **[`docs/ADR/README.md`](docs/ADR/README.md)** index rows for
     ADR-018, ADR-021, ADR-024 synchronised.
@@ -747,7 +746,7 @@
   `mlxk run gemma-4-e4b-it-4bit "prompt"` (param mismatch),
   `mlxk run gemma-3n-E2B-4bit "prompt"` (`KeyError 'model'`), and
   Llama-3.2-Vision / mllama (no text-tower loader at all). Workaround:
-  pass `--image` or `--audio`. Principled fix scheduled for 2.1
+  pass `--image` or `--audio`. Principled fix deferred
   (auto-discovered `MLX_LM_TEXT_LOADER_TYPES` + config-shape filter).
 
 ### Migration

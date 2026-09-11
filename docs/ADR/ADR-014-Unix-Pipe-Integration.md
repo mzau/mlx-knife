@@ -514,7 +514,7 @@ parallel model execution. For production distributed workflows, see broke-cluste
 - [ ] `examples/README.md`: mlxk-tee usage guide
 - [ ] Document topological equivalence (local models ↔ cluster nodes)
 
-### Phase 4: Server Integration (Future - 2.4+)
+### Phase 4: Server Integration (not built)
 - [ ] `/v1/completions` with `stream: true` → SSE
 - [ ] Client-side pipe emulation (broke-nchat)
 - [ ] Server stays simple (no pipe protocol)
@@ -707,7 +707,7 @@ These concerns are addressed in the broke-cluster project, which builds on this 
 2. **Testing:** Unit tests + manual workflow validation
 3. **mlxk-tee implementation:** Multi-model broadcast tool (examples/)
 4. **Documentation:** README examples + mlxk-tee usage guide
-5. **Decision:** Ship in 2.0.3 (quick win) or 2.1 (with vision support)?
+5. **Decision:** Ship in 2.0.3 (quick win) or together with vision support? *(Phase 1 shipped in 2.0.4-beta.1.)*
 6. **Community feedback:** Reddit/Discord examples to gauge adoption
 7. **Issue #26 synergy:** Once pipes are stable, embeddings API enables RAG workflows (ship example `cosine-search.py`)
 

@@ -54,7 +54,7 @@ async def handle_list_models(
 
     def _is_embedder(model_obj: Dict[str, Any]) -> bool:
         # ADR-015 §2.0.7-scope: serve's /v1/models does NOT advertise embedders. The embed
-        # backend's /v1/models merge is deferred to 2.1, and the chat-surface response carries
+        # backend's /v1/models merge is deferred, and the chat-surface response carries
         # no capability field — listing a runnable embedder here would be a list↔verb
         # contradiction (Invariant 4). `mlxk list` DOES show them (the honesty win); serve hides
         # them until the merge lands.
