@@ -12,6 +12,22 @@
   and any model mlxk would not run. Setup and how to read the table: TESTING-DETAILS →
   *Server Overhead Gauge (mlx-chronos)*.
 
+### Fixed
+
+- An empty model name selected a model. The resolver matched workspace directories and cached
+  models by case-insensitive substring, and `""` is contained in every name, so a caller that
+  named no model was served whatever the filesystem listed first — in directory order, and
+  without being told which model had answered. `POST /v1/chat/completions` with `"model": ""`
+  replied **200** from an arbitrary workspace model and echoed the empty name back; `mlxk rm ""
+  --force` deleted a cached model; `mlxk run ""` started inside a model directory loaded that
+  directory. An empty or whitespace-only name is now refused the way an unknown name is refused
+  — **404** `model_not_found` on the server, matching the neighbouring cases — and so is
+  `@<revision>` with no name in front of it, which reached the same match-everything path
+  through the revision lookup. `run`, `show`, `rm`, `embed` and `embed-serve` refuse it, as
+  does a model named in a server request. Two verbs read an empty argument as *no* argument
+  and still do: `mlxk health ""` checks every model, the way `mlxk health` without a pattern
+  does, and `serve --model ""` starts without a preloaded model. Present since 2.0.5.
+
 ## [2.0.8-beta.2] - 2026-09-11
 
 ### Security

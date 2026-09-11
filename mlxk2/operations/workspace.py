@@ -277,6 +277,10 @@ def is_workspace_path(path) -> bool:
         >>> is_workspace_path("mlx-community/Phi-3-mini")
         False  # HF model ID, not a path
     """
+    # Path("") is Path("."), so an empty spec would silently mean the working
+    # directory — an empty name never denotes a workspace (issue #70).
+    if not path or not str(path).strip():
+        return False
     try:
         p = Path(path)
         return p.exists() and (p / "config.json").exists()

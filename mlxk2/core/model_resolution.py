@@ -44,7 +44,15 @@ def parse_model_spec(model_spec: str) -> Tuple[str, Optional[str]]:
 
 
 def find_matching_models(pattern: str) -> List[Tuple[Path, str]]:
-    """Find models that match a partial pattern (case-insensitive)."""
+    """Find models that match a partial pattern (case-insensitive).
+
+    An empty pattern matches nothing rather than everything (issue #70): `"" in name`
+    holds for every name, and `@<revision>` with no name in front of it arrives here
+    with an empty pattern through `find_model_by_hash`.
+    """
+    if not pattern or not pattern.strip():
+        return []
+
     model_cache = get_current_model_cache()
     if not model_cache.exists():
         return []
@@ -174,7 +182,13 @@ def resolve_model_for_operation(model_spec: str) -> Tuple[Optional[str], Optiona
         '/abs/path/workspace' → ('/abs/path/workspace', None, None)
         'Mistral-Small' → cache resolution (NOT workspace, even if local dir exists)
         'ambig' → (None, None, ['model1', 'model2'])
+        '' → (None, None, []) - an empty name is not a pattern
     """
+    # Issue #70: an empty name is not a search pattern — "" is a substring of every
+    # model name, so the branches below would return whatever iterdir() yields first.
+    if not model_spec or not str(model_spec).strip():
+        return None, None, []
+
     # Check if model_spec is an EXPLICIT workspace path (ADR-018 Phase 0c)
     # Only paths starting with ./ ../ / or being . or .. are treated as workspace paths
     # This ensures "model-name" goes through cache resolution even if a local dir exists

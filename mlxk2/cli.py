@@ -30,6 +30,10 @@ def _resolve_workspace_for_bootstrap(model_spec: str) -> "Path | None":
     - Explicit paths: ./workspace, ../workspace, /abs/path
     - MLXK_WORKSPACE_HOME fuzzy match: "VibeVoice" → $MLXK_WORKSPACE_HOME/VibeVoice-ASR-8bit
     """
+    # Issue #70: an empty name matches every directory in the fuzzy loop below.
+    if not model_spec or not model_spec.strip():
+        return None
+
     # 1. Explicit path (starts with ./ ../ / or is . ..)
     if model_spec.startswith(("./", "../", "/")) or model_spec in (".", ".."):
         workspace_path = Path(model_spec).resolve()
