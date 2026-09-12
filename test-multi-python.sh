@@ -8,6 +8,7 @@ echo "Prerequisites: Python versions should be available as:"
 echo "  - python3.10, python3.11, python3.12, python3.13, python3.14 (full support: text + vision + audio)"
 echo "Note: Python 3.9 not supported (MLX 0.30+ requires 3.10+)"
 echo "Note: an interpreter that is not on PATH is reported as 'Not Available', not as a failure"
+echo "Usage: $0 [version ...]   e.g. '$0 3.14' or '$0 3.14 3.10' — no argument runs all of them"
 echo ""
 
 # Colors for output
@@ -23,6 +24,33 @@ NC='\033[0m' # No Color
 PYTHON_COMMANDS=("python3.10" "python3.11" "python3.12" "python3.13" "python3.14")
 VERSION_NAMES=("3.10" "3.11" "3.12" "3.13" "3.14")
 RESULTS=()
+
+# Optional: version names as arguments run only those, in the order given. Two things
+# that a full run cannot separate: a version's own cost and its position in the run
+# (the last one meets the warmest machine), so `… 3.14 3.10` measures the same pair the
+# other way round. Without arguments every version is tried, as before.
+SELECTED=()
+if [ $# -gt 0 ]; then
+    for requested in "$@"; do
+        found=""
+        for i in "${!VERSION_NAMES[@]}"; do
+            if [ "${VERSION_NAMES[$i]}" = "$requested" ]; then
+                SELECTED+=("$i")
+                found="yes"
+                break
+            fi
+        done
+        if [ -z "$found" ]; then
+            echo -e "${RED}❌ Unknown version '$requested' — known: ${VERSION_NAMES[*]}${NC}"
+            exit 1
+        fi
+    done
+    echo -e "${YELLOW}▶️  Selected versions: $* (default is all of them)${NC}\n"
+else
+    for i in "${!PYTHON_COMMANDS[@]}"; do
+        SELECTED+=("$i")
+    done
+fi
 
 # Test function
 test_python_version() {
@@ -60,9 +88,11 @@ test_python_version() {
     local install_log="install_${version_name//./_}.log"
     pip install --upgrade pip setuptools wheel > "$install_log" 2>&1
 
-    # Install with vision + audio support (all supported versions are 3.10+)
-    local install_extras=".[test,vision,audio]"
-    echo "   Including vision + audio support (Python $version_name)"
+    # Vision and audio are base dependencies since 2.0.4 stable, where the extras that
+    # once carried them were removed. Asking for them by name changed nothing about what
+    # got installed; it only made pip warn "does not provide the extra" in every run.
+    local install_extras=".[test]"
+    echo "   Vision and audio come with the base dependencies (Python $version_name)"
 
     if pip install -e "$install_extras" >> "$install_log" 2>&1; then
         echo -e "${GREEN}✅ Installation successful${NC}"
@@ -155,8 +185,8 @@ test_python_version() {
     rm -rf "$venv_name"
 }
 
-# Run tests for all Python versions
-for i in "${!PYTHON_COMMANDS[@]}"; do
+# Run tests for the selected Python versions (all of them unless arguments were given)
+for i in "${SELECTED[@]}"; do
     test_python_version "$i"
 done
 

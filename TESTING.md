@@ -300,8 +300,12 @@ pytest -m live_stop_tokens -v
 
 Multi-version testing:
 ```bash
-# Automated script
+# Automated script — every version it knows
 ./test-multi-python.sh
+
+# Or only the versions named, in the order given
+./test-multi-python.sh 3.14
+./test-multi-python.sh 3.14 3.10
 
 # Manual verification
 python3.10 -m venv test_310

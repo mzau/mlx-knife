@@ -932,7 +932,10 @@ at it directly.
 Per-version pass/skip counts are **not carried here**: they move with every test added and
 with the environment (see the note under Test Results above). Re-measure at release with
 `bash test-multi-python.sh`, which builds a fresh venv per version and runs the default suite
-plus ruff.
+plus ruff. Version names as arguments narrow the run to those, in the order given
+(`bash test-multi-python.sh 3.14 3.10`) — useful when a single version needs a second look, and
+when a timing difference has to be told apart from the position in the run: the version that goes
+last meets the warmest machine.
 
 All versions run against the `isolated_cache` system and MLX stubs, so no model downloads are
 needed.
