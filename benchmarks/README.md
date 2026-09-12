@@ -22,7 +22,9 @@ benchmarks/
 │   └── report-current.schema.json  # Symlink → current schema
 ├── tools/                      # Standalone tools
 │   ├── memmon.py                   # Memory monitor (background sampling)
-│   └── memplot.py                  # Memory timeline visualizer
+│   ├── memplot.py                  # Memory timeline visualizer
+│   ├── chronos_gauge.py            # mlxk serve vs. mlx_lm.server (mlx-chronos)
+│   └── stream_overhead.py          # Streamed vs. unstreamed cost per token
 ├── generate_benchmark_report.py    # Report generator (Template v1.1)
 ├── validate_reports.py             # Schema validation
 ├── README.md                       # ← You are here
@@ -37,7 +39,8 @@ benchmarks/
 | `validate_reports.py` | Schema validation of JSONL files |
 | `tools/memmon.py` | Memory + CPU + GPU monitoring (200ms sampling) |
 | `tools/memplot.py` | Interactive 3-row timeline (Memory/CPU/GPU, HTML) |
-| `tools/chronos_gauge.py` | `mlxk serve` against `mlx_lm.server`, measured by mlx-chronos (TTFT, throughput, RAM) — [TESTING-DETAILS.md](../TESTING-DETAILS.md#server-overhead-gauge-mlx-chronos) |
+| `tools/chronos_gauge.py` | `mlxk serve` against `mlx_lm.server`, measured by mlx-chronos (TTFT, throughput, RAM) — [below](#server-overhead-gauge-chronos_gaugepy) |
+| `tools/stream_overhead.py` | Streamed against unstreamed generation on one runner: cost per token, as a ratio — nothing to install |
 
 ## Schema
 
@@ -275,6 +278,110 @@ Example: 57 GB used in test_text_request_still_works_on_vision_model
 - [ ] Automatic anomaly detection (memory leaks, zombies)
 - [ ] Per-model memory profiling (min/max/avg RAM)
 - [ ] Scheduling optimization (avoid model-switch overlap)
+
+---
+
+## Server Overhead Gauge (`chronos_gauge.py`)
+
+**Tool:** `tools/chronos_gauge.py` - what does mlxk's own server shell cost?
+
+For one text model it starts `mlx_lm.server` and `mlxk serve` in turn on the same port, runs
+the same [mlx-chronos](https://github.com/igurss/mlx-chronos) protocol against each and prints
+both results side by side with their ratio: time to first token (cold and cached), request and
+decode throughput, system RAM peak. The reference is measured in the same session, so **the
+ratio is the number that travels** - absolute values depend on machine and thermal state.
+Output quality is not measured.
+
+### Two environments, and which one runs what
+
+mlx-chronos needs its own venv and is only ever called over its command line, so it never
+enters the development or test environment and installing it changes no test result.
+
+| | lives in | started by |
+|---|---|---|
+| `mlx-chronos` | `venv-chronos/` | the gauge, by absolute path |
+| `mlxk serve`, `mlx_lm.server`, the gauge itself | the development environment | you |
+
+⚠️ **Do not activate `venv-chronos` to run the gauge.** It starts both servers from the venv of
+the interpreter it runs in, and `venv-chronos` carries neither `mlxk` nor MLX - the run dies with
+`FileNotFoundError: .../venv-chronos/bin/mlxk`.
+
+### Setup (once, with the development environment activated)
+
+```bash
+python -m venv venv-chronos          # the development environment's interpreter, see below
+venv-chronos/bin/pip install "mlx-chronos[thermal]==0.4.1"
+# same mlx-lm version as the development environment - chronos records it but never imports it,
+# so --no-deps pulls in no MLX:
+venv-chronos/bin/pip install --no-deps \
+  "mlx-lm==$(python -c 'import importlib.metadata as m; print(m.version("mlx-lm"))')"
+```
+
+**Which interpreter:** mlx-chronos needs Python **>= 3.10**. Build the venv from the development
+environment (or name a version explicitly, `python3.11 -m venv venv-chronos`) - a bare `python3`
+on macOS is still the system's 3.9, and the pip that ships with it reports the version floor as
+
+```
+ERROR: Could not find a version that satisfies the requirement mlx-chronos[thermal]==0.4.1 (from versions: none)
+```
+
+which reads as if the package did not exist. It does; every release of it needs 3.10.
+
+The gauge compares both mlx-lm versions before it starts and prints the exact command when they
+differ. A venv elsewhere goes into `$MLXK_CHRONOS_BIN` or `--chronos`.
+
+### Run
+
+```bash
+source <development environment>/bin/activate
+python benchmarks/tools/chronos_gauge.py --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
+```
+
+Activated, because macOS has no bare `python` on the PATH and `python3` is the system's 3.9
+without mlxk. With `HF_HOME` pointing at the cache that holds the model; both servers run with
+`HF_HUB_OFFLINE=1`. Results go to `benchmarks/reports/chronos/<timestamp>-<model>/` - chronos
+JSON per server, server and chronos logs, `summary.json`, `summary.md` - and stay local.
+Options: `--port` (default 8080), `--profile baseline|sustained`, `--trials`, `--pause`,
+`--max-gpu-busy`, `--chronos`.
+
+### How long it takes, and how to tell it apart from a hang
+
+A `baseline` run sends **18 requests per server**: 2 warm-ups, 5 cold and 5 cached TTFT trials at
+one token each, one cache priming call, and 5 throughput trials of up to 100 tokens. On a small
+model that is a minute or two per server; on a large one it is however long that model needs for
+~500 tokens plus 26 prompts, which can be far more than the model's size suggests.
+
+Nothing here is a timeout on the measurement: `--pause` (default 60 s) sits **between** the two
+servers and cuts off neither, and `--timeout` (default 600 s) covers only how long a server may
+take to become ready. A run that looks stuck is best checked in its session directory rather than
+interrupted - `<kind>.chronos.log` names the trial in flight and `<kind>.server.log` shows every
+request the server answered.
+
+`Engine PID not found; diagnostic engine RSS will use system RAM peak fallback` in the mlxk log is
+expected: chronos looks for a process named `mlx_lm.server`, which the mlxk side does not have.
+
+### What it refuses, and why
+
+- **A model mlxk cannot resolve.** `--model` takes what mlxk takes: a cached `org/name`, or a
+  workspace model by its bare name with `MLXK_WORKSPACE_HOME` set. `mlxk serve` gets that spec
+  and resolves it itself; `mlx_lm` knows no workspaces, so the reference server is handed the
+  directory `mlxk show` resolved it to (`summary.json` keeps it as `resolved`).
+- **A model that is not text-only, or one mlxk would not run.** It asks `mlxk show --json` first.
+  Vision and audio checkpoints are rejected because chronos measures text generation; a
+  checkpoint mlxk reports as not runnable is rejected because `mlx_lm.server` would execute its
+  `model_file` unconditionally.
+- **A busy GPU.** It samples `Device Utilization %` through `ioreg` before each server and stops
+  above `--max-gpu-busy` (default 10 %). A game or a video stream in a browser tab slows every
+  step that waits on the GPU, and the run would measure that application instead.
+- **A port that is already in use.**
+
+### ⚠️ Never submit these results
+
+Both runs carry the `mlx-lm` engine label, so neither belongs on the mlx-chronos leaderboard.
+
+How to read the table - what `token counts` means, why `repetition_penalty` makes the two texts
+differ, and why the RAM figure is system-wide - is in
+[TESTING-DETAILS.md](../TESTING-DETAILS.md#server-overhead-gauge-mlx-chronos).
 
 ---
 

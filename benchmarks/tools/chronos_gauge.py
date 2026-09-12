@@ -6,18 +6,30 @@ For one text model, starts each server in turn on the same port, runs
 with their ratio. The reference is measured in the same session, so the ratio stays
 comparable across thermal state, machines and changes to the instrument itself.
 
-Usage (run from the mlx-knife development environment; mlx-chronos lives in its own
-venv and is only called over its command line, so it never enters the test environment):
-    python3 -m venv venv-chronos
+Setup, once - mlx-chronos lives in its own venv and is only called over its command line,
+so it never enters the test environment. Build that venv with a Python >= 3.10 (a bare
+`python3` finds macOS' 3.9), and do not activate it:
+    python -m venv venv-chronos
     venv-chronos/bin/pip install "mlx-chronos[thermal]==0.4.1"
-    venv-chronos/bin/pip install --no-deps "mlx-lm==<the mlx-lm version of this environment>"
+    venv-chronos/bin/pip install --no-deps "mlx-lm==0.31.3"  # the version of the dev env
+
+Run with the mlx-knife development environment activated - the venv that carries mlxk and
+MLX - and HF_HOME pointing at the cache that holds the model:
+    source <development environment>/bin/activate
     python benchmarks/tools/chronos_gauge.py --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
+
+The gauge starts both servers from its own interpreter's venv, so running it out of
+venv-chronos fails on the missing mlxk. mlx-chronos itself is found at
+venv-chronos/bin/mlx-chronos; a venv elsewhere goes into $MLXK_CHRONOS_BIN or --chronos.
 
 mlx-chronos only checks that the mlx-lm package is present in its own environment and
 records its version; it never imports it, so --no-deps pulls in no MLX. The gauge checks
 that the two versions match and prints the exact command when they do not.
 
-The model must be in the Hugging Face cache; both servers run with HF_HUB_OFFLINE=1.
+The model must be text-only and one mlxk would run. --model takes whatever mlxk takes: a
+cached org/name, or a workspace model by its bare name with MLXK_WORKSPACE_HOME set. mlxk
+gets that spec and resolves it itself; mlx_lm knows no workspaces, so the reference server
+is handed the directory mlxk resolved it to. Both servers run with HF_HUB_OFFLINE=1.
 Results stay local (default: benchmarks/reports/chronos/). Both runs carry the mlx-lm
 engine label, so they must never be submitted to the mlx-chronos leaderboard.
 
@@ -65,7 +77,7 @@ def fail(message: str) -> None:
 
 
 def check_model(model: str) -> Dict:
-    """mlxk's own verdict: an exact cached name, a text model, and one mlxk would run.
+    """mlxk's own verdict: a text model it would run, cached or in the workspace.
 
     mlx_lm.server executes a checkpoint's `model_file` unconditionally. mlxk reports such
     a model as not runnable, so this check keeps the reference server off that path.
@@ -77,8 +89,10 @@ def check_model(model: str) -> Dict:
         info = json.loads(result.stdout)["data"]["model"]
     except (json.JSONDecodeError, KeyError, TypeError):
         fail(f"`mlxk show {model} --json` returned no model: {result.stderr.strip()[-300:]}")
-    if info.get("name") != model:
-        fail(f"{model!r} resolves to {info.get('name')!r}; pass the exact cached org/name")
+    # A cached model resolves to its org/name, a workspace model to its directory.
+    resolved = info.get("name") or ""
+    if resolved != model and not Path(resolved).is_dir():
+        fail(f"{model!r} resolves to {resolved!r}; pass a cached org/name or a workspace model")
     if not info.get("runtime_compatible"):
         fail(f"mlxk will not run {model}: {info.get('reason')}")
     capabilities = set(info.get("capabilities") or [])
@@ -100,6 +114,7 @@ def tail(path: Path, lines: int = 15) -> str:
 
 
 def start_server(kind: str, model: str, port: int, log: Path) -> subprocess.Popen:
+    """`model` is what this server understands: mlxk takes the spec, mlx_lm the resolved one."""
     if kind == "mlx-lm":
         cmd = [sys.executable, "-m", "mlx_lm.server", "--model", model]
     else:
@@ -259,12 +274,17 @@ def fmt(value: Optional[float]) -> str:
     return "n/a" if value is None else f"{value:.3f}"
 
 
-def report(model: str, env: Dict, summaries: Dict[str, Dict]) -> str:
+def report(model: str, resolved: str, env: Dict, summaries: Dict[str, Dict]) -> str:
     ref, own = summaries["mlx-lm"], summaries["mlxk"]
     lines = [
         f"## {model} - {datetime.now():%Y-%m-%d %H:%M}",
         " · ".join(f"{k} {v}" for k, v in env.items()),
         "",
+    ]
+    # Which directory a workspace name stood for is not recoverable from the name later.
+    if resolved != model:
+        lines += [f"resolved to `{resolved}`", ""]
+    lines += [
         f"| metric | {LABELS['mlx-lm']} | {LABELS['mlxk']} | mlxk / mlx-lm | better |",
         "|---|---:|---:|---:|---|",
     ]
@@ -305,9 +325,15 @@ def main() -> None:
     check_chronos_env(args.chronos)
     if port_in_use(args.port):
         fail(f"port {args.port} is already in use")
-    check_model(args.model)
+    info = check_model(args.model)
+    # mlx_lm resolves a model name against the Hugging Face cache only, so a workspace model
+    # reaches the reference server as the directory mlxk resolved it to. mlxk keeps the spec:
+    # it resolves workspace-first itself, and the spec is also the name chronos then requests.
+    reference_model = info["name"]
+    models = {"mlx-lm": reference_model, "mlxk": args.model}
 
-    slug = args.model.replace("/", "--")
+    # A workspace model passed as a path would drag the whole path into the directory name.
+    slug = Path(args.model).name if os.path.isabs(args.model) else args.model.replace("/", "--")
     session = args.output_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{slug}"
     session.mkdir(parents=True)
     env = environment(args.chronos)
@@ -318,9 +344,9 @@ def main() -> None:
             print(f"pausing {args.pause} s before the next server ...", flush=True)
             time.sleep(args.pause)
         busy = require_quiet_gpu(args.max_gpu_busy)
-        print(f"{LABELS[kind]}: starting with {args.model} on port {args.port} ...", flush=True)
+        print(f"{LABELS[kind]}: starting with {models[kind]} on port {args.port} ...", flush=True)
         server_log = session / f"{kind}.server.log"
-        proc = start_server(kind, args.model, args.port, server_log)
+        proc = start_server(kind, models[kind], args.port, server_log)
         try:
             wait_ready(proc, args.port, args.timeout, server_log)
             # mlx_lm.server keys its preloaded model as "default_model"; any other name
@@ -335,9 +361,13 @@ def main() -> None:
         finally:
             stop_server(proc, args.port)
 
-    text = report(args.model, env, summaries)
+    text = report(args.model, reference_model, env, summaries)
     (session / "summary.json").write_text(
-        json.dumps({"model": args.model, "environment": env, "servers": summaries}, indent=2) + "\n"
+        json.dumps(
+            {"model": args.model, "resolved": reference_model,
+             "environment": env, "servers": summaries},
+            indent=2,
+        ) + "\n"
     )
     (session / "summary.md").write_text(text + "\n")
     print()

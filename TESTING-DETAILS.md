@@ -1074,7 +1074,7 @@ mlx-chronos lives in its own virtual environment and is only called through its 
 never enters the development or test environment, so installing it changes no test result:
 
 ```bash
-python3 -m venv venv-chronos
+python3.11 -m venv venv-chronos  # any interpreter of the multi-Python matrix; not a bare `python3`
 venv-chronos/bin/pip install "mlx-chronos[thermal]==0.4.1"
 venv-chronos/bin/pip install --no-deps "mlx-lm==<mlx-lm version of the development environment>"
 ```
@@ -1085,11 +1085,27 @@ gauge compares both versions and prints the exact command when they differ.
 
 ### Run
 
-From the development environment, with the model in the Hugging Face cache:
+With the development environment **activated** — macOS has no bare `python` on the PATH, and
+`python3` is the system's 3.9 without mlxk — and the model in the Hugging Face cache:
 
 ```bash
+source <development environment>/bin/activate
 python benchmarks/tools/chronos_gauge.py --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
 ```
+
+The gauge starts both servers from the venv of the interpreter it runs in, so it belongs in the
+development environment; activating `venv-chronos` for the run fails on the missing `mlxk`.
+
+`--model` takes what mlxk takes: a cached `org/name`, or a workspace model by its bare name with
+`MLXK_WORKSPACE_HOME` set. `mlxk serve` receives that spec and resolves it itself; `mlx_lm` knows
+no workspaces, so the reference server is handed the directory `mlxk show` resolved it to, and
+`summary.json` records it as `resolved`.
+
+A `baseline` run sends 18 requests per server — 2 warm-ups, 5 cold and 5 cached TTFT trials at one
+token, one priming call, 5 throughput trials of up to 100 tokens — so its duration is the model's,
+not the gauge's. Neither `--pause` (between the two servers) nor `--timeout` (server start) limits
+a measurement; a run that looks stuck is read in `<kind>.chronos.log`, which names the trial in
+flight.
 
 Both servers run with `HF_HUB_OFFLINE=1`. Results go to
 `benchmarks/reports/chronos/<timestamp>-<model>/` — chronos JSON per server, server and chronos
@@ -1126,7 +1142,8 @@ logs, `summary.json`, `summary.md` — and stay local. Options: `--port` (defaul
 
 `benchmarks/tools/stream_overhead.py` answers a narrower question than the chronos gauge and needs
 nothing installed: is streaming costing more than the model? It generates the same answer twice on
-one runner, streamed and unstreamed, and prints the cost per token with their ratio.
+one runner, streamed and unstreamed, and prints the cost per token with their ratio. It runs in
+the activated development environment, like the chronos gauge:
 
 ```bash
 python benchmarks/tools/stream_overhead.py --model mlx-community/Qwen2.5-0.5B-Instruct-4bit

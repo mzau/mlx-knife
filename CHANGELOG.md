@@ -8,9 +8,10 @@
   [mlx-chronos](https://github.com/igurss/mlx-chronos): the same protocol against both servers,
   one after the other on the same model and port — time to first token, request and decode
   throughput, RAM — printed side by side with their ratio. mlx-chronos runs from its own virtual
-  environment and never enters the development or test environment. The gauge refuses a busy GPU
-  and any model mlxk would not run. Setup and how to read the table: TESTING-DETAILS →
-  *Server Overhead Gauge (mlx-chronos)*.
+  environment and never enters the development or test environment. `--model` takes what mlxk
+  takes — a cached `org/name`, or a workspace model by its bare name — and the gauge refuses a
+  busy GPU and any model mlxk would not run. Setup and how to read the table: TESTING-DETAILS →
+  *Server Overhead Gauge (mlx-chronos)*, and `benchmarks/README.md` for the whole tool.
 
 - `benchmarks/tools/stream_overhead.py` measures streamed against unstreamed generation on one
   runner and prints the cost per token with their ratio. The ratio is what travels between
