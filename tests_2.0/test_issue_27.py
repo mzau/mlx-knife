@@ -61,7 +61,7 @@ class TestIssue27Exploration:
     def test_index_missing_shards_unhealthy(self, copy_user_model_to_isolated, monkeypatch):
         model = os.environ.get(
             "MLXK2_ISSUE27_INDEX_MODEL",
-            os.environ.get("MLXK2_ISSUE27_MODEL", "intfloat/multilingual-e5-large"),
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mlx-community/Qwen2.5-0.5B-Instruct-4bit"),
         )
         # Force subset copy with 0 shards to minimize disk use
         monkeypatch.setenv("MLXK2_SUBSET_COUNT", "0")
@@ -76,9 +76,14 @@ class TestIssue27Exploration:
         assert any(m["name"].endswith(model.split('/')[-1]) or m["name"] == model for m in result["data"]["unhealthy"])
 
     def test_index_delete_shard_is_unhealthy(self, copy_user_model_to_isolated):
+        # Single-shard default: deleting the indexed weight leaves no .safetensors at
+        # all, so health answers "No model weights found" rather than naming the index.
+        # Both are unhealthy and both are real interrupted-download states, but the
+        # index branch itself is only reachable with a genuine multi-shard model — the
+        # smallest one cached here is 5.4 GB, too expensive to copy per test run.
         model = os.environ.get(
             "MLXK2_ISSUE27_INDEX_MODEL",
-            os.environ.get("MLXK2_ISSUE27_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mlx-community/Qwen2.5-0.5B-Instruct-4bit"),
         )
         dst = copy_user_model_to_isolated(model, mutations=['delete_indexed_shard'])
         # If no index exists, skip this targeted test
@@ -92,9 +97,9 @@ class TestIssue27Exploration:
     def test_index_truncate_shard_is_unhealthy(self, copy_user_model_to_isolated):
         model = os.environ.get(
             "MLXK2_ISSUE27_INDEX_MODEL",
-            os.environ.get("MLXK2_ISSUE27_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mlx-community/Qwen2.5-0.5B-Instruct-4bit"),
         )
-        dst = copy_user_model_to_isolated(model, mutations=['truncate_indexed_shard'])
+        dst = copy_user_model_to_isolated(model, mutations=['truncate_indexed_shard'])  # stays in the index branch
         if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
             pytest.skip('No safetensors/pytorch index found; skipping index-specific test')
 
@@ -105,7 +110,7 @@ class TestIssue27Exploration:
     def test_index_lfs_pointer_is_unhealthy(self, copy_user_model_to_isolated):
         model = os.environ.get(
             "MLXK2_ISSUE27_INDEX_MODEL",
-            os.environ.get("MLXK2_ISSUE27_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
+            os.environ.get("MLXK2_ISSUE27_MODEL", "mlx-community/Qwen2.5-0.5B-Instruct-4bit"),
         )
         dst = copy_user_model_to_isolated(model, mutations=['lfsify_indexed_shard'])
         if not (dst / 'model.safetensors.index.json').exists() and not (dst / 'pytorch_model.bin.index.json').exists():
