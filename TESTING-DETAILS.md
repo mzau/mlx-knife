@@ -99,7 +99,11 @@ Phase 2-4 (live operations): 3+3+3 passed
 
 **Portfolio Discovery** (ADR-009) auto-discovers MLX models using `mlxk list --json` as single source of truth. Since 2.0.5-beta.2, `list` includes both **HuggingFace cache** and **MLXK_WORKSPACE_HOME** workspaces (ADR-022). When the same model exists in both, the cache copy wins (`apply_cache_wins_workspace_fallback`) to avoid double-testing; workspace-only models join the portfolio under their absolute-path id. No cache-format back-conversion needed — model names from `list --json` are used directly.
 
-**Known-broken exclusion:** `KNOWN_BROKEN_MODELS` (`tests_2.0/live/test_utils.py`) removes models from portfolio discovery that pass static health checks but consistently fail at runtime due to verified upstream bugs. Policy and per-model rationale live as comments at the list itself and are intentionally not duplicated here. Cache ids match exactly; workspace models also match by directory basename. The list is an interim compensation for [Issue #53](https://github.com/mzau/mlx-knife/issues/53): discovery already filters on mlxk's healthy + runtime-compatible verdict, so once param-reconciliation makes that verdict honest, load-failure entries self-exclude and can be dropped — only execution-time failures (e.g., non-terminating forwards) remain list-worthy.
+**Known-broken exclusion:** `KNOWN_BROKEN_MODELS` (`tests_2.0/live/test_utils.py`) removes models from portfolio discovery that pass static health checks but fail at runtime. The exclusion is **per capability**: each entry names the capabilities it breaks (`chat`, `vision`, `audio`) and a model is dropped only from those axes, so a multimodal checkpoint whose text loader fails keeps the vision coverage it earns. `is_known_broken(model_id, capability)` takes the capability as a required argument; the per-axis discovery functions apply it, and the shared base discovery deliberately carries no policy because it feeds both the text and the vision axis. Each entry records a **measured condition** rather than an upstream issue number — an issue can close while the behaviour stays. Policy and per-model rationale live as comments at the list itself and are intentionally not duplicated here.
+
+Matching is asymmetric: an `org/name` entry matches that cache id exactly, and a bare-basename entry additionally matches every cache id and workspace path with that basename. The basename is stripped off the query, never off the entry, so a full `org/name` entry can never match a workspace path.
+
+The list is an interim compensation for [Issue #53](https://github.com/mzau/mlx-knife/issues/53): discovery already filters on mlxk's healthy + runtime-compatible verdict, so once param-reconciliation makes that verdict honest, load-failure entries self-exclude and can be dropped — only execution-time failures (e.g., non-terminating forwards) remain list-worthy. That mechanism is already visible: a model mlxk reports as `runtime_compatible: false` never reaches discovery, so an entry for it is dead weight and is not kept.
 
 **Note:** Models requiring workspace repair (e.g., Gemma-3n for audio) must be tested manually.
 
@@ -1188,9 +1192,6 @@ export HF_HOME=/Volumes/your-ssd/huggingface/cache
 # Select a model with index file (upstream repo)
 export MLXK2_ISSUE27_MODEL="mistralai/Mixtral-8x7B-Instruct-v0.1"
 
-# Optional: Bootstrap index if not in cache
-export MLXK2_BOOTSTRAP_INDEX=1
-
 # Run tests
 pytest tests_2.0/test_issue_27.py -v
 ```
@@ -1231,12 +1232,9 @@ export MLXK2_MIN_FREE_MB=512     # Default 512 MB
 PYTHONPATH=. pytest tests_2.0/test_issue_27.py -v
 ```
 
-### Optional Bootstrap (Opt-in, Minimal Workflow)
+### Separate Index Model (Optional)
 
 ```bash
-# Enable index bootstrap (fetches only index files, never modifies user cache)
-export MLXK2_BOOTSTRAP_INDEX=1
-
 # Optional: Separate model for index tests
 export MLXK2_ISSUE27_INDEX_MODEL="org/model-with-index"
 
@@ -1244,7 +1242,7 @@ export MLXK2_ISSUE27_INDEX_MODEL="org/model-with-index"
 pytest tests_2.0/test_issue_27.py -v
 ```
 
-**Note:** Network is only needed if your user cache does not already contain an index file for the chosen repo. If the index exists in your cache, the tests copy it into the isolated cache and no network is required.
+**Note:** These tests never reach the network. They copy from your user cache into an isolated cache, so a repo whose snapshot carries no index file makes the index-specific tests skip — pick one that has an index instead.
 
 ### Troubleshooting
 
@@ -1890,7 +1888,6 @@ These variables enable optional live tests that interact with real models or ext
 | `MLXK2_ISSUE27_MODEL` | Specific model for Issue #27 tests | `pytest -m issue27` |
 | `MLXK2_ISSUE27_INDEX_MODEL` | Index-based model for Issue #27 | `pytest -m issue27` |
 | `MLXK2_SUBSET_COUNT` | Limit Issue #27 test count | `pytest -m issue27` |
-| `MLXK2_BOOTSTRAP_INDEX` | Auto-download model for Issue #27 | `pytest -m issue27` |
 | `MLXK2_TEST_RESUMABLE_DOWNLOAD` | Enable resumable pull tests (requires network) | `pytest -m live_pull tests_2.0/test_resumable_pull.py` |
 | `MLXK2_RESUMABLE_TEST_MODEL` | Override the model the resumable pull test downloads | `pytest -m live_pull tests_2.0/test_resumable_pull.py` |
 

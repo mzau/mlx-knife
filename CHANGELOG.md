@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Testing
+
+- The live-test exclusion list `KNOWN_BROKEN_MODELS` is per capability: an entry names the
+  capabilities it breaks, `is_known_broken()` takes the capability as a required argument, and the
+  per-axis discovery functions apply it — so a checkpoint whose text loader fails keeps the vision
+  coverage it earns. Every entry was re-measured against the shipped pins and records that
+  condition instead of an upstream issue number; five of seven did not survive. Details:
+  TESTING-DETAILS → *Known-broken exclusion*.
+
 ### Changed
 
 - `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`

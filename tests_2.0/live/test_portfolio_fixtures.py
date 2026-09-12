@@ -132,3 +132,58 @@ def test_show_vision_portfolio(vision_portfolio):
         skip_marker = " ⚠️ WILL BE SKIPPED" if ram == float('inf') else ""
         print(f"   {key}: {model_info['id']}")
         print(f"          RAM: {ram_str}{skip_marker}")
+
+
+@pytest.mark.live_e2e
+def test_exclusions_are_capability_scoped(vision_portfolio, monkeypatch):
+    """A model may only be missing from the vision axis for a VISION-scoped reason.
+
+    Compares the vision portfolio against itself with the policy removed, so it
+    asserts a set difference and never a portfolio size — counts depend on what
+    happens to be on this machine's disk. Skips cleanly where nothing is cached.
+    """
+    from . import test_utils as tu
+
+    policy = dict(tu.KNOWN_BROKEN_MODELS)          # capture before patching
+    policed = {info["id"] for info in vision_portfolio.values()}
+
+    monkeypatch.setattr(tu, "KNOWN_BROKEN_MODELS", {})
+    unpoliced = {m["model_id"] for m in tu.discover_vision_models()}
+    if not unpoliced:
+        pytest.skip("No vision models on this machine")
+
+    for model_id in unpoliced - policed:
+        entry = policy.get(model_id) or policy.get(model_id.rsplit("/", 1)[-1])
+        assert entry is not None, (
+            f"{model_id} is missing from the vision portfolio with no entry at all"
+        )
+        assert "vision" in entry["breaks"], (
+            f"{model_id} lost its vision coverage for a non-vision reason "
+            f"(breaks={sorted(entry['breaks'])}). Condition: {entry['condition']}"
+        )
+
+
+@pytest.mark.live_e2e
+def test_chat_broken_models_still_reach_their_working_axes(vision_portfolio, monkeypatch):
+    """Every chat-broken model that is vision-capable must be IN the vision portfolio."""
+    from . import test_utils as tu
+
+    policy = dict(tu.KNOWN_BROKEN_MODELS)
+    chat_broken = {mid for mid, e in policy.items() if "vision" not in e["breaks"]}
+    if not chat_broken:
+        pytest.skip("No non-vision-scoped entries in the policy")
+
+    policed = {info["id"] for info in vision_portfolio.values()}
+    monkeypatch.setattr(tu, "KNOWN_BROKEN_MODELS", {})
+    vision_capable = {m["model_id"] for m in tu.discover_vision_models()}
+
+    present = {mid for mid in vision_capable
+               if mid in chat_broken or mid.rsplit("/", 1)[-1] in chat_broken}
+    if not present:
+        pytest.skip("No listed non-vision-broken model is vision-capable on this machine")
+
+    for model_id in present:
+        assert model_id in policed, (
+            f"{model_id} is vision-capable and not vision-broken, but the vision "
+            f"portfolio does not contain it — the exclusion is leaking across axes"
+        )

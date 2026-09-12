@@ -268,3 +268,132 @@ class TestPortfolioStructure:
                 assert "ram_needed_gb" in result[0]
                 assert "snapshot_path" in result[0]
                 assert "weight_count" in result[0]
+
+
+class TestKnownBrokenIsCapabilityScoped:
+    """A break on one capability must not cost coverage on another.
+
+    Regression guard for the defect these tests could not see before: the
+    exclusion used to be applied inside the shared base discovery, which feeds
+    both the text and the vision axis, so a model with a broken text loader
+    silently lost its (working) vision coverage too.
+    """
+
+    WORKSPACE = "/ws/some-multimodal-4bit"          # absolute path -> basename arm
+    CACHE = "mlx-community/some-text-model-4bit"    # org/name       -> exact arm
+
+    POLICY = {
+        "some-multimodal-4bit": {
+            "breaks": {"chat"},
+            "condition": "unit fixture: text loader fails, vision path works",
+        },
+        CACHE: {
+            "breaks": {"chat"},
+            "condition": "unit fixture: pure text model, load fails",
+        },
+    }
+
+    ALL_MODELS = [
+        {"model_id": WORKSPACE, "ram_needed_gb": 6.0, "snapshot_path": None, "weight_count": None},
+        {"model_id": CACHE, "ram_needed_gb": 9.0, "snapshot_path": None, "weight_count": None},
+        {"model_id": "mlx-community/healthy-vision-4bit", "ram_needed_gb": 8.0, "snapshot_path": None, "weight_count": None},
+    ]
+
+    LIST_JSON = {
+        "status": "success",
+        "command": "list",
+        "data": {
+            "models": [
+                {"name": WORKSPACE, "capabilities": ["text-generation", "chat", "vision"], "size_bytes": 5_000_000_000},
+                {"name": CACHE, "capabilities": ["text-generation", "chat"], "size_bytes": 9_000_000_000},
+                {"name": "mlx-community/healthy-vision-4bit", "capabilities": ["text-generation", "chat", "vision"], "size_bytes": 7_000_000_000},
+            ],
+            "count": 3,
+        },
+        "error": None,
+    }
+
+    @pytest.fixture(autouse=True)
+    def _policy(self, monkeypatch):
+        """Swap in a synthetic policy so the tests do not depend on the real list."""
+        import live.test_utils as tu
+        monkeypatch.setattr(tu, "KNOWN_BROKEN_MODELS", self.POLICY)
+
+    def _axis(self, fn_name, monkeypatch):
+        monkeypatch.setenv("HF_HOME", "/fake/cache")
+        with patch("live.test_utils.discover_mlx_models_in_user_cache", return_value=self.ALL_MODELS):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(self.LIST_JSON))
+                import live.test_utils as tu
+                return [m["model_id"] for m in getattr(tu, fn_name)()]
+
+    def test_chat_break_does_not_cost_vision_coverage(self, monkeypatch):
+        """The whole point: chat-broken but vision-capable stays on the vision axis."""
+        assert self.WORKSPACE not in self._axis("discover_text_models", monkeypatch)
+        assert self.WORKSPACE in self._axis("discover_vision_models", monkeypatch)
+
+    def test_pure_text_chat_break_is_excluded_from_text(self, monkeypatch):
+        """An exact org/name entry still excludes on its own axis."""
+        assert self.CACHE not in self._axis("discover_text_models", monkeypatch)
+
+    def test_unlisted_model_is_untouched(self, monkeypatch):
+        assert "mlx-community/healthy-vision-4bit" in self._axis("discover_vision_models", monkeypatch)
+
+    def test_text_fallback_paths_still_apply_the_policy(self, monkeypatch):
+        """A failing `mlxk list` must not silently restore an unfiltered portfolio."""
+        monkeypatch.setenv("HF_HOME", "/fake/cache")
+        with patch("live.test_utils.discover_mlx_models_in_user_cache", return_value=self.ALL_MODELS):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=1, stdout="")
+                import live.test_utils as tu
+                assert self.CACHE not in [m["model_id"] for m in tu.discover_text_models()]
+
+    def test_base_discovery_carries_no_policy(self, monkeypatch):
+        """The shared base returns mlxk's raw verdict — no mock of it here."""
+        monkeypatch.setenv("HF_HOME", "/fake/cache")
+        payload = {
+            "status": "success",
+            "command": "list",
+            "data": {"models": [{
+                "name": self.CACHE, "framework": "MLX", "health": "healthy",
+                "runtime_compatible": True, "model_type": "chat",
+                "size_bytes": 9_000_000_000,
+            }], "count": 1},
+            "error": None,
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(payload))
+            import live.test_utils as tu
+            discovered = [m["model_id"] for m in tu.discover_mlx_models_in_user_cache()]
+        assert discovered == [self.CACHE]
+
+
+class TestKnownBrokenPolicyShape:
+    """Validate the REAL list (no synthetic policy patched in)."""
+
+    def test_every_entry_names_capabilities_and_a_condition(self):
+        from live.test_utils import BROKEN_CAPABILITIES, KNOWN_BROKEN_MODELS
+
+        for model_id, entry in KNOWN_BROKEN_MODELS.items():
+            assert set(entry["breaks"]) <= BROKEN_CAPABILITIES, model_id
+            assert entry["breaks"], f"{model_id}: an entry breaking nothing excludes nothing"
+            assert entry["condition"].strip(), f"{model_id}: measured condition required"
+
+    def test_unknown_capability_raises_instead_of_silently_missing(self):
+        from live.test_utils import is_known_broken
+
+        with pytest.raises(ValueError, match="unknown capability"):
+            is_known_broken("mlx-community/anything", "visual")
+
+    def test_org_prefixed_entry_never_matches_a_workspace_path(self):
+        """The basename is stripped off the query, never off the entry."""
+        import live.test_utils as tu
+
+        policy = {"mlx-community/foo-4bit": {"breaks": {"vision"}, "condition": "fixture"}}
+        original = tu.KNOWN_BROKEN_MODELS
+        tu.KNOWN_BROKEN_MODELS = policy
+        try:
+            assert tu.is_known_broken("mlx-community/foo-4bit", "vision") is True
+            assert tu.is_known_broken("/ws/foo-4bit", "vision") is False
+        finally:
+            tu.KNOWN_BROKEN_MODELS = original

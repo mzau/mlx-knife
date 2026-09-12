@@ -102,17 +102,37 @@ def main():
     print("=" * 80)
     print("📊 SUMMARY")
     print("=" * 80)
-    print(f"   All Models (legacy):  {len(all_models)}")
-    print(f"   Text Portfolio:       {len(text_models)}")
-    print(f"   Vision Portfolio:     {len(vision_models)}")
+    print(f"   All Models (unfiltered):  {len(all_models)}")
+    print(f"   Text Portfolio:           {len(text_models)}")
+    print(f"   Vision Portfolio:         {len(vision_models)}")
 
+    # "All" is mlxk's raw verdict and carries no test policy, so the axes do NOT
+    # have to add up to it: a model can be excluded from one axis and kept on
+    # another. Name every such model instead of printing a bare mismatch — an
+    # unexplained warning is how a silent exclusion goes unnoticed.
     if all_models:
-        # Check if portfolios add up
-        total_separated = len(text_models) + len(vision_models)
-        if total_separated == len(all_models):
-            print(f"   ✅ Text + Vision = All ({total_separated} = {len(all_models)})")
-        else:
-            print(f"   ⚠️  Mismatch: Text + Vision ({total_separated}) ≠ All ({len(all_models)})")
+        from live.test_utils import KNOWN_BROKEN_MODELS, is_known_broken
+
+        all_ids = {m["model_id"] for m in all_models}
+        placed = {m["model_id"] for m in text_models} | {m["model_id"] for m in vision_models}
+        unplaced = sorted(all_ids - placed)
+        if unplaced:
+            print(f"   ℹ️  {len(unplaced)} model(s) in All but on no axis:")
+            for model_id in unplaced:
+                entry = (KNOWN_BROKEN_MODELS.get(model_id)
+                         or KNOWN_BROKEN_MODELS.get(model_id.rsplit("/", 1)[-1]))
+                if entry:
+                    print(f"        {model_id}")
+                    print(f"          broken on {sorted(entry['breaks'])}: {entry['condition']}")
+                else:
+                    print(f"        {model_id}  (no known-broken entry — check capabilities)")
+
+        cross = [m["model_id"] for m in vision_models
+                 if is_known_broken(m["model_id"], "chat")]
+        if cross:
+            print(f"   ✅ {len(cross)} chat-broken model(s) kept on the vision axis:")
+            for model_id in cross:
+                print(f"        {model_id}")
 
     # Count skippable vision models
     if vision_models:

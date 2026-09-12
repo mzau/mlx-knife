@@ -255,10 +255,14 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     - Health: healthy only (static file integrity)
     - Runtime: runtime_compatible only (mlx-lm/mlx-vlm can load)
     - Type: chat models (TEXT + VISION, includes all model_type="chat")
-    - Exclusions: KNOWN_BROKEN_MODELS (upstream runtime bugs)
+
+    This is mlxk's raw verdict and carries NO test-tree policy: it feeds both
+    the text and the vision axis, so a per-capability exclusion applied here
+    would cost the other axis its coverage. KNOWN_BROKEN_MODELS is applied by
+    the per-axis discovery functions in tests_2.0/live/test_utils.py.
 
     Note: Returns BOTH text and vision models. Caller must filter by capabilities
-    if needed (e.g., portfolio_models fixture filters to TEXT-only).
+    if needed (e.g., discover_text_models() filters to TEXT-only).
 
     Returns:
         List of dicts with keys: model_id, ram_needed_gb, snapshot_path, weight_count
@@ -266,15 +270,6 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
     """
     import subprocess
     import json
-
-    # Import blacklist (local import to avoid circular dependency)
-    # KNOWN_BROKEN_MODELS is defined in tests_2.0/live/test_utils.py
-    try:
-        sys.path.insert(0, str(Path(__file__).parent / "live"))
-        from test_utils import KNOWN_BROKEN_MODELS
-        sys.path.pop(0)
-    except ImportError:
-        KNOWN_BROKEN_MODELS = set()  # Fallback if import fails
 
     # Check HF_HOME is set (required for Portfolio Discovery - see TESTING.md)
     # Without HF_HOME: tests fall back to TEST_MODELS/VISION_TEST_MODELS/AUDIO_TEST_MODELS
@@ -327,10 +322,6 @@ def discover_mlx_models_in_user_cache() -> List[Dict[str, Any]]:
                 # the workspace, which downstream tests handle).
                 model_name = model["name"]
 
-                # FILTER: Exclude known broken models (upstream runtime bugs)
-                if model_name in KNOWN_BROKEN_MODELS:
-                    continue
-
                 discovered.append({
                     "model_id": model_name,
                     "ram_needed_gb": ram_gb,
@@ -379,39 +370,13 @@ def portfolio_models():
     Enables portfolio testing when HF_HOME is set, falls back to
     3 hardcoded test models otherwise (backward compatibility).
     """
-    all_models = discover_mlx_models_in_user_cache()  # Returns TEXT + VISION
+    # Single implementation of the text axis, including its chat-broken
+    # exclusion. Lazy import: the cycle with live/test_utils is import-time only.
+    from live.test_utils import discover_text_models
 
-    if all_models:
-        # Filter to TEXT-only models (exclude Vision)
-        # Vision models have "vision" in capabilities array (from mlxk list --json)
-        import subprocess
-        import json
-        import os
+    text_models = discover_text_models()
 
-        env = os.environ.copy()
-        if env.get("HF_HOME"):
-            try:
-                result_data = subprocess.run(
-                    [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    env=env
-                )
-                if result_data.returncode == 0:
-                    data = json.loads(result_data.stdout)
-                    models_list = data.get("data", {}).get("models", [])
-                    # Build set of vision model IDs
-                    vision_ids = {m["name"] for m in models_list if "vision" in m.get("capabilities", [])}
-                    # Filter out vision models
-                    text_models = [m for m in all_models if m["model_id"] not in vision_ids]
-                else:
-                    text_models = all_models  # Fallback: include all
-            except Exception:
-                text_models = all_models  # Fallback: include all
-        else:
-            text_models = all_models  # No HF_HOME, use all
-
+    if text_models:
         # Convert discovered TEXT models to TEST_MODELS format
         result = {}
         for i, model in enumerate(text_models):
@@ -475,36 +440,13 @@ def pytest_generate_tests(metafunc):
     - Reflects real-world usage (users never load 20+ models sequentially)
     """
     if metafunc.function.__name__ == "test_empirical_mapping_single_model":
-        # Lightweight discovery for parametrization (same logic as portfolio_models fixture)
-        from live.test_utils import discover_mlx_models_in_user_cache
+        # Same single implementation the portfolio_models fixture uses — the keys
+        # generated here must index exactly that list.
+        from live.test_utils import discover_text_models
 
-        all_models = discover_mlx_models_in_user_cache()
+        text_models = discover_text_models()
 
-        if all_models:
-            # Filter to TEXT-only models (exclude Vision) - same as portfolio_models fixture
-            import json
-            env = os.environ.copy()
-            if env.get("HF_HOME"):
-                try:
-                    result_data = subprocess.run(
-                        [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        env=env
-                    )
-                    if result_data.returncode == 0:
-                        data = json.loads(result_data.stdout)
-                        models_list = data.get("data", {}).get("models", [])
-                        vision_ids = {m["name"] for m in models_list if "vision" in m.get("capabilities", [])}
-                        text_models = [m for m in all_models if m["model_id"] not in vision_ids]
-                    else:
-                        text_models = all_models
-                except Exception:
-                    text_models = all_models
-            else:
-                text_models = all_models
-
+        if text_models:
             # Generate model keys (discovered_00, discovered_01, ...)
             model_keys = [f"discovered_{i:02d}" for i in range(len(text_models))]
         else:

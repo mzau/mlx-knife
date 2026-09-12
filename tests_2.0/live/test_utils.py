@@ -31,25 +31,28 @@ finally:
 
 
 # =============================================================================
-# KNOWN BROKEN MODELS - Upstream Runtime Bugs
+# KNOWN BROKEN MODELS - per-capability runtime exclusions
 # =============================================================================
 # These models pass static health checks (files present, config valid) but fail
-# at runtime initialization due to upstream mlx-lm/mlx-vlm bugs. They are
-# excluded from portfolio discovery to prevent spurious test failures.
+# at runtime on at least one capability. They are excluded from the portfolio
+# of that capability only — a model whose text path is broken still belongs in
+# the vision portfolio if its vision path was measured working.
 #
-# Policy: Add models here ONLY when:
+# Policy: Add a model here ONLY when all four hold:
 #   1. Static health check passes (healthy files)
-#   2. Runtime initialization fails consistently
-#   3. Root cause is verified upstream bug (not mlx-knife bug)
-#   4. Issue is documented (session notes, upstream issue tracker)
+#   2. mlxk's own verdict does NOT already exclude it (a `runtime_compatible:
+#      false` model never reaches discovery, so an entry for it is dead weight)
+#   3. The failure is reproduced against the CURRENT pin set, and the entry
+#      records that measurement as a CONDITION — not as an upstream issue
+#      number. An issue can close while the behaviour stays; the condition is
+#      the whole claim (same idiom as mlxk2/operations/common.py's audio gates)
+#   4. The `breaks` set names every capability that fails, and only those
 #
-# Format: Full HuggingFace model ID (org/name) - org matters for filtering!
-# Note: BrokeC/ models are FIXED versions and should NOT be in this list
-#
-# Workspace models have absolute-path ids, so is_known_broken() also matches
-# the directory basename. CAUTION: a bare-basename entry therefore excludes
-# EVERY org/workspace copy with that name — only use one when no fixed
-# same-name conversion exists.
+# Format: cache ids are `org/name` and match exactly — org matters. A bare
+# basename additionally matches every cache id and workspace path with that
+# name; is_known_broken() strips the basename off the QUERY, never off the
+# ENTRY, so a full `org/name` entry can never match a workspace path.
+# CAUTION: use a bare basename only when no fixed same-name conversion exists.
 #
 # SSOT trajectory (Issue #53): this list compensates for runtime_compatible
 # false-positives. Discovery already filters on mlxk's healthy+runnable
@@ -58,79 +61,108 @@ finally:
 # execution-time failures (e.g., non-terminating forwards) stay list-worthy.
 # =============================================================================
 
-KNOWN_BROKEN_MODELS = {
-    # transformers 5.0 video processor bug: "argument of type 'NoneType' is not iterable"
-    # Root Cause (2026-01): transformers set video_processor=None without torchvision,
-    # then video_processor_class_from_name() evaluated `if class_name in extractors`
-    # against it (transformers/models/auto/video_processing_auto.py; no line number —
-    # it moves between releases). Check whether that shape still exists upstream
-    # before assuming mlxk's own gate is still needed.
-    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640 — closed 2026-02-04
-    # Details: docs/MODEL-COVERAGE.md, video-capable checkpoints (gate condition)
-    # Test: `mlxk run mlx-community/MiMo-VL-7B-RL-bf16 "test" --image foo.jpg` → Error
-    # Status: the exclusion now rests on mlxk's own vision gate, not on #640. That
-    # gate's verdict can be a false negative (see MODEL-COVERAGE) — re-check before
-    # trusting these entries.
-    "mlx-community/MiMo-VL-7B-RL-bf16",
+# The capability axes a portfolio is built for. Tokens are mlxk's own
+# vocabulary (source: mlxk2/core/capabilities.py, class Capability) but are
+# repeated here on purpose: these files reach mlxk only through the CLI/JSON
+# boundary, so the oracle must not import the system under test.
+# "text-generation" is deliberately absent — one axis, one name.
+BROKEN_CAPABILITIES = frozenset({"chat", "vision", "audio"})
 
-    # transformers 5.0 video processor bug (same as MiMo-VL above)
-    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
-    # Details: docs/MODEL-COVERAGE.md, video-capable checkpoints (gate condition)
-    # Test: `mlxk run mlx-community/Qwen2-VL-7B-Instruct-4bit "test" --image foo.jpg` → Error
-    # Note: Image-only processing works, video processing broken
-    "mlx-community/Qwen2-VL-7B-Instruct-4bit",
+KNOWN_BROKEN_MODELS: Dict[str, Dict[str, Any]] = {
+    # Checkpoint that corrupts stdout on the text path, so `run --json` returns
+    # output no JSON parser accepts. Generation itself is fine.
+    #
+    # Condition (measured 2026-09-12; transformers 5.14.1 / mlx-lm 0.31.3):
+    # config.json declares `auto_map`, so transformers prints its remote-code
+    # consent prompt ("Do you wish to run the custom code? [y/N]") to STDOUT
+    # while resolving the config — ahead of mlxk's JSON envelope. The envelope
+    # that follows is complete and correct; it is simply no longer the first
+    # byte, and json.loads() fails at column 1.
+    #
+    # It does NOT hang, which is what the pre-2026-09 entry claimed: measured
+    # exit 0 in 16.6s with stdin at EOF and in 10.5s with an open, unwritten
+    # pipe, answering correctly both times. No model-supplied code executes
+    # either — AutoConfig refuses at EOF and mlx-lm loads its own Klear module.
+    # Only the JSON contract breaks (test_run_json_output), so: "chat" only.
+    #
+    # The condition holds for ANY checkpoint whose load makes a library write
+    # to stdout; the deeper defect is that mlxk's --json path does not fence
+    # its own stdout. Excluding one model does not fix that — see the §T7
+    # follow-up note. Recheck this entry when that path is hardened.
+    "mlx-community/Klear-46B-A2.5B-Instruct-3bit": {
+        "breaks": {"chat"},
+        "condition": (
+            "transformers prints its auto_map remote-code consent prompt to "
+            "stdout during load, ahead of the JSON envelope, so `run --json` "
+            "emits unparseable output; generation itself succeeds"
+        ),
+    },
 
-    # transformers 5.0 video processor bug (same as above)
-    # Upstream: https://github.com/Blaizzy/mlx-vlm/issues/640
-    # Details: docs/MODEL-COVERAGE.md, video-capable checkpoints (gate condition)
-    # Test: `mlxk run Qwen3-Omni-30B-A3B-Instruct-4bit "test" --image foo.jpg` → Error
-    # Note: Omni model (audio+video+vision) - all multimodal processing broken
-    "mlx-community/Qwen3-Omni-30B-A3B-Instruct-4bit",
-
-    # mlx-vlm vision feature mismatch: Image token positions (5476) ≠ features (1369)
-    # Status: Upstream mlx-vlm vision encoder/model compatibility bug (separate from #624)
-    # Test: `mlxk run ./Mistral-Small-3.1-24B-Instruct-2503-FIXED-4bit "test" --image foo.jpg` → Error
-    # Note: --repair-index fixes #624 (index mismatch) but NOT this vision feature bug
-    # Note: BrokeC/Mistral-Small-3.1... is the FIXED version (not in this list)
-    "mlx-community/Mistral-Small-3.1-24B-Instruct-2503-4bit",
-
-    # transformers 5.0.0rc3 trust_remote_code dialog blocks non-interactive tests
-    # Root Cause: Model has custom code, transformers 5.0.0rc3 prompts Y/N dialog
-    # Upstream: Needs mlx-lm issue (sharded_load sets trust_remote_code=True, load() doesn't)
-    # Test: `mlxk run Klear-46B "test"` → hangs waiting for Y/N input
-    # Strategy: Exclude until mlx-lm fixes trust_remote_code handling
-    "mlx-community/Klear-46B-A2.5B-Instruct-3bit",
-
-    # transformers 5.0 VoxtralProcessor hardcodes return_tensors="pt" (PyTorch only)
-    # Root Cause: processing_voxtral.py line 61,192,327 reject non-PyTorch tensors
-    # Error: "Unable to convert output to PyTorch tensors format, PyTorch is not installed."
-    # Impact: Voxtral STT requires PyTorch (~2GB) - conflicts with lightweight goal
-    # Test: `mlxk run Voxtral-Mini "test" --audio foo.wav` → ImportError
-    # Strategy: Deferred - use Whisper for STT (works without PyTorch, excellent quality)
-    # Watch: transformers upstream for MLX/NumPy tensor support
-    "mlx-community/Voxtral-Mini-3B-2507-bf16",
-
-    # mlx-vlm 0.6.x KV-sharing vs stale 0.4.3-era conversion
-    # Root Cause: conversion predates mlx-vlm #1301 KV-sharing; load fails with
-    #   "Received 126 parameters not in model: language_model...k_proj..."
-    # Static health passes (#53 gap), server preload times out (90s) in e2e
-    # Status: off the verified list since the 2.0.7 dep bump (docs/MODEL-COVERAGE.md)
-    # Strategy: recovery = fresh post-0.6.x conversion (different basename)
-    # Note: basename entry — matches the workspace copy and any cache twin
-    "gemma-4-e4b-it-4bit",
+    # Multimodal checkpoint whose TEXT path alone is broken. Vision and audio
+    # load and answer correctly, so it belongs in the vision portfolio — this
+    # entry must never widen past "chat".
+    #
+    # Condition (measured 2026-09-12; mlx-vlm 0.6.10 / mlx-lm 0.31.3 /
+    # transformers 5.14.1 / mlx 0.32.0): a text-only `run` exits 1 in ~3s with
+    #   "Received 126 parameters not in model: language_model.model.layers.24
+    #    .self_attn.k_norm.weight, ...k_proj.{biases,scales,weight}, ...v_proj.*"
+    # (126 parameters, layers 24-41). The weights live under `language_model.*`;
+    # mlx-lm's text loader is handed a layout it cannot map. The same checkpoint
+    # answers correctly through mlx-vlm with --image and with --audio.
+    #
+    # Not a version peg: every measured cell is identical on mlx-vlm 0.6.8 and
+    # 0.6.10. The condition holds as long as mlx-lm's text loader receives a
+    # checkpoint whose weights sit under `language_model.*`.
+    #
+    # Retires with Issue #53, not with a release: once runtime_compatible is
+    # honest on the text axis, discovery drops this model on its own and the
+    # entry becomes redundant (see TESTING-DETAILS.md, known-broken exclusion).
+    #
+    # Bare-basename entry — matches the workspace copy and any cache twin.
+    "gemma-4-e4b-it-4bit": {
+        "breaks": {"chat"},
+        "condition": (
+            "mlx-lm text load raises 'Received 126 parameters not in model' "
+            "(layers 24-41, language_model.*.self_attn.{k,v}_proj); the same "
+            "checkpoint answers correctly via mlx-vlm with --image / --audio"
+        ),
+    },
 }
 
 
-def is_known_broken(model_id: str) -> bool:
-    """True if a model is on the KNOWN_BROKEN_MODELS list.
-
-    Cache ids (org/name) match exactly; workspace models (absolute-path ids)
-    additionally match by directory basename.
-    """
-    return (
-        model_id in KNOWN_BROKEN_MODELS
-        or model_id.rsplit("/", 1)[-1] in KNOWN_BROKEN_MODELS
+# Policy guard: a typo in `breaks` would silently disable an exclusion, and an
+# entry without a condition is exactly the issue-number rationale this list was
+# rewritten to remove. Both are cheap to catch at import.
+for _model_id, _entry in KNOWN_BROKEN_MODELS.items():
+    assert set(_entry["breaks"]) <= BROKEN_CAPABILITIES, (
+        f"{_model_id}: unknown capability in breaks={_entry['breaks']!r}"
     )
+    assert _entry["condition"].strip(), f"{_model_id}: a measured condition is required"
+del _model_id, _entry
+
+
+def is_known_broken(model_id: str, capability: str) -> bool:
+    """True if `model_id` is measured broken on `capability`.
+
+    `capability` is required on purpose. A default would let any call site that
+    was not migrated keep the old behaviour — excluding a model from every
+    portfolio at once — and that silent, global exclusion is the defect this
+    list was rewritten to remove.
+
+    An `org/name` entry matches that cache id exactly. A bare-basename entry
+    additionally matches every cache id and workspace path with that basename;
+    the basename is stripped off the query, never off the entry.
+    """
+    if capability not in BROKEN_CAPABILITIES:
+        raise ValueError(
+            f"unknown capability {capability!r}; "
+            f"expected one of {sorted(BROKEN_CAPABILITIES)}"
+        )
+    entry = (
+        KNOWN_BROKEN_MODELS.get(model_id)
+        or KNOWN_BROKEN_MODELS.get(model_id.rsplit("/", 1)[-1])
+    )
+    return entry is not None and capability in entry["breaks"]
 
 
 # RAM calculation utilities (modularized for different model types)
@@ -230,6 +262,10 @@ def discover_text_models() -> list[Dict[str, Any]]:
     This enables deterministic text-only test portfolios that won't
     change when Vision or Audio models are added/removed from cache.
 
+    Chat-broken models are dropped here, on every return path: the shared base
+    discovery carries no test-tree policy, because it also feeds the vision
+    axis, where a chat break is irrelevant.
+
     Returns:
         List of text-only model dicts (same format as discover_mlx_models_in_user_cache):
         [{"model_id": "...", "ram_needed_gb": X.X, "snapshot_path": None, "weight_count": None}, ...]
@@ -242,6 +278,10 @@ def discover_text_models() -> list[Dict[str, Any]]:
     all_models = discover_mlx_models_in_user_cache()
     if not all_models:
         return []
+
+    # The fallbacks below must apply this too — a transient `mlxk list` failure
+    # must not silently restore an unfiltered portfolio.
+    runnable = [m for m in all_models if not is_known_broken(m["model_id"], "chat")]
 
     # Get capabilities from mlxk list --json
     env = os.environ.copy()
@@ -256,7 +296,7 @@ def discover_text_models() -> list[Dict[str, Any]]:
         )
 
         if result.returncode != 0:
-            return all_models  # Fall back to all models
+            return runnable  # Fall back to all models minus chat-broken ones
 
         # Parse JSON and build vision model ID set
         data = json.loads(result.stdout)
@@ -269,10 +309,10 @@ def discover_text_models() -> list[Dict[str, Any]]:
         }
 
         # Filter out vision and audio models
-        return [m for m in all_models if m["model_id"] not in non_text_model_ids]
+        return [m for m in runnable if m["model_id"] not in non_text_model_ids]
 
     except Exception:
-        return all_models  # Fall back to all models on error
+        return runnable  # Fall back to all models minus chat-broken ones
 
 
 def discover_vision_models() -> list[Dict[str, Any]]:
@@ -335,8 +375,10 @@ def discover_vision_models() -> list[Dict[str, Any]]:
         for model in all_models:
             model_id = model["model_id"]
 
-            # Skip known broken models
-            if is_known_broken(model_id):
+            # Skip models measured broken on the vision axis. A break on
+            # another axis (e.g. a multimodal checkpoint whose text loader
+            # fails) does not belong here and must not cost vision coverage.
+            if is_known_broken(model_id, "vision"):
                 continue
 
             if model_id in model_info:
@@ -411,8 +453,8 @@ def discover_audio_models() -> list[Dict[str, Any]]:
 
                 model_name = m["name"]
 
-                # Skip known broken models
-                if is_known_broken(model_name):
+                # Skip models measured broken on the audio axis
+                if is_known_broken(model_name, "audio"):
                     continue
 
                 # Calculate RAM using vision formula (conservative)
@@ -514,6 +556,9 @@ __all__ = [
     "get_safe_ram_budget_gb",
     "get_system_ram_gb",
     "should_skip_model",
+    "is_known_broken",
+    "KNOWN_BROKEN_MODELS",
+    "BROKEN_CAPABILITIES",
     "TEST_MODELS",
     "VISION_TEST_MODELS",
     "AUDIO_TEST_MODELS",
