@@ -33,7 +33,7 @@ try:
 except ImportError:  # pragma: no cover
     httpx = None
 
-pytestmark = pytest.mark.live_e2e
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
 if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
     pytest.skip("embed-serve is alpha-gated; set MLXK2_ENABLE_ALPHA_FEATURES=1",

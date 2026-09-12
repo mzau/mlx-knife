@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     httpx = None
 
-pytestmark = pytest.mark.live_e2e
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
 STARTUP_TIMEOUT = 60.0   # imports plus app construction, no model load
 SHUTDOWN_TIMEOUT = 20.0  # 5s grace + SIGKILL, plus room for a loaded runtime

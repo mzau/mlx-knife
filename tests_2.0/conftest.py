@@ -1124,39 +1124,8 @@ def copy_user_model_to_isolated(isolated_cache):
 
         mutate_model_dir(dst, mutations)
 
-        # Optional: bootstrap index files into the ISOLATED cache (never user cache)
-        # Enable with MLXK2_BOOTSTRAP_INDEX=1 to reduce SKIPs for Issue #27 when the
-        # selected model doesn't ship an index in your user cache.
-        try_bootstrap = os.environ.get("MLXK2_BOOTSTRAP_INDEX") == "1"
-        if try_bootstrap:
-            # Quick existence check at model root (tests look here first)
-            root_sft = dst / "model.safetensors.index.json"
-            root_pt = dst / "pytorch_model.bin.index.json"
-            if not root_sft.exists() and not root_pt.exists():
-                try:
-                    # Use hf snapshot_download with allow_patterns to fetch ONLY index files
-                    # into the isolated HF_HOME (set by isolated_cache fixture).
-                    from huggingface_hub import snapshot_download
-                    _ = snapshot_download(
-                        repo_id=hf_name,
-                        allow_patterns=[
-                            "**/model.safetensors.index.json",
-                            "**/pytorch_model.bin.index.json",
-                        ],
-                        local_files_only=False,
-                        resume_download=True,
-                        token=(os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")),
-                    )
-                    # Copy any fetched index up to model root so tests can detect it
-                    fetched = list((dst / "snapshots").rglob("*index.json"))
-                    for f in fetched:
-                        try:
-                            shutil.copy2(f, dst / f.name)
-                        except Exception:
-                            pass
-                except Exception:
-                    # Ignore bootstrap failures; tests will skip as before
-                    pass
+        # Deliberately no network here: a model without an index makes its tests
+        # skip, and that skip reason is then literally true.
         return dst
 
     return copier

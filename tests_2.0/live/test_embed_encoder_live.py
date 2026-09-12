@@ -20,7 +20,7 @@ import pytest
 
 from .test_utils import EMBED_TEST_MODELS
 
-pytestmark = pytest.mark.live_e2e
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
 if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
     pytest.skip("embed is alpha-gated; set MLXK2_ENABLE_ALPHA_FEATURES=1", allow_module_level=True)

@@ -532,7 +532,7 @@ def _auto_report_vision_model(request):
         return
 
     # Type 2: CLI vision tests (test_vision_e2e_live.py)
-    # These tests use subprocess.run(["mlxk", "run", VISION_MODEL, ...])
+    # These tests use subprocess.run([sys.executable, "-m", "mlxk2.cli", "run", VISION_MODEL, ...])
     # VISION_MODEL is "pixtral-12b-4bit" (matches VISION_TEST_MODELS fallback)
     if 'test_vision_e2e_live.py' in request.node.nodeid:
         # All CLI vision tests use pixtral-12b-4bit

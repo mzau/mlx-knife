@@ -17,7 +17,7 @@ import subprocess
 
 import pytest
 
-pytestmark = pytest.mark.live_e2e
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
 EMBED_MODEL = os.getenv("MLXK_EMBED_MODEL", "Qwen3-Embedding-0.6B-4bit-DWQ")
 

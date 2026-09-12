@@ -46,7 +46,7 @@ class TestVisionDeterministicQueries:
         """Test reading specific chess position (e6 = black king)."""
         result = subprocess.run(
             [
-                "mlxk", "run", VISION_MODEL,
+                sys.executable, "-m", "mlxk2.cli", "run", VISION_MODEL,
                 "What is on field e6? Answer briefly.",
                 "--image", "tests_2.0/assets/T2.png",
                 "--max-tokens", "50",  # Increased to ensure full answer
@@ -68,7 +68,7 @@ class TestVisionDeterministicQueries:
         """Test OCR: extract name from contract document."""
         result = subprocess.run(
             [
-                "mlxk", "run", VISION_MODEL,
+                sys.executable, "-m", "mlxk2.cli", "run", VISION_MODEL,
                 "What name is on the contract?",
                 "--image", "tests_2.0/assets/T4.png",
                 "--max-tokens", "30",
@@ -90,7 +90,7 @@ class TestVisionDeterministicQueries:
         """Test color recognition: blue mug."""
         result = subprocess.run(
             [
-                "mlxk", "run", VISION_MODEL,
+                sys.executable, "-m", "mlxk2.cli", "run", VISION_MODEL,
                 "What color is the mug?",
                 "--image", "tests_2.0/assets/T1.png",
                 "--max-tokens", "20",
@@ -111,7 +111,7 @@ class TestVisionDeterministicQueries:
         """Test chart OCR: read Y-axis label."""
         result = subprocess.run(
             [
-                "mlxk", "run", VISION_MODEL,
+                sys.executable, "-m", "mlxk2.cli", "run", VISION_MODEL,
                 "What is the Y-axis label?",
                 "--image", "tests_2.0/assets/T6.png",
                 "--max-tokens", "30",
@@ -141,7 +141,7 @@ class TestVisionDeterministicQueries:
         # Test that it's accepted and processed
         result = subprocess.run(
             [
-                "mlxk", "run", VISION_MODEL,
+                sys.executable, "-m", "mlxk2.cli", "run", VISION_MODEL,
                 "What game is this?",
                 "--image", str(image_path),
                 "--max-tokens", "20",

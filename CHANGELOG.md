@@ -11,6 +11,16 @@
   condition instead of an upstream issue number; five of seven did not survive. Details:
   TESTING-DETAILS → *Known-broken exclusion*.
 
+- Live tests no longer depend on what `PATH` happens to provide: the vision tests invoke
+  `sys.executable -m mlxk2.cli` instead of a bare `mlxk`, and five live modules that carried only
+  `live_e2e` now also carry the `live` umbrella marker, so the default run stops selecting modules
+  it then skips.
+
+- The opt-in index bootstrap in the Issue #27 test fixtures, and its `MLXK2_BOOTSTRAP_INDEX`
+  switch. It swallowed a failed download and let the test skip with "No safetensors/pytorch index
+  found" — a claim about the model, not about the network. Nothing downloads now, so that skip
+  reason is true as written.
+
 ### Changed
 
 - `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`

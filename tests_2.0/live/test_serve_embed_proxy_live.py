@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     httpx = None
 
-pytestmark = pytest.mark.live_e2e
+pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
 # Skip BEFORE importing the D1 live module (which also module-skips when alpha is unset).
 if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
