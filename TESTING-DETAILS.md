@@ -1122,6 +1122,28 @@ logs, `summary.json`, `summary.md` — and stay local. Options: `--port` (defaul
 - **Never submit these results** to the mlx-chronos leaderboard: both runs carry the `mlx-lm`
   engine label.
 
+## Streaming Overhead Gauge
+
+`benchmarks/tools/stream_overhead.py` answers a narrower question than the chronos gauge and needs
+nothing installed: is streaming costing more than the model? It generates the same answer twice on
+one runner, streamed and unstreamed, and prints the cost per token with their ratio.
+
+```bash
+python benchmarks/tools/stream_overhead.py --model mlx-community/Qwen2.5-0.5B-Instruct-4bit
+```
+
+- **The ratio is the number that travels.** Absolute throughput depends on the machine and its
+  thermal state; both halves here are measured in the same process on the same model, so a ratio
+  far above 1 means the streaming path pays for something the forward pass does not. Calibration on
+  `Qwen2.5-0.5B-Instruct-4bit` over 300 tokens: **66.5x** against the tree that carried issue #73,
+  **1.0x** after it was fixed. The gauge warns above 3x.
+- **Pick a small model with a large vocabulary.** Per-token overhead scales with the vocabulary,
+  the forward pass with the model, so a large model hides exactly what this measures.
+- **Not a test, on purpose.** It measures time: a machine under load would fail it with nothing
+  wrong in the code. It refuses a busy GPU (`--max-gpu-busy`, default 10%) for the same reason.
+- It also compares the two texts and reports a difference as a **parity defect** — at temperature 0
+  they must match, and if they do not, the ratio is comparing two different answers.
+
 ## Known Warnings
 
 - urllib3 LibreSSL notice on macOS Python 3.9

@@ -12,7 +12,26 @@
   and any model mlxk would not run. Setup and how to read the table: TESTING-DETAILS →
   *Server Overhead Gauge (mlx-chronos)*.
 
+- `benchmarks/tools/stream_overhead.py` measures streamed against unstreamed generation on one
+  runner and prints the cost per token with their ratio. The ratio is what travels between
+  machines: both halves are measured in the same process on the same model, so a value far
+  above 1 means streaming pays for something the model does not. Needs nothing installed, and
+  is deliberately not a test — it measures time, and a loaded machine would fail it with
+  nothing wrong in the code. Pick a small model with a large vocabulary; on a large model
+  per-token overhead hides inside the forward pass.
+
 ### Fixed
+
+- Streaming was far slower than the same generation unstreamed — 65x on a 300-token answer,
+  53 s where the unstreamed request took 0.8 s. `tokenizer.detokenizer` is a factory rather
+  than an attribute: every read builds a new instance over the whole vocabulary, about 61 ms
+  for a 151k BPE vocabulary. The decode helper read it on each call and the streaming loop
+  called it up to three times per token, against a forward pass of roughly 1 ms. One instance
+  now serves a whole generation, reset per decode as before, and streaming lands on the
+  unstreamed cost: 176 ms per token became 3 ms, which is what the unstreamed path costs
+  as well — the ratio between them went from 66x to 1. Text is
+  unchanged. It affected every interactive `mlxk run` — a terminal streams — and every client
+  sending `"stream": true`. Present since 2.0.4-beta.5. Issue #73.
 
 - An empty model name selected a model. The resolver matched workspace directories and cached
   models by case-insensitive substring, and `""` is contained in every name, so a caller that

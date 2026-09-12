@@ -296,8 +296,19 @@ Backends (e.g., `VisionRunner`) should be loaded **once per process** and reused
 - Vision batching (ADR-012 Phase 1c): Reuse same `VisionRunner` for all image chunks
 - Temporary files: Track and clean up on exit
 - Context managers: Use `with` statements for resource safety
+- Detokenizers: one per generation, passed into `_decode_tokens`, reset before each decode
 
 **Rationale:** Model loading is expensive (~5-10s). Reuse improves performance for batch operations.
+
+⚠ **`tokenizer.detokenizer` reads like an attribute and is a factory.** Every read constructs
+a new instance over the whole vocabulary — about 61 ms for a 151k BPE vocabulary — so reading
+it inside a decode loop costs more than the model does (issue #73: 176 ms per streamed token
+against a 1 ms forward pass). It is upstream's documented behaviour, not a defect: the
+docstring reads *"Get a stateful streaming detokenizer"*. Hold one instance for the generation
+and reset it per decode — safe across all three upstream classes, whose `reset()` clears their
+entire state (naive five fields, SPM and BPE four each), nothing carried over. Keep it **local to the generation**, not a runner field: `_lock` in
+`ModelManager` serializes state changes only, so nothing guarantees that two generations on
+one runner never overlap.
 
 ### 6. Explicit Error Codes for Servers
 

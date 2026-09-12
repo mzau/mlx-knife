@@ -1382,6 +1382,10 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 - Built for Apple Silicon using the [MLX framework](https://github.com/ml-explore/mlx)
 - Models hosted by the [MLX Community](https://huggingface.co/mlx-community) on HuggingFace
 - Inspired by [ollama](https://ollama.ai)'s user experience
+- Server throughput is compared against `mlx_lm.server` with
+  [mlx-chronos](https://github.com/igurss/mlx-chronos) by Igor Pastore (Apache-2.0), a benchmark
+  suite for local inference servers. It runs from its own virtual environment, is called only
+  through its command line, and is not a dependency of this package
 
 ---
 

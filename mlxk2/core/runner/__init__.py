@@ -115,7 +115,7 @@ class MLXRunner:
         """Handle Ctrl-C interruption during generation."""
         self._interrupted = True
 
-    def _decode_tokens(self, token_ids):
+    def _decode_tokens(self, token_ids, detok=None):
         """Decode token IDs using the streaming detokenizer.
 
         This properly converts BPE space markers (Ġ U+0120) to spaces (U+0020)
@@ -123,11 +123,15 @@ class MLXRunner:
 
         Args:
             token_ids: List of token IDs to decode
+            detok: Detokenizer to reuse. `tokenizer.detokenizer` is a factory, not an
+                attribute: every read constructs a new instance over the whole vocabulary.
+                Callers that decode in a loop hold one and pass it in (issue #73).
 
         Returns:
             Decoded string
         """
-        detok = self.tokenizer.detokenizer
+        if detok is None:
+            detok = self.tokenizer.detokenizer
         detok.reset()
         for token_id in token_ids:
             detok.add_token(token_id)
@@ -600,6 +604,9 @@ class MLXRunner:
         accumulated_response = ""
         context_window = 10
         stopped = False  # model ended its turn (EOS id or stop string)
+        # One detokenizer for this generation, reset per decode (issue #73). Local, not
+        # a runner field: nothing guarantees that two generations never overlap.
+        detok = self.tokenizer.detokenizer
 
         for token, _ in generator:
             # Check for interruption
@@ -620,7 +627,7 @@ class MLXRunner:
             # Use sliding window for proper decoding
             start_idx = max(0, len(generated_tokens) - context_window)
             window_tokens = generated_tokens[start_idx:]
-            window_text = self._decode_tokens(window_tokens)
+            window_text = self._decode_tokens(window_tokens, detok)
 
             # Extract new text
             if start_idx == 0:
@@ -632,13 +639,13 @@ class MLXRunner:
                     new_text = window_text
                 previous_decoded = window_text
             else:
-                new_text = self._decode_tokens(window_tokens)
+                new_text = self._decode_tokens(window_tokens, detok)
                 if len(window_tokens) > 1:
-                    prefix = self._decode_tokens(window_tokens[:-1])
+                    prefix = self._decode_tokens(window_tokens[:-1], detok)
                     if new_text.startswith(prefix):
                         new_text = new_text[len(prefix):]
                     else:
-                        new_text = self._decode_tokens([token_id])
+                        new_text = self._decode_tokens([token_id], detok)
 
             if new_text:
                 accumulated_response += new_text
@@ -818,7 +825,8 @@ class MLXRunner:
         # Decode full response using the streaming detokenizer
         # This properly converts BPE space markers (Ġ U+0120) to spaces (U+0020)
         # while tokenizer.decode() for slow tokenizers (LlamaTokenizer) does NOT.
-        full_response = self._decode_tokens(all_tokens)
+        detok = self.tokenizer.detokenizer  # one per generation (issue #73)
+        full_response = self._decode_tokens(all_tokens, detok)
 
         # Debug: Show raw generated tokens for quality analysis (enabled via --verbose)
         if self.verbose:
@@ -830,7 +838,7 @@ class MLXRunner:
                 for tid in last_3_ids:
                     try:
                         # Use detokenizer for debug output too
-                        decoded = self._decode_tokens([tid])
+                        decoded = self._decode_tokens([tid], detok)
                         last_3_decoded.append(f"{tid}={decoded!r}")
                     except Exception:
                         last_3_decoded.append(f"{tid}=<error>")
@@ -846,7 +854,7 @@ class MLXRunner:
             response = full_response[len(formatted_prompt):]
         else:
             # Decode generated tokens only (use detokenizer)
-            decoded = self._decode_tokens(generated_tokens)
+            decoded = self._decode_tokens(generated_tokens, detok)
             response = decoded if isinstance(decoded, str) else str(decoded)
 
         # Filter stop tokens (strings only)
