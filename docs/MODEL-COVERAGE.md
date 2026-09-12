@@ -17,6 +17,13 @@ mlx-knife's own code, this matrix names the **dependency condition**
 actually have installed, not against your mlx-knife version — the two
 move independently.
 
+**What this matrix is not.** It carries no denominator. The entries are the
+types someone had a reason to try, on the models that happened to be at hand —
+not a sample of the ecosystem, and not a share of it. A type that is absent has
+not been tested; it is not thereby unsupported. And a ✅ states that
+mlx-knife's integration works, not that the model is good: this is a tool's
+verification log, not a model benchmark.
+
 ## Legend
 
 - ✅ **Verified** — integration tested in this release (local wet run and/or explicit unit test)
