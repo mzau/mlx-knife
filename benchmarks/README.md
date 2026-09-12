@@ -370,7 +370,9 @@ expected: chronos looks for a process named `mlx_lm.server`, which the mlxk side
   Vision and audio checkpoints are rejected because chronos measures text generation; a
   checkpoint mlxk reports as not runnable is rejected because `mlx_lm.server` would execute its
   `model_file` unconditionally.
-- **A busy GPU.** It samples `Device Utilization %` through `ioreg` before each server and stops
+- **A busy GPU.** It samples `Device Utilization %` through `ioreg` — the same counter
+  `tools/memmon.py` has sampled since 2.0.4, here as a gate before the run rather than as a
+  timeline during it — before each server and stops
   above `--max-gpu-busy` (default 10 %). A game or a video stream in a browser tab slows every
   step that waits on the GPU, and the run would measure that application instead.
 - **A port that is already in use.**
