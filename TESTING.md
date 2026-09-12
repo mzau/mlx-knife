@@ -47,8 +47,12 @@ pip install -e ".[dev,test]"
 pytest -v
 
 # Before committing
-ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
+ruff check mlxk2/ --fix && pytest -v
 ```
+
+Type checking is a separate step, not part of this chain: `mypy mlxk2/` reports a known,
+pre-existing error count, so chaining it with `&&` would keep the tests from ever running.
+See [Code Quality](#code-quality).
 
 **That's it!** Default tests use isolated caches and MLX stubs - no model downloads required.
 
@@ -316,12 +320,21 @@ pip install -e .[dev]
 # Code formatting and linting
 ruff check mlxk2/ --fix
 
-# Type checking
-mypy mlxk2/
-
 # Complete workflow
-ruff check mlxk2/ --fix && mypy mlxk2/ && pytest
+ruff check mlxk2/ --fix && pytest
 ```
+
+### Type checking
+
+```bash
+mypy mlxk2/
+```
+
+`mlxk2/` carries a pre-existing type-error count, so mypy exits non-zero on a healthy tree and
+belongs in no `&&` chain. What is checked is that the count does not **grow**:
+`scripts/mypy-baseline.txt` holds today's total, `test-multi-python.sh` compares against it and
+turns a Python version red when it rises. Fixing the existing errors is welcome — refresh the
+baseline in the same commit; never to turn a red run green.
 
 ## Test Markers
 
@@ -392,14 +405,14 @@ Before committing:
 # 1. Code style
 ruff check mlxk2/ --fix
 
-# 2. Type checking
-mypy mlxk2/
-
-# 3. Run tests
+# 2. Run tests
 pytest -v
 
 # Or combined
-ruff check mlxk2/ --fix && mypy mlxk2/ && pytest -v
+ruff check mlxk2/ --fix && pytest -v
+
+# 3. Type checking — separate, see Code Quality: the count must not grow
+mypy mlxk2/
 ```
 
 ## Summary

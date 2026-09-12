@@ -100,12 +100,27 @@ test_python_version() {
                         if python -m ruff check mlxk2/ > "$ruff_log" 2>&1; then
                             echo -e "${GREEN}✅ ruff linting passed${NC}"
                             
-                            # Note: mypy might have many warnings, so we allow it to "fail" but still continue
-                            python -m mypy mlxk2/ --ignore-missing-imports > mypy_${version_name//./_}.log 2>&1
+                            # mypy carries a pre-existing error count; the gate is on growth only,
+                            # against the total in scripts/mypy-baseline.txt (see that file).
+                            python -m mypy mlxk2/ > mypy_${version_name//./_}.log 2>&1
                             local mypy_errors=$(grep -c "error:" mypy_${version_name//./_}.log 2>/dev/null || echo "0")
-                            echo -e "${YELLOW}ℹ️  mypy check complete ($mypy_errors errors found)${NC}"
-                            
-                            RESULTS+=("${version_name}:FULL_SUCCESS:${passed_count}tests")
+                            local mypy_baseline=$(awk '/^total /{print $2}' scripts/mypy-baseline.txt 2>/dev/null)
+
+                            if [ -n "$mypy_baseline" ] && [ "$mypy_errors" -gt "$mypy_baseline" ]; then
+                                echo -e "${RED}❌ mypy grew: $mypy_errors errors, baseline $mypy_baseline${NC}"
+                                echo "   See mypy_${version_name//./_}.log — fix the new ones, or refresh"
+                                echo "   scripts/mypy-baseline.txt deliberately if the growth is intended"
+                                RESULTS+=("${version_name}:MYPY_GREW:${mypy_errors}errors")
+                            else
+                                if [ -n "$mypy_baseline" ] && [ "$mypy_errors" -lt "$mypy_baseline" ]; then
+                                    # Fewer can also mean a leaner venv, not cleaner code: with
+                                    # ignore_missing_imports an absent package silences its callers.
+                                    echo -e "${GREEN}✅ mypy $mypy_errors errors, below the baseline of $mypy_baseline — refresh scripts/mypy-baseline.txt after a deliberate cleanup${NC}"
+                                else
+                                    echo -e "${YELLOW}ℹ️  mypy $mypy_errors errors (baseline ${mypy_baseline:-none}, gate on growth only)${NC}"
+                                fi
+                                RESULTS+=("${version_name}:FULL_SUCCESS:${passed_count}tests")
+                            fi
                         else
                             local ruff_error_count=$(grep -c "Found .* error" "$ruff_log" 2>/dev/null || echo "unknown")
                             echo -e "${RED}❌ ruff linting failed ($ruff_error_count errors)${NC}"

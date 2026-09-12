@@ -1,0 +1,42 @@
+# mypy baseline — what `mypy mlxk2/` reports today, not a target.
+#
+# The type errors below are pre-existing. Fixing them is worthwhile but is its own piece of
+# work; what must not happen is that the number grows unnoticed while nobody looks. So the
+# check in test-multi-python.sh reads the `total` line and fails a Python version when the
+# count RISES. It never demands that the list shrink, and a smaller count is reported, not
+# rewarded — refresh this file deliberately after a cleanup, never to make a red run green.
+#
+# Measured identical on 3.10 and 3.14 (2026-09-12), so one number covers the whole matrix.
+# Regenerate the per-file list with:
+#
+#   python -m mypy mlxk2/ | grep "error:" | cut -d: -f1 | sort | uniq -c | sort -rn
+#
+# Only the `total` line is read by the gate; the rest is here so a growth can be traced to
+# a file without digging through the log.
+
+total 124
+
+mlxk2/operations/clone.py                      25
+mlxk2/core/server_base.py                      15
+mlxk2/core/reasoning.py                        15
+mlxk2/core/embedding_runner.py                 12
+mlxk2/operations/convert.py                    10
+mlxk2/operations/show.py                        8
+mlxk2/core/vision_runner.py                     7
+mlxk2/operations/run.py                         4
+mlxk2/operations/push.py                        4
+mlxk2/core/server/error_handlers.py             4
+mlxk2/core/runner/stop_tokens.py                3
+mlxk2/operations/workspace.py                   2
+mlxk2/operations/pull.py                        2
+mlxk2/operations/list.py                        2
+mlxk2/core/server/handlers/models.py            2
+mlxk2/output/human.py                           1
+mlxk2/operations/health.py                      1
+mlxk2/errors.py                                 1
+mlxk2/core/server/model_manager.py              1
+mlxk2/core/server/handlers/audio.py             1
+mlxk2/core/runner/__init__.py                   1
+mlxk2/core/encoders/bert.py                     1
+mlxk2/core/audio_runner.py                      1
+mlxk2/audio/whisper_tokenizer.py                1

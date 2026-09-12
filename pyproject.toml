@@ -114,6 +114,14 @@ dev = [
     "openai>=1.0",
 ]
 
+[tool.mypy]
+# Third-party MLX and Hugging Face packages ship no type information, and their absence
+# produced ten of the errors a bare run reported — noise that says nothing about this code.
+# Silencing it here rather than in each caller's command line means the count is the same
+# number everywhere: in test-multi-python.sh, in the documented commands, and in
+# mypy-baseline.txt, which the matrix run compares against so the total cannot grow unseen.
+ignore_missing_imports = true
+
 [tool.ruff.lint]
 # Pin the rule set to the project's own choice, not to whatever the installed
 # ruff happens to default to. Without this, a ruff release can turn a green

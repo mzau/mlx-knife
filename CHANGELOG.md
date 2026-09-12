@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`
+  carries the current total, `test-multi-python.sh` fails a Python version when that total rises,
+  and `ignore_missing_imports` moves into `pyproject.toml` so every caller reads the same number.
+  The documented pre-commit chain drops mypy — with pre-existing errors, `&&` kept the tests from
+  ever running.
+
 ### Added
 
 - `benchmarks/tools/chronos_gauge.py` measures `mlxk serve` against `mlx_lm.server` with
