@@ -37,6 +37,12 @@ dependencies: a workaround retires when its cause is gone, not on a date
 
 ## Active ADRs
 
+**The register is complete; the table is not a roadmap.** Numbers are never reused, so every
+ADR that exists appears here — including drafts that are deliberately not committed, marked
+`(not committed)`. Such a row records that the number is taken and what the document
+contains. **It is not a promise that the thing will be built.** A seed whose `When:` reads
+*nothing pulls this* says exactly that, and its row repeats it.
+
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [ADR-001](ADR-001-json-api-strategy.md) | JSON API Strategy & 2.0 Migration Path | Accepted | 2025-08-28 |
@@ -65,6 +71,9 @@ dependencies: a workaround retires when its cause is gone, not on a date
 | [ADR-024](ADR-024-Pre-Execution-Capability-Mismatch-Reject.md) | Pre-Execution Capability-Mismatch Reject | Partially Implemented (Class A STT/Embedding shipped 2.0.6; Class C Loader-Gap + Class D Invocation-Gap deferred, gated on their acceptance criteria) | 2026-04-19 |
 | [ADR-025](ADR-025-content-hash-v2.md) | content_hash v2 Algorithm + Sentinel Migration | Accepted (Implemented in 2.0.6; real-world smoke pending) | 2026-04-20 |
 | [ADR-026](ADR-026-Model-Location-Dispatcher.md) | Unified Model Resolution — Model-Location-Dispatcher | Draft (full design deferred to the `run.py` split; interim seed shipped — `run.py` embed pre-flight, Slice C) | 2026-06-16 |
+| ADR-027 | OpenAI Tool/Function Calling API (#39) | Proposed — scoping seed. **No decision taken**, neither whether to implement nor where the parser lives. Nothing pulls it: #39 asked, no consumer has named it a requirement since | 2026-06-18 (not committed) |
+| ADR-028 | Reasoning Control & Reasoning-Out-Of-Context (#40) | Proposed — scoping seed. **No decision taken**, neither whether to expose reasoning controls, nor which, nor on which surface. Inventory and measurement only | 2026-09-01 (not committed) |
+| ADR-029 | Server State Vocabulary and Generation Controllability | Proposed — one word per question (`live` / `ready` / `loaded`, `healthy` reserved for the artifact) plus the observability and controllability boundary it requires. Commits with the `SERVER-HANDBOOK` revision that adopts the vocabulary; that publication is what makes the wording true | 2026-09-13 (not committed) |
 
 ## ADR Format
 
