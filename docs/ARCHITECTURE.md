@@ -234,7 +234,7 @@ The tree above fails the whole model when any one per-modality gate fails (`AND`
 
 > A modality is **listed** as a capability iff it is both **declared** (`detect_capabilities`) and **runnable** (its per-modality gate passes — structural availability + known-bad exclusions; the ADR-023 verified list is confidence, not a per-model gate). The gates **filter** the capability set; `runtime_compatible` is a boolean over the filtered set — `healthy AND effective_capabilities ≠ ∅`.
 
-**Two surfaces.** Diagnostic (`mlxk list --all`, `mlxk show`): declared set + effective set + per-modality drop reason. Consumer (`mlxk list` default, `/v1/models`): effective set only, non-runnable models filtered out (the server already filters `healthy AND runtime_compatible`, in `core/server/handlers/models.py`). The client-facing capability *contract* — `/v1/models` **emitting** the effective set so a client can read it — is **`SERVER-HANDBOOK.md`** terrain and is **not built**: the response carries `{id, object, owned_by, permission, context_length}` and no capability field, so an HTTP client cannot tell a vision model from a text-only one. Tracked as [#51](https://github.com/mzau/mlx-knife/issues/51). *(The workspace scan is built — that was #58, closed.)*
+**Two surfaces.** Diagnostic (`mlxk list --all`, `mlxk show`): declared set + effective set + per-modality drop reason. Consumer (`mlxk list` default, `/v1/models`): effective set only, non-runnable models filtered out (the server already filters `healthy AND runtime_compatible`, in `core/server/handlers/models.py`). The client-facing capability *contract* — `/v1/models` **emitting** the effective set so a client can read it — is **`SERVER-HANDBOOK.md`** terrain and is **not built**: the response carries `{id, object, owned_by, permission, context_length, loaded}` and no capability field, so an HTTP client cannot tell a vision model from a text-only one. Tracked as [#51](https://github.com/mzau/mlx-knife/issues/51). *(The workspace scan is built — that was #58, closed.)*
 
 **Invariants.** (1) *No silent fallback* (Principle #2): a dropped modality surfaces its gate reason. (2) *Capability is host-effective, not intrinsic*: the **declared** set is retained in `show`/`--json`. (3) *Integrity precedes capability*: gate [1] health runs before the filter → a false-negative integrity verdict drops a *runnable* model from the consumer surface (see below). (4) *Runnable is a prediction, not a per-model certificate*: a listed-runnable modality's verb is **attempted, never pre-rejected** for a knowable reason; runtime may still fail (unknown / stale-converted model) but **honestly** (Principle #2), never as a `list`↔verb contradiction. Verified sets are class-level (ADR-023 / MODEL-COVERAGE), not per-instance guarantees.
 
@@ -310,8 +310,9 @@ docstring reads *"Get a stateful streaming detokenizer"*. Hold one instance for 
 and reset it per decode — safe across all three upstream classes, whose `reset()` clears their
 entire state (naive five fields, SPM and BPE four each), nothing carried over. Keep it **local to the generation**, not a runner field: it is a per-generation object, and
 runner fields are overwritten by the next generation the way `last_finish_reason` and its
-siblings are. Two generations on one runner can no longer overlap — see §Model Thread — but
-that guarantee is about the process, not about what belongs on a runner.
+siblings are. Two generations on one runner can no longer run at the same moment — see §Model
+Thread — but they still interleave: a batch answer can run between two steps of a stream on the
+same runner, which is one more reason per-generation state does not belong on it.
 
 ### 6. Explicit Error Codes for Servers
 
@@ -411,7 +412,7 @@ The server's model lifecycle is managed by `ModelManager` in `mlxk2/core/server/
 
 | State | Description |
 |-------|-------------|
-| IDLE | No model loaded (`_current_model_path = None`) |
+| IDLE | No model loaded (`_loaded_identity = None`) |
 | LOADED(X) | Model X loaded and cached |
 | SWITCHING | Model switch in progress (lock held, cleanup + load) |
 | SHUTTING_DOWN | Server shutting down (all requests → 503) |
@@ -431,8 +432,14 @@ ANY ──shutdown_event.set()──→ SHUTTING_DOWN
 - `_lock` serializes all state changes
 - Double-check pattern: Check shutdown before AND after lock acquire
 - Cleanup with `list()` copy to avoid dict mutation during iteration
-- `_lock` covers the cache, not a generation — what keeps a switch from freeing a runner
-  mid-generation is the model thread below, not this lock
+- `_lock` covers the cache, not a generation — what keeps two model operations from overlapping
+  is the model thread below, not this lock
+- The cache is keyed by the model directory a spec reaches, as the filesystem identifies it
+  (`model_dir_identity`), not by the spelling a request used: any spelling that resolves to the
+  loaded model's directory is served from memory, and `GET /v1/models` marks the row whose directory
+  matches (`loaded`). Keyed by spelling, the listed id of a model loaded as `qwen` loaded it a second
+  time. The cache also records which kind of runner it holds, so a text request never receives the
+  audio runner of the same directory
 
 ### Memory Gates (see Principle #4)
 
@@ -476,9 +483,20 @@ in flight at a time. Before, that rested on the event loop being blocked — and
 everywhere: a streaming multi-image request ran its chunks in a thread while a batch request
 blocked the loop, so two generations really did overlap.
 
-**Not covered:** between a request acquiring a runner and a stream taking its first step,
-nothing holds the worker, so a batch starting in that window can still evict the runner the
-stream is about to use. The same window existed when the loop was blocked instead.
+**The listing is off the loop too, but not on this thread.** `GET /v1/models` reads every model
+directory, and `GET /health` used to wait for it, so it runs on a helper thread. It reads no weights,
+and on the model thread it would queue behind a generation. The runtime-compatibility check it calls
+sets process-wide logger levels, which is why those are saved and restored under a lock
+(`operations/health.py`): two listings at once could otherwise leave the root logger at CRITICAL.
+
+**Still on the loop:** reading a request. A large upload delays `GET /health` while its body is read
+and its images are decoded.
+
+**Not covered:** nothing holds a runner for the length of a stream. The worker is free between two
+of its steps, so a request for another model is served there, unloads the runner, and the stream
+fails at its next step (measured). On the blocked loop the same could happen between two yields. A
+non-streaming request whose client has gone is not stopped either: nothing reads the disconnect, and
+a thread cannot be cancelled from outside.
 
 ---
 
@@ -518,6 +536,7 @@ stream is about to use. The same window existed when the loop was blocked instea
 
 ## Changelog
 
+- **2026-09-14 (server state):** `GET /v1/models` rows carry `loaded` (ADR-029): *Two surfaces* lists the field, and §Thread Safety records that the `ModelManager` cache is keyed by the model directory a spec reaches rather than by the request's spelling — which is what makes the flag match a row, and what stopped a request for the listed id from loading the model a second time — and that it records the runner kind. §Model Thread: the listing moved to a helper thread, with the logger-level lock that made safe; reading a request stays on the loop; *Not covered* corrected — the eviction window is the whole stream, not only the time before its first step, measured by requesting another model mid-stream; and a disconnected non-streaming request runs on. §Thread Safety no longer says the model thread keeps a switch from freeing a runner mid-generation: it serializes operations, and a stream spans many of them. Principle #5 said two generations on one runner can no longer overlap; they cannot run at the same moment, but a batch answer still runs between two steps of a stream.
 - **2026-09-14 (references de-anchored):** Line numbers replaced by the symbols they meant. Nine of thirteen checkable anchors pointed at the wrong line — `cli.py:647` by 467 lines and at a different feature entirely — because a line number rots on the next commit to the file and nothing reads it back. `docs/SERVER-HANDBOOK.md` carries none and is checked by `scripts/check-handbook-contract.py`, which is the form that holds. Also: `TESTING-DETAILS.md` lives at the repo root, not under `docs/`; §Historical pointed at a file that exists nowhere; the JSON API entry no longer names a spec version the spec itself owns.
 - **2026-09-14 (model thread):** New §Model Thread — every model operation in `serve` moved off the event loop onto a single worker, so `/health` and `/v1/models` answer while the server works ([#64](https://github.com/mzau/mlx-knife/issues/64)). Corrected Principle #5: it claimed *nothing guarantees that two generations on one runner never overlap*, which the single worker now does guarantee; the advice to keep the detokenizer local to the generation stands on its own reason. §Thread Safety notes that `ModelManager._lock` covers the cache and not a generation. Corrected in the same list, and older than this change: *Reuse same `VisionRunner` for all image chunks* — every chunk path builds a fresh one instead, which the code says in its own comments (*fresh runner per chunk to prevent KV-cache/state accumulation*). Recorded with it, because it decides the shape: an `mx.array` carries the stream it was made on, so a main-thread load cannot be generated with elsewhere — checkpoint-dependent, which is why a pool would fail intermittently rather than loudly.
 - **2026-08-27 (mlx upper bound tightened to `<0.32.1`):** The `<0.33` bound set on 07-29 was the only loose one in the MLX stack, and a plain `pip install` had begun resolving past what the pinned `mlx-vlm==0.6.10` can run. Measured against one model and one command (Qwen2-VL-7B, single image, temperature 0): **0.32.0** clean; **0.32.1** produces correct output and then aborts the interpreter (`PyThreadState_Get … GIL is released` during finalize, exit 134); **0.32.2** raises before inference (`mx.tile` given an array-derived tuple in the vision tower, exit 1). Same class both times — `mx.array` where an `int` is expected — fixed upstream in mlx-vlm 0.6.16 (#1982) and 0.6.17 (#2021), neither of which this release takes. Scope is narrow: the text path and non-MRoPE vision (pixtral) were unaffected in the same runs. ⚠ The bound also excludes **mlx#3675** (state corruption when a primitive throws during eval), which shipped in 0.32.1 — the serve fault-recovery question must therefore be measured in a scratch environment, not in the pinned tree.

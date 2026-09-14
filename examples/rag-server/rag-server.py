@@ -173,19 +173,26 @@ async def list_models():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    # Check mlxk serve connectivity
-    mlxk_status = "unknown"
+    """This server is live; `mlxk_backend` says what it sees of mlxk serve.
+
+    Answers the way mlx-knife's own GET /health does (SERVER-HANDBOOK): the status code is
+    the answer for this process, `status` and `service` name it. `timeout` means mlxk serve
+    took the connection but did not answer; `mlxk serve` answers /health while it generates.
+    """
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{MLXK_URL}/health", timeout=5.0)
-            mlxk_status = "healthy" if response.status_code == 200 else "unhealthy"
-    except:
+        mlxk_status = "live" if response.status_code == 200 else f"http {response.status_code}"
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+        mlxk_status = "unreachable"
+    except httpx.TimeoutException:
+        mlxk_status = "timeout"
+    except (httpx.HTTPError, httpx.InvalidURL):
         mlxk_status = "unreachable"
 
     return {
-        "status": "healthy",
-        "service": "mlx-knife-server-2.0",  # SERVER-HANDBOOK /health contract
+        "status": "ok",
+        "service": "rag-server",
         "mlxk_backend": {
             "url": MLXK_URL,
             "status": mlxk_status

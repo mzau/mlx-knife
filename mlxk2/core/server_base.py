@@ -3,6 +3,7 @@ OpenAI-compatible API server for MLX models (2.0 implementation).
 Provides REST endpoints for text generation with MLX backend.
 """
 
+import asyncio
 import os
 import threading
 import time
@@ -153,6 +154,7 @@ class ModelInfo(BaseModel):
     owned_by: str = "mlx-knife"
     permission: List = []
     context_length: Optional[int] = None
+    loaded: bool = False
 
 
 class TranscriptionResponse(BaseModel):
@@ -635,19 +637,26 @@ register_error_handlers(app)
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint (OpenAI compatible)."""
-    return {"status": "healthy", "service": "mlx-knife-server-2.0"}
+    """`live`: the process runs and can answer. The status code is the answer (ADR-029).
+
+    `healthy` names a model's file integrity in the CLI, so it stays off this surface.
+    """
+    return {"status": "ok", "service": "mlx-knife-server-2.0"}
 
 
 @app.get("/v1/models")
 async def list_models():
     """List available MLX models in the cache.
 
-    Delegates to extracted handler module (Phase 1 refactoring).
+    The scan reads every model directory, so it runs on a helper thread instead of holding up
+    GET /health. Not on the model thread: it reads no weights, and must not wait behind a
+    generation.
     """
-    result = await _handle_list_models_impl(
+    result = await asyncio.to_thread(
+        _handle_list_models_impl,
         get_cache_fn=get_current_model_cache,
         preload_model=_preload_model,
+        loaded_identity=_model_manager.loaded_identity if _model_manager else None,
     )
     # Convert dicts to ModelInfo Pydantic objects
     model_list = [
@@ -657,6 +666,7 @@ async def list_models():
             owned_by=m["owned_by"],
             permission=m.get("permission", []),
             context_length=m.get("context_length"),
+            loaded=m.get("loaded", False),
         )
         for m in result["data"]
     ]

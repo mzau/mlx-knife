@@ -15,11 +15,12 @@ Memory Gates (ARCHITECTURE.md Principle #4):
   - wait_for_memory_release() polls until threshold reached or timeout
 """
 
+import os
 import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException
 
@@ -137,6 +138,19 @@ def wait_for_memory_release(
     return False
 
 
+def model_dir_identity(path: Any) -> Optional[Tuple[int, int]]:
+    """A model directory as the filesystem identifies it, or None when it cannot be read.
+
+    Compared instead of names: a case-insensitive volume takes `Qwen` and `qwen` for one
+    directory.
+    """
+    try:
+        st = os.stat(path)
+    except (OSError, TypeError, ValueError):
+        return None
+    return (st.st_dev, st.st_ino)
+
+
 # =============================================================================
 # ModelManager Class
 # =============================================================================
@@ -167,8 +181,14 @@ class ModelManager:
         Args:
             shutdown_event: Event to signal server shutdown
         """
-        self._cache: Dict[str, Any] = {}
+        # Keyed by the directory a spec reaches, not by how a request spelled it: `qwen` and
+        # `mlx-community/Qwen2.5-0.5B-Instruct-4bit` are one model, and GET /v1/models lists
+        # only the second. Keyed by spelling, a client naming the listed id reloaded it.
+        self._cache: Dict[Any, Any] = {}
+        self._aliases: Dict[str, Any] = {}
         self._current_model_path: Optional[str] = None
+        self._loaded_identity: Optional[Tuple[int, int]] = None
+        self._loaded_kind: Optional[str] = None  # "text" (text or vision runner) or "audio"
         self._lock = threading.Lock()
         self._shutdown_event = shutdown_event
 
@@ -178,8 +198,55 @@ class ModelManager:
 
     @property
     def current_model(self) -> Optional[str]:
-        """Get the currently loaded model path/name."""
+        """Get the currently loaded model path/name, as the request that loaded it spelled it."""
         return self._current_model_path
+
+    @property
+    def loaded_identity(self) -> Optional[Tuple[int, int]]:
+        """The loaded model's directory as `model_dir_identity` gives it, or None.
+
+        GET /v1/models marks the row whose directory matches as `loaded`.
+        """
+        return self._loaded_identity
+
+    def _resolve(self, model_spec: str) -> Tuple[Any, Optional[str]]:
+        """The cache key for a spec — its directory's identity, else the spelling — and the name.
+
+        Resolves the way the loaders below do. When it names nothing the key is the spelling,
+        and the loader answers that request with its own 404.
+        """
+        from ..cache import get_current_model_cache, hf_to_cache_dir
+        from ..model_resolution import resolve_model_for_operation
+        from ...operations.workspace import is_workspace_path
+
+        resolved_name = None
+        directory = None
+        try:
+            resolved_name, _, _ = resolve_model_for_operation(model_spec)
+            if resolved_name and is_workspace_path(resolved_name):
+                directory = Path(resolved_name)
+            elif resolved_name:
+                directory = get_current_model_cache() / hf_to_cache_dir(resolved_name)
+            elif is_workspace_path(model_spec):
+                directory = Path(model_spec)
+        except Exception:
+            pass
+        identity = model_dir_identity(directory) if directory is not None else None
+        return (identity if identity is not None else model_spec), resolved_name
+
+    def _remember(self, model_spec: str, key: Any, runner: Any, kind: str) -> None:
+        self._cache[key] = runner
+        self._aliases = {model_spec: key}
+        self._current_model_path = model_spec
+        self._loaded_identity = key if isinstance(key, tuple) else None
+        self._loaded_kind = kind
+
+    def _forget(self) -> None:
+        self._cache.clear()
+        self._aliases.clear()
+        self._current_model_path = None
+        self._loaded_identity = None
+        self._loaded_kind = None
 
     @property
     def is_shutting_down(self) -> bool:
@@ -207,8 +274,7 @@ class ModelManager:
                 except Exception as e:
                     self._logger.warning(f"Warning during cleanup: {e}")
         finally:
-            self._cache.clear()
-            self._current_model_path = None
+            self._forget()
 
         # Force Metal GPU memory release before loading new model
         try:
@@ -252,9 +318,14 @@ class ModelManager:
         with self._lock:
             self._check_shutdown()
 
-            # Return cached model if same
-            if self._current_model_path == model_spec and model_spec in self._cache:
-                return self._cache[model_spec]
+            # Return cached model if same, whatever spelling reached it — never an audio runner
+            key = self._aliases.get(model_spec)
+            resolved_name = None
+            if key is None:
+                key, resolved_name = self._resolve(model_spec)
+            if key in self._cache and self._loaded_kind == "text":
+                self._aliases[model_spec] = key
+                return self._cache[key]
 
             # Clean up previous model
             if self._cache:
@@ -264,17 +335,15 @@ class ModelManager:
             # Load new model
             try:
                 runner = self._load_text_or_vision_model(model_spec, verbose)
-                self._cache[model_spec] = runner
-                self._current_model_path = model_spec
-                self._logger.info(f"Switched to model: {model_spec}", model=model_spec)
+                self._remember(model_spec, key, runner, "text")
+                self._logger.info(f"Switched to model: {model_spec}", model=model_spec, resolved=resolved_name)
                 return runner
 
             except HTTPException:
                 raise
             except KeyboardInterrupt:
                 self._logger.warning("Model loading interrupted")
-                self._cache.clear()
-                self._current_model_path = None
+                self._forget()
                 raise HTTPException(status_code=503, detail="Server interrupted during model load")
             except Exception as e:
                 self._logger.error(
@@ -282,8 +351,7 @@ class ModelManager:
                     error_key=f"model_load_{model_spec}",
                     detail=str(e)
                 )
-                self._cache.clear()
-                self._current_model_path = None
+                self._forget()
                 raise HTTPException(
                     status_code=404,
                     detail=f"Model '{model_spec}' not found or failed to load: {str(e)}"
@@ -419,12 +487,14 @@ class ModelManager:
         with self._lock:
             self._check_shutdown()
 
-            # Check if model is already cached and is an AudioRunner
-            if self._current_model_path == model_spec:
-                from ..audio_runner import AudioRunner
-                cached = self._cache.get(model_spec)
-                if isinstance(cached, AudioRunner):
-                    return cached
+            # Check if model is already cached and is an AudioRunner, whatever spelling reached it
+            key = self._aliases.get(model_spec)
+            resolved_name = None
+            if key is None:
+                key, resolved_name = self._resolve(model_spec)
+            if key in self._cache and self._loaded_kind == "audio":
+                self._aliases[model_spec] = key
+                return self._cache[key]
 
             # Clean up previous model
             if self._cache:
@@ -434,17 +504,15 @@ class ModelManager:
             # Load new audio model
             try:
                 runner = self._load_audio_model(model_spec, verbose)
-                self._cache[model_spec] = runner
-                self._current_model_path = model_spec
-                self._logger.info(f"Audio model loaded: {model_spec}", model=model_spec)
+                self._remember(model_spec, key, runner, "audio")
+                self._logger.info(f"Audio model loaded: {model_spec}", model=model_spec, resolved=resolved_name)
                 return runner
 
             except HTTPException:
                 raise
             except KeyboardInterrupt:
                 self._logger.warning("Audio model loading interrupted")
-                self._cache.clear()
-                self._current_model_path = None
+                self._forget()
                 raise HTTPException(status_code=503, detail="Server interrupted during model load")
             except Exception as e:
                 self._logger.error(
@@ -452,8 +520,7 @@ class ModelManager:
                     error_key=f"audio_model_load_{model_spec}",
                     detail=str(e)
                 )
-                self._cache.clear()
-                self._current_model_path = None
+                self._forget()
                 raise HTTPException(
                     status_code=404,
                     detail=f"Audio model '{model_spec}' failed to load: {str(e)}"

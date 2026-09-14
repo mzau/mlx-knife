@@ -40,6 +40,11 @@
   diagnostic in the test execution guide. The per-model observation itself is model empiricism
   and no longer sits in the test documentation.
 
+- `test_server_e2e.py` asks `GET /health` while a non-streaming and a streaming request run on the
+  same model, each probe with Kubernetes' default one-second timeout. The row fails against the
+  server as it was before every model operation moved to one worker thread, and passes now. The
+  health and model-list rows check the new body and `loaded`.
+
 ### Changed
 
 - `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`
@@ -48,7 +53,14 @@
   The documented pre-commit chain drops mypy — with pre-existing errors, `&&` kept the tests from
   ever running.
 
+- `GET /health` on `serve` answers `{"status": "ok", "service": "mlx-knife-server-2.0"}` where it
+  said `healthy`. The status code is the answer; `healthy` stays the word `mlxk health` uses for a
+  model's files (ADR-029). SERVER-HANDBOOK → *GET /health*, and *From 2.0.7 → 2.0.8* for clients.
+
 ### Added
+
+- `loaded` on every `GET /v1/models` row: `true` on the model in memory, `false` on the others.
+  SERVER-HANDBOOK → *GET /v1/models*.
 
 - `benchmarks/tools/chronos_gauge.py` measures `mlxk serve` against `mlx_lm.server` with
   [mlx-chronos](https://github.com/igurss/mlx-chronos): the same protocol against both servers,
@@ -107,6 +119,28 @@
   does a model named in a server request. Two verbs read an empty argument as *no* argument
   and still do: `mlxk health ""` checks every model, the way `mlxk health` without a pattern
   does, and `serve --model ""` starts without a preloaded model. Present since 2.0.5.
+
+- A request naming the loaded model by its `/v1/models` id loaded it a second time when the
+  server had loaded it under another spelling — `serve --model Qwen2.5-0.5B`, then a request for
+  `mlx-community/Qwen2.5-0.5B-Instruct-4bit` — and every alternation between the two spellings
+  loaded it again. A workspace preloaded by path and requested by its listed name did the same.
+  The model cache is keyed by the model directory a name reaches, so another spelling — another
+  case, on a case-insensitive volume — finds the model in memory.
+
+- `GET /health` waited while `GET /v1/models` read the model directories. The listing runs off the
+  event loop.
+
+- `examples/rag-server`: `/health` names the RAG server itself instead of repeating mlx-knife's
+  service string, and tells a backend that took the connection but did not answer in time
+  (`timeout`) from one it cannot reach (`unreachable`); a failed answer reads `http <code>`.
+
+### Documentation
+
+- SERVER-HANDBOOK states what `serve` can say about its state — one word per question, with the
+  ones it cannot answer marked — and what its single model thread guarantees: one model operation
+  at a time, a stream sharing its turn token by token, a stream failing when another model is
+  requested, and a non-streaming request running on after its client has gone. ADR-029 records
+  the vocabulary, with its prior-art survey.
 
 ## [2.0.8-beta.2] - 2026-09-11
 

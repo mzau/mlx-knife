@@ -1,12 +1,11 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.7 plus the unreleased tree state — the 2.0.8 dependency wave, the `serve`
-signal/teardown fix, and the generation-budget rule (default `max_tokens`, `finish_reason:
-"length"`, HTTP 400 `context_length_exceeded`). Endpoint surface and request/response shapes are
-those of released 2.0.7; the [Migration Guide](#migration-guide) records what differs.
+**Version:** 2.0.8, unreleased — the tree as it stands; the 2.0.8 betas published so far carry part
+of it. The latest stable release is 2.0.7: its endpoint surface is the same, its request and response
+shapes differ in places, and the [Migration Guide](#migration-guide) records every difference.
 **Scope:** what the server does today. Planned work, deferred features and target releases are
 deliberately absent — this is a contract, not a roadmap.
-**Last Updated:** 2026-09-02
+**Last Updated:** 2026-09-14
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -16,8 +15,8 @@ deliberately absent — this is a contract, not a roadmap.
 > returns the family string `mlx-knife-server-2.0` — and there is no capability negotiation, so
 > a client cannot select a version-specific contract at runtime even if one existed.
 >
-> The surface described here is current as of **2.0.7** plus the unreleased 2.0.8 tree state.
-> Older 2.0.x releases predate parts of it — the Changelog at the end records when each endpoint appeared. Where behaviour genuinely
+> The surface described here is that of **2.0.8**, unreleased. Older 2.0.x releases predate parts
+> of it — the Changelog at the end records when each endpoint appeared. Where behaviour genuinely
 > varies it is anchored inline rather than left to the reader, including the one case a client
 > cannot probe: container audio formats depend on tooling installed on the server host (see
 > [Audio Errors](#audio-errors)).
@@ -52,7 +51,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 
 Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
 
-> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints and request/response shapes are identical; what differs is the pin set, how `serve` shuts down, and the generation budget — the default `max_tokens`, `finish_reason: "length"` on a cut answer, and a 400 for a prompt that fills the context window. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
+> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints and request shapes are identical; what differs is the pin set, how `serve` shuts down, the generation budget — the default `max_tokens`, `finish_reason: "length"` on a cut answer, and a 400 for a prompt that fills the context window — and what `serve` says about its state: `GET /health` answers `ok` where it said `healthy`, and `GET /v1/models` rows carry `loaded`. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
 
 ---
 
@@ -69,8 +68,8 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API (beta.9+) |
 | `/v1/audio/translations` | ✅ Supported (2.0.7+) | OpenAI Whisper translations API — speech→English (multilingual non-turbo Whisper; non-capable models → 400/422). See [POST /v1/audio/translations](#post-v1audiotranslations) |
 | `/v1/embeddings` | ✅ Supported (2.0.7, experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend`. Returns **501** on a plain `serve` started without `--embed-backend` (embeddings not enabled). See [Embeddings Backend](#embeddings-backend-embed-serve) |
-| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` field. Does **not** list embedders — they belong to the separate `embed-serve` backend, whose model list is not merged in |
-| `/health` | ✅ Custom | MLX Knife extension — liveness probe, no backend state |
+| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` and `loaded` fields. Does **not** list embedders — they belong to the separate `embed-serve` backend, whose model list is not merged in |
+| `/health` | ✅ Custom | MLX Knife extension — `live`: `200` while the process runs; no model or backend state (see [GET /health](#get-health)) |
 
 ### Authentication
 
@@ -581,12 +580,13 @@ docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).
 
 **List available models.**
 
-Returns the runnable models — healthy and runtime-compatible — from both the
-HF cache and the workspace home (`MLXK_WORKSPACE_HOME`, ADR-022). This is the
-same set of models as the default human `mlxk list` view (without `--all`);
+Returns the runnable models — healthy on disk (the file-integrity check of `mlxk health`) and
+runtime-compatible — from both the HF cache and the workspace home (`MLXK_WORKSPACE_HOME`,
+ADR-022). This is the same set of models as the default human `mlxk list` view (without `--all`);
 a model preloaded from outside the workspace home is included as well.
 The preloaded model (if any) appears exactly once, sorted first; all other
-models follow alphabetically.
+models follow alphabetically. Being listed is a prediction: a listed model can still be refused
+when a request names it.
 
 > **Embedders are excluded.** Embedding models (e.g. `bge-*`, `Qwen3-Embedding-*`) are
 > **not** listed here — they are served by the separate `embed-serve` backend, whose model
@@ -609,14 +609,16 @@ models follow alphabetically.
       "object": "model",
       "owned_by": "workspace",
       "permission": [],
-      "context_length": 131072
+      "context_length": 131072,
+      "loaded": true
     },
     {
       "id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
       "object": "model",
       "owned_by": "mlx-knife-2.0",
       "permission": [],
-      "context_length": 8192
+      "context_length": 8192,
+      "loaded": false
     }
   ]
 }
@@ -631,6 +633,9 @@ models follow alphabetically.
 - `owned_by`: `"mlx-knife-2.0"` for cached models, `"workspace"` for workspace models
 - `permission`: Empty array (OpenAI legacy field)
 - `context_length`: Maximum context window in tokens, read from the model's `config.json`; `null` when the config states none — then no window guard applies and the generation budget is the ceiling alone
+- `loaded`: `true` on the model in memory now, so a request naming this `id` is served without
+  loading it; `false` on every other model, and on all of them while nothing is loaded or a model is
+  loading. It says where the weights are, not that the next request will succeed.
 
 **Why context_length matters:**
 
@@ -646,18 +651,43 @@ Note: LM Studio provides similar field as `max_context_length`.
 
 ### GET /health
 
-**Liveness only — 200 OK means the process is up and answering.**
+**`live` — a `200` means the process is running and able to answer.** The status code is the answer.
 
 ```json
-{ "status": "healthy", "service": "mlx-knife-server-2.0" }
+{"status": "ok", "service": "mlx-knife-server-2.0"}
 ```
 
-The response is a constant: it inspects neither the loaded model nor the inference backend, so
-`"status": "healthy"` is not a statement about whether the next request will succeed. A process whose
-backend has failed still answers `healthy`. Treat it as a liveness probe — it detects a dead or
-unreachable server, not an unhealthy one — and not as a readiness or retry signal.
+The endpoint reads no model and no backend state. It answers while the server works — during a
+generation, a model load, a vision answer, a transcription or a model listing — because none of that
+runs on the loop that answers it. Reading a request does: a large upload delays it while it is read.
 
-(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}` and `503` until its model is loaded. The `system_fingerprint` matches the `/v1/embeddings` response, so a client **talking directly to the backend port** can poll that `/health` to detect a model/device swap without an embed request. **Through the `serve` gateway the backend's `/health` is not exposed** — a gateway client detects swaps reactively, from the next `/v1/embeddings` response.)
+What the server can say about its state, one word per question:
+
+| Question | Word | Ask | Logged on stderr | Answerable |
+|----------|------|-----|------------------|------------|
+| Is the process alive and able to answer? | `live` | `GET /health` → `200` | startup, shutdown | yes |
+| Can it accept a request now? | `ready` | the same `200` | — | yes — the same answer as `live` on this server |
+| Is this model in memory? | `loaded` | `loaded` on a row of [`GET /v1/models`](#get-v1models) | each model load | yes |
+| Is a generation still producing, and since when? | `progressing` | — | a finished text generation, image answer or transcription | **no** — the server keeps no clock on a generation |
+| Is the model complete on disk? | `healthy` | `mlxk health`; `health` in `mlxk list --json` and `mlxk show --json` | — | yes — never on the HTTP surface |
+
+**`ready` is `live` here.** Without `--reload`, the port opens only once startup has finished — a
+`--model` preload included, which lasts as long as the model takes to load — and closes when shutdown
+begins, so a server that answers accepts requests. Accepting is not being served at once: a request
+waits while another model operation runs (see [Concurrent Requests](#concurrent-requests)). During
+startup a connection is refused, not answered with `503`; give a probe that much grace before reading
+a refused connection as a dead server. A preload that fails ends the process.
+
+**What a `200` does not tell you:**
+- **That a generation is progressing.** A stalled generation — a GPU fault, a hang inside a native
+  call — leaves this endpoint answering. Only the client waiting for the answer sees it: detect it with
+  your own request timeout. `max_tokens` bounds tokens, not time, and the server never times a
+  generation out.
+- **That the next request will succeed.** A process whose inference backend has failed keeps answering
+  `200` here while it fails requests; restart it from outside (see [Supervised Mode](#supervised-mode-default)).
+- **Which model is loaded.** Read `loaded` on [`GET /v1/models`](#get-v1models).
+
+(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}`. Its port opens only once its model has loaded, so every answer comes from a loaded model: with a single model, `ready` and `loaded` are one fact. The `system_fingerprint` matches the `/v1/embeddings` response, so a client **talking directly to the backend port** can poll that `/health` to detect a model/device swap without an embed request. **Through the `serve` gateway the backend's `/health` is not exposed** — a gateway client detects swaps reactively, from the next `/v1/embeddings` response.)
 
 ---
 
@@ -942,10 +972,8 @@ with HTTP 400 `context_length_exceeded` before the response starts.
 
 #### Closing the connection
 
-A client that closes a streaming connection stops the generation. Measured: a 300-token
-generation that takes 56 seconds to completion, with the client killed after 3 seconds, had
-not finished 156 seconds later — the remaining 53 seconds of work were never done. The machine
-is freed, not just the client.
+A client that closes a streaming connection stops the generation, and the machine is freed, not
+just the client.
 
 Two consequences worth knowing:
 
@@ -953,19 +981,21 @@ Two consequences worth knowing:
   writes never appears, so the server-side record shows the request starting and nothing else.
   Tokens already delivered are the client's; there is no way to resume.
 - **The guarantee comes from the ASGI runtime, not from this server.** No code here watches for a
-  disconnect. The runtime finalizes the response generator when the connection drops, and that
-  closes the token generator. A deployment that buffers the response — a proxy that reads ahead,
-  for instance — can therefore keep the generation running after the client is gone.
+  disconnect. The runtime finalizes the response generator when the connection drops, and the
+  generation takes no further step. A deployment that buffers the response — a proxy that reads
+  ahead, for instance — can therefore keep the generation running after the client is gone.
 
-There is no explicit cancellation endpoint. Closing the connection is the way to abort.
+This holds for streams only: a non-streaming request keeps generating after its client has gone
+(see [Concurrent Requests](#concurrent-requests)). There is no explicit cancellation endpoint;
+closing a streaming connection is the way to abort.
 
 ### Embeddings Backend (embed-serve)
 
 **Experimental.** Text embeddings run in a **separate process**, `mlxk embed-serve` —
 not inside `mlxk serve`. This keeps the main server's memory gates (8 GB vision / 4 GB audio)
 intact: an embedding model is never loaded into serve's address space. The backend exposes two
-routes: `POST /v1/embeddings` (the OpenAI surface) and `GET /health` (liveness **+ identity** —
-`200` with `{status, model, system_fingerprint}` once the model is loaded, `503` before).
+routes: `POST /v1/embeddings` (the OpenAI surface) and `GET /health` (readiness **+ identity** —
+`200` with `{status, model, system_fingerprint}`; the port opens only once the model has loaded).
 
 **Topology — one OpenAI surface:**
 ```bash
@@ -1075,7 +1105,8 @@ MLXK2_EMBED_BACKEND=http://127.0.0.1:8002
 - If the supervisor is killed outright (`SIGKILL`) or crashes, the server process notices
   and stops itself, so neither the model nor the port is left behind. Not covered: a server
   wedged inside a native call — no in-process mechanism can end that, only an external
-  supervisor or the OS
+  supervisor or the OS; `GET /health` keeps answering meanwhile, so a probe cannot find it
+  (see [GET /health](#get-health))
 - Logs go to stderr — application *and* access logs, with and without `--log-json` — so stdout
   stays clean for data
 - `--log-json` produces 100% JSON output; without it Uvicorn's plain format applies
@@ -1141,9 +1172,9 @@ python -m mlxk2.core.server_base
 ## Performance Characteristics
 
 ### Model Loading
-- **Time:** ~5-10 seconds (first request only)
-- **Caching:** Model stays loaded until server restart or model switch
-- **Memory:** Held in RAM until explicitly unloaded
+- **Time:** Paid by a request whose model is not `loaded`
+- **Caching:** One model stays loaded until a request names another or the server stops; `GET /v1/models` marks it `loaded`
+- **Memory:** Held until then — no endpoint unloads it
 
 ### Inference Speed
 
@@ -1158,8 +1189,20 @@ python -m mlxk2.core.server_base
 - **Streaming:** Each chunk delivers results immediately (see Streaming section above)
 
 ### Concurrent Requests
-- **Current:** Sequential processing (one request at a time)
-- **Reason:** Metal backend, single GPU
+- **One model operation at a time.** Loading a model, a batch answer, one step of a stream, a vision
+  chunk and a transcription never overlap. Requests are accepted concurrently and wait for their
+  turn; there is no queue limit and no busy status.
+- **A stream shares the turn step by step** — a text stream token by token, a multi-image vision
+  stream image chunk by chunk. A request that arrives mid-stream is served between two steps, and the
+  stream pauses for as long as that request's work takes — a whole batch answer, a model load, a
+  transcription. A vision or audio request that streams as one event takes the turn whole.
+- **`GET /health` and `GET /v1/models` do not wait** — they answer while a model operation runs.
+- **One model in memory.** A request naming another model unloads the current one first — also
+  while a stream is still using it, and that stream then fails part-way (see [finish_reason](#finish_reason)).
+- **Leaving does not cancel a batch request.** A client that closes a non-streaming request — its
+  own timeout included — leaves the generation running until it ends on its own, and requests behind
+  it wait. Closing a stream does stop it (see [Closing the connection](#closing-the-connection)).
+- **Reason:** Metal backend, single GPU.
 
 ---
 
@@ -1501,10 +1544,11 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 
 > Unreleased. This records what the tree carries beyond released 2.0.7.
 
-**Endpoint surface:** unchanged. **Response shapes** move in two places: `finish_reason` gains
-`"length"`, and the `error` a failed stream carries is an object where it was a string. A new **400**
+**Endpoint surface:** unchanged. **Response shapes** move in four places: `finish_reason` gains
+`"length"`, the `error` a failed stream carries is an object where it was a string, `GET /health`
+says `"ok"` where it said `"healthy"`, and every `GET /v1/models` row gains `loaded`. A new **400**
 error type `context_length_exceeded` exists. Request shapes are unchanged. See *Generation budget*
-below.
+and *Server state* below.
 
 **Two rejects stop looking like faults.** An audio upload above the size limit (**413**) and
 `POST /v1/audio/translations` against a model that cannot translate (**422**) now carry
@@ -1564,7 +1608,20 @@ keep their own ceiling with no window guard; see
 | Vision / audio-chat default | 2048 on the server, inherited from mlx-vlm on the CLI | 2048, set explicitly on both | No wire change. |
 | `max_completion_tokens` | ignored | ignored | Unchanged — use `max_tokens`. |
 
+**Server state** ([#64](https://github.com/mzau/mlx-knife/issues/64)) — see [GET /health](#get-health):
+
+| Change | 2.0.7 | 2.0.8 | Effect on clients |
+|--------|-------|-------|-------------------|
+| `GET /health` body | `{"status": "healthy", …}` | `{"status": "ok", …}` | The status code was and is the answer. `healthy` names a model's file integrity in the CLI and no longer appears on the HTTP surface. |
+| `GET /health` and `GET /v1/models` while the server works | no answer for the whole of a non-streaming generation, a model load, a vision answer or a transcription; a model listing held up `GET /health` | answer while the server works; a large upload delays them while it is read | No longer silent for the length of a generation. |
+| `loaded` on `GET /v1/models` | absent | `true` on the model in memory, `false` on every other row | Additive. |
+| The loaded model, named by its listed `id` | loaded again when it had been loaded under another spelling | served from memory | |
+| Concurrency | documented as one request at a time | one model operation at a time; a stream shares its turn step by step | See [Concurrent Requests](#concurrent-requests). |
+
 **Client updates required:**
+- Decide on `GET /health` by its status code; a check for `"status": "healthy"` fails from this release on.
+- Keep your own request timeout: `GET /health` answering does not mean a generation is progressing.
+- Accept a boolean `loaded` on `GET /v1/models` rows.
 - Handle `finish_reason: "length"` — offer "continue", raise `max_tokens`, or shorten the prompt.
 - Drop any branch keyed on `finish_reason: "error"`, and read a failed stream's `error` as an object
   rather than a string. An OpenAI SDK client needs no change: it raises on the `error` key either way.
@@ -1591,6 +1648,7 @@ keep their own ceiling with no window guard; see
 - **ADR-023:** Text-First + Verified Multimodal (HTTP 501 `unsupported_multimodal` policy + the Workaround-Sunset Policy that retired the `torch` / `torchvision` base deps)
 - **ADR-024:** Pre-Execution Capability-Mismatch Reject (Class A — CLI-side; surface-transparent on the server today)
 - **ADR-025:** content_hash v2 (background; surface-transparent on the server)
+- **ADR-029:** Server State Vocabulary (`live` on `GET /health`, `loaded` on `GET /v1/models`; `healthy` stays the CLI's file-integrity word)
 
 ---
 
@@ -1898,7 +1956,7 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ## Changelog
 
-- **Unreleased:** 2.0.8 — generation budget, `finish_reason`, stream failures
+- **Unreleased:** 2.0.8 — generation budget, `finish_reason`, stream failures, server state
   - **CHANGED:** default text `max_tokens` is `min(32768, context_length − prompt tokens)`; an explicit value is clamped to the window too.
   - **NEW:** `finish_reason: "length"` when the budget cut the answer.
   - **NEW: 400** `context_length_exceeded` — prompt fills the window, rejected before any token; `detail` carries `prompt_tokens` and `context_length`. A status even on `stream: true`.
@@ -1910,6 +1968,11 @@ When switching from Vision or Audio to Text model mid-conversation:
   - **FIXED:** `/v1/models` lists vision models it wrongly withheld — a check rejected every checkpoint carrying `temporal_patch_size` under transformers 5.x, and those models load and answer correctly.
   - **FIXED:** a vision model outside the type whitelist (`qwen2_5_vl`, `qwen3_5`) is served by the vision backend. The server's own probe called it text-only, so an image request got an answer with the image dropped in 2.0.7 and, after the reject above, a **422**. The server now decides with the detector behind `mlxk list`.
   - **CHANGED:** `mlxk serve` takes one teardown path for Ctrl-C, `SIGTERM` and `SIGHUP`, and stops itself if its supervisor dies. Exit `143` on signal, `137` when forced.
+  - **CHANGED:** `GET /health` answers `{"status": "ok"}` where it said `healthy`; the status code is the answer. `healthy` stays the CLI's word for a model's file integrity.
+  - **NEW:** `loaded` on every `GET /v1/models` row — `true` on the model in memory.
+  - **FIXED:** `GET /health` and `GET /v1/models` answer while the server works. A non-streaming generation, a model load, a vision answer or a transcription silenced both for its whole duration ([#64](https://github.com/mzau/mlx-knife/issues/64)), and a model listing held up `GET /health`.
+  - **FIXED:** a request naming the loaded model by its listed `id` no longer loads it again when the model had been loaded under another spelling.
+  - **DOCUMENTED:** what a `200` from `GET /health` does not tell; one model operation at a time; a stream fails when another model is requested; a batch request runs on after its client has gone.
   - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (524 MB smaller install).
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.
 

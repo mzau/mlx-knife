@@ -7,7 +7,9 @@ Extracted from server_base.py as part of Phase 1 refactoring.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
+
+from ..model_manager import model_dir_identity
 
 
 def _get_logger():
@@ -25,9 +27,10 @@ def _best_effort_context_length(model_path) -> Optional[int]:
         return None
 
 
-async def handle_list_models(
+def handle_list_models(
     get_cache_fn: Callable[[], Path],
     preload_model: Optional[str],
+    loaded_identity: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
     """List available MLX models from the HF cache and the workspace home.
 
@@ -37,11 +40,15 @@ async def handle_list_models(
     basename — a stable short id that resolves at request time via
     workspace-first resolution — not by their absolute path.
 
+    Synchronous: it reads every model directory, so the server calls it off the event loop.
+
     Returns models sorted with preloaded model first (if set), then alphabetically.
 
     Args:
         get_cache_fn: Function returning the model cache path
         preload_model: Pre-loaded model name for sorting priority (or None)
+        loaded_identity: The directory of the model in memory, as `model_dir_identity`
+            gives it; a row whose directory matches is `loaded` (or None)
 
     Returns:
         Dict with "object": "list", "data": [...models...]
@@ -59,6 +66,9 @@ async def handle_list_models(
         # contradiction (Invariant 4). `mlxk list` DOES show them (the honesty win); serve hides
         # them until the merge lands.
         return Capability.EMBEDDINGS.value in (model_obj.get("capabilities") or [])
+
+    def _loaded(directory) -> bool:
+        return loaded_identity is not None and model_dir_identity(directory) == loaded_identity
 
     logger = _get_logger()
     model_list = []
@@ -89,6 +99,7 @@ async def handle_list_models(
                     "owned_by": "workspace",
                     "permission": [],
                     "context_length": _best_effort_context_length(ws_dir),
+                    "loaded": _loaded(ws_dir),
                 })
                 listed_workspace_ids[str(ws_dir.resolve())] = ws_dir.name
             except Exception as e:
@@ -141,6 +152,7 @@ async def handle_list_models(
                 "owned_by": "mlx-knife-2.0",
                 "permission": [],
                 "context_length": context_length,
+                "loaded": _loaded(model_dir),
             })
         except Exception as e:
             # Skip models that can't be processed
@@ -183,6 +195,7 @@ async def handle_list_models(
                         "owned_by": "workspace",
                         "permission": [],
                         "context_length": _best_effort_context_length(preload_path),
+                        "loaded": _loaded(preload_path),
                     })
             elif not_runnable_reason:
                 # The model is loaded and serving, but clients must only ever

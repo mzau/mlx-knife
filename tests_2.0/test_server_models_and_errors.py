@@ -340,6 +340,209 @@ def test_models_endpoint_preload_not_runnable_stays_hidden(tmp_path, monkeypatch
         assert resp.json()["data"] == []
 
 
+def test_health_answers_ok_not_healthy():
+    """ADR-029: the status code is the answer; `healthy` is the CLI's file-integrity word."""
+    resp = TestClient(app).get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "service": "mlx-knife-server-2.0"}
+    assert "healthy" not in resp.text
+
+
+def test_models_rows_mark_the_loaded_workspace_model(tmp_path, monkeypatch):
+    """Every row carries `loaded`; only the model in memory is true — none while nothing is."""
+    from mlxk2.core.server.model_manager import model_dir_identity
+
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "a-model")
+    in_memory = _make_workspace(ws_home, "b-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build:
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        with patch('mlxk2.core.server_base._model_manager', None):
+            rows = client.get("/v1/models").json()["data"]
+        assert [(m["id"], m["loaded"]) for m in rows] == [("a-model", False), ("b-model", False)]
+
+        # The manager and the row meet on the directory, not on a name
+        manager = Mock(loaded_identity=model_dir_identity(in_memory))
+        with patch('mlxk2.core.server_base._model_manager', manager):
+            rows = client.get("/v1/models").json()["data"]
+        assert [(m["id"], m["loaded"]) for m in rows] == [("a-model", False), ("b-model", True)]
+
+
+def test_models_rows_mark_the_loaded_cache_model(tmp_path, monkeypatch):
+    """A cached model's row is marked by its cache directory; a workspace row beside it stays false."""
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "ws-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.core.cache.cache_dir_to_hf') as mock_cache_to_hf, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build, \
+         patch('mlxk2.core.server.handlers.models.model_dir_identity', lambda d: ("dev", d.name)), \
+         patch('mlxk2.core.server_base._model_manager', Mock(loaded_identity=("dev", "models--org--cache-model"))):
+
+        d1 = MagicMock()
+        d1.name = "models--org--cache-model"
+        snapshot_dir = MagicMock()
+        snapshot_dir.exists.return_value = True
+        snapshot_dir.iterdir.return_value = []
+        d1.__truediv__ = lambda self, x: snapshot_dir
+        mock_cache.return_value.exists.return_value = True
+        mock_cache.return_value.iterdir.return_value = [d1]
+        mock_cache_to_hf.return_value = "org/cache-model"
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        by_id = {m["id"]: m["loaded"] for m in client.get("/v1/models").json()["data"]}
+        assert by_id == {"org/cache-model": True, "ws-model": False}
+
+
+def test_models_rows_mark_a_preload_outside_the_home(tmp_path, monkeypatch):
+    """A preload listed under its path is marked like any other row."""
+    from mlxk2.core.server.model_manager import model_dir_identity
+
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "a-model")
+    external = _make_workspace(tmp_path / "elsewhere", "ext-model")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.operations.common.build_model_object') as mock_build, \
+         patch('mlxk2.core.server_base._preload_model', str(external)), \
+         patch('mlxk2.core.server_base._model_manager', Mock(loaded_identity=model_dir_identity(external))):
+        mock_cache.return_value.exists.return_value = False
+        mock_build.return_value = {"health": "healthy", "runtime_compatible": True}
+
+        rows = client.get("/v1/models").json()["data"]
+        assert [(m["id"], m["loaded"]) for m in rows] == [(str(external), True), ("a-model", False)]
+
+
+def test_models_listing_runs_off_the_event_loop():
+    """The scan reads every model directory; on the loop, GET /health waited for it."""
+    import asyncio
+
+    seen = []
+
+    def listing(**kwargs):
+        try:
+            asyncio.get_running_loop()
+            seen.append("on the loop")
+        except RuntimeError:
+            seen.append("off the loop")
+        return {"object": "list", "data": []}
+
+    with patch('mlxk2.core.server_base._handle_list_models_impl', listing):
+        assert TestClient(app).get("/v1/models").status_code == 200
+    assert seen == ["off the loop"]
+
+
+def _manager_with_fake_loads(tmp_path, monkeypatch, names):
+    """A ModelManager over a cache of empty model directories, resolving names from `names`."""
+    import threading
+    from mlxk2.core.cache import hf_to_cache_dir
+    from mlxk2.core.server.model_manager import ModelManager
+
+    cache = tmp_path / "hub"
+    for hf_name in set(names.values()):
+        (cache / hf_to_cache_dir(hf_name)).mkdir(parents=True)
+    monkeypatch.setattr("mlxk2.core.cache.get_current_model_cache", lambda: cache)
+    monkeypatch.setattr("mlxk2.core.model_resolution.resolve_model_for_operation",
+                        lambda spec: (names.get(spec), None, None))
+    manager = ModelManager(threading.Event())
+    monkeypatch.setattr(manager, "_wait_for_memory", lambda *args: None)
+    return manager, cache
+
+
+def test_model_manager_serves_another_spelling_from_memory(tmp_path, monkeypatch):
+    """The cache is keyed by the directory a spec reaches: requesting the listed id of a model
+    loaded as `qwen` used to load it a second time."""
+    from mlxk2.core.server.model_manager import model_dir_identity
+
+    manager, cache = _manager_with_fake_loads(
+        tmp_path, monkeypatch, {"qwen": "org/qwen", "org/qwen": "org/qwen", "llama": "org/llama"})
+    loads = []
+    monkeypatch.setattr(manager, "_load_text_or_vision_model",
+                        lambda spec, verbose: loads.append(spec) or Mock(spec=[]))
+
+    first = manager.get_or_load_model("qwen")
+    assert manager.get_or_load_model("org/qwen") is first
+    assert manager.get_or_load_model("qwen") is first
+    assert loads == ["qwen"]
+    assert manager.loaded_identity == model_dir_identity(cache / "models--org--qwen")
+
+    manager.get_or_load_model("llama")
+    assert loads == ["qwen", "llama"]
+    assert manager.loaded_identity == model_dir_identity(cache / "models--org--llama")
+
+
+def _fake_audio_runner_class(monkeypatch):
+    import sys
+    import types
+
+    # The real module patches mlx-audio on import, which the stubbed mlx here cannot take.
+    fake = types.ModuleType("mlxk2.core.audio_runner")
+    fake.AudioRunner = type("AudioRunner", (), {})
+    monkeypatch.setitem(sys.modules, "mlxk2.core.audio_runner", fake)
+    return fake.AudioRunner
+
+
+def test_model_manager_serves_another_spelling_of_an_audio_model_from_memory(tmp_path, monkeypatch):
+    AudioRunner = _fake_audio_runner_class(monkeypatch)
+    manager, _ = _manager_with_fake_loads(
+        tmp_path, monkeypatch, {"whisper": "org/whisper", "org/whisper": "org/whisper"})
+    loads = []
+    monkeypatch.setattr(manager, "_load_audio_model",
+                        lambda spec, verbose: loads.append(spec) or AudioRunner())
+
+    first = manager.get_or_load_audio_model("whisper")
+    assert manager.get_or_load_audio_model("org/whisper") is first
+    assert loads == ["whisper"]
+
+
+def test_model_manager_never_hands_a_text_request_the_audio_runner(tmp_path, monkeypatch):
+    """One model directory, two runner kinds: a text request for a loaded Whisper goes through
+    the text loader, where an AudioRunner would fail it with a 500."""
+    AudioRunner = _fake_audio_runner_class(monkeypatch)
+    manager, _ = _manager_with_fake_loads(tmp_path, monkeypatch, {"whisper": "org/whisper"})
+    monkeypatch.setattr(manager, "_load_audio_model", lambda spec, verbose: AudioRunner())
+    text_loads = []
+    monkeypatch.setattr(manager, "_load_text_or_vision_model",
+                        lambda spec, verbose: text_loads.append(spec) or Mock(spec=[]))
+
+    manager.get_or_load_audio_model("whisper")
+    assert not isinstance(manager.get_or_load_model("whisper"), AudioRunner)
+    assert text_loads == ["whisper"]
+
+
+def test_model_manager_resolves_spellings_to_one_workspace(tmp_path, monkeypatch):
+    """Resolution itself, unmocked: a workspace named by path, by basename and — on a
+    case-insensitive volume — in another case is one cache key, and it is the identity
+    GET /v1/models compares its row against."""
+    import threading
+    from mlxk2.core.server.model_manager import ModelManager, model_dir_identity
+
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    ws = _make_workspace(ws_home, "Qwen-ws")
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+    manager = ModelManager(threading.Event())
+
+    expected = model_dir_identity(ws)
+    spellings = [str(ws), "Qwen-ws"]
+    if (ws_home / "qwen-WS").exists():  # case-insensitive volume
+        spellings.append("qwen-WS")
+    assert {manager._resolve(spec)[0] for spec in spellings} == {expected}
+
+
 def test_chat_unknown_model_maps_to_404():
     from fastapi import HTTPException
 

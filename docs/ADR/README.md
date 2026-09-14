@@ -73,7 +73,7 @@ contains. **It is not a promise that the thing will be built.** A seed whose `Wh
 | [ADR-026](ADR-026-Model-Location-Dispatcher.md) | Unified Model Resolution — Model-Location-Dispatcher | Draft (full design deferred to the `run.py` split; interim seed shipped — `run.py` embed pre-flight, Slice C) | 2026-06-16 |
 | ADR-027 | OpenAI Tool/Function Calling API (#39) | Proposed — scoping seed. **No decision taken**, neither whether to implement nor where the parser lives. Nothing pulls it: #39 asked, no consumer has named it a requirement since | 2026-06-18 (not committed) |
 | ADR-028 | Reasoning Control & Reasoning-Out-Of-Context (#40) | Proposed — scoping seed. **No decision taken**, neither whether to expose reasoning controls, nor which, nor on which surface. Inventory and measurement only | 2026-09-01 (not committed) |
-| ADR-029 | Server State Vocabulary and Generation Controllability | Proposed — one word per question (`live` / `ready` / `loaded`, `healthy` reserved for the artifact) plus the observability and controllability boundary it requires. Commits with the `SERVER-HANDBOOK` revision that adopts the vocabulary; that publication is what makes the wording true | 2026-09-13 (not committed) |
+| [ADR-029](ADR-029-Server-State-Vocabulary-and-Generation-Controllability.md) | Server State Vocabulary and Generation Controllability | Accepted — one word per question (`live` on `GET /health`, `loaded` on `GET /v1/models`, `healthy` reserved for the artifact), published with the `SERVER-HANDBOOK` revision that adopts it. Stage 2 built (every model touch on one worker thread); Stages 1 and 3 carry their own conditions | 2026-09-13 |
 
 ## ADR Format
 

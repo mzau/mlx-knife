@@ -21,6 +21,9 @@ Requires: HF_HOME set to model cache, httpx installed
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 from typing import Dict, Any
 
@@ -47,6 +50,14 @@ from .test_utils import (
 SERVER_REQUEST_TIMEOUT = 45.0
 # /v1/models can be slower due to cache scans + runtime checks
 MODEL_LIST_TIMEOUT = 20.0
+# Kubernetes' default probe timeout: a supervisor's patience, not a latency target. The
+# generation below outlasts it on any model, so a probe queued behind it fails.
+HEALTH_PROBE_TIMEOUT = 1.0
+# Keeps a model writing until the token budget ends it, so the generation lasts
+LONG_PROMPT = (
+    "Write an extremely long, exhaustive, chapter-by-chapter history of sailing ships. "
+    "Do not stop early."
+)
 
 # Opt-in markers
 pytestmark = [
@@ -86,7 +97,66 @@ class TestServerHealthEndpoints:
 
             assert response.status_code == 200
             data = response.json()
-            assert data.get("status") == "healthy"
+            # ADR-029: `healthy` is the CLI's file-integrity word and stays off the HTTP surface
+            assert data.get("status") == "ok"
+            assert "healthy" not in response.text
+
+    @pytest.mark.live_e2e
+    def test_health_answers_while_generating(self, text_portfolio):
+        """GET /health answers while a batch and a stream share the model thread (#64).
+
+        The loop used to run a non-streaming generation itself, so a probe got no answer
+        for the whole of it. The probe timeout is the bound, not a measurement: a probe
+        waiting behind the generation would outlast it. Both requests must finish too.
+        """
+        candidates = [
+            info for key, info in text_portfolio.items()
+            if not should_skip_model(key, text_portfolio)[0]
+        ]
+        if not candidates:
+            pytest.skip("No text models available within RAM budget")
+        test_model = min(candidates, key=lambda info: info.get("ram_needed_gb") or 0)["id"]
+        budget = model_timeout(SERVER_REQUEST_TIMEOUT, test_model)
+        payload = {
+            "model": test_model,
+            "messages": [{"role": "user", "content": LONG_PROMPT}],
+            "max_tokens": 1000,
+            "temperature": 0.0,
+        }
+
+        with LocalServer(test_model) as server_url:
+            results: Dict[str, Any] = {}
+
+            def batch():
+                results["batch"] = httpx.post(
+                    f"{server_url}/v1/chat/completions", json=payload, timeout=budget
+                )
+
+            def stream():
+                with httpx.stream(
+                    "POST", f"{server_url}/v1/chat/completions",
+                    json={**payload, "stream": True}, timeout=budget,
+                ) as response:
+                    results["stream_status"] = response.status_code
+                    results["stream"] = [line for line in response.iter_lines() if line]
+
+            workers = [threading.Thread(target=batch), threading.Thread(target=stream)]
+            for worker in workers:
+                worker.start()
+            probes = []
+            while any(worker.is_alive() for worker in workers):
+                probes.append(httpx.get(f"{server_url}/health", timeout=HEALTH_PROBE_TIMEOUT).status_code)
+                time.sleep(0.25)
+            for worker in workers:
+                worker.join()
+
+            assert len(probes) >= 2, "the generations ended before a probe could overlap them"
+            assert set(probes) == {200}
+            assert results["batch"].status_code == 200
+            assert results["batch"].json()["choices"][0]["message"]["content"]
+            assert results["stream_status"] == 200
+            assert results["stream"][-1] == "data: [DONE]"
+            assert not any('"error"' in line for line in results["stream"])
 
     @pytest.mark.live_e2e
     def test_v1_models_list(self, text_portfolio):
@@ -127,6 +197,10 @@ class TestServerHealthEndpoints:
                 else test_model
             )
             assert expected_id in model_ids
+
+            # The preloaded model is the one in memory, and the only one
+            assert all("loaded" in m for m in data["data"])
+            assert [m["id"] for m in data["data"] if m["loaded"]] == [expected_id]
 
 
 class TestChatCompletionsBatch:

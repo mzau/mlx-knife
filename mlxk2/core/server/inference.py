@@ -1,8 +1,8 @@
 """One thread owns the models, and it is not the event loop's.
 
-``docs/SERVER-HANDBOOK.md`` §Concurrent Requests promises *"Sequential processing (one
-request at a time)"*. That used to be enforced by the event loop being blocked for the
-whole generation — which is also why ``GET /health`` went unanswered under load:
+``docs/SERVER-HANDBOOK.md`` §Concurrent Requests promises one model operation at a time.
+That used to be enforced by the event loop being blocked for the whole generation — which
+is also why ``GET /health`` went unanswered under load:
 measured 2026-09-13, a 9.1 s non-streaming completion swallowed two of three probes and
 answered the third after 2.548 s, while a streaming one answered 40 of 40 in 16-86 ms.
 A supervisor reads the silence as *dead* and restarts a working server.
@@ -26,10 +26,11 @@ lifespan preload included.
 ``contextvars`` are copied into the worker the way ``asyncio.to_thread`` does it, so
 ``request_id`` still reaches the generation's own log line.
 
-Neither closed nor opened here: between the endpoint acquiring a runner and a stream's
-first step, nothing holds the worker, so a batch starting in that window can evict the
-runner the stream is about to use. That window exists today — the interloper blocks the
-loop instead, to the same end. It closes with a request-bound generation state.
+Neither closed nor opened here: nothing holds a runner for the length of a stream. The
+worker is free between two steps, so a request for another model is served there, unloads
+the runner, and the stream fails at its next step — measured 2026-09-14, after 13 tokens.
+On the loop the same could happen between two yields; it closes with a request-bound
+generation state.
 """
 
 from __future__ import annotations

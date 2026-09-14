@@ -252,7 +252,8 @@ curl http://localhost:8001/v1/chat/completions \
 
 #### `GET /health`
 
-Health check:
+Health check. The status code answers for the RAG server itself; `mlxk_backend.status` reports
+what it sees of `mlxk serve`: `live`, `http <code>`, `timeout` or `unreachable`.
 
 ```bash
 curl http://localhost:8001/health
@@ -261,10 +262,11 @@ curl http://localhost:8001/health
 **Response:**
 ```json
 {
-  "status": "healthy",
+  "status": "ok",
+  "service": "rag-server",
   "mlxk_backend": {
     "url": "http://localhost:8000",
-    "status": "healthy"
+    "status": "live"
   },
   "pipeline": "/path/to/rag-pipeline.sh",
   "index": "project-index.jsonl"

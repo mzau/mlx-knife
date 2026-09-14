@@ -1680,7 +1680,7 @@ def server_health(client, base_url: str, timeout: float = 5.0) -> None:
             "them and take a multi-day run with it.") from e
     if r.status_code != 200:
         raise Precondition(EXIT_PRECONDITION, f"server /health returned {r.status_code}",
-                           "the server is up but not healthy; check its log")
+                           "the server answered, but not with 200; check its log")
 
 
 def list_models(client, base_url: str, timeout: float = 10.0) -> List[str]:

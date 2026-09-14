@@ -1,11 +1,16 @@
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Tuple, Optional
 from ..core.cache import get_current_model_cache, hf_to_cache_dir, cache_dir_to_hf
 from ..core.model_resolution import resolve_model_for_operation
 from ..core.remote_code import MODEL_FILE_REASON, declared_model_file
 from .workspace import is_workspace_path, get_workspace_home
+
+# Logger levels are process-wide. Two threads saving and restoring them around each other — two
+# model listings in `serve`, or a listing beside a model load — could leave root at CRITICAL.
+_log_levels_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -501,30 +506,31 @@ def check_runtime_compatibility(model_path: Path, framework: str) -> Tuple[bool,
     try:
         # Suppress mlx-lm's ERROR logs during detection
         # mlx-lm uses root logger, so we need to suppress both mlx_lm and root
-        mlx_logger = logging.getLogger("mlx_lm")
-        root_logger = logging.getLogger()
-        original_mlx_level = mlx_logger.level
-        original_root_level = root_logger.level
-        mlx_logger.setLevel(logging.CRITICAL)
-        root_logger.setLevel(logging.CRITICAL)
+        with _log_levels_lock:
+            mlx_logger = logging.getLogger("mlx_lm")
+            root_logger = logging.getLogger()
+            original_mlx_level = mlx_logger.level
+            original_root_level = root_logger.level
+            mlx_logger.setLevel(logging.CRITICAL)
+            root_logger.setLevel(logging.CRITICAL)
 
-        try:
-            # Try mlx-lm >= 0.28.0 API first (mlx_lm.models.base._get_classes)
             try:
-                from mlx_lm.models.base import _get_classes
-                model_class, _ = _get_classes(config=config, model_config=config)
-            except ImportError:
-                # Fall back to mlx-lm 0.27.x API (mlx_lm.utils._get_classes)
-                from mlx_lm.utils import _get_classes
-                model_class, _ = _get_classes(config)
+                # Try mlx-lm >= 0.28.0 API first (mlx_lm.models.base._get_classes)
+                try:
+                    from mlx_lm.models.base import _get_classes
+                    model_class, _ = _get_classes(config=config, model_config=config)
+                except ImportError:
+                    # Fall back to mlx-lm 0.27.x API (mlx_lm.utils._get_classes)
+                    from mlx_lm.utils import _get_classes
+                    model_class, _ = _get_classes(config)
 
-            if model_class is None:
-                return False, f"model_type '{model_type}' not supported by mlx-lm"
+                if model_class is None:
+                    return False, f"model_type '{model_type}' not supported by mlx-lm"
 
-            return True, None
-        finally:
-            mlx_logger.setLevel(original_mlx_level)
-            root_logger.setLevel(original_root_level)
+                return True, None
+            finally:
+                mlx_logger.setLevel(original_mlx_level)
+                root_logger.setLevel(original_root_level)
 
     except Exception as e:
         # Pass through the actual error for debugging
