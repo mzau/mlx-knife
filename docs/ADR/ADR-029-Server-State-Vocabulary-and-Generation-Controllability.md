@@ -337,8 +337,9 @@ whether it restarts afterwards. This is the only complete control for the Metal 
 it has a real price: it takes the other requests with it and costs a model reload. That is
 precisely liveness semantics in the Kubernetes sense, and it is an owner decision, not a
 technical one.
-*Due when:* the Stage-1 clock exists (there is no trigger without it) and a stall has been
-observed that Stage 1 cannot resolve.
+*Due when:* the Stage-1 clock exists (a stall raises nothing, so there is no trigger without
+it) and a stall has been observed that Stage 1 cannot resolve. A fault does raise, but not
+specifically — see #65 under [Consequences](#consequences).
 
 > Stage 3 is deliberately coarse. The pathological case — a genuine GPU hang — cannot be
 > induced on demand and therefore cannot be tested. A mechanism finer than the process
@@ -453,10 +454,12 @@ needs a model to name, which is the part `serve` cannot supply.
   promises more than the tree holds. §Concurrent Requests, whose claim *"Sequential processing
   (one request at a time)"* rested on the blocked event loop, now states what the single model
   thread guarantees — one model operation at a time — and what it does not.
-- **#65 keeps its own fix.** Nothing here supersedes the upstream condition tracked for that
-  issue; the phase marks make its symptom observable, not its cause. When that fix can tell a
-  failed backend, the field's precedent is a `503` on `GET /health` (vLLM does so for a dead
-  engine).
+- **#65 is not resolved here, and waits on no upstream release.** A backend fault does arrive
+  as an exception, but MLX reports every command-buffer failure — the timeout of #65 as well
+  as out-of-memory — with the same message prefix, so the exception alone does not identify a
+  failed backend. The phase marks make its symptom observable, not its cause. When a fix can
+  tell a failed backend, the field's precedent is a `503` on `GET /health` (vLLM does so for a
+  dead engine).
 
 ---
 
