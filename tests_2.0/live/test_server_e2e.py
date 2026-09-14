@@ -33,14 +33,17 @@ except ImportError:
 from .server_context import LocalServer
 from .sse_parser import parse_sse_stream, collect_sse_content, validate_sse_format
 from .test_utils import (
+    model_timeout,
     should_skip_model,
     TEST_PROMPT,
     MAX_TOKENS,
 )
 # text_portfolio fixture is provided by conftest.py (Portfolio Separation)
 
-# Server request timeout (increased from 30s to 45s)
-# Accounts for: baseline (15s) + probe/policy overhead (2.7s) + generation + safety margin
+# Server request base limit (raised from 30s to 45s).
+# Accounts for: baseline (15s) + probe/policy overhead (2.7s) + generation + safety margin.
+# This is the WORK term and the lower bound; model_timeout() adds what a model
+# of the given size costs on top (test_utils.LOAD_ALLOWANCE_S).
 SERVER_REQUEST_TIMEOUT = 45.0
 # /v1/models can be slower due to cache scans + runtime checks
 MODEL_LIST_TIMEOUT = 20.0
@@ -167,7 +170,7 @@ class TestChatCompletionsBatch:
                     "max_tokens": MAX_TOKENS,
                     "stream": False
                 },
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             )
 
             assert response.status_code == 200, f"Expected 200, got {response.status_code}"
@@ -261,7 +264,7 @@ class TestChatCompletionsStreaming:
                     "max_tokens": MAX_TOKENS,
                     "stream": True
                 },
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             ) as response:
                 assert response.status_code == 200
 
@@ -283,7 +286,7 @@ class TestChatCompletionsStreaming:
                     "max_tokens": MAX_TOKENS,
                     "stream": True
                 },
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             ) as response:
                 content = collect_sse_content(response)
 
@@ -342,7 +345,7 @@ class TestCompletionsBatch:
                     "max_tokens": MAX_TOKENS,
                     "stream": False
                 },
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, test_model)
             )
 
             assert response.status_code == 200
@@ -402,7 +405,7 @@ class TestCompletionsStreaming:
                     "max_tokens": MAX_TOKENS,
                     "stream": True
                 },
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, test_model)
             ) as response:
                 assert response.status_code == 200
 

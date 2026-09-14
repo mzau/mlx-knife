@@ -17,6 +17,8 @@ import subprocess
 
 import pytest
 
+from .test_utils import model_timeout
+
 pytestmark = [pytest.mark.live, pytest.mark.live_e2e]
 
 EMBED_MODEL = os.getenv("MLXK_EMBED_MODEL", "Qwen3-Embedding-0.6B-4bit-DWQ")
@@ -30,7 +32,8 @@ def _run(args, stdin=None, timeout=300):
     env["MLXK2_ENABLE_ALPHA_FEATURES"] = "1"
     return subprocess.run(
         [sys.executable, "-m", "mlxk2.cli", "embed", EMBED_MODEL] + args,
-        input=stdin, text=True, capture_output=True, env=env, timeout=timeout,
+        input=stdin, text=True, capture_output=True, env=env,
+        timeout=model_timeout(timeout, EMBED_MODEL),
     )
 
 

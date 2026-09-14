@@ -26,7 +26,7 @@ from typing import Optional
 
 import pytest
 
-from .test_utils import EMBED_TEST_MODELS
+from .test_utils import EMBED_TEST_MODELS, model_timeout
 
 try:
     import httpx
@@ -57,9 +57,15 @@ def _runnable_or_skip(model_id: str):
 
 @contextmanager
 def EmbedServer(model: str, port: int = EMBED_PORT, timeout: int = 120, log_level: str = "warning"):
-    """Boot a real embed-serve backend subprocess; yield its base URL; ensure cleanup."""
+    """Boot a real embed-serve backend subprocess; yield its base URL; ensure cleanup.
+
+    `timeout` is the startup base and the lower bound; the model's size is added
+    on top, same rule as LocalServer (test_utils.LOAD_ALLOWANCE_S).
+    """
     if httpx is None:
         raise RuntimeError("httpx required for E2E tests (pip install httpx)")
+
+    startup_budget = model_timeout(timeout, model)
 
     env = os.environ.copy()
     env["MLXK2_HOST"] = "127.0.0.1"
@@ -77,7 +83,7 @@ def EmbedServer(model: str, port: int = EMBED_PORT, timeout: int = 120, log_leve
 
     start = time.time()
     last_err: Optional[Exception] = None
-    while time.time() - start < timeout:
+    while time.time() - start < startup_budget:
         if proc.poll() is not None:  # died during startup
             out, err = proc.communicate()
             raise RuntimeError(f"embed-serve exited early (rc={proc.returncode})\nSTDERR:\n{err}")
@@ -90,7 +96,10 @@ def EmbedServer(model: str, port: int = EMBED_PORT, timeout: int = 120, log_leve
     else:
         proc.kill()
         out, err = proc.communicate()
-        raise TimeoutError(f"embed-serve not ready in {timeout}s (last={last_err})\nSTDERR:\n{err}")
+        raise TimeoutError(
+            f"embed-serve not ready in {startup_budget:.0f}s "
+            f"(base {timeout}s + model size allowance, last={last_err})\nSTDERR:\n{err}"
+        )
 
     try:
         yield url
@@ -131,7 +140,12 @@ def _cos(u, v):
 
 
 def _post(url, payload):
-    return httpx.post(f"{url}/v1/embeddings", json=payload, timeout=120.0)
+    # The model is in the payload, so the size term needs no call-site change.
+    return httpx.post(
+        f"{url}/v1/embeddings",
+        json=payload,
+        timeout=model_timeout(120.0, payload.get("model")),
+    )
 
 
 def test_health(embed_backend):
@@ -235,7 +249,8 @@ def test_cli_parity(embed_backend):
     env["MLXK2_ENABLE_ALPHA_FEATURES"] = "1"
     cli = subprocess.run(
         [sys.executable, "-m", "mlxk2.cli", "embed", model_id, "-"],
-        input=text, text=True, capture_output=True, env=env, timeout=300,
+        input=text, text=True, capture_output=True, env=env,
+        timeout=model_timeout(300, model_id),
     )
     assert cli.returncode == 0, cli.stderr
     cv = json.loads([ln for ln in cli.stdout.splitlines() if ln.strip()][0])["embedding"]

@@ -32,6 +32,7 @@ from pathlib import Path
 
 # Import test utilities
 from .test_utils import (
+    model_timeout,
     should_skip_model,
     TEST_PROMPT,
     MAX_TOKENS,
@@ -43,12 +44,18 @@ from .test_utils import (
 pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
 
 
-def _run_mlxk_subprocess(args: list[str], timeout: int = 60) -> tuple[str, str, int]:
+def _run_mlxk_subprocess(
+    args: list[str], timeout: int = 60, model_id: str | None = None
+) -> tuple[str, str, int]:
     """Run mlxk CLI in subprocess and capture output.
 
     Args:
         args: CLI arguments (e.g., ["run", "model-id", "prompt"])
-        timeout: Timeout in seconds
+        timeout: Base limit in seconds - the work this call does, and the lower
+                 bound. Pass model_id whenever the call loads a model; what the
+                 load costs is added on top (test_utils.LOAD_ALLOWANCE_S).
+        model_id: The model this call loads, or None for calls that load none
+                  (error paths, --help, a rejected id)
 
     Returns:
         (stdout, stderr, exit_code) tuple
@@ -57,7 +64,7 @@ def _run_mlxk_subprocess(args: list[str], timeout: int = 60) -> tuple[str, str, 
         [sys.executable, "-m", "mlxk2.cli"] + args,
         capture_output=True,
         text=True,
-        timeout=timeout
+        timeout=model_timeout(timeout, model_id)
     )
     return result.stdout, result.stderr, result.returncode
 
@@ -93,7 +100,7 @@ class TestRunCommandBasic:
         print(f"\nTesting {text_model_key}: {model_id}")
 
         args = ["run", model_id, TEST_PROMPT, "--max-tokens", str(MAX_TOKENS), "--temperature", str(TEST_TEMPERATURE)]
-        stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90)
+        stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90, model_id=model_id)
 
         # Validate exit code
         assert exit_code == 0, (
@@ -159,7 +166,7 @@ class TestRunCommandJSON:
         print(f"\nTesting {text_model_key}: {model_id}")
 
         args = ["run", model_id, TEST_PROMPT, "--max-tokens", str(MAX_TOKENS), "--temperature", str(TEST_TEMPERATURE), "--json"]
-        stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90)
+        stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90, model_id=model_id)
 
         # Validate exit code
         assert exit_code == 0, (
@@ -285,7 +292,7 @@ class TestRunCommandStopTokens:
         print(f"\nTesting MXFP4: {mxfp4_model}")
 
         args = ["run", mxfp4_model, TEST_PROMPT, "--max-tokens", str(MAX_TOKENS), "--temperature", str(TEST_TEMPERATURE)]
-        stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90)
+        stdout, stderr, exit_code = _run_mlxk_subprocess(args, timeout=90, model_id=mxfp4_model)
 
         assert exit_code == 0, f"Command failed with exit code {exit_code}"
 

@@ -1546,6 +1546,36 @@ pytest -m live_e2e --collect-only  # Should work without errors
 # Llama-3.2-90B-Vision (46.4GB, 72.5% ratio) → ⏭️ SKIP (exceeds 70%)
 ```
 
+### Time Limits: Staged by Model Size
+
+**Implementation:** `model_timeout()`, `size_allowance_s()`, `model_size_gb()`, `LOAD_ALLOWANCE_S` in `tests_2.0/live/test_utils.py`
+
+Every wall-clock limit in the live suite is a **hang guard, not a performance budget**. The runaway it was built for is structurally excluded since `max_tokens` is bounded (#66), and the performance signal lives in the benchmark stream (`duration` + `size_gb`). What a limit still has to catch is a real hang — and a real hang is unbounded, not merely slow. Being generous therefore costs nothing; being tight costs a red line nobody can attribute.
+
+A limit has two terms:
+
+| Term | What it is | Who sets it |
+|------|------------|-------------|
+| **base** | The *work* the row does — generate `MAX_TOKENS`, transcribe 30 minutes of audio. A property of the test, not of the model. | The call site, unchanged. It is the **lower bound**: nothing ever gets tighter. |
+| **tier** | The part that scales with the *model* — what it costs to get its bytes resident once the suite has already filled memory. | `LOAD_ALLOWANCE_S`, added on top. |
+
+**Size tiers:**
+
+| Model size on disk | Added to the base |
+|--------------------|-------------------|
+| ≤ 8 GB | +40 s |
+| ≤ 20 GB | +90 s |
+| > 20 GB | +140 s, and above the text RAM gate (~32 GB) the measured rate takes over, so a larger model never gets a tighter limit |
+| unresolvable | +140 s — what cannot be bounded is not bounded tightly |
+
+**Calibration:** each tier is the measured load penalty at its upper bound plus ~25 % reserve. The penalty comes from the same model run under two memory conditions: 29.65 GB in 30 s on a relaxed machine, 135 s under the umbrella — 105 s over 29.65 GB ≈ 0.28 GB/s. The control in the other direction is a 0.82 GB Whisper that needs 145 s to translate 30 minutes of German: pure work, no size component, which is why the base carries it and the tier does not.
+
+**The expensive condition is memory pressure, not a cold file cache.** Under the umbrella the 135 s run shows `ram_free` at 0.0 GB and `vm_pressure` ~22000 — 29.7 GB being made resident in ~11 GB of free memory, 102 s of it in `sys` with the GPU at 1.6 %. Flushing the page cache does *not* reproduce it: `sudo purge` followed by the same row measured **16.3 s**, faster than the relaxed run, because purge frees memory rather than exhausting it. A row that fails on this axis is therefore only reproducible inside a full umbrella run, never in isolation.
+
+**Size comes from `mlxk list --json`**, cached once per pytest process, keyed under both the full name and the basename (workspace models arrive as an absolute path, cache models as `org/name`). Not from the portfolio's `ram_needed_gb`, which is 1.2× disk on the text axis and `inf` above the vision threshold — that is a budget, not a size.
+
+**Applies to:** `LocalServer` and `EmbedServer` startup, `mlxk` subprocess runs that load a model, and HTTP requests that generate. **Does not apply to:** health probes, port polls, process teardown, `/v1/models` (scales with the inventory, not the model), and CLI error paths that reject before loading.
+
 ### max_tokens Strategy: Vision vs Text
 
 **One rule, both surfaces.** A text generation may produce `min(32768, context_length − prompt_tokens)` tokens; the CLI and the server apply the same rule (#66). `max_tokens` counts *generated* tokens, so without the `− prompt` term prompt plus output could exceed the window the model was trained for.
@@ -1747,33 +1777,6 @@ pytest -m live_e2e --collect-only  # Should work without errors
 ```python
 # 64GB system with whisper-large-v3-turbo-4bit
 # Model: 0.4 GB, Runtime: ~17 GB → ✅ RUN
-```
-
----
-
-## Known Model Quality Issues
-
-Models with documented quality issues discovered during testing. Tests **will fail** when these issues occur (no workarounds).
-
-### Multiple EOS Token Generation
-
-| Model | Token IDs | Status | Evidence Date |
-|-------|-----------|--------|---------------|
-| Phi-3-mini-4k-instruct-4bit | 32007=`<\|end\|>`, 32000=`<\|endoftext\|>` | Fixed 2.0.2 | 2025-11-13 |
-
-**Issue:** Model generates multiple EOS tokens instead of stopping at first.
-**Detection:** Use `mlxk run --verbose` to see token generation details.
-**Fix:** MLX-Knife 2.0.2+ filters by earliest position in text (not list order).
-
-**Example usage:**
-```bash
-# Manual debugging with verbose mode
-mlxk run mlx-community/Phi-3-mini-4k-instruct-4bit "Write one sentence about cats." --verbose
-
-# Look for:
-# [DEBUG] Token generation analysis:
-# [DEBUG]   Last 3 tokens: ["29889='.'", "32007='<|end|>'", "32000='<|endoftext|>'"]
-# [DEBUG]   ⚠️ WARNING: Multiple EOS tokens detected (2) - model quality issue
 ```
 
 ---

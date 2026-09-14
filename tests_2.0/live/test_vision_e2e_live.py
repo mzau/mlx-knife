@@ -19,6 +19,8 @@ import pytest
 import subprocess
 from pathlib import Path
 
+from .test_utils import model_timeout
+
 # Must match VISION_TEST_MODELS fallback (see tests_2.0/live/test_utils.py)
 VISION_MODEL = "pixtral-12b-4bit"
 
@@ -55,7 +57,7 @@ class TestVisionDeterministicQueries:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, VISION_MODEL),
             env=os.environ,
         )
         assert result.returncode == 0, f"Command failed: {result.stderr}"
@@ -76,7 +78,7 @@ class TestVisionDeterministicQueries:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, VISION_MODEL),
             env=os.environ,
         )
         assert result.returncode == 0, f"Command failed: {result.stderr}"
@@ -98,7 +100,7 @@ class TestVisionDeterministicQueries:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, VISION_MODEL),
             env=os.environ,
         )
         assert result.returncode == 0, f"Command failed: {result.stderr}"
@@ -119,7 +121,7 @@ class TestVisionDeterministicQueries:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, VISION_MODEL),
             env=os.environ,
         )
         assert result.returncode == 0, f"Command failed: {result.stderr}"
@@ -149,7 +151,7 @@ class TestVisionDeterministicQueries:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, VISION_MODEL),
             env=os.environ,
         )
         assert result.returncode == 0, f"Large image rejected: {result.stderr}"

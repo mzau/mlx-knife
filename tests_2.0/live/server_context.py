@@ -161,7 +161,11 @@ def LocalServer(
         model: Model ID to pre-load (e.g., "mlx-community/Llama-3.2-3B-Instruct-4bit"),
                or None to start without preload (e.g. for /v1/models listing tests)
         port: Server port (default 8765, non-standard to avoid conflicts)
-        timeout: Startup timeout in seconds (default 60s for model loading)
+        timeout: Startup budget in seconds and the LOWER BOUND, not the limit.
+                 The port only binds after the preload, so what a start really
+                 costs scales with the model; model_timeout() adds that on top
+                 (see test_utils.LOAD_ALLOWANCE_S). The TimeoutError names the
+                 effective value. Without a preload the base stands alone.
         log_level: Server log level (default "warning" to reduce noise)
 
     Yields:
@@ -178,6 +182,16 @@ def LocalServer(
     """
     if httpx is None:
         raise RuntimeError("httpx required for E2E tests (pip install httpx)")
+
+    # Imported inside the function on purpose: tests_2.0/test_capabilities.py
+    # imports this module and lives in the stub-mlx tree, so a module-level
+    # import would pull test_utils - and through it test_stop_tokens_live -
+    # into the unit run. Same reasoning as the lazy import in
+    # test_stop_tokens_live.py's discovery path.
+    from .test_utils import model_timeout
+
+    # `timeout` is the base; the model decides how much is added on top.
+    startup_budget = model_timeout(timeout, model)
 
     # Start server subprocess
     # Pass environment variables (including HF_HOME) to subprocess
@@ -216,7 +230,7 @@ def LocalServer(
     start_time = time.time()
     last_error: Optional[Exception] = None
 
-    while time.time() - start_time < timeout:
+    while time.time() - start_time < startup_budget:
         try:
             response = httpx.get(f"{server_url}/health", timeout=2.0)
             if response.status_code == 200:
@@ -231,7 +245,8 @@ def LocalServer(
         stdout, stderr = proc.communicate()
 
         error_msg = (
-            f"Server failed to start within {timeout}s\n"
+            f"Server failed to start within {startup_budget:.0f}s "
+            f"(base {timeout}s + model size allowance)\n"
             f"Last error: {last_error}\n"
             f"--- STDOUT ---\n{stdout}\n"
             f"--- STDERR ---\n{stderr}"

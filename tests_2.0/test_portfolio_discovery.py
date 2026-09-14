@@ -397,3 +397,111 @@ class TestKnownBrokenPolicyShape:
             assert tu.is_known_broken("/ws/foo-4bit", "vision") is False
         finally:
             tu.KNOWN_BROKEN_MODELS = original
+
+
+class TestTimeLimitStaging:
+    """Tests for the size-staged time limits (test_utils.model_timeout()).
+
+    Deterministic, no models: the size index is faked so the staging itself is
+    what is under test. Why this staging exists at all: limits used to hang off
+    the MODULE, so the file with the 90 s limit held models up to 29.7 GB while
+    the file with 180 s held models up to 8.9 GB. The biggest model the RAM gate
+    admits was structurally always the first to hit a wall.
+    """
+
+    def test_tier_boundaries_are_inclusive_upper_bounds(self):
+        from live.test_utils import size_allowance_s
+
+        assert size_allowance_s(0.18) == 40
+        assert size_allowance_s(8.0) == 40      # boundary belongs to the tier below
+        assert size_allowance_s(8.01) == 90
+        assert size_allowance_s(20.0) == 90
+        assert size_allowance_s(20.1) == 140
+        assert size_allowance_s(29.65) == 140   # GLM-4.7-Flash-8bit, the measured case
+
+    def test_unknown_size_gets_the_widest_tier(self):
+        """What cannot be bounded must not be bounded tightly."""
+        from live.test_utils import (
+            LOAD_ALLOWANCE_S,
+            size_allowance_s,
+            UNKNOWN_SIZE_ALLOWANCE_S,
+        )
+
+        assert size_allowance_s(None) == UNKNOWN_SIZE_ALLOWANCE_S
+        assert UNKNOWN_SIZE_ALLOWANCE_S == max(tier for _, tier in LOAD_ALLOWANCE_S)
+
+    def test_rate_takes_over_above_the_table(self):
+        """The table stops at the text RAM gate; the vision gate sits higher.
+
+        Below the last bound the tier always wins, so a bigger model can never
+        end up with a tighter limit than a smaller one.
+        """
+        from live.test_utils import size_allowance_s
+
+        assert size_allowance_s(32.0) == 140            # still the tier
+        assert size_allowance_s(44.8) > 140             # 0.70 x 64 GB vision gate
+        sizes = [0.5, 4.0, 8.0, 12.0, 20.0, 26.0, 32.0, 40.0, 44.8, 60.0]
+        allowances = [size_allowance_s(s) for s in sizes]
+        assert allowances == sorted(allowances), allowances
+
+    def test_base_is_the_lower_bound_never_the_limit(self):
+        """The base encodes the work, so nothing ever gets tighter."""
+        from live.test_utils import model_timeout, size_allowance_s
+
+        for base in (30.0, 45.0, 60, 90, 180, 600):
+            for size in (None, 0.8, 12.0, 29.65):
+                assert model_timeout(base, "x") >= base
+        # And the widening is exactly the tier, not a multiplier.
+        assert model_timeout(90, None) == 90 + size_allowance_s(None)
+
+    def test_size_resolves_by_full_name_and_by_basename(self):
+        """Workspace models arrive as an absolute path, cache models as org/name."""
+        import live.test_utils as tu
+
+        tu._model_size_index.cache_clear()
+        fake = {"mlx-community/Big-8bit": 29.65, "Big-8bit": 29.65}
+        with patch.object(tu, "_model_size_index", lambda: fake):
+            assert tu.model_size_gb("mlx-community/Big-8bit") == 29.65
+            assert tu.model_size_gb("/workspace/models/Big-8bit") == 29.65
+            assert tu.model_size_gb("mlx-community/Unknown-4bit") is None
+            assert tu.model_size_gb(None) is None
+        tu._model_size_index.cache_clear()
+
+    def test_a_broken_index_widens_rather_than_narrows(self):
+        """`mlxk list --json` failing must not produce tight limits."""
+        import live.test_utils as tu
+
+        tu._model_size_index.cache_clear()
+        with patch.object(tu, "_model_size_index", dict):
+            assert tu.model_timeout(90, "mlx-community/Anything") == 90 + tu.UNKNOWN_SIZE_ALLOWANCE_S
+        tu._model_size_index.cache_clear()
+
+    def test_index_survives_a_failing_list_call(self):
+        import subprocess
+
+        import live.test_utils as tu
+
+        tu._model_size_index.cache_clear()
+        with patch.object(subprocess, "run", side_effect=OSError("boom")):
+            assert tu._model_size_index() == {}
+        tu._model_size_index.cache_clear()
+
+    def test_index_keeps_the_larger_model_on_a_basename_collision(self):
+        """A cache copy and a workspace clone can share a basename."""
+        import subprocess
+
+        import live.test_utils as tu
+
+        payload = {"data": {"models": [
+            {"name": "mlx-community/twin-4bit", "size_bytes": 1 * 1024**3},
+            {"name": "/ws/twin-4bit", "size_bytes": 9 * 1024**3},
+        ]}}
+        completed = MagicMock(returncode=0, stdout=json.dumps(payload))
+
+        tu._model_size_index.cache_clear()
+        with patch.object(subprocess, "run", return_value=completed):
+            index = tu._model_size_index()
+        tu._model_size_index.cache_clear()
+
+        assert index["twin-4bit"] == pytest.approx(9.0)
+        assert index["mlx-community/twin-4bit"] == pytest.approx(1.0)

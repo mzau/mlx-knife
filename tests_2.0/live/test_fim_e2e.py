@@ -32,9 +32,10 @@ except ImportError:
     httpx = None
 
 from .server_context import LocalServer
-from .test_utils import should_skip_model
+from .test_utils import model_timeout, should_skip_model
 
-# Match the request timeout used by the other E2E tests (test_server_e2e.py).
+# Match the request base used by the other E2E tests (test_server_e2e.py).
+# The work term and the lower bound; the model's size is added on top.
 SERVER_REQUEST_TIMEOUT = 45.0
 
 # Opt-in markers (same set as test_server_e2e.py).
@@ -90,7 +91,7 @@ def test_fim_completion_end_to_end(request):
                 "temperature": 0,
                 "stream": False,
             },
-            timeout=SERVER_REQUEST_TIMEOUT,
+            timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model),
         )
 
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"

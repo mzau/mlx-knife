@@ -14,9 +14,13 @@ from typing import Dict, Any, Tuple
 
 import pytest
 
-from .test_utils import should_skip_model, MAX_TOKENS, TEST_TEMPERATURE
+from .test_utils import model_timeout, should_skip_model, MAX_TOKENS, TEST_TEMPERATURE
 
 pytestmark = [pytest.mark.live, pytest.mark.live_e2e, pytest.mark.slow]
+
+# How many models of `list --json` get piped. The row checks stdin '-', not how
+# large a listing the prefill can swallow.
+PIPE_MODEL_SAMPLE = 5
 
 
 @pytest.fixture(autouse=True)
@@ -78,14 +82,24 @@ def _pick_first_eligible_model(text_portfolio: Dict[str, Dict[str, Any]]) -> Dic
     pytest.skip("No suitable text models found in portfolio (RAM gating)")
 
 
-def _run_cli(args: list[str], stdin: str | None = None, timeout: int = 120) -> Tuple[str, str, int]:
-    """Run mlxk CLI as subprocess."""
+def _run_cli(
+    args: list[str],
+    stdin: str | None = None,
+    timeout: int = 120,
+    model_id: str | None = None,
+) -> Tuple[str, str, int]:
+    """Run mlxk CLI as subprocess.
+
+    `timeout` is the base - the work this call does, and the lower bound. Pass
+    `model_id` when the call loads a model; the load cost is added on top
+    (test_utils.LOAD_ALLOWANCE_S).
+    """
     result = subprocess.run(
         [sys.executable, "-m", "mlxk2.cli"] + args,
         input=stdin,
         text=True,
         capture_output=True,
-        timeout=timeout,
+        timeout=model_timeout(timeout, model_id),
     )
     return result.stdout, result.stderr, result.returncode
 
@@ -115,7 +129,7 @@ class TestPipeModeSingleModel:
             str(TEST_TEMPERATURE),
         ]
 
-        stdout, stderr, code = _run_cli(args, stdin=stdin_text, timeout=180)
+        stdout, stderr, code = _run_cli(args, stdin=stdin_text, timeout=180, model_id=model_id)
 
         assert code == 0, f"exit={code}, stderr={stderr!r}"
         assert stdout.strip(), "Expected non-empty model output"
@@ -133,10 +147,25 @@ class TestPipeModeSingleModel:
         assert "interactive" in data["error"]["message"].lower()
 
     def test_pipe_from_list_json(self, model_id):
-        """Pipe mlxk list --json into run via stdin '-'."""
+        """Pipe mlxk list --json into run via stdin '-'.
+
+        The payload is capped at PIPE_MODEL_SAMPLE entries. Piping the whole
+        listing made the prompt grow with the model inventory (98 models is
+        roughly 15k tokens of prefill), so the row silently measured the
+        cache's size instead of what it claims to check: that stdin '-' is
+        read. Capped, it costs the same on every machine.
+        """
         list_out, list_err, list_code = _run_cli(["list", "--json"], timeout=60)
         assert list_code == 0, f"list failed: {list_err}"
         assert list_out.strip(), "list --json returned empty output"
+
+        listing = json.loads(list_out)
+        models = listing.get("data", {}).get("models", [])
+        listing["data"]["models"] = models[:PIPE_MODEL_SAMPLE]
+        piped = json.dumps(listing)
+        # The cut must not be what breaks the pipe: still a real list --json
+        # document, just shorter.
+        assert json.loads(piped)["data"]["models"] == models[:PIPE_MODEL_SAMPLE]
 
         args = [
             "run",
@@ -148,7 +177,7 @@ class TestPipeModeSingleModel:
             "--temperature",
             str(TEST_TEMPERATURE),
         ]
-        stdout, stderr, code = _run_cli(args, stdin=list_out, timeout=180)
+        stdout, stderr, code = _run_cli(args, stdin=piped, timeout=180, model_id=model_id)
 
         assert code == 0, f"exit={code}, stderr={stderr!r}"
         assert stdout.strip(), "Expected non-empty summary output"

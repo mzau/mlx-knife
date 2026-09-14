@@ -26,7 +26,7 @@ except ImportError:
     httpx = None
 
 from .server_context import LocalServer
-from .test_utils import should_skip_model
+from .test_utils import model_timeout, should_skip_model
 
 # Skip entire module if httpx not installed
 pytestmark = [
@@ -38,7 +38,8 @@ pytestmark = [
 # Test image path
 TEST_IMAGE = Path(__file__).parent.parent / "assets" / "T5.png"
 
-# Server request timeout (vision models are slower)
+# Server request base limit (vision models are slower). The work term and the
+# lower bound; model_timeout() adds what a model of this size costs on top.
 SERVER_REQUEST_TIMEOUT = 120
 
 
@@ -106,7 +107,7 @@ class TestVisionServerE2E:
             response = httpx.post(
                 f"{server_url}/v1/chat/completions",
                 json=payload,
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             )
 
             assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
@@ -167,7 +168,7 @@ class TestVisionServerE2E:
                 "POST",
                 f"{server_url}/v1/chat/completions",
                 json=payload,
-                timeout=120
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             ) as response:
                 # Graceful degradation: returns 200 with SSE emulation (not 400)
                 assert response.status_code == 200, f"Expected 200 (graceful degradation), got {response.status_code}"
@@ -226,7 +227,7 @@ class TestVisionServerE2E:
             response = httpx.post(
                 f"{server_url}/v1/chat/completions",
                 json=payload,
-                timeout=60
+                timeout=model_timeout(60, model_id)
             )
 
             assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
@@ -302,7 +303,7 @@ class TestVisionServerE2E:
             response1 = httpx.post(
                 f"{server_url}/v1/chat/completions",
                 json=vision_payload,
-                timeout=SERVER_REQUEST_TIMEOUT
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, vision_model_id)
             )
 
             # Vision response should work
@@ -341,7 +342,7 @@ class TestVisionServerE2E:
             response2 = httpx.post(
                 f"{server_url}/v1/chat/completions",
                 json=text_payload,
-                timeout=60
+                timeout=model_timeout(60, text_model_id)
             )
 
             # Text model should succeed (filtered history, no HTTP 400)

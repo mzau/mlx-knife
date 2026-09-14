@@ -30,7 +30,7 @@ from typing import Dict, Any
 
 import pytest
 
-from .test_utils import should_skip_model
+from .test_utils import model_timeout, should_skip_model
 
 pytestmark = [pytest.mark.live, pytest.mark.live_vision_pipe, pytest.mark.slow]
 
@@ -76,14 +76,19 @@ def _pick_best_eligible_text_model(text_portfolio: Dict[str, Dict[str, Any]]) ->
     return eligible[0][1]  # Return largest general-purpose model info dict
 
 
-def _run_cli(args: list[str], stdin: str | None = None, timeout: int = 600) -> tuple[str, str, int]:
+def _run_cli(
+    args: list[str],
+    stdin: str | None = None,
+    timeout: int = 600,
+    model_id: str | None = None,
+) -> tuple[str, str, int]:
     """Run mlxk CLI as subprocess."""
     result = subprocess.run(
         [sys.executable, "-m", "mlxk2.cli"] + args,
         input=stdin,
         text=True,
         capture_output=True,
-        timeout=timeout,
+        timeout=model_timeout(timeout, model_id),
         env={**os.environ, "MLXK2_ENABLE_PIPES": "1"},
     )
     return result.stdout, result.stderr, result.returncode
@@ -149,7 +154,9 @@ class TestVisionGeoPipeline:
             "--prompt", "Describe each image in best possible detail.",
         ]
 
-        stdout, stderr, code = _run_cli(args, timeout=600)
+        # 600 s is the WORK term: a batch over many images. It scales with the
+        # batch, not with the model; the size term comes on top.
+        stdout, stderr, code = _run_cli(args, timeout=600, model_id=vision_model_id)
 
         # Minimal criteria: Process succeeds and produces output
         assert code == 0, f"Vision phase failed: exit={code}\nstderr={stderr}"
@@ -187,7 +194,9 @@ class TestVisionGeoPipeline:
             ),
         ]
 
-        vision_stdout, vision_stderr, vision_code = _run_cli(vision_args, timeout=600)
+        vision_stdout, vision_stderr, vision_code = _run_cli(
+            vision_args, timeout=600, model_id=vision_model_id
+        )
         vision_end = time.time()
 
         # Log Vision phase as sub-test
@@ -224,7 +233,9 @@ class TestVisionGeoPipeline:
             "--max-tokens", "500",
         ]
 
-        geo_stdout, geo_stderr, geo_code = _run_cli(geo_args, stdin=vision_stdout, timeout=300)
+        geo_stdout, geo_stderr, geo_code = _run_cli(
+            geo_args, stdin=vision_stdout, timeout=300, model_id=text_model_id
+        )
         text_end = time.time()
 
         # Log Text phase as sub-test
@@ -278,7 +289,7 @@ class TestVisionGeoPipeline:
             "--prompt", "Describe this image briefly.",
         ]
 
-        stdout, stderr, code = _run_cli(args, timeout=240)
+        stdout, stderr, code = _run_cli(args, timeout=240, model_id=vision_model_id)
 
         # Minimal criteria: Process succeeds, output not empty, both batches present
         assert code == 0, f"exit={code}\nstderr={stderr}"

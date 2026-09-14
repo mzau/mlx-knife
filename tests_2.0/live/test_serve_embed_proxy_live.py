@@ -31,7 +31,7 @@ if not os.getenv("MLXK2_ENABLE_ALPHA_FEATURES"):
 
 from .server_context import LocalServer  # noqa: E402
 from .test_embed_serve_live import EmbedServer, _runnable_or_skip  # noqa: E402
-from .test_utils import EMBED_TEST_MODELS  # noqa: E402
+from .test_utils import EMBED_TEST_MODELS, model_timeout  # noqa: E402
 
 SERVE_PORT = 8767   # distinct from EmbedServer(8766) and LocalServer default(8765)
 
@@ -65,7 +65,12 @@ def proxy_pair():
 
 
 def _post(url, payload):
-    return httpx.post(f"{url}/v1/embeddings", json=payload, timeout=120.0)
+    # The model is in the payload, so the size term needs no call-site change.
+    return httpx.post(
+        f"{url}/v1/embeddings",
+        json=payload,
+        timeout=model_timeout(120.0, payload.get("model")),
+    )
 
 
 def test_proxy_parity_with_direct_backend(proxy_pair):

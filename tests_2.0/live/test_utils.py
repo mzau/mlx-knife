@@ -8,8 +8,10 @@ Provides:
 
 from __future__ import annotations
 
+import math
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Any, Tuple
 
@@ -251,6 +253,153 @@ def parse_vm_stat_page_size(output: str) -> int:
     if match:
         return int(match.group(1))
     return 4096
+
+
+# =============================================================================
+# TIME LIMITS - staged by model size
+# =============================================================================
+# Every wall-clock limit in this suite is a HANG GUARD, not a performance
+# budget. The runaway it was originally built for is structurally excluded
+# since max_tokens is bounded (#66), and the performance signal lives in the
+# benchmark stream (duration + size_gb). What a limit still has to catch is a
+# real hang, and a real hang is unbounded - not merely slow. So being generous
+# costs nothing, while being tight costs a red line nobody can attribute.
+#
+# A limit has two terms and they must not be confused:
+#   base  - the WORK the row does (generate MAX_TOKENS, transcribe 30 minutes
+#           of audio). A property of the test, not of the model. It stays
+#           whatever the call site already says, and it is the LOWER BOUND.
+#   tier  - the part that scales with the MODEL: what it costs to get its bytes
+#           resident when the suite has already filled memory. That is the term
+#           this table adds.
+#
+# Measured 2026-09-12 (wet umbrella + benchmark stream; mlx 0.32.0, mlx-lm
+# 0.31.3, mlx-vlm 0.6.10, transformers 5.14.1) on GLM-4.7-Flash-8bit, 29.65 GB
+# on disk - the same CLI run under two memory conditions:
+#     relaxed machine    30 s
+#     under the umbrella 135 s   (102 s sys, 9.5 s user, GPU 1.6 %; ram_free at
+#                                 0.0 GB and vm_pressure ~22000 - 29.7 GB being
+#                                 made resident in ~11 GB of free memory)
+# => 105 s of load penalty over 29.65 GB = 0.28 GB/s. The base (90 s there)
+# already covers the relaxed run in full, so the tier covers the penalty and
+# nothing else.
+#
+# WHAT THE DRIVER IS NOT (measured 2026-09-13, and the earlier note here said
+# the opposite): it is not a cold file cache. `sudo purge` followed by the same
+# row took 16.3 s - FASTER than the 30 s above, because purge frees memory
+# rather than exhausting it. The expensive condition is memory PRESSURE built up
+# by the preceding tests, which is why this row is only reproducible inside the
+# umbrella and not in an isolated run.
+#
+# Control from the same stream: the largest duration below 8 GB is 145.5 s - a
+# 0.82 GB Whisper translating 30 minutes of German. Pure work, zero size
+# component. A size-staged limit must not try to explain that; the base does.
+#
+# Each tier is the load penalty at its UPPER BOUND plus roughly 25 % reserve.
+LOAD_PENALTY_RATE_GB_S = 0.3
+TIMEOUT_RESERVE = 1.3
+
+LOAD_ALLOWANCE_S = (
+    (8.0, 40),    # small  - up to  8 GB (load penalty  28 s, reserve 1.41x)
+    (20.0, 90),   # medium - up to 20 GB (load penalty  71 s, reserve 1.27x)
+    (None, 140),  # large  - beyond      (load penalty 113 s at the 32 GB text
+                  #                       gate, reserve 1.24x)
+)
+
+# Size unresolvable: what cannot be bounded gets the widest tier. Happens when
+# `mlxk list --json` fails or the model is not in the portfolio at all.
+UNKNOWN_SIZE_ALLOWANCE_S = 140
+
+
+@lru_cache(maxsize=1)
+def _model_size_index() -> Dict[str, float]:
+    """Map model name -> size on disk in GB, from `mlxk list --json`.
+
+    One subprocess per pytest process. Keys are stored twice, under the full
+    name AND under the basename: workspace models arrive as an absolute path,
+    cache models as `org/name`, and a call site may hold either form. Same
+    matching idiom as is_known_broken(), for the same reason.
+
+    Never raises. A broken index means generous limits, which is the safe
+    direction for a hang guard - the suite must still run.
+    """
+    import json
+    import os
+    import subprocess
+
+    index: Dict[str, float] = {}
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "mlxk2.cli", "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=os.environ.copy(),
+        )
+        if result.returncode != 0:
+            return index
+        models = json.loads(result.stdout).get("data", {}).get("models", [])
+    except Exception:
+        return index
+
+    for model in models:
+        name = model.get("name")
+        size_bytes = model.get("size_bytes") or 0
+        if not name or not size_bytes:
+            continue
+        size_gb = size_bytes / (1024**3)
+        index[name] = size_gb
+        # Basename collision (a cache copy and a workspace clone of the same
+        # name): keep the larger, so the guard errs wide rather than narrow.
+        basename = name.rsplit("/", 1)[-1]
+        index[basename] = max(index.get(basename, 0.0), size_gb)
+
+    return index
+
+
+def model_size_gb(model_id: str | None) -> float | None:
+    """Size on disk in GB for `model_id`, or None if it cannot be resolved.
+
+    Deliberately reads the index rather than the portfolio dicts: their
+    `ram_needed_gb` is 1.2x disk on the text axis and `inf` above the 70 %
+    threshold on the vision axis, so it is not a size. It also serves the call
+    sites that hold no portfolio dict at all (a hardcoded model constant, a
+    fixture that returns only the id).
+    """
+    if not model_id:
+        return None
+    index = _model_size_index()
+    if model_id in index:
+        return index[model_id]
+    return index.get(model_id.rsplit("/", 1)[-1])
+
+
+def size_allowance_s(size_gb: float | None) -> int:
+    """Seconds to add on top of a call site's base limit for a model this size."""
+    if size_gb is None:
+        return UNKNOWN_SIZE_ALLOWANCE_S
+
+    allowance = LOAD_ALLOWANCE_S[-1][1]
+    for bound, tier in LOAD_ALLOWANCE_S:
+        if bound is None or size_gb <= bound:
+            allowance = tier
+            break
+
+    # The table is calibrated against the text RAM gate (~32 GB on disk). The
+    # vision gate sits higher (0.70 x system RAM), so a checkpoint past the last
+    # bound would get LESS than the measured rate predicts - precisely the
+    # defect this staging removes. Above the table the rate takes over; below
+    # it the tier always wins by construction (35<=40, 87<=90, 139<=140).
+    return max(allowance, math.ceil(size_gb / LOAD_PENALTY_RATE_GB_S * TIMEOUT_RESERVE))
+
+
+def model_timeout(base_s: float, model_id: str | None) -> float:
+    """A call site's base limit widened by what a model of this size costs.
+
+    `base_s` stays the lower bound - it encodes the work, so nothing ever gets
+    tighter than it is today.
+    """
+    return base_s + size_allowance_s(model_size_gb(model_id))
 
 
 def discover_text_models() -> list[Dict[str, Any]]:
@@ -552,6 +701,11 @@ __all__ = [
     "discover_audio_models",
     "calculate_text_model_ram_gb",
     "calculate_vision_model_ram_gb",
+    "model_size_gb",
+    "size_allowance_s",
+    "model_timeout",
+    "LOAD_ALLOWANCE_S",
+    "UNKNOWN_SIZE_ALLOWANCE_S",
     "get_system_memory_bytes",
     "get_safe_ram_budget_gb",
     "get_system_ram_gb",

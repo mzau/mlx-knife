@@ -28,6 +28,7 @@ except ImportError:
     httpx = None
 
 from .server_context import LocalServer
+from .test_utils import model_timeout
 
 ws_home = os.environ.get("MLXK_WORKSPACE_HOME")
 ws_home_valid = ws_home and Path(ws_home).is_dir()
@@ -143,7 +144,7 @@ def test_v1_models_preloaded_workspace_dedup_and_chat():
                 "max_tokens": 8,
                 "stream": False,
             },
-            timeout=120.0,
+            timeout=model_timeout(120.0, preload_path),
         )
         assert resp.status_code == 200, resp.text
         payload = resp.json()

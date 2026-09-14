@@ -30,6 +30,8 @@ import pytest
 import subprocess
 from pathlib import Path
 
+from .test_utils import model_timeout
+
 # Use the Python interpreter from the test environment
 PYTHON = sys.executable
 
@@ -90,7 +92,7 @@ class TestAudioTranscription:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, model_id),
             env=os.environ,
         )
         assert result.returncode == 0, f"Command failed for {model_id}: {result.stderr}"
@@ -132,7 +134,7 @@ class TestAudioTranscription:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, model_id),
             env=os.environ,
         )
         assert result.returncode == 0, f"Command failed for {model_id}: {result.stderr}"
@@ -176,7 +178,7 @@ class TestAudioTranscription:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, model_id),
             env=os.environ,
         )
 
@@ -221,7 +223,7 @@ class TestAudioTranscription:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, model_id),
             env=os.environ,
         )
 
@@ -264,7 +266,7 @@ class TestAudioSegments:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=model_timeout(180, model_id),
             env=env_without,
         )
 
@@ -319,7 +321,7 @@ class TestAudioTranscriptionsServer:
                     f"{server_url}/v1/audio/transcriptions",
                     files={"file": (audio_file.name, f, "audio/wav")},
                     data={"model": model_id},
-                    timeout=120,
+                    timeout=model_timeout(120, model_id),
                 )
 
             assert response.status_code == 200, f"Request failed: {response.text}"
@@ -353,7 +355,7 @@ class TestAudioTranscriptionsServer:
                     f"{server_url}/v1/audio/transcriptions",
                     files={"file": (audio_file.name, f, "audio/wav")},
                     data={"model": model_id, "response_format": "text"},
-                    timeout=120,
+                    timeout=model_timeout(120, model_id),
                 )
 
             assert response.status_code == 200, f"Request failed: {response.text}"
@@ -385,7 +387,7 @@ class TestAudioTranscriptionsServer:
                     f"{server_url}/v1/audio/transcriptions",
                     files={"file": (audio_file.name, f, "audio/wav")},
                     data={"model": model_id, "response_format": "verbose_json"},
-                    timeout=120,
+                    timeout=model_timeout(120, model_id),
                 )
 
             assert response.status_code == 200, f"Request failed: {response.text}"
@@ -420,7 +422,7 @@ class TestAudioTranscriptionsServer:
                     f"{server_url}/v1/audio/transcriptions",
                     files={"file": (audio_file.name, f, "audio/mpeg")},
                     data={"model": model_id},
-                    timeout=120,
+                    timeout=model_timeout(120, model_id),
                 )
 
             assert response.status_code == 200, f"Request failed: {response.text}"
@@ -454,7 +456,7 @@ class TestAudioTranscriptionsServer:
                     f"{server_url}/v1/audio/transcriptions",
                     files={"file": (audio_file.name, f, "audio/wav")},
                     data={"model": model_id, "language": "en"},
-                    timeout=120,
+                    timeout=model_timeout(120, model_id),
                 )
 
             assert response.status_code == 200, f"Request failed: {response.text}"
@@ -584,7 +586,7 @@ class TestAudioTranslationsServer:
                     f"{server_url}/v1/audio/translations",
                     files={"file": (audio_file.name, f, "audio/wav")},
                     data={"model": model_id, "response_format": "verbose_json"},
-                    timeout=180,
+                    timeout=model_timeout(180, model_id),
                 )
 
         assert response.status_code == 200, f"Request failed: {response.text}"
@@ -622,7 +624,10 @@ class TestAudioTranslationsServer:
                     f"{server_url}/v1/audio/translations",
                     files={"file": (fixture.name, f, content_type)},
                     data={"model": model_id},
-                    timeout=600,
+                    # 600 s is the WORK term: a 30-minute German fixture. It
+                    # scales with the audio, not with the model; the size term
+                    # comes on top and never makes it tighter.
+                    timeout=model_timeout(600, model_id),
                 )
 
         assert response.status_code == 200, f"Request failed: {response.text}"

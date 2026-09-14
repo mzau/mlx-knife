@@ -21,6 +21,25 @@
   found" — a claim about the model, not about the network. Nothing downloads now, so that skip
   reason is true as written.
 
+- Live-test time limits are staged by model size instead of by the file they happen to sit in.
+  Each call site keeps its own value as the *work* term and lower bound; what a model of that
+  size costs to become resident is added on top, in three tiers calibrated against the measured
+  penalty. Before, the file holding models up to 29.7 GB allowed 90 s while the file holding
+  models up to 8.9 GB allowed 180 s, so the largest model the RAM gate admits was structurally
+  always the first to hit a wall — three timeouts on one checkpoint, and no baseline left to
+  attribute a new failure to. Details: TESTING-DETAILS → *Time Limits: Staged by Model Size*.
+
+- `test_pipe_from_list_json` pipes a capped sample of `list --json` rather than the whole
+  listing. Its prompt grew with the model inventory, so the row measured the cache's size
+  instead of what it checks — that stdin `-` is read.
+
+- The *Known Model Quality Issues* chapter in TESTING-DETAILS. Its header promised that tests
+  fail over the issues it listed, while its only entry had long since been handled — a closed
+  case presented as an open hazard. What was durable about it is already published elsewhere:
+  the earliest-position stop-token rule in ADR-011, and the `mlxk run --verbose` multiple-EOS
+  diagnostic in the test execution guide. The per-model observation itself is model empiricism
+  and no longer sits in the test documentation.
+
 ### Changed
 
 - `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`

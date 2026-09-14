@@ -172,7 +172,6 @@ For detailed bug analysis and fixes, see CHANGELOG.md 2.0.2 section. Summary:
 ### Quality Infrastructure
 
 - **Verbose Mode:** `mlxk run --verbose` shows token generation details including multiple EOS token warnings
-- **Quality Database:** Known Model Quality Issues tracked in TESTING-DETAILS.md
 - **Philosophy:** No hidden workarounds - broken models fail tests and are documented
 - **Note:** Initial `MLXK2_DEBUG_TOKENS` E2E test support removed (caused false positives matching metadata)
 

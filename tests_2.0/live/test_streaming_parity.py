@@ -35,11 +35,17 @@ except ImportError:
 from .server_context import LocalServer
 from .sse_parser import collect_sse_content
 from .test_utils import (
+    model_timeout,
     should_skip_model,
     TEST_PROMPT,
     MAX_TOKENS,
 )
 # text_portfolio fixture is provided by conftest.py (Portfolio Separation)
+
+# Request base limit. The tightest in the suite, and these rows run the SAME
+# prompt twice (batch, then stream) - the work term only, with the model's size
+# added on top by model_timeout().
+SERVER_REQUEST_TIMEOUT = 30.0
 
 # Opt-in markers
 pytestmark = [
@@ -214,7 +220,7 @@ class TestServerStreamingParity:
                     "temperature": 0.0,
                     "stream": False
                 },
-                timeout=30.0
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             )
             assert batch_response.status_code == 200
             batch_data = batch_response.json()
@@ -231,7 +237,7 @@ class TestServerStreamingParity:
                     "temperature": 0.0,
                     "stream": True
                 },
-                timeout=30.0
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             ) as stream_response:
                 assert stream_response.status_code == 200
                 stream_output = collect_sse_content(stream_response)
@@ -304,7 +310,7 @@ class TestCrossInterfaceParity:
                     "temperature": 0.0,
                     "stream": False
                 },
-                timeout=30.0
+                timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             )
             assert response.status_code == 200
             server_output = response.json()["choices"][0]["message"]["content"]
