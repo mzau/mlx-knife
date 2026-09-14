@@ -41,7 +41,7 @@ mlx-knife distinguishes three on-disk forms:
 
 The HF-cache path stays a first-class store for `pull` and `run`; the workspace path is preferred for repair workflows, multi-variant convert outputs, and any offline / archive use case.
 
-### HF_HOME Bootstrap (`cli.py:109-140`)
+### HF_HOME Bootstrap (`_bootstrap_hf_home()` in `cli.py`)
 
 When `mlxk run` or `mlxk serve --model` receives a workspace path, mlx-knife reroutes `HF_HOME` to `<workspace>/.hf_cache` **before any other import**. The bootstrap (`_bootstrap_hf_home()`) inspects `sys.argv` and calls `os.environ["HF_HOME"] = ...` before `huggingface_hub` is imported by any transitive dependency (huggingface_hub reads `HF_HOME` once at import time). Workspace isolation takes priority even over a user-set `HF_HOME` — CoW snapshots and archives stay self-contained. Non-workspace runs respect the user's `HF_HOME` or fall back to the HF default.
 
@@ -58,7 +58,7 @@ The `_resolve_workspace_for_bootstrap()` helper accepts explicit paths (`./`, `.
 | `mlxk ls` hot path | Recompute every time | `stat()` only with mtime self-heal; ~50 ms over 50 workspaces |
 | Issue #52 (`convert --repair-index` invisible) | Affected | Fixed |
 
-The hot-path read flow (`is_workspace_clean()` at `workspace.py:734`): if `hash_algorithm != "v2"` → `clean: None` plus the migration hint *"run `mlxk show <name> --recalc-hash` to upgrade"*. Otherwise stat-walk filtered by the sentinel's stored `exclude_patterns` (not current code defaults), with self-heal on `mtime_ns` drift that silently writes back to the sentinel. Symlinks inside the workspace become path fingerprints; outside or broken targets refuse.
+The hot-path read flow (`is_workspace_clean()` in `operations/workspace.py`): if `hash_algorithm != "v2"` → `clean: None` plus the migration hint *"run `mlxk show <name> --recalc-hash` to upgrade"*. Otherwise stat-walk filtered by the sentinel's stored `exclude_patterns` (not current code defaults), with self-heal on `mtime_ns` drift that silently writes back to the sentinel. Symlinks inside the workspace become path fingerprints; outside or broken targets refuse.
 
 ### Clean-State Visibility
 
@@ -207,9 +207,9 @@ runtime_compatible?
 If all gates pass → True (runtime_compatible)
 ```
 
-> **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `run.py:506-530`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
+> **Note (2.0.6).** This tree governs the `runtime_compatible` field on the listing side (`build_model_object()`). `mlxk run` adds a further pre-execution capability-mismatch reject (ADR-024 Class A: STT-only and embedding-only models invoked text-only) at `operations/run.py`. The reject fires before the runner is invoked and returns a typed error with a corrective hint; `runtime_compatible` itself stays unchanged for those models because the listing-side gates (above) do not detect the invocation form.
 
-> **Shipped (2.0.7, [#54](https://github.com/mzau/mlx-knife/issues/54)).** `mlxk run --translate` adds its own pre-execution reject *ahead* of the Class-A one, at `run.py:472-504`, with three checks: target ≠ `en` (Whisper's translate task is fixed-target English), `--translate` without `--audio`, and a model that is not `audio-translate-en` capable (`detect_audio_translate_en_capability`). Like the reject above it fires before any model load and returns a corrective hint; the server mirrors it on `POST /v1/audio/translations` (HTTP 422; a non-audio model gets 400). `runtime_compatible` is again unchanged — translate capability is a per-verb property, not a listing gate.
+> **Shipped (2.0.7, [#54](https://github.com/mzau/mlx-knife/issues/54)).** `mlxk run --translate` adds its own pre-execution reject *ahead* of the Class-A one, in `operations/run.py`, with three checks: target ≠ `en` (Whisper's translate task is fixed-target English), `--translate` without `--audio`, and a model that is not `audio-translate-en` capable (`detect_audio_translate_en_capability`). Like the reject above it fires before any model load and returns a corrective hint; the server mirrors it on `POST /v1/audio/translations` (HTTP 422; a non-audio model gets 400). `runtime_compatible` is again unchanged — translate capability is a per-verb property, not a listing gate.
 
 > **Shipped (2.0.7, ADR-015 Slice C).** `mlxk embed` ships with config-first embedder detection (`classify_embedder()`, the single source of truth shared by `detect_model_type`, gate [5] and the serve-load probe — replacing the `"embed" in name` heuristic that mislabelled bge-small as `base`). Gate [5]'s blanket `False` is now a verified-encoder-list filter: `bert`/`qwen3` are runnable-via-`embed` (`runtime_compatible=True`); non-vendored encoder types (xlm-roberta/modernbert/nomic_bert) stay `False` with a "not vendored" reason; plus an embed-side pre-execution reject (`operations/embed.py`). **Surface asymmetry (deliberate):** `mlxk list` shows runnable embedders (the honesty win); serve's `/v1/models` deliberately *hides* them (`handlers/models.py`) — the embed-backend `/v1/models` merge is deferred and the chat-surface response carries no capability field, so advertising an embedder there would be a list↔verb contradiction (Invariant 4). Spec + scope: [ADR-015](ADR/ADR-015-Embeddings-API.md).
 
@@ -224,7 +224,7 @@ If all gates pass → True (runtime_compatible)
 | 5 | Embeddings | Embedding models |
 | 6 | Text/LLM | Text-only models |
 
-**Implementation:** `build_model_object()` in `common.py:582-706`
+**Implementation:** `build_model_object()` in `operations/common.py`
 
 #### Capability Presentation — `declared ∩ runnable` (decided 2026-06-10; full form deferred)
 
@@ -234,7 +234,7 @@ The tree above fails the whole model when any one per-modality gate fails (`AND`
 
 > A modality is **listed** as a capability iff it is both **declared** (`detect_capabilities`) and **runnable** (its per-modality gate passes — structural availability + known-bad exclusions; the ADR-023 verified list is confidence, not a per-model gate). The gates **filter** the capability set; `runtime_compatible` is a boolean over the filtered set — `healthy AND effective_capabilities ≠ ∅`.
 
-**Two surfaces.** Diagnostic (`mlxk list --all`, `mlxk show`): declared set + effective set + per-modality drop reason. Consumer (`mlxk list` default, `/v1/models`): effective set only, non-runnable models filtered out (the server already filters `healthy AND runtime_compatible`, `core/server/handlers/models.py:64-68`). The client-facing capability *contract* — `/v1/models` **emitting** the effective set so a client can read it — is **`SERVER-HANDBOOK.md`** terrain and is **not built**: the response carries `{id, object, owned_by, permission, context_length}` and no capability field, so an HTTP client cannot tell a vision model from a text-only one. Tracked as [#51](https://github.com/mzau/mlx-knife/issues/51). *(The workspace scan is built — that was #58, closed.)*
+**Two surfaces.** Diagnostic (`mlxk list --all`, `mlxk show`): declared set + effective set + per-modality drop reason. Consumer (`mlxk list` default, `/v1/models`): effective set only, non-runnable models filtered out (the server already filters `healthy AND runtime_compatible`, in `core/server/handlers/models.py`). The client-facing capability *contract* — `/v1/models` **emitting** the effective set so a client can read it — is **`SERVER-HANDBOOK.md`** terrain and is **not built**: the response carries `{id, object, owned_by, permission, context_length}` and no capability field, so an HTTP client cannot tell a vision model from a text-only one. Tracked as [#51](https://github.com/mzau/mlx-knife/issues/51). *(The workspace scan is built — that was #58, closed.)*
 
 **Invariants.** (1) *No silent fallback* (Principle #2): a dropped modality surfaces its gate reason. (2) *Capability is host-effective, not intrinsic*: the **declared** set is retained in `show`/`--json`. (3) *Integrity precedes capability*: gate [1] health runs before the filter → a false-negative integrity verdict drops a *runnable* model from the consumer surface (see below). (4) *Runnable is a prediction, not a per-model certificate*: a listed-runnable modality's verb is **attempted, never pre-rejected** for a knowable reason; runtime may still fail (unknown / stale-converted model) but **honestly** (Principle #2), never as a `list`↔verb contradiction. Verified sets are class-level (ADR-023 / MODEL-COVERAGE), not per-instance guarantees.
 
@@ -329,7 +329,7 @@ Server endpoints return standardized HTTP status codes:
 
 New features may be gated behind environment variables during alpha/beta:
 
-- `MLXK2_ENABLE_PIPES=1` (ADR-014 Phase 1) — required for `-` / stdin input on `mlxk run`. Prevents unexpected stdin blocking in non-piped invocations. Active in 2.0.6 (`cli.py:647`).
+- `MLXK2_ENABLE_PIPES=1` (ADR-014 Phase 1) — required for `-` / stdin input on `mlxk run`. Prevents unexpected stdin blocking in non-piped invocations. Active in 2.0.6 (gate read in `cli.py`).
 - `MLXK2_ENABLE_ALPHA_FEATURES=1` (ADR-015) — required for the experimental **Embeddings** surface: `mlxk embed`, `mlxk embed-serve`, and `serve --embed-backend`. Active since 2.0.7.
 - Gates are **documented** in ADRs and `--help` output.
 - Gates are **removed** when features reach stable status.
@@ -361,20 +361,20 @@ API:
 
 The core probe/policy implementation lives in `mlxk2/core/capabilities.py`:
 
-- `detect_vision_capability(model_path, config)` → the vision decision every surface shares (`capabilities.py:568`)
-- `probe_model_capabilities(model_path)` → Capability detection (`capabilities.py:578`)
-- `select_backend_policy(capabilities, context)` → Backend selection (`capabilities.py:721`)
-- `classify_convert_target(config)` → Single-dispatcher for `convert --quantize` (`capabilities.py:250`)
+- `detect_vision_capability(model_path, config)` → the vision decision every surface shares
+- `probe_model_capabilities(model_path)` → Capability detection
+- `select_backend_policy(capabilities, context)` → Backend selection
+- `classify_convert_target(config)` → Single-dispatcher for `convert --quantize`
 
 Workspace Model implementation (ADR-022, ADR-025):
 
 | Concern | Symbol | File |
 |---|---|---|
-| Sentinel I/O | `write_workspace_sentinel`, `read_workspace_metadata` | `operations/workspace.py:118, 195` |
-| HF_HOME bootstrap | `_bootstrap_hf_home`, `_resolve_workspace_for_bootstrap` | `cli.py:109-140` |
-| content_hash v2 compute | `compute_workspace_hash_v2` | `operations/workspace.py:550` |
-| Clean-check hot path | `is_workspace_clean` | `operations/workspace.py:734` |
-| Algorithm constants | `HASH_ALGORITHM_V2`, `CATCHALL_FULL_READ_CAP`, `SAFETENSORS_HEADER_MAX`, `DEFAULT_EXCLUDE_PATTERNS` | `operations/workspace.py:43-76` |
+| Sentinel I/O | `write_workspace_sentinel`, `read_workspace_metadata` | `operations/workspace.py` |
+| HF_HOME bootstrap | `_bootstrap_hf_home`, `_resolve_workspace_for_bootstrap` | `cli.py` |
+| content_hash v2 compute | `compute_workspace_hash_v2` | `operations/workspace.py` |
+| Clean-check hot path | `is_workspace_clean` | `operations/workspace.py` |
+| Algorithm constants | `HASH_ALGORITHM_V2`, `CATCHALL_FULL_READ_CAP`, `SAFETENSORS_HEADER_MAX`, `DEFAULT_EXCLUDE_PATTERNS` | `operations/workspace.py` |
 
 Dependency stack (`pyproject.toml:41-52`):
 
@@ -501,27 +501,24 @@ stream is about to use. The same window existed when the loop was blocked instea
 
 - `docs/RUNTIME-FEATURES.md` — §5 four-bug-class catalog (A shipped, B detection fix shipped, C+D deferred); shared vocabulary for ADR-024.
 - `docs/MODEL-COVERAGE.md` — per-release operation-vs-model_type verification matrix; living document.
-- `docs/TESTING-DETAILS.md` — operational test-execution details and env vars (including `MLXK2_LIVE_CHV2=1` for content_hash v2 live tests).
+- `TESTING-DETAILS.md` (repo root) — operational test-execution details and env vars (including `MLXK2_LIVE_CHV2=1` for content_hash v2 live tests).
 - `docs/SERVER-HANDBOOK.md` — user-facing server documentation.
-- `docs/json-api-specification.md` + `docs/json-api-schema.json` — JSON API contract (0.2.2 documents `content_hash` as `sha256:<64-hex>` per ADR-025).
+- `docs/json-api-specification.md` + `docs/json-api-schema.json` — JSON API contract (`content_hash` as `sha256:<64-hex>` per ADR-025; the spec carries its own version).
 
 ### Code Anchors
 
 - `mlxk2/core/capabilities.py` — probe/policy implementation
-- `mlxk2/operations/common.py` — detection helpers + `build_model_object` (line 582)
+- `mlxk2/operations/common.py` — detection helpers + `build_model_object()`
 - `mlxk2/operations/workspace.py` — sentinel + content_hash v2
-- `mlxk2/core/server/model_manager.py` — model lifecycle (line 146)
+- `mlxk2/core/server/model_manager.py` — model lifecycle (`ModelManager`)
 - `mlxk2/core/server/inference.py` — the model thread (`in_worker`, `drive`)
-- `mlxk2/cli.py` — HF_HOME bootstrap (line 109)
-
-### Historical
-
-- `docs/vision_server_leitplanken.md` (German, historical pre-2.0 discussion)
+- `mlxk2/cli.py` — HF_HOME bootstrap (`_bootstrap_hf_home()`)
 
 ---
 
 ## Changelog
 
+- **2026-09-14 (references de-anchored):** Line numbers replaced by the symbols they meant. Nine of thirteen checkable anchors pointed at the wrong line — `cli.py:647` by 467 lines and at a different feature entirely — because a line number rots on the next commit to the file and nothing reads it back. `docs/SERVER-HANDBOOK.md` carries none and is checked by `scripts/check-handbook-contract.py`, which is the form that holds. Also: `TESTING-DETAILS.md` lives at the repo root, not under `docs/`; §Historical pointed at a file that exists nowhere; the JSON API entry no longer names a spec version the spec itself owns.
 - **2026-09-14 (model thread):** New §Model Thread — every model operation in `serve` moved off the event loop onto a single worker, so `/health` and `/v1/models` answer while the server works ([#64](https://github.com/mzau/mlx-knife/issues/64)). Corrected Principle #5: it claimed *nothing guarantees that two generations on one runner never overlap*, which the single worker now does guarantee; the advice to keep the detokenizer local to the generation stands on its own reason. §Thread Safety notes that `ModelManager._lock` covers the cache and not a generation. Corrected in the same list, and older than this change: *Reuse same `VisionRunner` for all image chunks* — every chunk path builds a fresh one instead, which the code says in its own comments (*fresh runner per chunk to prevent KV-cache/state accumulation*). Recorded with it, because it decides the shape: an `mx.array` carries the stream it was made on, so a main-thread load cannot be generated with elsewhere — checkpoint-dependent, which is why a pool would fail intermittently rather than loudly.
 - **2026-08-27 (mlx upper bound tightened to `<0.32.1`):** The `<0.33` bound set on 07-29 was the only loose one in the MLX stack, and a plain `pip install` had begun resolving past what the pinned `mlx-vlm==0.6.10` can run. Measured against one model and one command (Qwen2-VL-7B, single image, temperature 0): **0.32.0** clean; **0.32.1** produces correct output and then aborts the interpreter (`PyThreadState_Get … GIL is released` during finalize, exit 134); **0.32.2** raises before inference (`mx.tile` given an array-derived tuple in the vision tower, exit 1). Same class both times — `mx.array` where an `int` is expected — fixed upstream in mlx-vlm 0.6.16 (#1982) and 0.6.17 (#2021), neither of which this release takes. Scope is narrow: the text path and non-MRoPE vision (pixtral) were unaffected in the same runs. ⚠ The bound also excludes **mlx#3675** (state corruption when a primitive throws during eval), which shipped in 0.32.1 — the serve fault-recovery question must therefore be measured in a scratch environment, not in the pinned tree.
 - **2026-07-29 (dep wave + torch drop):** Dependency-stack table rewritten — pointer corrected (`pyproject.toml:41-56` → `:41-52`) and split into a released-2.0.7 column and the current tree, because the change is **pins only, no code**: `mlx <0.32 → <0.33`, `mlx-vlm 0.6.2 → 0.6.8`, `transformers 5.5.4 → 5.14.1`, `torch`/`torchvision` removed, `mlx-lm`/`mlx-audio` unchanged. The `torch` sunset marker is retired — its condition (mlx-vlm #1011) resolved in `mlx-vlm 0.6.4`. Added the rationale for keeping `mlx-audio` explicitly pinned under a transitive resolution, and the note that mlx-knife's own video-capable-checkpoint gate keys on `transformers` version + checkpoint marker, never on torch — so the torch drop is a packaging change, not a capability change.
