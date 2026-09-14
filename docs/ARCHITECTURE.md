@@ -293,7 +293,9 @@ Memory is checked via `vm_stat` free+speculative pages (macOS). Future: Add Linu
 
 Backends (e.g., `VisionRunner`) should be loaded **once per process** and reused across multiple operations.
 
-- Vision batching (ADR-012 Phase 1c): Reuse same `VisionRunner` for all image chunks
+- Vision chunking is the deliberate exception: a **fresh** `VisionRunner` per chunk, to keep
+  KV-cache and decoder state from accumulating across chunks. Both surfaces do it — `operations/run.py`
+  and, on the server, `handlers/chat.py` (batch) and `streaming.py` (per-chunk SSE)
 - Temporary files: Track and clean up on exit
 - Context managers: Use `with` statements for resource safety
 - Detokenizers: one per generation, passed into `_decode_tokens`, reset before each decode
@@ -306,9 +308,10 @@ it inside a decode loop costs more than the model does (issue #73: 176 ms per st
 against a 1 ms forward pass). It is upstream's documented behaviour, not a defect: the
 docstring reads *"Get a stateful streaming detokenizer"*. Hold one instance for the generation
 and reset it per decode — safe across all three upstream classes, whose `reset()` clears their
-entire state (naive five fields, SPM and BPE four each), nothing carried over. Keep it **local to the generation**, not a runner field: `_lock` in
-`ModelManager` serializes state changes only, so nothing guarantees that two generations on
-one runner never overlap.
+entire state (naive five fields, SPM and BPE four each), nothing carried over. Keep it **local to the generation**, not a runner field: it is a per-generation object, and
+runner fields are overwritten by the next generation the way `last_finish_reason` and its
+siblings are. Two generations on one runner can no longer overlap — see §Model Thread — but
+that guarantee is about the process, not about what belongs on a runner.
 
 ### 6. Explicit Error Codes for Servers
 
@@ -428,6 +431,8 @@ ANY ──shutdown_event.set()──→ SHUTTING_DOWN
 - `_lock` serializes all state changes
 - Double-check pattern: Check shutdown before AND after lock acquire
 - Cleanup with `list()` copy to avoid dict mutation during iteration
+- `_lock` covers the cache, not a generation — what keeps a switch from freeing a runner
+  mid-generation is the model thread below, not this lock
 
 ### Memory Gates (see Principle #4)
 
@@ -442,6 +447,38 @@ ANY ──shutdown_event.set()──→ SHUTTING_DOWN
 get_or_load_model(model_spec, verbose=False) -> MLXRunner | VisionRunner
 get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 ```
+
+---
+
+## Model Thread
+
+**Nothing that touches a model runs on the main thread.** Loading, batch and streaming
+generation, vision chunks, transcription, the startup preload and the shutdown cleanup are all
+submitted to a single worker (`mlxk2/core/server/inference.py`, `max_workers=1`), which is why
+the server reads `await in_worker(...)` and `async for ... in drive(...)` throughout.
+
+Two reasons, both measured:
+
+1. **The event loop stays free.** Every one of those operations used to run on it, so `GET
+   /health` and `GET /v1/models` were unreachable for the whole of a generation, a cold load or
+   a transcription — and a supervisor reads that silence as a dead process
+   ([#64](https://github.com/mzau/mlx-knife/issues/64)). A 9.1 s completion swallowed two of
+   three health probes; a 3.1 GB load plus a seven-minute transcription left the endpoint dead
+   for 220 s. Under the same load the probes now answer in 1-3 ms.
+2. **A pool would be wrong.** An `mx.array` carries the stream it was made on, so a model
+   loaded on the main thread raises `RuntimeError: There is no Stream(gpu, N) in current
+   thread.` when it is generated with anywhere else. Worker-to-worker is harmless; the main
+   thread is the one that poisons. It is also silently checkpoint-dependent — a small model can
+   survive what a larger one does not — so a green run on one model proves nothing here.
+
+**Serialization follows from the shape, not from a lock.** One worker means one model operation
+in flight at a time. Before, that rested on the event loop being blocked — and it did not hold
+everywhere: a streaming multi-image request ran its chunks in a thread while a batch request
+blocked the loop, so two generations really did overlap.
+
+**Not covered:** between a request acquiring a runner and a stream taking its first step,
+nothing holds the worker, so a batch starting in that window can still evict the runner the
+stream is about to use. The same window existed when the loop was blocked instead.
 
 ---
 
@@ -474,6 +511,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 - `mlxk2/operations/common.py` — detection helpers + `build_model_object` (line 582)
 - `mlxk2/operations/workspace.py` — sentinel + content_hash v2
 - `mlxk2/core/server/model_manager.py` — model lifecycle (line 146)
+- `mlxk2/core/server/inference.py` — the model thread (`in_worker`, `drive`)
 - `mlxk2/cli.py` — HF_HOME bootstrap (line 109)
 
 ### Historical
@@ -484,6 +522,7 @@ get_or_load_audio_model(model_spec, verbose=False) -> AudioRunner
 
 ## Changelog
 
+- **2026-09-14 (model thread):** New §Model Thread — every model operation in `serve` moved off the event loop onto a single worker, so `/health` and `/v1/models` answer while the server works ([#64](https://github.com/mzau/mlx-knife/issues/64)). Corrected Principle #5: it claimed *nothing guarantees that two generations on one runner never overlap*, which the single worker now does guarantee; the advice to keep the detokenizer local to the generation stands on its own reason. §Thread Safety notes that `ModelManager._lock` covers the cache and not a generation. Corrected in the same list, and older than this change: *Reuse same `VisionRunner` for all image chunks* — every chunk path builds a fresh one instead, which the code says in its own comments (*fresh runner per chunk to prevent KV-cache/state accumulation*). Recorded with it, because it decides the shape: an `mx.array` carries the stream it was made on, so a main-thread load cannot be generated with elsewhere — checkpoint-dependent, which is why a pool would fail intermittently rather than loudly.
 - **2026-08-27 (mlx upper bound tightened to `<0.32.1`):** The `<0.33` bound set on 07-29 was the only loose one in the MLX stack, and a plain `pip install` had begun resolving past what the pinned `mlx-vlm==0.6.10` can run. Measured against one model and one command (Qwen2-VL-7B, single image, temperature 0): **0.32.0** clean; **0.32.1** produces correct output and then aborts the interpreter (`PyThreadState_Get … GIL is released` during finalize, exit 134); **0.32.2** raises before inference (`mx.tile` given an array-derived tuple in the vision tower, exit 1). Same class both times — `mx.array` where an `int` is expected — fixed upstream in mlx-vlm 0.6.16 (#1982) and 0.6.17 (#2021), neither of which this release takes. Scope is narrow: the text path and non-MRoPE vision (pixtral) were unaffected in the same runs. ⚠ The bound also excludes **mlx#3675** (state corruption when a primitive throws during eval), which shipped in 0.32.1 — the serve fault-recovery question must therefore be measured in a scratch environment, not in the pinned tree.
 - **2026-07-29 (dep wave + torch drop):** Dependency-stack table rewritten — pointer corrected (`pyproject.toml:41-56` → `:41-52`) and split into a released-2.0.7 column and the current tree, because the change is **pins only, no code**: `mlx <0.32 → <0.33`, `mlx-vlm 0.6.2 → 0.6.8`, `transformers 5.5.4 → 5.14.1`, `torch`/`torchvision` removed, `mlx-lm`/`mlx-audio` unchanged. The `torch` sunset marker is retired — its condition (mlx-vlm #1011) resolved in `mlx-vlm 0.6.4`. Added the rationale for keeping `mlx-audio` explicitly pinned under a transitive resolution, and the note that mlx-knife's own video-capable-checkpoint gate keys on `transformers` version + checkpoint marker, never on torch — so the torch drop is a packaging change, not a capability change.
 - **2026-07-14 (ADR-021 rejected — MCP out):** §7 corrected — `MLXK2_ENABLE_ALPHA_FEATURES=1` gates the **Embeddings** surface only (`embed`, `embed-serve`, `serve --embed-backend`) and is active since 2.0.7; it never gated MCP, though this document said it did. §Capability Presentation: the client-facing capability contract is tracked as **#51**, not #58 (a different, closed bug — the workspace scan it named is built).
