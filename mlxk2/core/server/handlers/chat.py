@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from ...runner.token_limits import apply_stop_sequences
+from ..inference import in_worker
 from ..streaming import finish_reason_of, log_generation_end, stopped_on_sequence, usage_of
 
 if TYPE_CHECKING:
@@ -115,7 +116,7 @@ async def handle_text_chat_completion(
     logger = _get_logger()
 
     if runner is None:
-        runner = ctx.get_model(request_model, False)
+        runner = await in_worker(ctx.get_model, request_model, False)
 
     # Check if runner is VisionRunner (vision model loaded without images in request)
     from ...vision_runner import VisionRunner
@@ -135,7 +136,8 @@ async def handle_text_chat_completion(
         prompt = ctx.extract_text(messages)
 
         # Vision model WITHOUT images: the vision ceiling applies (stateless, no window guard)
-        generated_text = runner.generate(
+        generated_text = await in_worker(
+            runner.generate,
             prompt=prompt,
             images=None,
             max_tokens=ctx.get_effective_max_tokens_vision(max_tokens),
@@ -180,9 +182,13 @@ async def handle_text_chat_completion(
         # Streaming response (use filtered messages)
         message_dicts = ctx.format_messages(messages)
         effective_max_tokens = ctx.get_effective_max_tokens(max_tokens)
-        # A full window must answer with a status, not inside the stream (#66)
-        ensure_generation_budget(
-            runner, runner._format_conversation(message_dicts), effective_max_tokens, use_chat_template=False
+        # A full window must answer with a status, not inside the stream (#66).
+        # `_format_conversation` reads the tokenizer, so it goes in with the check.
+        await in_worker(
+            lambda: ensure_generation_budget(
+                runner, runner._format_conversation(message_dicts), effective_max_tokens,
+                use_chat_template=False,
+            )
         )
         return StreamingResponse(
             ctx.generate_chat_stream(
@@ -200,18 +206,21 @@ async def handle_text_chat_completion(
     # Convert messages to dict format for runner
     message_dicts = ctx.format_messages(messages)
 
-    # Let the runner format with chat templates
-    prompt = runner._format_conversation(message_dicts)
+    def _format_and_generate():
+        # The chat template runs on the tokenizer, so it belongs in the same worker
+        # call as the generation it prepares rather than beside it on the loop.
+        prompt = runner._format_conversation(message_dicts)
+        return runner.generate_batch(
+            prompt=prompt,
+            max_tokens=ctx.get_effective_max_tokens(max_tokens),
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            use_chat_template=False,
+            use_chat_stop_tokens=True
+        )
 
-    generated_text = runner.generate_batch(
-        prompt=prompt,
-        max_tokens=ctx.get_effective_max_tokens(max_tokens),
-        temperature=temperature,
-        top_p=top_p,
-        repetition_penalty=repetition_penalty,
-        use_chat_template=False,
-        use_chat_stop_tokens=True
-    )
+    generated_text = await in_worker(_format_and_generate)
     log_generation_end(logger, runner, request_model, stream=False)
 
     generated_text, stopped = apply_stop_sequences(generated_text, stop)
@@ -305,7 +314,7 @@ async def handle_vision_chat_completion(
 
     # Get or load VisionRunner
     if runner is None:
-        runner = ctx.get_model(request_model, False)
+        runner = await in_worker(ctx.get_model, request_model, False)
 
     # Verify we got a VisionRunner
     from ...vision_runner import VisionRunner
@@ -345,7 +354,8 @@ async def handle_vision_chat_completion(
 
     if len(images) <= chunk_size:
         # Single batch (no chunking)
-        generated_text = runner.generate(
+        generated_text = await in_worker(
+            runner.generate,
             prompt=prompt,
             images=images if images else None,
             audio=effective_audio,
@@ -390,7 +400,8 @@ async def handle_vision_chat_completion(
                 headers={"Cache-Control": "no-cache"}
             )
         # Non-streaming multi-chunk (batch mode)
-        generated_text, finish_reason = ctx.process_vision_chunks(
+        generated_text, finish_reason = await in_worker(
+            ctx.process_vision_chunks,
             model_path=runner.model_path,
             model_name=runner.model_name,
             prompt=prompt,

@@ -69,6 +69,20 @@
 
 ### Fixed
 
+- `serve` no longer goes silent while it works. `GET /health` and `GET /v1/models` were
+  unreachable for the whole of a non-streaming generation, a cold model load, a vision answer
+  or a transcription, because every one of those ran on the event loop: measured, a 9.1 s
+  completion swallowed two of three health probes and answered the third only after 2548 ms, and
+  3.1 GB load plus a seven-minute transcription left the endpoint dead for 220 s. A supervisor
+  reads that silence as a dead process and restarts a working server (#64). Every model
+  operation — loading, batch and streaming generation, vision chunks, transcription, the
+  startup preload and the shutdown cleanup — now runs on one worker thread, and the single
+  worker is what serializes requests, which the blocked loop had been doing by accident. Under
+  the same load the probes answer in 1-3 ms. A pool would not do: an `mx.array` carries the
+  stream it was made on, so a model loaded on the main thread raises `There is no Stream(gpu,
+  N) in current thread` when it is generated with anywhere else — for some checkpoints and not
+  others.
+
 - Streaming was far slower than the same generation unstreamed — 65x on a 300-token answer,
   53 s where the unstreamed request took 0.8 s. `tokenizer.detokenizer` is a factory rather
   than an attribute: every read builds a new instance over the whole vocabulary, about 61 ms

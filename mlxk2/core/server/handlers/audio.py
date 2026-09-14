@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from fastapi import HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from ..inference import in_worker
 from ..streaming import usage_of
 
 if TYPE_CHECKING:
@@ -81,13 +82,14 @@ async def handle_audio_chat_completion(
     )
 
     # Load AudioRunner
-    runner = get_audio_model_fn(request_model, False)
+    runner = await in_worker(get_audio_model_fn, request_model, False)
 
     # Generate transcription
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
-    generated_text = runner.transcribe(
+    generated_text = await in_worker(
+        runner.transcribe,
         audio=list(audio),
         prompt=prompt or "Transcribe this audio.",
         max_tokens=max_tokens or 4096,
@@ -181,7 +183,7 @@ async def handle_transcription(
 
     try:
         # Load audio model
-        runner = get_audio_model_fn(model, False)
+        runner = await in_worker(get_audio_model_fn, model, False)
 
         start_time = time.time()
 
@@ -193,7 +195,8 @@ async def handle_transcription(
         effective_prompt = prompt if task == "translate" else (prompt or "Transcribe this audio.")
 
         # Transcribe audio - runner.transcribe() expects List[(filename, bytes)]
-        transcription = runner.transcribe(
+        transcription = await in_worker(
+            runner.transcribe,
             audio=[(filename, content)],
             prompt=effective_prompt,
             max_tokens=4096,

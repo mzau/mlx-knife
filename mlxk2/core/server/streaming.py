@@ -16,6 +16,7 @@ from threading import Event
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from ...errors import internal_error
+from .inference import drive, in_worker
 from ..runner.token_limits import reported_finish_reason
 
 
@@ -158,14 +159,14 @@ async def generate_completion_stream(
     stopped_on_sequence = False
     try:
         token_count = 0
-        for token in runner.generate_streaming(
+        async for token in drive(runner.generate_streaming(
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             use_chat_template=False  # Raw completion mode
-        ):
+        )):
             # Stop promptly if server is shutting down
             if shutdown_event.is_set():
                 raise KeyboardInterrupt()
@@ -296,8 +297,9 @@ async def generate_chat_stream(
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
 
-    # Let the runner format with chat templates
-    prompt = runner._format_conversation(messages)
+    # Let the runner format with chat templates (the tokenizer belongs to the
+    # model thread as much as the weights do)
+    prompt = await in_worker(runner._format_conversation, messages)
 
     # Yield initial response
     initial_response = {
@@ -319,7 +321,7 @@ async def generate_chat_stream(
     # Stream tokens
     stopped_on_sequence = False
     try:
-        for token in runner.generate_streaming(
+        async for token in drive(runner.generate_streaming(
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -327,7 +329,7 @@ async def generate_chat_stream(
             repetition_penalty=repetition_penalty,
             use_chat_template=False,  # Already applied in _format_conversation
             use_chat_stop_tokens=True   # Server NEEDS chat stop tokens to prevent self-conversations
-        ):
+        )):
             # Stop promptly if server is shutting down
             if shutdown_event.is_set():
                 raise KeyboardInterrupt()
@@ -483,7 +485,6 @@ async def stream_vision_chunks(
     Yields:
         SSE event strings (data: {...}\n\n format)
     """
-    import asyncio
     from ..vision_runner import VisionRunner
 
     logger = _get_logger()
@@ -531,7 +532,8 @@ async def stream_vision_chunks(
             yield "data: [DONE]\n\n"
             return
 
-        # Process chunk in thread pool (keeps event loop responsive)
+        # Each chunk builds and uses its own runner inside one call on the model
+        # thread, so the loop stays free and requests may interleave between chunks.
         # NOTE: Pass chunk_images as argument to avoid closure late-binding issues
         def process_chunk(chunk_images):
             with VisionRunner(model_path, model_name, verbose=False) as runner:
@@ -550,7 +552,7 @@ async def stream_vision_chunks(
                 return text, finish_reason_of(runner), stopped_on_sequence(runner)
 
         try:
-            chunk_result, chunk_reason, stopped = await asyncio.to_thread(process_chunk, chunk)
+            chunk_result, chunk_reason, stopped = await in_worker(process_chunk, chunk)
         except Exception as e:
             logger.error(f"Vision chunk {chunk_idx}/{len(chunks)} failed: {e}")
             # The message goes in the error object, not into delta.content — a chat

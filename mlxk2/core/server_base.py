@@ -39,6 +39,8 @@ from .server.streaming import (
     usage_of,
 )
 from .runner.token_limits import apply_stop_sequences
+# ADR-029 Stage 2: every model touch goes to the model thread, never the loop
+from .server.inference import in_worker, shutdown_model_thread
 from .server.handlers.models import handle_list_models as _handle_list_models_impl
 from .server.handlers.audio import (
     handle_audio_chat_completion as _handle_audio_chat_completion_impl,
@@ -533,10 +535,10 @@ async def lifespan(app: FastAPI):
             audio_backend = _detect_audio_backend_for_model(preload_spec)
             if audio_backend == Backend.MLX_AUDIO:
                 logger.info(f"Detected audio model, using AudioRunner: {preload_spec}")
-                get_or_load_audio_model(preload_spec, verbose=False)
+                await in_worker(get_or_load_audio_model, preload_spec, verbose=False)
             else:
                 # Text/vision model path - uses probe/policy checks
-                get_or_load_model(preload_spec, verbose=False)
+                await in_worker(get_or_load_model, preload_spec, verbose=False)
 
             # Store resolved name for /v1/models sorting (e.g., "qwen" -> "mlx-community/Qwen2.5-0.5B-Instruct-4bit")
             from .model_resolution import resolve_model_for_operation
@@ -580,9 +582,10 @@ async def lifespan(app: FastAPI):
     # Clean up model cache via ModelManager
     if _model_manager:
         try:
-            _model_manager.cleanup()
+            await in_worker(_model_manager.cleanup)
         except Exception:
             pass
+    shutdown_model_thread()
 
     # Force MLX Metal memory cleanup
     try:
@@ -691,7 +694,7 @@ async def create_completion(request: CompletionRequest):
     try:
         if _shutdown_event.is_set():
             raise HTTPException(status_code=503, detail="Server is shutting down")
-        runner = get_or_load_model(request.model)
+        runner = await in_worker(get_or_load_model, request.model)
 
         # Handle array of prompts
         if isinstance(request.prompt, list):
@@ -703,7 +706,8 @@ async def create_completion(request: CompletionRequest):
 
         if request.stream:
             # A full window must answer with a status, not inside the stream (#66)
-            ensure_generation_budget(
+            await in_worker(
+                ensure_generation_budget,
                 runner, prompt, get_effective_max_tokens(request.max_tokens), use_chat_template=False
             )
             return StreamingResponse(
@@ -716,7 +720,8 @@ async def create_completion(request: CompletionRequest):
             completion_id = f"cmpl-{uuid.uuid4()}"
             created = int(time.time())
 
-            generated_text = runner.generate_batch(
+            generated_text = await in_worker(
+                runner.generate_batch,
                 prompt=prompt,
                 max_tokens=get_effective_max_tokens(request.max_tokens),
                 temperature=get_effective_temperature(request.temperature),
@@ -780,7 +785,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
         # Load model to determine type (uses cache if already loaded)
         # This ensures we route based on MODEL type, not just request content
-        runner = get_or_load_model(request.model, verbose=False)
+        runner = await in_worker(get_or_load_model, request.model, verbose=False)
 
         # Check if this is a vision model (VisionRunner handles both vision and audio)
         from .vision_runner import VisionRunner
