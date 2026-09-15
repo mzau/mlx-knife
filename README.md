@@ -393,6 +393,8 @@ mlxk run vision-model --image cat.jpg
 mlxk run "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit" "What is 2+2?"
 ```
 
+**Sampling:** On the CLI a vision run samples at 0.7 unless `--temperature` is given; the server's vision path always decodes greedily at 0.0, whatever the request sends. Pass `--temperature 0` for descriptions you can reproduce.
+
 #### Batch Processing
 
 **Terminology Note:** mlx-knife uses "batch" in the traditional computing sense (sequential job processing in groups), not ML inference batching (parallel batch_size > 1 in a single forward pass). Images are processed sequentially in groups for memory safety, not performance parallelization.
@@ -535,8 +537,8 @@ mlx-knife automatically routes audio models to the optimal backend:
 
 **⚙️ Audio Defaults:**
 
-| Setting | Audio | Text/Vision | Reason |
-|---------|-------|-------------|--------|
+| Setting | Audio | Text | Reason |
+|---------|-------|------|--------|
 | Temperature | 0.0 | 0.7 | Greedy decoding (STT best practice) |
 | Default Prompt | "Transcribe this audio." (not on `--translate`) | - | Minimal prompt for pure transcription; on translate it would bias the decoder back toward transcribing |
 

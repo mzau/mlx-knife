@@ -142,6 +142,19 @@
   requested, and a non-streaming request running on after its client has gone. ADR-029 records
   the vocabulary, with its prior-art survey.
 
+- README says what a vision run samples with: the CLI samples at 0.7 unless `--temperature` is
+  given, while the server's vision path decodes greedily at 0.0 and ignores the value a request
+  sends, so `--temperature 0` is what makes a CLI description reproducible. The audio defaults
+  table now contrasts audio with *text* rather than with "text/vision" — both of its cells were
+  untrue for vision, which has a temperature of its own on one surface and a default prompt on
+  both. SERVER-HANDBOOK → *POST /v1/chat/completions* states the server side.
+
+- ADR-020 gains a correction: its note that Whisper ignores `temperature` is wrong — the value
+  reaches the decoder, and `0.0` selects an exact argmax. What is true was never written down:
+  mlx-audio's own default is a schedule of rising temperatures the decoder escalates through when
+  a window fails its quality checks, and passing a single number replaces that schedule rather
+  than seeding it.
+
 ## [2.0.8-beta.2] - 2026-09-11
 
 ### Security

@@ -17,6 +17,16 @@
 > instructions**. For the current install see `README.md` and `docs/SERVER-HANDBOOK.md`. Some
 > runtime reject messages still quote the phantom extra; they are corrected separately.
 
+> **Correction (2026-09-15).** §Known Limitations states *"Temperature parameter likely
+> ignored (greedy decoding)"* for Whisper, and the `AudioRunner` sketch in §Architecture
+> Design repeats it as a code comment. Both are **wrong**, and both were guesses: measured
+> against the pinned `mlx-audio`, the value does reach the decoder, where `0.0` selects an
+> exact argmax. What is true is narrower and was never stated — mlx-audio's own default for
+> `temperature` is a *schedule* of rising values that the decoder escalates through when a
+> window fails its compression-ratio or log-probability check. Passing a single number
+> **replaces** that schedule instead of seeding it, so the escalation has nowhere to go.
+> The decision record below is left as written.
+
 ---
 
 ## Context
