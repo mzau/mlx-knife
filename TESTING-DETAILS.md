@@ -950,7 +950,7 @@ This section summarizes what our test suite covers for the experimental `push` f
 
 ### Reference: Push CLI and JSON
 
-- Usage: `mlxk2 push <local_dir> <org/model> --private [--create] [--branch main] [--commit <msg>] [--check-only] [--json] [--verbose]`
+- Usage: `mlxk2 push <local_dir> <org/model> --private [--create] [--branch main] [--commit <msg>] [--check-only] [--dry-run] [--json] [--verbose]`
 - Args:
   - `--private` (required in alpha): Safety gate to avoid public uploads.
   - `--create`: Create the repository if it does not exist (model repo).
@@ -982,9 +982,11 @@ This section summarizes what our test suite covers for the experimental `push` f
   - `would_create_repo: bool` / `would_create_branch: bool` — planning hints when target does not exist.
 
 - Error types (`error.type`):
+  - `ValidationError` — `local_dir` empty or whitespace-only; checked first, before the token.
   - `dependency_missing` — `huggingface-hub` not installed.
   - `auth_error` — missing `HF_TOKEN` (unless `--check-only`).
   - `workspace_not_found` — local_dir missing/not a directory.
+  - `ambiguous_workspace` — an explicit path pattern matches more than one workspace.
   - `repo_not_found` — repo missing without `--create`.
   - `upload_failed` — hub returned an error (e.g., 403/permission).
   - `push_operation_failed` — unexpected internal failure wrapper.
@@ -994,6 +996,10 @@ This section summarizes what our test suite covers for the experimental `push` f
 ### Automated (offline)
 
 - **Token/Workspace errors:** Missing `HF_TOKEN` and missing workspace produce proper JSON errors.
+- **Empty path:** An empty or whitespace-only `local_dir` is refused with `ValidationError` before the token
+  check, the workspace scan or any hub call. `Path("")` is the working directory, so this is the guard that
+  keeps `push "$UNSET_VAR"` from uploading it; the test replaces `huggingface_hub` wholesale, so nothing can
+  be uploaded even if the guard regresses.
 - **CLI args (JSON mode):** Missing positional args emit JSON errors rather than usage text.
 - **Schema shape:** Push success/error outputs validate against `docs/json-api-schema.json`.
 - **No-op push:** Detects `no_changes: true`, sets `uploaded_files_count: 0`, carries hub message into JSON (`message`/`hf_logs`), and human output shows "no changes" without duplicate logs.
@@ -1003,8 +1009,12 @@ This section summarizes what our test suite covers for the experimental `push` f
 
 **Files:**
 - `tests_2.0/test_cli_push_args.py` (CLI errors and JSON outputs)
+- `tests_2.0/test_push_minimal.py` (local preconditions and the JSON envelope)
+- `tests_2.0/test_push_workspace_check.py` (`--check-only` workspace health)
+- `tests_2.0/test_push_dry_run.py` (`--dry-run`: repo missing, no changes, changes)
 - `tests_2.0/test_push_extended.py` (no-op vs commit, branch/repo, .hfignore, human; includes retry on invalid revision with `--create`)
-- `tests_2.0/spec/test_push_output_matches_schema.py` (schema success path)
+- `tests_2.0/spec/test_push_output_matches_schema.py` / `test_push_error_matches_schema.py` (schema success and error paths)
+- `tests_2.0/test_issue_70.py::TestEmptyPathDoesNotPushOrConvert` (empty path)
 
 **Run** (any supported interpreter, editable install):
 ```bash
@@ -1015,7 +1025,12 @@ pytest -q tests_2.0/test_push_extended.py::test_push_retry_creates_branch_on_upl
 
 ### Live (opt-in / wet)
 
-- Purpose: sanity-check real HF behavior (auth, no-op vs commit, URLs).
+- Purpose: one real upload against the Hub.
+- ⚠ What it asserts: `push --json` returns a push envelope — `status` may be `success` **or** `error`. A pass
+  therefore does not show that the upload worked; read `status` in its output. Nothing else checks a real
+  upload: the wet umbrella collects this test and skips it without the env below.
+- A few-KB workspace (`config.json` plus a README) is enough — push does not validate model content — and a
+  private throwaway repo keeps Hub storage untouched once deleted.
 - Defaults: Live tests are skipped. Enable with env vars and markers.
 - Env:
   - `MLXK2_LIVE_PUSH=1`
@@ -1025,6 +1040,44 @@ pytest -q tests_2.0/test_push_extended.py::test_push_retry_creates_branch_on_upl
 - Command:
   - `pytest -q -m wet tests_2.0/live/test_push_live.py`
   - or `pytest -q -m live_push`
+
+## Convert Testing Details
+
+What the suite covers for `convert` (`--repair-index`, `--quantize`), offline and live.
+
+### Automated (offline)
+
+- **Repair index** (ADR-018): index rebuild, the cache sanctity block (neither source nor target inside the HF
+  cache), the workspace sentinel, and the health check on the result.
+- **Quantize dispatch** (ADR-023): verified model types route to their backend; multimodal markers on an
+  unverified type are rejected with `unsupported_multimodal` before anything touches the target.
+- **Model-supplied code**: a checkpoint whose `config.json` declares `model_file` is refused before the backend
+  runs, through the real CLI too, and nothing is left at the target.
+- **Empty path**: an empty or whitespace-only source or target is refused with `ValidationError` and nothing
+  is written. `Path("")` is the working directory, and the CLI resolves bare names into `MLXK_WORKSPACE_HOME`
+  (`home / ""` is the home itself), so one test runs the real CLI with a workspace home set.
+
+**Files:**
+- `tests_2.0/test_convert_repair_index.py`
+- `tests_2.0/test_convert_multimodal_reject.py`
+- `tests_2.0/test_model_file_gate.py` (the `convert` cases of the model-supplied-code gate)
+- `tests_2.0/test_issue_70.py::TestEmptyPathDoesNotPushOrConvert`
+
+### Live (wet umbrella, Phase 1a)
+
+- `tests_2.0/live/test_workspace_live.py` — bare names resolved via `MLXK_WORKSPACE_HOME`: source resolution,
+  `--quantize` into the workspace home, JSON output. Skips without `MLXK_WORKSPACE_HOME`.
+- `tests_2.0/live/test_json_smoke.py` — `convert --quantize 8 --json` on a workspace model (clean stdout,
+  schema-valid) and the error JSON for a missing source. Skips without `MLXK_WORKSPACE_HOME`.
+- `tests_2.0/live/test_content_hash_v2_live.py` — `--repair-index` on a broken multi-shard workspace writes a
+  v2 `content_hash`. Needs `MLXK2_LIVE_CHV2=1` and `HF_TOKEN`.
+
+**Run:**
+```bash
+pytest -q tests_2.0/test_convert_repair_index.py tests_2.0/test_convert_multimodal_reject.py \
+  tests_2.0/test_model_file_gate.py tests_2.0/test_issue_70.py
+pytest -m wet tests_2.0/live/test_workspace_live.py tests_2.0/live/test_json_smoke.py -v -o addopts=""
+```
 
 ## Pull/Preflight (Issue #30)
 
@@ -1911,7 +1964,9 @@ MLXK2_LIVE_PUSH=1 \
 
 ---
 
-### A5. Complete Test File Structure (2.0.4-beta.10)
+### A5. Test File Structure
+
+One line per file, kept by hand; `pytest --collect-only` is the authoritative list.
 
 ```
 scripts/
@@ -1932,9 +1987,11 @@ tests_2.0/
 │   └── mlx_vlm/
 │       └── __init__.py               # Vision stub (load, generate)
 ├── spec/                              # JSON API spec/contract validation
+│   ├── test_changelog_discipline.py           # CHANGELOG: top section is [Unreleased] or this version, names no later release; newest release frozen
 │   ├── test_cli_commands_json_flag.py         # CLI JSON flag behavior
 │   ├── test_cli_version_output.py             # Version command JSON shape
 │   ├── test_code_outputs_validate_against_schema.py  # Code outputs validate against schema
+│   ├── test_json_api_version_triple.py        # JSON API version agrees in the four places it lives (#67)
 │   ├── test_push_error_matches_schema.py      # Push error output matches schema
 │   ├── test_push_output_matches_schema.py     # Push success output matches schema
 │   ├── test_spec_doc_examples_validate.py     # Docs examples validate against JSON schema
@@ -1946,6 +2003,7 @@ tests_2.0/
 │   ├── sse_parser.py                           # SSE parsing utilities for streaming validation
 │   ├── test_utils.py                           # Portfolio Discovery (text/vision/audio separation), RAM calculation modularization, RAM gating utilities
 │   ├── test_audio_e2e_live.py                  # Audio E2E tests with Whisper models (ADR-020: CLI + Server transcriptions + size limit, parametrized: audio_XX)
+│   ├── test_audio_resample_guard.py            # STT load path resamples behind a real anti-aliasing stopband (mlx-audio #870; no model, no GPU)
 │   ├── test_cli_e2e.py                         # CLI integration E2E tests (ADR-011, parametrized)
 │   ├── test_cli_pipe_live.py                   # Pipe-mode E2E (stdin '-', JSON interactive error, list→run pipe) using first eligible model
 │   ├── test_clone_live.py                      # Live clone flow (requires MLXK2_LIVE_CLONE, HF_TOKEN)
@@ -1953,6 +2011,7 @@ tests_2.0/
 │   ├── test_embed_encoder_live.py              # Encoder path of `mlxk embed` live (ADR-015 B, alpha-gated: bge CLS + e5 mean via CLI subprocess, real mlx)
 │   ├── test_embed_pipe_live.py                 # Decoder path of `mlxk embed` live (ADR-015 A, alpha-gated: JSONL contract, L2 norm, dimensions, batching)
 │   ├── test_embed_serve_live.py                # `mlxk embed-serve` E2E (ADR-015 D1, alpha-gated: real backend process, OpenAI /v1/embeddings contract)
+│   ├── test_fim_e2e.py                         # Fill-in-the-middle with a real coder model (ADR-011, marker: live_e2e)
 │   ├── test_json_smoke.py                      # Per-command --json smoke: clean stdout, json.loads-parseable, schema-valid against docs/json-api-schema.json
 │   ├── test_list_human_live.py                 # Live list/health against user cache (requires HF_HOME)
 │   ├── test_pipe_vision_geo.py                 # Vision→Geo pipe integration tests (marker: live_vision_pipe: batch processing, complete pipe, chunk isolation)
@@ -1966,13 +2025,16 @@ tests_2.0/
 │   ├── test_streaming_parity.py                # Streaming vs batch parity tests (Issue #20, ADR-011, parametrized)
 │   ├── test_vision_e2e_live.py                 # Vision CLI E2E tests with real models (ADR-012, 5 deterministic vision queries)
 │   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
-│   └── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
+│   ├── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
+│   └── test_workspace_live.py                  # Workspace live: clone shorthand + convert with bare names via MLXK_WORKSPACE_HOME
 ├── test_adr004_error_logging.py       # ADR-004 error logging and redaction (tokens, paths)
+├── test_audio_bridge_canary.py        # Canary for the mlx-audio #645 bridge (ADR-023): says when the Whisper tokenizer workaround can retire
 ├── test_audio_cli.py                  # Audio CLI argument tests (ADR-020 Phase 2: --audio parsing, file validation, capability checks, backend detection)
 ├── test_capabilities.py               # Probe/Policy architecture (ADR-012, ADR-016)
 ├── test_capabilities_invariants.py    # Structural invariants on the capabilities.py frozensets (ADR-023: casing/disjointness, every vision-quantize type routes to vision, STT rejects)
 ├── test_cli_embed_gate.py             # Alpha gate for `mlxk embed` (ADR-015 A, subprocess-level: reject without MLXK2_ENABLE_ALPHA_FEATURES, JSON error envelope)
 ├── test_cli_embed_serve_gate.py       # Alpha gate for `mlxk embed-serve` (ADR-015 D1: rejects before import and port bind; a bogus model fails at pre-flight, not at the gate)
+├── test_cli_feature_gate_values.py    # Feature gates read the variable's value, not just its presence
 ├── test_cli_log_json_flag.py          # CLI --log-json flag behavior and JSON log format
 ├── test_cli_push_args.py              # Push CLI args and JSON error/output handling (offline)
 ├── test_cli_run_exit_codes.py         # CLI exit codes + pipe/JSON regressions, stdin '-', non-TTY batch, interactive JSON error, SIGPIPE, BrokenPipeError
@@ -1997,9 +2059,13 @@ tests_2.0/
 ├── test_issue_27.py                   # Health policy exploration with real models (marker: issue27)
 ├── test_issue_30_preflight.py         # Preflight for gated/private/not-found repos (Issue #30)
 ├── test_issue_37_private_org_regression.py  # Issue #37 private/org MLX model detection (marker: live_run)
+├── test_issue_70.py                   # Issue #70: an empty name is no search pattern (resolver, bootstrap, rm) and an empty path is not the working directory (push, convert)
+├── test_issue_73.py                   # Issue #73: one detokenizer per generation, not per decode
 ├── test_json_api_list.py              # JSON API list contract (shape/fields)
 ├── test_json_api_show.py              # JSON API show contract (base/files/config)
 ├── test_legacy_formats.py             # Legacy model format detection (Issue #37)
+├── test_model_file_gate.py            # CVE-2026-5843: a checkpoint declaring `model_file` is refused before any backend runs (run, convert, embed; real CLI included)
+├── test_model_file_gate_canary.py     # Canary for the CVE-2026-5843 bridge (ADR-023): says when upstream's own gate makes ours redundant
 ├── test_model_naming.py               # Conversion rules, bijection, parsing
 ├── test_model_resolution_workspace.py # Workspace path resolution tests (ADR-018, explicit path detection, prefix matching)
 ├── test_multimodal_filtering.py       # Multimodal history filtering (Vision→Text model switching)
@@ -2015,22 +2081,33 @@ tests_2.0/
 ├── test_robustness.py                 # Robustness for rm/pull/disk/timeout/concurrency
 ├── test_run_complete.py               # End-to-end run command (stream/batch/params)
 ├── test_run_embedding_reject.py       # Regression: `mlxk run <embedder>` gives the honest 'use mlxk embed' reject (ADR-015 C)
+├── test_run_finish_reason.py          # How `mlxk run` reports the end of a generation: stop/length, `--json` finish_reason (#66)
 ├── test_run_vision.py                 # Vision runner unit tests (ADR-012 Phase 1b, VisionRunner routing, default prompt)
 ├── test_runner_core.py                # MLXRunner core generation/memory/stop tokens
 ├── test_runtime_compatibility_reason_chain.py  # Runtime compatibility reason field decision chain (Issue #36)
+├── test_serve_audio_size_limit_route.py # Audio upload size limit answers HTTP 413 with its error type
 ├── test_serve_audio_translations_route.py  # Route tests for POST /v1/audio/translations (Issue #54: 400/422 gates, task threading, no synthetic prompt on translate)
 ├── test_serve_embed_proxy_route.py    # Route tests for POST /v1/embeddings on serve (ADR-015 D2: 501 unconfigured, proxying, backend error passthrough)
+├── test_serve_option_validation.py    # `serve` validates its options before it announces a start
 ├── test_serve_signal_teardown.py      # Supervisor teardown on SIGINT/SIGTERM/SIGHUP against a real child, escalation, exit codes (#60)
 ├── test_serve_supervisor.py           # Supervisor command/env construction with Popen mocked (module + extra_env seam, --embed-backend config bridge)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
 ├── test_server_audio.py               # Audio server unit tests (ADR-020 Phase 4: request detection, Base64 decoding, format validation)
+├── test_server_finish_reason.py       # Server finish_reason: stop/length/null, and failed streams (#66)
+├── test_server_modality_reject.py     # A modality the model lacks is a 422 reject, never a silent drop
 ├── test_server_models_and_errors.py   # Server model loading and error handling
+├── test_server_operator_ceiling_delivery.py # The operator max-tokens ceiling reaches the process that answers requests
+├── test_server_router_error_envelope.py # Router-level rejects carry the ADR-004 error envelope
+├── test_server_stop_sequences.py      # `stop` sequences cut batch text, completions and vision answers
 ├── test_server_streaming_minimal.py   # Server SSE streaming functionality
+├── test_server_temperature_defaults.py # Sampling defaults follow the surface, not the requested model
 ├── test_server_token_limits_api.py    # Server token limit enforcement
+├── test_server_usage_counts.py        # `usage` carries the runner's token counts, not a word estimate
 ├── test_server_vision.py              # Vision server unit tests (ADR-012 Phase 3: ChatMessage, image detection, helpers)
 ├── test_stop_tokens_live.py           # Stop token validation with real models (marker: live_stop_tokens, ADR-009)
 ├── test_token_limits.py               # Dynamic token calculation; server vs run policies
+├── test_unreadable_model_location.py  # Unreadable cache or workspace home: `run` reports the path, not an internal name or a traceback (real CLI)
 ├── test_vision_adapter.py             # Vision HTTP adapter unit tests (Base64 decoding, OpenAI format parsing, sequential images, image ID persistence)
 ├── test_vision_chunk_streaming.py     # Vision chunk streaming tests (SSE format, multi-chunk streaming, single-chunk routing, generator integration)
 ├── test_vision_exif.py                # EXIF extraction tests (GPS, DateTime, Camera, collapsible table, privacy controls)
