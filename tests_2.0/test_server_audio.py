@@ -316,3 +316,43 @@ class TestFilterMultimodalHistoryAudio:
 
         assert "1 image(s)" in filtered[0].content
         assert "1 audio(s)" in filtered[0].content
+
+
+class TestAudioChatFinishReason:
+    """#69: a transcription reported `"stop"` as a batch response and `null` as a stream. The
+    backend reports no reason, so both transports say `null` — the stream never claimed more."""
+
+    @staticmethod
+    def _complete(stream):
+        import asyncio
+        import json
+
+        from mlxk2.core.server.handlers.audio import handle_audio_chat_completion
+        from mlxk2.core.server.streaming import emulate_sse_stream
+
+        class Runner:
+            def transcribe(self, **kwargs):
+                return "a transcript"
+
+        audio = base64.b64encode(b"RIFF....WAVEfmt ").decode()
+        messages = [{"role": "user", "content": [
+            {"type": "input_audio", "input_audio": {"data": audio, "format": "wav"}}]}]
+
+        async def run():
+            response = await handle_audio_chat_completion(
+                "org/whisper", messages, None, 0.0, stream,
+                get_audio_model_fn=lambda model, verbose: Runner(),
+                emulate_sse_fn=emulate_sse_stream,
+                count_tokens_fn=lambda text: len(text.split()),
+            )
+            if not stream:
+                return response["choices"][0]["finish_reason"]
+            events = [json.loads(chunk[len("data: "):]) async for chunk in response.body_iterator
+                      if chunk.startswith("data: {")]
+            return events[-1]["choices"][0]["finish_reason"]
+
+        return asyncio.run(run())
+
+    def test_batch_and_stream_agree(self):
+        assert self._complete(stream=True) is None
+        assert self._complete(stream=False) is None

@@ -14,7 +14,7 @@
 # Only the `total` line is read by the gate; the rest is here so a growth can be traced to
 # a file without digging through the log.
 
-total 124
+total 123
 
 mlxk2/operations/clone.py                      25
 mlxk2/core/server_base.py                      15
@@ -35,7 +35,6 @@ mlxk2/output/human.py                           1
 mlxk2/operations/health.py                      1
 mlxk2/errors.py                                 1
 mlxk2/core/server/model_manager.py              1
-mlxk2/core/server/handlers/audio.py             1
 mlxk2/core/runner/__init__.py                   1
 mlxk2/core/encoders/bert.py                     1
 mlxk2/core/audio_runner.py                      1

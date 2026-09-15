@@ -104,12 +104,14 @@ async def handle_audio_chat_completion(
 
     # The audio backend reports no token counts, so these stay an estimate.
     usage = usage_of(runner, prompt or "", generated_text, count_tokens_fn)
+    # Nor does it report why it stopped: null on both transports, never an asserted "stop" (#69).
+    finish_reason = None
 
     # Emulate SSE for stream=true
     if stream:
         logger.info("Audio STT: emulating SSE stream (batch response as single event)")
         return StreamingResponse(
-            emulate_sse_fn(completion_id, created, request_model, generated_text),
+            emulate_sse_fn(completion_id, created, request_model, generated_text, finish_reason),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"}
         )
@@ -126,7 +128,7 @@ async def handle_audio_chat_completion(
                     "role": "assistant",
                     "content": generated_text
                 },
-                "finish_reason": "stop"
+                "finish_reason": finish_reason
             }
         ],
         "usage": usage

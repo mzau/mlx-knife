@@ -128,6 +128,11 @@
   with `ValidationError`, the type the JSON API names for empty input. Present since
   2.0.0-alpha.2 for `push` and 2.0.4-beta.5 for `convert`.
 
+- An audio transcription through `POST /v1/chat/completions` claimed `finish_reason: "stop"` in
+  the batch response, written unconditionally although the transcription backend reports no
+  reason, while the same request as a stream ended with `null`. Both transports carry `null` now —
+  the value SERVER-HANDBOOK gives a generation whose backend reports no reason, and the one
+  `run --json` reports for a transcription. Before 2.0.8-beta.1 both asserted `"stop"`. Issue #69.
 
 - `mlxk run` answered a model location it could not read with the name of one of its own
   variables — `local variable 'model_path' referenced before assignment`, typed `InternalError`
