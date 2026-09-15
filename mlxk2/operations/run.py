@@ -339,6 +339,15 @@ def run_model(
         pass  # transformers not installed (optional dependency for vision)
 
     json_mode = json_output
+    # Bound before the pre-flight try: the code after it reads them even when the resolver raised.
+    resolved_name = None
+    is_vision_model = False
+    is_audio_model = False
+    audio_backend = None  # ADR-020: Backend.MLX_AUDIO or Backend.MLX_VLM
+    model_path = None
+    model_cache_dir = None
+    cfg = None
+    preflight_error: Optional[Exception] = None
     # Pre-flight check: Verify runtime compatibility before attempting to load
     # This is a "best effort" check - if the model is in cache, verify it's compatible
     # If not in cache or check fails, let the runner handle it (for tests and edge cases)
@@ -353,12 +362,6 @@ def run_model(
             return error_result
 
         # Only perform compatibility check if model is actually in cache
-        is_vision_model = False
-        is_audio_model = False
-        audio_backend = None  # ADR-020: Backend.MLX_AUDIO or Backend.MLX_VLM
-        model_path = None
-        model_cache_dir = None
-        cfg = None
         if resolved_name:
             from .workspace import is_workspace_path
 
@@ -488,13 +491,13 @@ def run_model(
                                     print(error_result, file=sys.stderr)
                                 return error_result
 
-    except Exception:
+    except Exception as exc:
         # Pre-flight check failed - let the runner handle it
         # This preserves backward compatibility with tests and edge cases
-        pass
+        preflight_error = exc
 
     # WORKAROUND: CVE-2026-5843 — bridge, retires via tests_2.0/test_model_file_gate_canary.py
-    # Outside the pre-flight try above, whose `except Exception: pass` would make this a silent
+    # Outside the pre-flight try above, whose `except Exception` would make this a silent
     # pass-through. The runners refuse too; this is the readable line (ADR-024 Class A form).
     try:
         reject_untrusted_model_code(model_path)
@@ -504,9 +507,13 @@ def run_model(
             print(error_result, file=sys.stderr)
         return error_result
 
+    # "Not found" only when the pre-flight ran through; a lookup that failed says why.
+    not_found = (f"Error: {preflight_error}" if preflight_error is not None
+                 else f"Error: Model '{model_spec}' not found. Check the name or path.")
+
     if images and not is_vision_model:
         if not resolved_name or model_path is None:
-            error_result = f"Error: Model '{model_spec}' not found. Check the name or path."
+            error_result = not_found
         else:
             error_result = f"Error: Model '{model_spec}' does not support vision inputs."
         if not json_output:
@@ -515,7 +522,7 @@ def run_model(
 
     if audio and not is_audio_model:
         if not resolved_name or model_path is None:
-            error_result = f"Error: Model '{model_spec}' not found. Check the name or path."
+            error_result = not_found
         else:
             error_result = f"Error: Model '{model_spec}' does not support audio inputs."
         if not json_output:

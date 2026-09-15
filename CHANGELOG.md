@@ -120,6 +120,14 @@
   and still do: `mlxk health ""` checks every model, the way `mlxk health` without a pattern
   does, and `serve --model ""` starts without a preloaded model. Present since 2.0.5.
 
+- `mlxk run` answered a model location it could not read with the name of one of its own
+  variables — `local variable 'model_path' referenced before assignment`, typed `InternalError`
+  under `--json` — when the model cache was unreadable, and with a Python traceback when the
+  workspace home was. Every run, with or without an image or audio attached, now ends in the
+  error that stopped it, naming the path it could not read, typed `execution_error`; a model is
+  reported as not found only when the lookup completed. Present since 2.0.4 on `--image` and
+  `--audio` runs and since 2.0.6 on text runs; the traceback since 2.0.5.
+
 - A request naming the loaded model by its `/v1/models` id loaded it a second time when the
   server had loaded it under another spelling — `serve --model Qwen2.5-0.5B`, then a request for
   `mlx-community/Qwen2.5-0.5B-Instruct-4bit` — and every alternation between the two spellings

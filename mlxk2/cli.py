@@ -20,7 +20,10 @@ from pathlib import Path
 
 def _is_workspace(path: Path) -> bool:
     """Check if path is a valid MLX workspace (has config.json). No imports allowed."""
-    return path.exists() and path.is_dir() and (path / "config.json").exists()
+    try:
+        return path.exists() and path.is_dir() and (path / "config.json").exists()
+    except OSError:
+        return False
 
 
 def _resolve_workspace_for_bootstrap(model_spec: str) -> "Path | None":
@@ -44,17 +47,21 @@ def _resolve_workspace_for_bootstrap(model_spec: str) -> "Path | None":
     # 2. MLXK_WORKSPACE_HOME fuzzy match
     workspace_home_str = os.environ.get("MLXK_WORKSPACE_HOME")
     if workspace_home_str:
-        workspace_home = Path(workspace_home_str).expanduser().resolve()
-        if workspace_home.exists() and workspace_home.is_dir():
-            # Try exact match
-            exact = workspace_home / model_spec
-            if _is_workspace(exact):
-                return exact
-            # Try fuzzy match (case-insensitive substring)
-            for subdir in workspace_home.iterdir():
-                if subdir.is_dir() and model_spec.lower() in subdir.name.lower():
-                    if _is_workspace(subdir):
-                        return subdir
+        try:
+            workspace_home = Path(workspace_home_str).expanduser().resolve()
+            if workspace_home.exists() and workspace_home.is_dir():
+                # Try exact match
+                exact = workspace_home / model_spec
+                if _is_workspace(exact):
+                    return exact
+                # Try fuzzy match (case-insensitive substring)
+                for subdir in workspace_home.iterdir():
+                    if subdir.is_dir() and model_spec.lower() in subdir.name.lower():
+                        if _is_workspace(subdir):
+                            return subdir
+        except OSError:
+            # Unreadable home: the command resolves the name again and reports the error.
+            return None
 
     return None
 
