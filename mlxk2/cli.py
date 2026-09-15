@@ -690,10 +690,10 @@ def main():
                 _saved_stdout = sys.stdout
                 sys.stdout = open(os.devnull, "w")
 
-            # Resolve bare names via MLXK_WORKSPACE_HOME
+            # Resolve bare names via MLXK_WORKSPACE_HOME; an empty name is none (home / "" is home)
             source_path = args.source
             target_path = args.target
-            if not _is_explicit_path(source_path):
+            if source_path.strip() and not _is_explicit_path(source_path):
                 workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
                 if workspace_home:
                     ws_path = Path(workspace_home).expanduser().resolve()
@@ -701,7 +701,7 @@ def main():
                         resolved = ws_path / source_path
                         if resolved.is_dir():
                             source_path = str(resolved)
-            if not _is_explicit_path(target_path):
+            if target_path.strip() and not _is_explicit_path(target_path):
                 workspace_home = os.environ.get("MLXK_WORKSPACE_HOME")
                 if workspace_home:
                     ws_path = Path(workspace_home).expanduser().resolve()

@@ -325,6 +325,13 @@ def convert_operation(
         }
     }
 
+    # Path("") is Path("."): an empty path would read or write the working directory (issue #70's class).
+    for role, value in (("source", source_path), ("target", target_path)):
+        if not value or not str(value).strip():
+            result["status"] = "error"
+            result["error"] = {"type": "ValidationError", "message": f"Invalid {role} path: empty"}
+            return result
+
     try:
         # Phase 1: Validate paths
         src = Path(source_path).resolve()

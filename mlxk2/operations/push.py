@@ -69,6 +69,15 @@ def push_operation(
     }
 
     try:
+        # Path("") is Path("."): an empty name would push the working directory (issue #70's class).
+        if not local_dir or not str(local_dir).strip():
+            result["status"] = "error"
+            result["error"] = {
+                "type": "ValidationError",
+                "message": "Invalid local directory: empty",
+            }
+            return result
+
         # 1) Token (skip for check-only)
         hf_token = os.environ.get("HF_TOKEN")
         if not check_only and not hf_token:

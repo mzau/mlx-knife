@@ -220,3 +220,100 @@ class TestEmptyNameDoesNotDelete:
             "zebra-model",
         ]
         assert list(hub.iterdir()), "rm deleted a cached model for an empty spec"
+
+
+def _working_directory_with_files(root, blank):
+    """A working directory that holds files — and, for a blank spec, a directory really named
+    after it, so the spec fails on the guard rather than on a path that does not exist."""
+    cwd = root / "cwd"
+    cwd.mkdir()
+    (cwd / "notes.md").write_text("private")
+    if blank.strip() == "" and blank:
+        (cwd / blank).mkdir()
+        (cwd / blank / "notes.md").write_text("private")
+    return cwd
+
+
+class TestEmptyPathDoesNotPushOrConvert:
+    """`push` and `convert` never call the resolver, so the guard above does not reach them:
+    they turn the path into `Path("")`, which is the working directory."""
+
+    @pytest.mark.parametrize("spec", ["", "   "])
+    def test_push_does_not_take_the_working_directory(self, spec, tmp_path, monkeypatch):
+        from mlxk2.operations.push import push_operation
+
+        monkeypatch.chdir(_working_directory_with_files(tmp_path, spec))
+        # Check-only never contacts the Hub, and reports the folder it would have uploaded.
+        result = push_operation(spec, "org/repo", check_only=True)
+        assert result["status"] == "error"
+        assert result["error"]["type"] == "ValidationError"
+        assert result["data"]["local_files_count"] is None, "push counted the working directory"
+
+    def test_push_never_reaches_the_hub(self, tmp_path, monkeypatch):
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        from mlxk2.operations.push import push_operation
+
+        monkeypatch.chdir(_working_directory_with_files(tmp_path, ""))
+        monkeypatch.setenv("HF_TOKEN", "not-a-token")
+        # The hub is replaced wholesale, so nothing can be uploaded even with the guard gone.
+        hub = types.ModuleType("huggingface_hub")
+        hub.HfApi, hub.upload_folder = MagicMock(), MagicMock()
+        errors = types.ModuleType("huggingface_hub.errors")
+        errors.HfHubHTTPError = errors.RepositoryNotFoundError = errors.RevisionNotFoundError = type(
+            "HubError", (Exception,), {})
+        monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+        monkeypatch.setitem(sys.modules, "huggingface_hub.errors", errors)
+
+        result = push_operation("", "org/repo")
+        # Unguarded, this called upload_folder(folder_path=".") and reported success.
+        hub.upload_folder.assert_not_called()
+        hub.HfApi.assert_not_called()
+        assert result["error"]["type"] == "ValidationError"
+
+    @pytest.mark.parametrize("spec", ["", "   "])
+    def test_convert_does_not_read_the_working_directory(self, spec, tmp_path, monkeypatch):
+        from mlxk2.operations.convert import convert_operation
+
+        monkeypatch.chdir(_working_directory_with_files(tmp_path, spec))
+        target = tmp_path / "out"
+        result = convert_operation(spec, str(target), "repair-index")
+        assert result["error"]["type"] == "ValidationError"
+        assert not target.exists(), "convert wrote a workspace from the working directory"
+
+    @pytest.mark.parametrize("spec", ["", "   "])
+    def test_convert_does_not_write_into_the_working_directory(self, spec, tmp_path, monkeypatch):
+        from mlxk2.operations.convert import convert_operation
+
+        source = _make_model_dir(tmp_path / "src")
+        cwd = tmp_path / "empty-cwd"
+        cwd.mkdir()  # repair-index accepts an empty target, so this is the case that wrote
+        monkeypatch.chdir(cwd)
+        result = convert_operation(str(source), spec, "repair-index")
+        assert result["error"]["type"] == "ValidationError"
+        assert list(cwd.iterdir()) == [], "convert wrote into the working directory"
+
+    def test_convert_cli_does_not_read_an_empty_name_as_the_workspace_home(self, tmp_path):
+        # The CLI resolves bare names into MLXK_WORKSPACE_HOME before the operation runs, and
+        # `home / ""` is the home itself — a guard in the operation alone would never see "".
+        import json
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        home = tmp_path / "workspaces"
+        _make_model_dir(home / "zebra-model")
+        target = tmp_path / "out"
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("MLXK", "HF_"))}
+        env.update(MLXK_WORKSPACE_HOME=str(home), HF_HOME=str(tmp_path / "hf"),
+                   PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+        done = subprocess.run(
+            [sys.executable, "-m", "mlxk2.cli", "convert", "", str(target), "--repair-index", "--json"],
+            text=True, capture_output=True, env=env, cwd=tmp_path, timeout=120,
+        )
+        result = json.loads(done.stdout)
+        assert result["error"]["type"] == "ValidationError", done.stdout + done.stderr
+        assert not target.exists(), "convert took the workspace home as its source"

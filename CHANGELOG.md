@@ -120,6 +120,15 @@
   and still do: `mlxk health ""` checks every model, the way `mlxk health` without a pattern
   does, and `serve --model ""` starts without a preloaded model. Present since 2.0.5.
 
+- An empty path named the working directory in `push` and `convert`, the two verbs that take a
+  path without resolving a name. `mlxk push "" <repo>` uploaded the working directory, and
+  `mlxk convert "" <target>` converted it — with `MLXK_WORKSPACE_HOME` set, the workspace home
+  instead — and left a partial workspace at the target once the output check failed; an empty
+  target could write into the working directory. Both refuse an empty or whitespace-only path
+  with `ValidationError`, the type the JSON API names for empty input. Present since
+  2.0.0-alpha.2 for `push` and 2.0.4-beta.5 for `convert`.
+
+
 - `mlxk run` answered a model location it could not read with the name of one of its own
   variables — `local variable 'model_path' referenced before assignment`, typed `InternalError`
   under `--json` — when the model cache was unreadable, and with a Python traceback when the
