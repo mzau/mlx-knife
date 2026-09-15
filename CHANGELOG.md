@@ -157,6 +157,11 @@
   untrue for vision, which has a temperature of its own on one surface and a default prompt on
   both. SERVER-HANDBOOK → *POST /v1/chat/completions* states the server side.
 
+- SERVER-HANDBOOK defines a `null` `context_length` on `GET /v1/models` by what it means: no
+  window is known for the model, so a text model has no window guard — unknown, not unlimited.
+  It said `null` meant the model's `config.json` states no window, which is more than the server
+  checks. *GET /v1/models* and *Token Limits*.
+
 - ADR-020 gains a correction: its note that Whisper ignores `temperature` is wrong — the value
   reaches the decoder, and `0.0` selects an exact argmax. What is true was never written down:
   mlx-audio's own default is a schedule of rising temperatures the decoder escalates through when

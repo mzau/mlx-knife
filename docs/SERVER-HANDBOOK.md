@@ -632,7 +632,10 @@ when a request names it.
 - `object`: Always `"model"` (OpenAI-compatible)
 - `owned_by`: `"mlx-knife-2.0"` for cached models, `"workspace"` for workspace models
 - `permission`: Empty array (OpenAI legacy field)
-- `context_length`: Maximum context window in tokens, read from the model's `config.json`; `null` when the config states none — then no window guard applies and the generation budget is the ceiling alone
+- `context_length`: The model's context window in tokens, taken from its `config.json`, or `null`
+  when none is known. Text models are budgeted against it; with `null` they have no window guard and
+  the budget is the ceiling alone (see [Token Limits](#token-limits-text-vs-multimodal-models)).
+  `null` means unknown, not unlimited.
 - `loaded`: `true` on the model in memory now, so a request naming this `id` is served without
   loading it; `false` on every other model, and on all of them while nothing is loaded or a model is
   loading. It says where the weights are, not that the next request will succeed.
@@ -834,8 +837,8 @@ the request: a vision-capable model answering a text-only chat uses the vision c
 - **Full window:** `context_length − prompt tokens ≤ 0` is rejected before any token is generated
   with **400** `context_length_exceeded`; the error's `detail` carries `prompt_tokens` and
   `context_length`. On `stream: true` the reject is still an HTTP status, never an SSE event.
-- **Unknown window:** when the model's `config.json` states no context length (`/v1/models`
-  reports `null`), there is no guard — the budget is the ceiling alone.
+- **Unknown window:** when no context window is known for the model (`/v1/models` reports `null`),
+  there is no guard — the budget is the ceiling alone.
 
 **Example:** Llama-3.2-3B (128K context), 500-token prompt, no `max_tokens` → budget 32768.
 The same request with `"max_tokens": 200000` → budget 130572, the window's remainder.
@@ -1604,7 +1607,7 @@ keep their own ceiling with no window guard; see
 | Failed stream | `finish_reason: "error"`, `error` a message string, then a second chunk saying `"stop"` and `[DONE]` | `finish_reason: null`, `error` an object (`type`, `message`), stream ends there | The only breaking change in this release. |
 | Prompt fills the window | budget ignored the prompt; prompt + output could exceed the window | **400** `context_length_exceeded` before any token | `detail.prompt_tokens` / `detail.context_length` say how much to shorten. |
 | `max_tokens` below 1 | accepted | **400** `validation_error` | |
-| `/v1/models` `context_length` | `4096` when `config.json` states no window | `null` | The number was invented; `null` means "no window guard". |
+| `/v1/models` `context_length` | `4096` when no window was known | `null` | The number was invented; `null` means "no window guard". |
 | Vision / audio-chat default | 2048 on the server, inherited from mlx-vlm on the CLI | 2048, set explicitly on both | No wire change. |
 | `max_completion_tokens` | ignored | ignored | Unchanged — use `max_tokens`. |
 
@@ -1961,7 +1964,7 @@ When switching from Vision or Audio to Text model mid-conversation:
   - **NEW:** `finish_reason: "length"` when the budget cut the answer.
   - **NEW: 400** `context_length_exceeded` — prompt fills the window, rejected before any token; `detail` carries `prompt_tokens` and `context_length`. A status even on `stream: true`.
   - **CHANGED:** `max_tokens` below 1 → **400** `validation_error`.
-  - **CHANGED:** `/v1/models` `context_length` is `null` when the config states no window (was a hard-coded `4096`).
+  - **CHANGED:** `/v1/models` `context_length` is `null` when no window is known for the model (was a hard-coded `4096`).
   - **CHANGED:** a failed stream carries a top-level `error` object, keeps `finish_reason: null`, and ends.
   - **DOCUMENTED:** closing a streaming connection stops the generation; nothing is logged for it. Behaviour unchanged.
   - **FIXED:** **413** and **422** carry `payload_too_large` / `capability_not_supported`; both reported `internal_error` before, so a deliberate reject looked like a server fault.
