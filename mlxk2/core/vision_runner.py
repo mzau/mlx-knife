@@ -194,9 +194,9 @@ class VisionRunner:
         images: Sequence[Tuple[str, bytes]] | None,
         audio: Sequence[Tuple[str, bytes]] | None = None,
         max_tokens: Optional[int] = None,
-        temperature: float = 0.4,
-        top_p: float = 0.9,
-        repetition_penalty: float = 1.0,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
         image_id_map: Optional[Dict[str, int]] = None,
         total_images: Optional[int] = None,
         stop: Optional[Sequence[str]] = None,
@@ -208,9 +208,9 @@ class VisionRunner:
             images: List of (filename, bytes) tuples for images
             audio: List of (filename, bytes) tuples for audio files
             max_tokens: Maximum tokens to generate (None: the documented vision default)
-            temperature: Sampling temperature
-            top_p: Top-p sampling
-            repetition_penalty: Repetition penalty
+            temperature: Sampling temperature (None: not passed on, mlx-vlm's default applies)
+            top_p: Top-p sampling (None: not passed on, mlx-vlm's default applies)
+            repetition_penalty: Repetition penalty (None: not passed on, mlx-vlm's default applies)
             image_id_map: Optional mapping of content_hash -> image_id for stable
                          numbering across requests. If None, uses request-scoped IDs.
             total_images: Total number of images in full batch (for chunking context)
@@ -247,6 +247,8 @@ class VisionRunner:
                 "verbose": self.verbose,
                 "max_tokens": effective_max_tokens,
             }
+            # Every caller sets the three sampling values, so a number here would be a
+            # second policy nobody reads. Unset means: let mlx-vlm's own default stand.
             if temperature is not None:
                 gen_kwargs["temperature"] = temperature
             if top_p is not None:
