@@ -426,6 +426,47 @@ def test_models_rows_mark_a_preload_outside_the_home(tmp_path, monkeypatch):
         assert [(m["id"], m["loaded"]) for m in rows] == [(str(external), True), ("a-model", False)]
 
 
+def test_models_rows_carry_the_window_of_the_model_object(tmp_path, monkeypatch):
+    """Each row's `context_length` is the one build_model_object read — for workspace, cache and
+    preloaded rows alike. The configs on disk state another number, which a second reading would
+    report instead."""
+    from pathlib import Path
+
+    stated = '{"model_type": "llama", "max_position_embeddings": 8192}'
+    ws_home = tmp_path / "workspaces"
+    ws_home.mkdir()
+    _make_workspace(ws_home, "ws-model", config=stated)
+    external = _make_workspace(tmp_path / "elsewhere", "ext-model", config=stated)
+    monkeypatch.setenv("MLXK_WORKSPACE_HOME", str(ws_home))
+
+    windows = {"ws-model": 1001, "org/cache-model": 1002, "ext-model": 1003}
+
+    def build(hf_name, model_root, selected_path):
+        window = windows.get(hf_name) or windows[Path(hf_name).name]
+        return {"health": "healthy", "runtime_compatible": True, "context_length": window}
+
+    client = TestClient(app)
+    with patch('mlxk2.core.server_base.get_current_model_cache') as mock_cache, \
+         patch('mlxk2.core.cache.cache_dir_to_hf') as mock_cache_to_hf, \
+         patch('mlxk2.operations.common.build_model_object', side_effect=build), \
+         patch('mlxk2.core.server_base._preload_model', str(external)):
+        d1 = MagicMock()
+        d1.name = "models--org--cache-model"
+        snapshot_dir = MagicMock()
+        snapshot_dir.exists.return_value = True
+        snapshot_dir.iterdir.return_value = []
+        d1.__truediv__ = lambda self, x: snapshot_dir
+        mock_cache.return_value.exists.return_value = True
+        mock_cache.return_value.iterdir.return_value = [d1]
+        mock_cache_to_hf.return_value = "org/cache-model"
+
+        rows = client.get("/v1/models").json()["data"]
+
+    assert {m["id"]: m["context_length"] for m in rows} == {
+        str(external): 1003, "org/cache-model": 1002, "ws-model": 1001,
+    }
+
+
 def test_models_listing_runs_off_the_event_loop():
     """The scan reads every model directory; on the loop, GET /health waited for it."""
     import asyncio

@@ -18,15 +18,6 @@ def _get_logger():
     return get_logger()
 
 
-def _best_effort_context_length(model_path) -> Optional[int]:
-    """Read the model's context length, returning None on any failure."""
-    try:
-        from ...runner import get_model_context_length
-        return get_model_context_length(str(model_path))
-    except Exception:
-        return None
-
-
 def handle_list_models(
     get_cache_fn: Callable[[], Path],
     preload_model: Optional[str],
@@ -98,7 +89,7 @@ def handle_list_models(
                     "object": "model",
                     "owned_by": "workspace",
                     "permission": [],
-                    "context_length": _best_effort_context_length(ws_dir),
+                    "context_length": model_obj.get("context_length"),
                     "loaded": _loaded(ws_dir),
                 })
                 listed_workspace_ids[str(ws_dir.resolve())] = ws_dir.name
@@ -141,17 +132,12 @@ def handle_list_models(
             if _is_embedder(model_obj):
                 continue
 
-            # Get model context length (best effort)
-            context_length = None
-            if selected_path:
-                context_length = _best_effort_context_length(selected_path)
-
             model_list.append({
                 "id": model_name,
                 "object": "model",
                 "owned_by": "mlx-knife-2.0",
                 "permission": [],
-                "context_length": context_length,
+                "context_length": model_obj.get("context_length"),
                 "loaded": _loaded(model_dir),
             })
         except Exception as e:
@@ -194,7 +180,7 @@ def handle_list_models(
                         "object": "model",
                         "owned_by": "workspace",
                         "permission": [],
-                        "context_length": _best_effort_context_length(preload_path),
+                        "context_length": model_obj.get("context_length"),
                         "loaded": _loaded(preload_path),
                     })
             elif not_runnable_reason:
