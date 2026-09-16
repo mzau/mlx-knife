@@ -75,6 +75,14 @@
   server as it was before every model operation moved to one worker thread, and passes now. The
   health and model-list rows check the new body and `loaded`.
 
+- Two tests in `test_vision_chunk_streaming.py` exercised no server code.
+  `test_sse_format_compliance` sent its request through patches that got HTTP 400 before any stream
+  existed, so its per-event checks never ran; it now streams a chunked vision request through the
+  real server wiring and checks the OpenAI fields of every event.
+  `test_multi_chunk_streams_multiple_content_events` checked a hand-written event stream in its own
+  app against itself and is removed. The two stream wrappers in `server_base` that nothing called,
+  `generate_chat_stream` and `_stream_vision_chunks`, are removed as well.
+
 ### Changed
 
 - `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`

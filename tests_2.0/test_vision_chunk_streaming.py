@@ -9,7 +9,8 @@ waiting for all chunks to finish.
 import json
 from contextlib import contextmanager
 from typing import Iterator
-from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -81,49 +82,6 @@ def _parse_sse_events(resp) -> list:
 class TestVisionChunkStreamingSSEFormat:
     """Tests for vision per-chunk SSE streaming format (mocked endpoint)."""
 
-    def test_multi_chunk_streams_multiple_content_events(self):
-        """Multi-chunk vision request should emit SSE event per chunk."""
-        # This test validates the SSE format by mocking _stream_vision_chunks directly
-        from fastapi import FastAPI
-        from fastapi.responses import StreamingResponse
-
-        test_app = FastAPI()
-
-        async def mock_stream_gen():
-            yield 'data: {"id":"test","object":"chat.completion.chunk","created":1234,"model":"test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'
-            yield 'data: {"id":"test","object":"chat.completion.chunk","created":1234,"model":"test","choices":[{"index":0,"delta":{"content":"Chunk 1 output\\n\\n"},"finish_reason":null}]}\n\n'
-            yield 'data: {"id":"test","object":"chat.completion.chunk","created":1234,"model":"test","choices":[{"index":0,"delta":{"content":"Chunk 2 output\\n\\n"},"finish_reason":null}]}\n\n'
-            yield 'data: {"id":"test","object":"chat.completion.chunk","created":1234,"model":"test","choices":[{"index":0,"delta":{"content":"Chunk 3 output"},"finish_reason":null}]}\n\n'
-            yield 'data: {"id":"test","object":"chat.completion.chunk","created":1234,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
-            yield "data: [DONE]\n\n"
-
-        @test_app.post("/test-stream")
-        async def test_endpoint():
-            return StreamingResponse(
-                mock_stream_gen(),
-                media_type="text/event-stream"
-            )
-
-        client = TestClient(test_app)
-
-        with client.stream("POST", "/test-stream") as resp:
-            assert resp.status_code == 200
-
-            events = _parse_sse_events(resp)
-
-            # Should have: role event + 3 content events + final event = 5 events
-            assert len(events) == 5, f"Expected 5 events, got {len(events)}"
-
-            # First event should have role
-            assert events[0]["choices"][0]["delta"].get("role") == "assistant"
-
-            # Content events should have content
-            content_events = [e for e in events if e["choices"][0]["delta"].get("content")]
-            assert len(content_events) == 3, f"Expected 3 content events, got {len(content_events)}"
-
-            # Final event should have finish_reason
-            assert events[-1]["choices"][0]["finish_reason"] == "stop"
-
     def test_single_chunk_uses_emulated_sse(self):
         """Single-chunk requests should use existing SSE emulation (batch response).
 
@@ -151,64 +109,50 @@ class TestVisionChunkStreamingSSEFormat:
             assert events[-1]["choices"][0]["finish_reason"] == "stop"
 
     def test_sse_format_compliance(self):
-        """SSE events should follow OpenAI format."""
-        client = TestClient(app)
+        """A chunked stream through the real server wiring: role, one content event per chunk, the
+        finish reason — every event with the fields an OpenAI client reads.
 
-        with patch('mlxk2.core.server_base._stream_vision_chunks') as mock_stream:
-            async def mock_stream_gen(*args, **kwargs):
-                yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n'
-                yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"test","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n'
-                yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
-                yield "data: [DONE]\n\n"
+        Runs a real ``VisionRunner`` per chunk with only the model stubbed, so a handler that
+        rejects the request or a stream that loses a field fails here.
+        """
+        routed = VisionRunner("/mock/path", "mock-vision", verbose=False)
 
-            mock_stream.return_value = mock_stream_gen()
+        def load(self):
+            self._apply_chat_template = lambda *args, **kwargs: "prompt"
+            self._generate = lambda *args, **kwargs: SimpleNamespace(
+                text="an answer", finish_reason="stop", prompt_tokens=3, generation_tokens=6
+            )
 
-            mock_runner = MagicMock()
-            mock_runner.model_path = "/mock/path"
-            mock_runner.model_name = "mock-vision"
+        image = {"type": "image_url", "image_url": {"url": PIXEL_PNG}}
+        payload = {
+            "model": "mock-vision-model", "stream": True, "chunk": 1,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Test"}, image, image]}],
+        }
+        with patch.object(VisionRunner, "load_model", load), \
+             patch("mlxk2.core.server_base.get_or_load_model", return_value=routed):
+            with TestClient(app).stream("POST", "/v1/chat/completions", json=payload) as resp:
+                assert resp.status_code == 200, resp.read()
+                events = _parse_sse_events(resp)
 
-            with patch('mlxk2.core.server_base.get_or_load_model', return_value=mock_runner), \
-                 patch('mlxk2.core.server_base.isinstance', side_effect=lambda obj, cls: True):
-                payload = {
-                    "model": "mock-vision-model",
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Test"},
-                            {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}},
-                            {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}},
-                        ]
-                    }],
-                    "stream": True,
-                    "chunk": 1,
-                }
-
-                with client.stream("POST", "/v1/chat/completions", json=payload) as resp:
-                    events = _parse_sse_events(resp)
-
-                    for event in events:
-                        # Required fields per OpenAI spec
-                        assert "id" in event, "Missing 'id' field"
-                        assert "object" in event, "Missing 'object' field"
-                        assert event["object"] == "chat.completion.chunk"
-                        assert "choices" in event, "Missing 'choices' field"
-                        assert len(event["choices"]) > 0
-
-                        choice = event["choices"][0]
-                        assert "index" in choice, "Missing 'index' in choice"
-                        assert "delta" in choice, "Missing 'delta' in choice"
-
+        assert [bool(e["choices"][0]["delta"].get("content")) for e in events] == [False, True, True, False]
+        assert events[0]["choices"][0]["delta"].get("role") == "assistant"
+        assert events[-1]["choices"][0]["finish_reason"] == "stop"
+        for event in events:
+            assert event["object"] == "chat.completion.chunk" and event["id"] == events[0]["id"]
+            assert event["choices"][0]["index"] == 0 and "delta" in event["choices"][0]
 
 def _run_stream_vision_chunks(runner_cls, images) -> list:
-    """Drive _stream_vision_chunks with a stand-in VisionRunner; returns the raw SSE strings."""
+    """Drive stream_vision_chunks with a stand-in VisionRunner; returns the raw SSE strings."""
     import asyncio
-    from mlxk2.core.server_base import _stream_vision_chunks
+    import threading
+
+    from mlxk2.core.server.streaming import stream_vision_chunks
 
     async def run_generator():
         events = []
         # Patch at the source module where VisionRunner is defined
         with patch('mlxk2.core.vision_runner.VisionRunner', runner_cls):
-            gen = _stream_vision_chunks(
+            gen = stream_vision_chunks(
                 model_path="/mock/path",
                 model_name="mock-model",
                 prompt="Test prompt",
@@ -222,6 +166,7 @@ def _run_stream_vision_chunks(runner_cls, images) -> list:
                 completion_id="test-123",
                 created=1234567890,
                 model="test-model",
+                shutdown_event=threading.Event(),
             )
             async for event in gen:
                 events.append(event)
@@ -234,7 +179,7 @@ class TestVisionChunkStreamingIntegration:
     """Integration tests that exercise the actual streaming function."""
 
     def test_stream_vision_chunks_generator_format(self):
-        """Test _stream_vision_chunks yields valid SSE format."""
+        """stream_vision_chunks yields valid SSE format."""
 
         # Mock VisionRunner. The stream reports the runner's last_finish_reason as-is:
         # a runner that declares nothing yields null, so the mock says "stop" explicitly.

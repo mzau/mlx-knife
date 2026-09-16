@@ -242,35 +242,6 @@ async def generate_completion_stream(
         yield chunk
 
 
-
-async def generate_chat_stream(
-    runner: MLXRunner,
-    messages: List[ChatMessage],
-    request: ChatCompletionRequest,
-) -> AsyncGenerator[str, None]:
-    """Generate streaming chat completion response.
-
-    Delegates to extracted streaming module (Phase 1 refactoring).
-    """
-    message_dicts = format_chat_messages_for_runner(messages)
-    max_tokens = get_effective_max_tokens(request.max_tokens)
-    stop = request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None)
-
-    async for chunk in _generate_chat_stream_impl(
-        runner=runner,
-        messages=message_dicts,
-        request_model=request.model,
-        max_tokens=max_tokens,
-        temperature=get_effective_temperature(request.temperature),
-        top_p=request.top_p,
-        repetition_penalty=request.repetition_penalty,
-        stop=stop,
-        shutdown_event=_shutdown_event,
-    ):
-        yield chunk
-    
-
-
 def format_chat_messages_for_runner(messages: List[ChatMessage]) -> List[Dict[str, str]]:
     """Convert chat messages to format expected by MLXRunner.
     
@@ -927,48 +898,6 @@ def _process_vision_chunks_server(
         audio=audio,
         stop=stop,
     )
-
-
-async def _stream_vision_chunks(
-    model_path,
-    model_name: str,
-    prompt: str,
-    images: List[tuple],
-    chunk_size: int,
-    image_id_map: Dict[str, int],
-    max_tokens: Optional[int],
-    temperature: float,
-    top_p: float,
-    repetition_penalty: float,
-    completion_id: str,
-    created: int,
-    model: str,
-    audio: Optional[List[tuple]] = None,
-    stop: Optional[List[str]] = None,
-) -> AsyncGenerator[str, None]:
-    """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
-
-    Delegates to extracted streaming module (Phase 1 refactoring).
-    """
-    async for chunk in _stream_vision_chunks_impl(
-        model_path=model_path,
-        model_name=model_name,
-        prompt=prompt,
-        images=images,
-        chunk_size=chunk_size,
-        image_id_map=image_id_map,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        repetition_penalty=repetition_penalty,
-        completion_id=completion_id,
-        created=created,
-        model=model,
-        shutdown_event=_shutdown_event,
-        audio=audio,
-        stop=stop,
-    ):
-        yield chunk
 
 
 async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner: Any = None) -> ChatCompletionResponse:
