@@ -22,14 +22,17 @@ _PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(mlxk2.__file__))
 # How the worker starts. `-m` used to put the start directory first on its module search path,
 # so a `mlxk2/` or a `fastapi.py` lying there ran instead of the installed package - and `clone`
 # copies every file of a model repository into the workspace. PYTHONSAFEPATH below keeps that
-# directory off; this puts the root above on instead, unless it is on the path already.
+# directory off; this puts the root above first instead, unless the module's package already
+# resolves from it - on the path somewhere behind another copy is not enough.
 _WORKER_BOOTSTRAP = (
     "import sys\n"
     "module, root = sys.argv[1:3]\n"
     "del sys.argv[1:]\n"
     "import os.path, runpy\n"
-    "real = os.path.realpath(root)\n"
-    "if not any(os.path.realpath(p) == real for p in sys.path):\n"
+    "from importlib.util import find_spec\n"
+    "spec = find_spec(module.partition('.')[0])\n"
+    "where = spec and (next(iter(spec.submodule_search_locations or ()), None) or spec.origin)\n"
+    "if not (where and os.path.dirname(os.path.realpath(where)) == os.path.realpath(root)):\n"
     "    sys.path.insert(0, root)\n"
     "runpy.run_module(module, run_name='__main__', alter_sys=True)\n"
 )

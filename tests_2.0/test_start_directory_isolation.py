@@ -113,11 +113,25 @@ def test_the_worker_runs_no_module_from_the_start_directory(start_directory, pla
     assert exit_code == 0, f"worker exited {exit_code}"
 
 
-def test_the_worker_imports_the_package_the_supervisor_imported(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "on_pythonpath, untouched",
+    [
+        (("elsewhere",), False),                 # the root is not on the path at all
+        (("elsewhere", "root"), False),          # it is, behind the other copy
+        (("elsewhere", "alias"), False),         # ... under another name
+        (("root", "elsewhere"), True),           # it comes first anyway
+        (("bystander", "root", "elsewhere"), True),  # it wins anyway, behind a stranger
+    ],
+    ids=["absent", "behind", "behind-as-alias", "already-first", "already-winning"],
+)
+def test_the_worker_imports_the_package_the_supervisor_imported(tmp_path, on_pythonpath, untouched):
     """`python -m mlxk2.cli serve` inside a checkout must not hand the worker another copy.
 
     The bootstrap runs against a fake package here, so the three copies can be told apart:
-    the supervisor's root, one on PYTHONPATH, one in the working directory.
+    the supervisor's root, one on PYTHONPATH, one in the working directory. Being on the path
+    is not the same as coming first - the root may sit on PYTHONPATH behind the other copy,
+    also under another name. And where the root wins on its own, the path has to stay as it
+    is: in an ordinary install the root is site-packages, which belongs behind the stdlib.
     """
     root = tmp_path / "check out ü"          # spaces and non-ASCII survive as argv
     elsewhere = tmp_path / "elsewhere"
@@ -130,21 +144,34 @@ def test_the_worker_imports_the_package_the_supervisor_imported(tmp_path, monkey
             "from . import TAG\n"                      # a relative import needs __package__
             "main = sys.modules['__main__']\n"
             "print(TAG, __name__, main.__spec__.name, sys.argv == [__file__])\n"
+            "print(sys.path)\n"
             "sys.exit(7)\n"
         )
+    places = {"root": root, "elsewhere": elsewhere, "alias": tmp_path / "alias",
+              "bystander": tmp_path / "bystander"}
+    places["alias"].symlink_to(root)
+    places["bystander"].mkdir()
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONSAFEPATH", "PYTHONPATH")}
-    env["PYTHONPATH"] = str(elsewhere)
+    env["PYTHONPATH"] = os.pathsep.join(str(places[name]) for name in on_pythonpath)
+    worker_env = {**env, "PYTHONSAFEPATH": "1"}
 
     done = subprocess.run(
         [sys.executable, "-c", serve_mod._WORKER_BOOTSTRAP, "pkg.mod", str(root)],
-        cwd=here, env={**env, "PYTHONSAFEPATH": "1"},   # the worker's environment
-        capture_output=True, text=True, timeout=CHILD_TIMEOUT,
+        cwd=here, env=worker_env, capture_output=True, text=True, timeout=CHILD_TIMEOUT,
     )
 
     # Same shape as `python -m pkg.mod`: run as __main__, argv[0] the module file, the spec
     # naming the module, and the module's own exit code passed through.
-    assert done.stdout.split() == ["root", "__main__", "pkg.mod", "True"], done.stderr
+    shape, path = (done.stdout.splitlines() + ["", ""])[:2]
+    assert shape.split() == ["root", "__main__", "pkg.mod", "True"], done.stderr
     assert done.returncode == 7
+
+    if untouched:
+        plain = subprocess.run(
+            [sys.executable, "-c", "import sys; print(sys.path)"],
+            cwd=here, env=worker_env, capture_output=True, text=True, timeout=CHILD_TIMEOUT,
+        )
+        assert path == plain.stdout.strip(), "the bootstrap moved a path that already won"
 
     # The control: `-m` is what the fix replaced, and it takes the copy lying in the cwd.
     control = subprocess.run(
