@@ -92,6 +92,12 @@
 - `loaded` on every `GET /v1/models` row: `true` on the model in memory, `false` on the others.
   SERVER-HANDBOOK → *GET /v1/models*.
 
+- `stream_options.include_usage` on `POST /v1/chat/completions` and `POST /v1/completions`, in
+  OpenAI's form: every chunk carries `"usage": null`, and one more chunk before `data: [DONE]` has
+  empty `choices` and the counts for the whole request. A stream cut at a `stop` sequence counts
+  the tokens generated up to the match. Without the option the stream is unchanged; on a batch
+  request it is ignored. SERVER-HANDBOOK → *Token usage in a stream*. Issue #17.
+
 - `benchmarks/tools/chronos_gauge.py` measures `mlxk serve` against `mlx_lm.server` with
   [mlx-chronos](https://github.com/igurss/mlx-chronos): the same protocol against both servers,
   one after the other on the same model and port — time to first token, request and decode
@@ -172,6 +178,11 @@
   30-second windows and takes no budget, so nothing changes there. A `--max-tokens` below 1 on an
   audio run is refused, as on a text run. The `/v1/audio/*` endpoints take no budget field. Present
   since 2.0.4-beta.9. Issue #59.
+
+- `usage` of a vision request split into chunks — more images than `chunk` — reported the token
+  counts of the model's previous request, or the word estimate when there was none: each chunk
+  runs on a runner of its own, and the counts were read afterwards from the model's shared runner.
+  The response carries the sum over its chunks. Present since 2.0.8-beta.1. Issue #76.
 
 - `mlxk run` answered a model location it could not read with the name of one of its own
   variables — `local variable 'model_path' referenced before assignment`, typed `InternalError`

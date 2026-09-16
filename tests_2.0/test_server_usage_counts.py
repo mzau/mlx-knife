@@ -52,6 +52,12 @@ def test_a_test_double_does_not_pass_as_a_count():
     assert usage_of(Mock(), "p", "g", _estimate)["prompt_tokens"] == 99
 
 
+def test_a_bool_does_not_pass_as_a_count():
+    runner = CountingRunner()
+    runner.last_prompt_tokens = True
+    assert usage_of(runner, "p", "g", _estimate)["prompt_tokens"] == 99
+
+
 def test_the_chat_response_carries_them():
     payload = {"model": "org/model", "messages": [{"role": "user", "content": "Hi"}]}
     with patch("mlxk2.core.server_base.get_or_load_model", return_value=CountingRunner()):

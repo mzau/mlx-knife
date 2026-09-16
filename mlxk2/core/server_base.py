@@ -35,6 +35,8 @@ from .server.streaming import (
     generate_chat_stream as _generate_chat_stream_impl,
     stream_vision_chunks as _stream_vision_chunks_impl,
     emulate_sse_stream as _emulate_sse_stream_impl,
+    TokenCounts,
+    count_tokens,
     finish_reason_of,
     log_generation_end,
     usage_of,
@@ -101,6 +103,10 @@ _embed_proxy_client: Optional[Any] = None  # httpx.AsyncClient — httpx is impo
 logger = get_logger()
 
 
+class StreamOptions(BaseModel):
+    include_usage: Optional[bool] = False
+
+
 class CompletionRequest(BaseModel):
     model: str
     prompt: Union[str, List[str]]
@@ -108,6 +114,7 @@ class CompletionRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = 0.9
     stream: Optional[bool] = False
+    stream_options: Optional[StreamOptions] = None  # read on streams only
     stop: Optional[Union[str, List[str]]] = None
     repetition_penalty: Optional[float] = 1.1
 
@@ -125,9 +132,15 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = 0.9
     stream: Optional[bool] = False
+    stream_options: Optional[StreamOptions] = None  # read on streams only
     stop: Optional[Union[str, List[str]]] = None
     repetition_penalty: Optional[float] = 1.1
     chunk: Optional[int] = None  # Vision batch processing (None = use ENV/default)
+
+
+def _include_usage(request: Union[CompletionRequest, ChatCompletionRequest]) -> bool:
+    """Whether a stream ends with its token counts (``stream_options.include_usage``)."""
+    return bool(request.stream_options and request.stream_options.include_usage)
 
 
 class CompletionResponse(BaseModel):
@@ -224,9 +237,10 @@ async def generate_completion_stream(
         repetition_penalty=request.repetition_penalty,
         stop=stop,
         shutdown_event=_shutdown_event,
+        include_usage=_include_usage(request),
     ):
         yield chunk
-    
+
 
 
 async def generate_chat_stream(
@@ -308,11 +322,6 @@ def get_effective_max_tokens_vision(requested_max_tokens: Optional[int]) -> int:
     if _default_max_tokens is not None:
         return _default_max_tokens
     return DEFAULT_MAX_TOKENS_VISION
-
-
-def count_tokens(text: str) -> int:
-    """Rough token count estimation."""
-    return int(len(text.split()) * 1.3)  # Approximation, convert to int
 
 
 def _request_has_images(messages: List[ChatMessage]) -> bool:
@@ -501,6 +510,7 @@ async def _handle_audio_chat_completion(request: ChatCompletionRequest) -> ChatC
         get_audio_model_fn=get_or_load_audio_model,
         emulate_sse_fn=_emulate_sse_stream,
         count_tokens_fn=count_tokens,
+        include_usage=_include_usage(request),
     )
     # Return StreamingResponse directly or convert dict to Pydantic model
     if isinstance(result, StreamingResponse):
@@ -877,6 +887,7 @@ async def _handle_text_chat_completion(request: ChatCompletionRequest, runner: A
         stream=request.stream,
         stop=stop,
         runner=runner,
+        include_usage=_include_usage(request),
     )
     # Return StreamingResponse directly or convert dict to Pydantic model
     if isinstance(result, StreamingResponse):
@@ -897,7 +908,7 @@ def _process_vision_chunks_server(
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
     stop: Optional[List[str]] = None,
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, Optional[str], TokenCounts]:
     """Process vision images in batches with isolated model instances per chunk.
 
     Delegates to extracted chat handler module (Phase 1 refactoring).
@@ -979,6 +990,7 @@ async def _handle_vision_chat_completion(request: ChatCompletionRequest, runner:
         chunk_size_request=request.chunk,
         stop=stop,
         runner=runner,
+        include_usage=_include_usage(request),
     )
     # Return StreamingResponse directly or convert dict to Pydantic model
     if isinstance(result, StreamingResponse):
@@ -992,11 +1004,11 @@ async def _emulate_sse_stream(
     model: str,
     content: str,
     finish_reason: Optional[str] = None,
+    usage: Optional[Dict[str, int]] = None,
 ) -> AsyncGenerator[str, None]:
     """Emulate SSE streaming for vision models (batch response as SSE events).
 
-    Delegates to extracted streaming module (Phase 1 refactoring). The default
-    keeps callers that report no stop reason (audio chat) on four arguments.
+    Delegates to extracted streaming module (Phase 1 refactoring).
     """
     async for chunk in _emulate_sse_stream_impl(
         completion_id=completion_id,
@@ -1004,6 +1016,7 @@ async def _emulate_sse_stream(
         model=model,
         content=content,
         finish_reason=finish_reason,
+        usage=usage,
     ):
         yield chunk
 

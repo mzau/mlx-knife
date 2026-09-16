@@ -13,24 +13,39 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from threading import Event
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeGuard
 
 from ...errors import internal_error
 from .inference import drive, in_worker
 from ..runner.token_limits import reported_finish_reason
 
 
-def _stream_error(payload: dict, exc: Exception) -> str:
+def _event(payload: dict, include_usage: bool = False) -> str:
+    """One SSE event. A client that asked for usage finds ``"usage": null`` on every chunk but the last."""
+    if include_usage:
+        payload = {**payload, "usage": None}
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _usage_event(completion_id: str, chunk_object: str, created: int, model: str, usage: Dict[str, int]) -> str:
+    """The chunk OpenAI ends such a stream with, before ``[DONE]``: no choices, the request's counts."""
+    return _event({
+        "id": completion_id, "object": chunk_object, "created": created,
+        "model": model, "choices": [], "usage": usage,
+    })
+
+
+def _stream_error(payload: dict, exc: Exception, include_usage: bool = False) -> str:
     """Terminal SSE event for a stream that failed part-way.
 
     ``finish_reason`` stays ``None``: it says why the *model* stopped, and a backend
     fault is not a generation outcome — OpenAI's enum has no value for it. The signal
     is the ADR-004 ``error`` object, which is where an OpenAI client looks (its SDK
     raises on this key and never reads the choice). The caller returns afterwards:
-    no trailing chunk, no ``[DONE]`` — the stream did not complete.
+    no trailing chunk, no usage chunk, no ``[DONE]`` — the stream did not complete.
     """
     payload["error"] = internal_error(str(exc)).to_dict()
-    return f"data: {json.dumps(payload)}\n\n"
+    return _event(payload, include_usage)
 
 if TYPE_CHECKING:
     from ..runner import MLXRunner
@@ -60,14 +75,46 @@ def stopped_on_sequence(runner) -> bool:
     return bool(getattr(runner, "last_stopped_on_sequence", False))
 
 
-def _counted(runner, attribute: str, text: str, estimate) -> int:
-    """One real token count, or the estimate when the runner has none.
+def _is_count(value: Any) -> TypeGuard[int]:
+    """An int, not merely present: a runner that recorded nothing leaves ``None``, a test double
+    answers every attribute with another mock, and a bool is an int to Python."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
-    The value must be an int, not merely present: a runner that recorded nothing leaves
-    ``None``, and a test double answers every attribute with another mock.
-    """
+
+def _counted(runner, attribute: str, text: str, estimate) -> int:
+    """One real token count, or the estimate when the runner has none."""
     counted = getattr(runner, attribute, None)
-    return counted if isinstance(counted, int) else estimate(text)
+    return counted if _is_count(counted) else estimate(text)
+
+
+def count_tokens(text: str) -> int:
+    """Rough token count estimation."""
+    return int(len(text.split()) * 1.3)  # Approximation, convert to int
+
+
+class TokenCounts:
+    """One request's token counts, apart from the runner its model shares with other requests.
+
+    The attributes carry the runner's names, so ``usage_of`` reads either. A text stream hands
+    it to the runner, which keeps it current per token; a chunked vision request adds up the
+    runners of its chunks.
+    """
+
+    def __init__(self) -> None:
+        self.last_prompt_tokens: Optional[int] = None
+        self.last_completion_tokens: Optional[int] = None
+        self._chunks = 0
+
+    def add(self, runner: Any) -> None:
+        """Add one chunk's counts. A chunk that recorded none leaves the sum unknown."""
+        for name in ("last_prompt_tokens", "last_completion_tokens"):
+            total = getattr(self, name) if self._chunks else 0
+            counted = getattr(runner, name, None)
+            if _is_count(total) and _is_count(counted):
+                setattr(self, name, total + counted)
+            else:
+                setattr(self, name, None)
+        self._chunks += 1
 
 
 def usage_of(runner, prompt: str, generated: str, estimate) -> Dict[str, int]:
@@ -119,6 +166,7 @@ async def generate_completion_stream(
     repetition_penalty: float,
     stop: Optional[List[str]],
     shutdown_event: Event,
+    include_usage: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Generate streaming completion response.
 
@@ -132,10 +180,13 @@ async def generate_completion_stream(
         repetition_penalty: Repetition penalty
         stop: Stop sequences
         shutdown_event: Thread event to check for shutdown
+        include_usage: End with a usage chunk (``stream_options.include_usage``)
     """
     logger = _get_logger()
     completion_id = f"cmpl-{uuid.uuid4()}"
     created = int(time.time())
+    counts = TokenCounts()
+    pieces: List[str] = []  # the streamed text, for the estimate should the runner count nothing
 
     # Yield initial response
     initial_response = {
@@ -153,7 +204,7 @@ async def generate_completion_stream(
         ]
     }
 
-    yield f"data: {json.dumps(initial_response)}\n\n"
+    yield _event(initial_response, include_usage)
 
     # Stream tokens
     stopped_on_sequence = False
@@ -165,12 +216,15 @@ async def generate_completion_stream(
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
-            use_chat_template=False  # Raw completion mode
+            use_chat_template=False,  # Raw completion mode
+            counts=counts,
         )):
             # Stop promptly if server is shutting down
             if shutdown_event.is_set():
                 raise KeyboardInterrupt()
             token_count += 1
+            if include_usage:
+                pieces.append(token)
 
             chunk_response = {
                 "id": completion_id,
@@ -187,7 +241,7 @@ async def generate_completion_stream(
                 ]
             }
 
-            yield f"data: {json.dumps(chunk_response)}\n\n"
+            yield _event(chunk_response, include_usage)
 
             # Check for stop sequences
             if stop:
@@ -224,7 +278,7 @@ async def generate_completion_stream(
                         }
                     ]
                 }
-                yield f"data: {json.dumps(interrupt_response)}\n\n"
+                yield _event(interrupt_response, include_usage)
             except Exception:
                 pass
         return
@@ -243,7 +297,7 @@ async def generate_completion_stream(
                     "finish_reason": None
                 }
             ],
-        }, e)
+        }, e, include_usage)
         return
 
     # Final response (skip if shutting down)
@@ -265,7 +319,10 @@ async def generate_completion_stream(
         ]
     }
 
-    yield f"data: {json.dumps(final_response)}\n\n"
+    yield _event(final_response, include_usage)
+    if include_usage:
+        usage = usage_of(counts, prompt, "".join(pieces), count_tokens)
+        yield _usage_event(completion_id, "text_completion", created, request_model, usage)
     yield "data: [DONE]\n\n"
 
 
@@ -279,6 +336,7 @@ async def generate_chat_stream(
     repetition_penalty: float,
     stop: Optional[List[str]],
     shutdown_event: Event,
+    include_usage: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Generate streaming chat completion response.
 
@@ -292,10 +350,13 @@ async def generate_chat_stream(
         repetition_penalty: Repetition penalty
         stop: Stop sequences
         shutdown_event: Thread event to check for shutdown
+        include_usage: End with a usage chunk (``stream_options.include_usage``)
     """
     logger = _get_logger()
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
+    counts = TokenCounts()
+    pieces: List[str] = []  # the streamed text, for the estimate should the runner count nothing
 
     # Let the runner format with chat templates (the tokenizer belongs to the
     # model thread as much as the weights do)
@@ -316,7 +377,7 @@ async def generate_chat_stream(
         ]
     }
 
-    yield f"data: {json.dumps(initial_response)}\n\n"
+    yield _event(initial_response, include_usage)
 
     # Stream tokens
     stopped_on_sequence = False
@@ -328,11 +389,14 @@ async def generate_chat_stream(
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             use_chat_template=False,  # Already applied in _format_conversation
-            use_chat_stop_tokens=True   # Server NEEDS chat stop tokens to prevent self-conversations
+            use_chat_stop_tokens=True,  # Server NEEDS chat stop tokens to prevent self-conversations
+            counts=counts,
         )):
             # Stop promptly if server is shutting down
             if shutdown_event.is_set():
                 raise KeyboardInterrupt()
+            if include_usage:
+                pieces.append(token)
             chunk_response = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
@@ -347,7 +411,7 @@ async def generate_chat_stream(
                 ]
             }
 
-            yield f"data: {json.dumps(chunk_response)}\n\n"
+            yield _event(chunk_response, include_usage)
 
             # Check for stop sequences
             if stop:
@@ -381,7 +445,7 @@ async def generate_chat_stream(
                         }
                     ]
                 }
-                yield f"data: {json.dumps(interrupt_response)}\n\n"
+                yield _event(interrupt_response, include_usage)
             except Exception:
                 pass
         return
@@ -416,7 +480,7 @@ async def generate_chat_stream(
                     "finish_reason": None
                 }
             ],
-        }, e)
+        }, e, include_usage)
         return
 
     # Final response (skip if shutting down)
@@ -437,7 +501,10 @@ async def generate_chat_stream(
         ]
     }
 
-    yield f"data: {json.dumps(final_response)}\n\n"
+    yield _event(final_response, include_usage)
+    if include_usage:
+        usage = usage_of(counts, prompt, "".join(pieces), count_tokens)
+        yield _usage_event(completion_id, "chat.completion.chunk", created, request_model, usage)
     yield "data: [DONE]\n\n"
 
 
@@ -458,6 +525,7 @@ async def stream_vision_chunks(
     shutdown_event: Event,
     audio: Optional[List[tuple]] = None,
     stop: Optional[List[str]] = None,
+    include_usage: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Stream SSE events per vision chunk as they complete (OpenAI-compatible).
 
@@ -481,6 +549,7 @@ async def stream_vision_chunks(
         shutdown_event: Thread event to check for shutdown
         audio: Optional list of (filename, bytes) tuples for audio input
         stop: Stop sequences, handed to the runner for each chunk
+        include_usage: End with a usage chunk summed over the chunks (``stream_options.include_usage``)
 
     Yields:
         SSE event strings (data: {...}\n\n format)
@@ -491,6 +560,8 @@ async def stream_vision_chunks(
     chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
     total_images = len(images)
     finish_reason: Optional[str] = None  # aggregated over chunks: any "length" wins
+    counts = TokenCounts()
+    answer: List[str] = []
 
     # Initial role event
     initial_event = {
@@ -504,7 +575,7 @@ async def stream_vision_chunks(
             "finish_reason": None
         }]
     }
-    yield f"data: {json.dumps(initial_event)}\n\n"
+    yield _event(initial_event, include_usage)
 
     # Process each chunk and stream result immediately
     for chunk_idx, chunk in enumerate(chunks, start=1):
@@ -528,7 +599,7 @@ async def stream_vision_chunks(
                     "finish_reason": "stop"
                 }]
             }
-            yield f"data: {json.dumps(interrupt_event)}\n\n"
+            yield _event(interrupt_event, include_usage)
             yield "data: [DONE]\n\n"
             return
 
@@ -549,6 +620,7 @@ async def stream_vision_chunks(
                     total_images=total_images,
                     stop=stop,
                 )
+                counts.add(runner)
                 return text, finish_reason_of(runner), stopped_on_sequence(runner)
 
         try:
@@ -567,7 +639,7 @@ async def stream_vision_chunks(
                     "delta": {},
                     "finish_reason": None
                 }]
-            }, RuntimeError(f"vision chunk {chunk_idx}/{len(chunks)} failed: {e}"))
+            }, RuntimeError(f"vision chunk {chunk_idx}/{len(chunks)} failed: {e}"), include_usage)
             return
 
         # The runner cut the chunk's text at the sequence (before its filename header),
@@ -591,7 +663,9 @@ async def stream_vision_chunks(
                 "finish_reason": None
             }]
         }
-        yield f"data: {json.dumps(content_event)}\n\n"
+        yield _event(content_event, include_usage)
+        if include_usage:
+            answer.append(chunk_result + separator)
 
         logger.info(
             f"Vision chunk {chunk_idx}/{len(chunks)} streamed",
@@ -614,7 +688,10 @@ async def stream_vision_chunks(
             "finish_reason": finish_reason
         }]
     }
-    yield f"data: {json.dumps(final_event)}\n\n"
+    yield _event(final_event, include_usage)
+    if include_usage:
+        usage = usage_of(counts, prompt, "".join(answer), count_tokens)
+        yield _usage_event(completion_id, "chat.completion.chunk", created, model, usage)
     yield "data: [DONE]\n\n"
 
 
@@ -624,6 +701,7 @@ async def emulate_sse_stream(
     model: str,
     content: str,
     finish_reason: Optional[str] = None,
+    usage: Optional[Dict[str, int]] = None,
 ) -> AsyncGenerator[str, None]:
     """Emulate SSE streaming for vision models (batch response as SSE events).
 
@@ -636,7 +714,11 @@ async def emulate_sse_stream(
         model: Model name for SSE events
         content: Complete response content to stream
         finish_reason: How the batch generation ended ("stop" | "length" | None)
+        usage: The request's token counts when the client asked for them
+            (``stream_options.include_usage``); None sends no usage chunk
     """
+    include_usage = usage is not None
+
     # First chunk: role
     chunk1 = {
         "id": completion_id,
@@ -649,7 +731,7 @@ async def emulate_sse_stream(
             "finish_reason": None
         }]
     }
-    yield f"data: {json.dumps(chunk1)}\n\n"
+    yield _event(chunk1, include_usage)
 
     # Second chunk: content (all at once)
     chunk2 = {
@@ -663,7 +745,7 @@ async def emulate_sse_stream(
             "finish_reason": None
         }]
     }
-    yield f"data: {json.dumps(chunk2)}\n\n"
+    yield _event(chunk2, include_usage)
 
     # Final chunk: finish_reason
     chunk3 = {
@@ -677,7 +759,9 @@ async def emulate_sse_stream(
             "finish_reason": finish_reason
         }]
     }
-    yield f"data: {json.dumps(chunk3)}\n\n"
+    yield _event(chunk3, include_usage)
+    if usage is not None:
+        yield _usage_event(completion_id, "chat.completion.chunk", created, model, usage)
 
     # Done marker
     yield "data: [DONE]\n\n"

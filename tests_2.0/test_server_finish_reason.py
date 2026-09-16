@@ -247,7 +247,7 @@ def test_process_vision_chunks_any_length_wins(reasons, expected):
             return f"text for {kwargs['images'][0][0]}"
 
     with patch('mlxk2.core.vision_runner.VisionRunner', ChunkRunner):
-        text, reason = process_vision_chunks_server(
+        text, reason, _ = process_vision_chunks_server(
             model_path="/mock/path", model_name="mock", prompt="p",
             images=[(name, b"") for name in by_image], chunk_size=1, image_id_map={},
             max_tokens=100, temperature=0.0, top_p=0.9, repetition_penalty=1.0,

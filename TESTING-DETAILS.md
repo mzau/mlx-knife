@@ -1729,6 +1729,13 @@ A limit has two terms:
    - Validates: Multimodal history filtering
    - (uses both portfolios)
 
+5. **test_chunked_request_counts_its_own_chunks** (not parametrized: smallest vision model in budget)
+   - A single-image request (`max_tokens: 5`), then two images with `chunk: 1` and `max_tokens: 8`,
+     as a batch and as a stream with `stream_options.include_usage`
+   - Validates: the chunked `usage` has more than one chunk's 8 completion tokens and more prompt
+     tokens than the single image — the defect reported the single-image request's numbers — and the
+     stream's usage chunk carries the same numbers as the batch (Issue #76)
+
 **RAM Gating:**
 - Uses `calculate_vision_model_ram_gb()` (0.70 threshold, no multiplier)
 - Models >70% system RAM → `ram_needed_gb = float('inf')` (auto-skip)
@@ -2021,7 +2028,7 @@ tests_2.0/
 │   ├── test_server_e2e.py                      # Server E2E tests with TEXT models (ADR-011 + Portfolio Separation, parametrized: text_XX)
 │   ├── test_server_models_workspace_live.py    # /v1/models lists workspace models by basename, matching the default `mlxk list` view (Issue #58, ADR-022)
 │   ├── test_show_portfolio.py                  # Portfolio display (marker: show_model_portfolio, requires HF_HOME)
-│   ├── test_streaming_parity.py                # Streaming vs batch parity tests (Issue #20, ADR-011, parametrized)
+│   ├── test_streaming_parity.py                # Streaming vs batch parity tests (Issue #20, ADR-011, parametrized; the server row also checks the stream's usage chunk against the batch)
 │   ├── test_vision_e2e_live.py                 # Vision CLI E2E tests with real models (ADR-012, 5 deterministic vision queries)
 │   ├── test_vision_server_e2e.py               # Vision Server E2E tests with VISION models (ADR-012 Phase 3 + Portfolio Separation, parametrized: vision_XX)
 │   ├── test_vm_stat_parsing.py                 # vm_stat output parsing validation (macOS memory metrics)
@@ -2061,6 +2068,7 @@ tests_2.0/
 ├── test_issue_59.py                   # Issue #59: a given max_tokens reaches the transcription backend, none is invented, below 1 is refused
 ├── test_issue_70.py                   # Issue #70: an empty name is no search pattern (resolver, bootstrap, rm) and an empty path is not the working directory (push, convert)
 ├── test_issue_73.py                   # Issue #73: one detokenizer per generation, not per decode
+├── test_issue_76.py                   # Issue #76: a chunked vision request's usage is the sum of its own chunks, not the shared runner's last counts
 ├── test_json_api_list.py              # JSON API list contract (shape/fields)
 ├── test_json_api_show.py              # JSON API show contract (base/files/config)
 ├── test_legacy_formats.py             # Legacy model format detection (Issue #37)
@@ -2100,6 +2108,7 @@ tests_2.0/
 ├── test_server_operator_ceiling_delivery.py # The operator max-tokens ceiling reaches the process that answers requests
 ├── test_server_router_error_envelope.py # Router-level rejects carry the ADR-004 error envelope
 ├── test_server_stop_sequences.py      # `stop` sequences cut batch text, completions and vision answers
+├── test_server_stream_usage.py        # `stream_options.include_usage` on every streaming surface: the usage chunk, request-bound counts, the OpenAI SDK as reader
 ├── test_server_streaming_minimal.py   # Server SSE streaming functionality
 ├── test_server_temperature_defaults.py # Sampling defaults follow the surface, not the requested model
 ├── test_server_token_limits_api.py    # Server token limit enforcement

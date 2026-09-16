@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from ...runner.token_limits import apply_stop_sequences
 from ..inference import in_worker
-from ..streaming import finish_reason_of, log_generation_end, stopped_on_sequence, usage_of
+from ..streaming import TokenCounts, finish_reason_of, log_generation_end, stopped_on_sequence, usage_of
 
 if TYPE_CHECKING:
     from ...runner import MLXRunner  # noqa: F401
@@ -62,7 +62,9 @@ class ChatHandlerContext:
         filter_multimodal_fn: Callable[[List[Any]], List[Any]],
         messages_to_dicts_fn: Callable[[List[Any]], List[Dict[str, Any]]],
         generate_chat_stream_fn: Callable,
-        emulate_sse_fn: Callable[[str, int, str, str, Optional[str]], AsyncGenerator[str, None]],
+        emulate_sse_fn: Callable[
+            [str, int, str, str, Optional[str], Optional[Dict[str, int]]], AsyncGenerator[str, None]
+        ],
         stream_vision_chunks_fn: Callable,
         process_vision_chunks_fn: Callable,
         shutdown_event: Event,
@@ -93,6 +95,7 @@ async def handle_text_chat_completion(
     stream: bool,
     stop: Optional[List[str]],
     runner: Any = None,
+    include_usage: bool = False,
 ) -> Union[Dict[str, Any], StreamingResponse]:
     """Handle text-only chat completion.
 
@@ -109,6 +112,7 @@ async def handle_text_chat_completion(
         stream: Whether to stream response
         stop: Stop sequences
         runner: Pre-loaded model runner (optional, will load if not provided)
+        include_usage: A stream ends with a usage chunk (``stream_options.include_usage``)
 
     Returns:
         ChatCompletionResponse dict or StreamingResponse
@@ -154,7 +158,10 @@ async def handle_text_chat_completion(
         if stream:
             logger.info("Vision model: emulating SSE stream (batch response as single event)")
             return StreamingResponse(
-                ctx.emulate_sse(completion_id, created, request_model, generated_text, finish_reason),
+                ctx.emulate_sse(
+                    completion_id, created, request_model, generated_text, finish_reason,
+                    usage if include_usage else None,
+                ),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache"}
             )
@@ -193,7 +200,8 @@ async def handle_text_chat_completion(
         return StreamingResponse(
             ctx.generate_chat_stream(
                 runner, message_dicts, request_model, effective_max_tokens,
-                temperature, top_p, repetition_penalty, stop, ctx.shutdown_event
+                temperature, top_p, repetition_penalty, stop, ctx.shutdown_event,
+                include_usage=include_usage,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"}
@@ -258,6 +266,7 @@ async def handle_vision_chat_completion(
     chunk_size_request: Optional[int],
     stop: Optional[List[str]] = None,
     runner: Any = None,
+    include_usage: bool = False,
 ) -> Union[Dict[str, Any], StreamingResponse]:
     """Handle vision/audio chat completion with images or audio (ADR-012 Phase 3, ADR-019 Phase 4).
 
@@ -276,6 +285,7 @@ async def handle_vision_chat_completion(
         stream: Whether to stream response
         chunk_size_request: Chunk size from request (None = use ENV/default)
         runner: Pre-loaded model runner (optional, will load if not provided)
+        include_usage: A stream ends with a usage chunk (``stream_options.include_usage``)
 
     Returns:
         ChatCompletionResponse dict or StreamingResponse
@@ -367,6 +377,7 @@ async def handle_vision_chat_completion(
             stop=stop,
         )
         finish_reason = finish_reason_of(runner)
+        counted = runner
     else:
         # Multi-chunk processing
         if stream:
@@ -395,12 +406,14 @@ async def handle_vision_chat_completion(
                     shutdown_event=ctx.shutdown_event,
                     audio=effective_audio,
                     stop=stop,
+                    include_usage=include_usage,
                 ),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache"}
             )
-        # Non-streaming multi-chunk (batch mode)
-        generated_text, finish_reason = await in_worker(
+        # Non-streaming multi-chunk (batch mode). The chunks run on runners of their own, so the
+        # counts come from them; the model's shared runner holds another request's (#76).
+        generated_text, finish_reason, counted = await in_worker(
             ctx.process_vision_chunks,
             model_path=runner.model_path,
             model_name=runner.model_name,
@@ -424,13 +437,16 @@ async def handle_vision_chat_completion(
 
     # The runner applied `stop` to the model's text, ahead of the filename header it
     # prepends; cutting the finished text here would cut through that header.
-    usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
+    usage = usage_of(counted, prompt, generated_text, ctx.count_tokens)
 
     # Graceful degradation: emulate SSE for stream=true (single-chunk only)
     if stream:
         logger.info("Vision request: emulating SSE stream (single-chunk batch response)")
         return StreamingResponse(
-            ctx.emulate_sse(completion_id, created, request_model, generated_text, finish_reason),
+            ctx.emulate_sse(
+                completion_id, created, request_model, generated_text, finish_reason,
+                usage if include_usage else None,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"}
         )
@@ -467,7 +483,7 @@ def process_vision_chunks_server(
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
     stop: Optional[List[str]] = None,
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, Optional[str], TokenCounts]:
     """Process vision images in batches with isolated model instances per chunk.
 
     Each chunk creates a fresh VisionRunner to prevent state leakage between batches.
@@ -485,9 +501,9 @@ def process_vision_chunks_server(
               answer there and no later chunk is generated
 
     Returns:
-        Combined text with merged filename mappings, and the aggregated finish
-        reason: "stop" if a stop sequence matched, "length" if any chunk was cut,
-        else what the chunks reported.
+        Combined text with merged filename mappings; the aggregated finish reason:
+        "stop" if a stop sequence matched, "length" if any chunk was cut, else what
+        the chunks reported; and the token counts summed over the chunks.
     """
     from ...vision_runner import VisionRunner
 
@@ -497,6 +513,7 @@ def process_vision_chunks_server(
     # Process each chunk with fresh runner
     all_results = []
     finish_reason: Optional[str] = None
+    counts = TokenCounts()
     for chunk in chunks:
         with VisionRunner(model_path, model_name, verbose=False) as runner:
             chunk_result = runner.generate(
@@ -513,6 +530,7 @@ def process_vision_chunks_server(
             )
             chunk_reason = finish_reason_of(runner)
             stopped = stopped_on_sequence(runner)
+            counts.add(runner)
         all_results.append(chunk_result)
         if stopped:
             finish_reason = "stop"
@@ -520,4 +538,4 @@ def process_vision_chunks_server(
         if chunk_reason == "length" or finish_reason is None:
             finish_reason = chunk_reason
 
-    return "\n\n".join(all_results), finish_reason
+    return "\n\n".join(all_results), finish_reason, counts

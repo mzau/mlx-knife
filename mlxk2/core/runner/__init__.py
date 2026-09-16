@@ -11,7 +11,7 @@ import time
 import signal
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from ..cache import get_current_model_cache, hf_to_cache_dir
 from ..model_resolution import resolve_model_for_operation
@@ -508,9 +508,10 @@ class MLXRunner:
         use_chat_template: bool = True,
         use_chat_stop_tokens: bool = False,
         hide_reasoning: bool = False,
+        counts: Any = None,
     ) -> Iterator[str]:
         """Generate text with streaming output.
-        
+
         Args:
             prompt: Input prompt
             max_tokens: Maximum tokens to generate (None for dynamic)
@@ -521,7 +522,11 @@ class MLXRunner:
             use_chat_template: Apply tokenizer's chat template if available
             use_chat_stop_tokens: Include chat turn markers as stop tokens
             hide_reasoning: Hide reasoning section for reasoning models
-            
+            counts: Kept current with this generation's ``last_prompt_tokens`` and
+                ``last_completion_tokens``. The runner's own attributes belong to whichever
+                generation started last; this object belongs to the caller, and holds the
+                count even when the caller stops reading early.
+
         Yields:
             Generated tokens as they are produced
         """
@@ -543,6 +548,8 @@ class MLXRunner:
         # Raises before any token is produced when the prompt fills the window.
         prompt_tokens = self._encode_prompt(formatted_prompt)
         effective_max_tokens = self._begin_generation(prompt_tokens, max_tokens)
+        if counts is not None:
+            counts.last_prompt_tokens, counts.last_completion_tokens = len(prompt_tokens), 0
         # Ensure MLX core is available
         mx_core = self._mx
         if mx_core is None:
@@ -623,6 +630,8 @@ class MLXRunner:
 
             token_id = token.item() if hasattr(token, 'item') else token
             generated_tokens.append(token_id)
+            if counts is not None:
+                counts.last_completion_tokens = len(generated_tokens)
 
             # Use sliding window for proper decoding
             start_idx = max(0, len(generated_tokens) - context_window)

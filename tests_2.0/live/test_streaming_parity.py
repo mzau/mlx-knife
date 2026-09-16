@@ -33,7 +33,7 @@ except ImportError:
 
 # Import test utilities
 from .server_context import LocalServer
-from .sse_parser import collect_sse_content
+from .sse_parser import parse_sse_stream
 from .test_utils import (
     model_timeout,
     should_skip_model,
@@ -191,7 +191,8 @@ class TestServerStreamingParity:
         Parametrized test - runs for all text models, filters to parity subset.
         Uses text_model_key for automatic inference_modality detection (v0.2.1).
 
-        Tests parity at HTTP API level (closest to production usage).
+        Tests parity at HTTP API level (closest to production usage). The stream asks for
+        its usage (`stream_options.include_usage`), which must count the batch's prompt.
         """
         # Parity subset filtering - only run for 2-3 representative models
         parity_keys = _select_parity_test_keys(text_portfolio)
@@ -235,12 +236,17 @@ class TestServerStreamingParity:
                     "messages": [{"role": "user", "content": TEST_PROMPT}],
                     "max_tokens": MAX_TOKENS,
                     "temperature": 0.0,
-                    "stream": True
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
                 },
                 timeout=model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
             ) as stream_response:
                 assert stream_response.status_code == 200
-                stream_output = collect_sse_content(stream_response)
+                events = list(parse_sse_stream(stream_response))
+            stream_output = "".join(
+                choice.get("delta", {}).get("content", "")
+                for event in events for choice in event["choices"]
+            )
 
             # Validate parity
             assert batch_output == stream_output, (
@@ -250,7 +256,17 @@ class TestServerStreamingParity:
                 f"Stream ({len(stream_output)} chars): {stream_output!r}"
             )
 
-            print(f"✓ {text_model_key}: Parity verified ({len(batch_output)} chars)")
+            # The usage chunk closes the stream. Its prompt is the batch's; the stream generates
+            # no more than the batch, which runs past a stop string on to EOS or the budget.
+            *chunks, last = events
+            assert last["choices"] == [] and all(chunk["usage"] is None for chunk in chunks), last
+            stream_usage, batch_usage = last["usage"], batch_data["usage"]
+            assert stream_usage["prompt_tokens"] == batch_usage["prompt_tokens"], (stream_usage, batch_usage)
+            assert 0 < stream_usage["completion_tokens"] <= batch_usage["completion_tokens"], (
+                stream_usage, batch_usage
+            )
+
+            print(f"✓ {text_model_key}: Parity verified ({len(batch_output)} chars, usage {stream_usage})")
 
 
 class TestCrossInterfaceParity:

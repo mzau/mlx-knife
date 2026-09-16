@@ -5,7 +5,7 @@ of it. The latest stable release is 2.0.7: its endpoint surface is the same, its
 shapes differ in places, and the [Migration Guide](#migration-guide) records every difference.
 **Scope:** what the server does today. Planned work, deferred features and target releases are
 deliberately absent — this is a contract, not a roadmap.
-**Last Updated:** 2026-09-14
+**Last Updated:** 2026-09-16
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -51,7 +51,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 
 Pins are exact per ADR-023: every upstream minor bump goes through an explicit mlx-knife release with re-verified integration. Do not loosen on `pip install`.
 
-> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints and request shapes are identical; what differs is the pin set, how `serve` shuts down, the generation budget — the default `max_tokens`, `finish_reason: "length"` on a cut answer, and a 400 for a prompt that fills the context window — and what `serve` says about its state: `GET /health` answers `ok` where it said `healthy`, and `GET /v1/models` rows carry `loaded`. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
+> **If you are on released 2.0.7 (PyPI):** you have the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, plus `torch`/`torchvision` as base deps. Endpoints are identical and requests gain one optional field, `stream_options`; what differs is the pin set, how `serve` shuts down, the generation budget — the default `max_tokens`, `finish_reason: "length"` on a cut answer, and a 400 for a prompt that fills the context window — and what `serve` says about its state: `GET /health` answers `ok` where it said `healthy`, and `GET /v1/models` rows carry `loaded`. See *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide).
 
 ---
 
@@ -155,6 +155,7 @@ These are intentional design choices, not bugs:
 | Multi-audio | Supported | 1 per request | mlx-vlm limitation |
 | Error format | `{"error": {"message", "type", "code"}}` | ADR-004 envelope (see below) | Richer error context |
 | `max_completion_tokens` | Preferred | Silently ignored — the request falls to `max_tokens`, else the default ceiling | Unknown request fields are dropped, not rejected |
+| `stream_options` without `"stream": true` | Rejected with 400 | Ignored — the response carries `usage` anyway | Clients that send it on every request keep working |
 | HTTP 507 | Not used | Memory constraint | Explicit OOM prevention |
 
 ### Error Response Format
@@ -277,7 +278,7 @@ whisper-turbo or `.en` variant is the case you will meet (see
 **Supported audio formats:** `wav`, `mp3` (or `mpeg` alias)
 
 **mlx-knife Extension Parameters:**
-- `chunk` (integer, optional): Batch size for vision processing (default: 1). Controls how many images are processed per inference session. Higher values may trigger OOM on resource-constrained systems. Maximum: 5 (enforced by server).
+- `chunk` (integer, optional): Batch size for vision processing (default: 1). Controls how many images are processed per inference session. Higher values may trigger OOM on resource-constrained systems. Maximum: 5 (enforced by server). `usage` sums the chunks.
 
 **Also honored** (standard OpenAI sampling fields): `top_p` (default `0.9`) and
 `repetition_penalty` (default `1.1`, an mlx-knife-leaning default), in addition to `temperature`
@@ -294,7 +295,7 @@ that precedes a vision answer is not searched. What that costs differs by surfac
   it ends and `finish_reason` is `"stop"` — but the tokens generated past the cut were generated,
   and still count in `usage`. A chunked vision stream is a batch answer per chunk: the chunk's
   text is cut the same way, and no later chunk is generated.
-- **Stream:** each token is checked as it is emitted, and the terminal chunk reports `"stop"`. The
+- **Stream:** each token is checked as it is emitted, and the last chunk with a choice reports `"stop"`. The
   check is per token, so a sequence split across two of them is not seen, and the token carrying a
   match has already been sent — the answer ends one token late rather than exactly at the sequence.
 - **Dedicated STT (Whisper, Voxtral) through chat completions:** the transcript is returned whole;
@@ -882,10 +883,10 @@ ignores the value.
 #### finish_reason
 
 Every completion reports how it ended — batch responses in `choices[0].finish_reason`, streams in
-the final chunk before `data: [DONE]`:
+the last chunk that carries a choice:
 
 - `"stop"` — the model ended its turn (EOS), or a `stop` sequence matched; a stream that ends on
-  a sequence reports it in the final chunk as well.
+  a sequence reports it there as well.
 - `"length"` — the generation budget cut the answer. This is the OpenAI value: a client can offer
   the user a "continue", raise `max_tokens`, or shorten the prompt. On chunked vision requests one
   cut chunk makes the whole response `"length"`.
@@ -946,7 +947,7 @@ cut answer is visible operator-side as well.
 - **Format:** OpenAI-compatible SSE with per-chunk deltas
 
 #### Audio Models
-- ⚠️ **Batch mode only:** the answer is generated whole, then emitted as three `data:` events (role, content, `finish_reason`) and `[DONE]`
+- ⚠️ **Batch mode only:** the answer is generated whole, then emitted as `data:` events for role, content and `finish_reason`, and `[DONE]`
 - **Reason:** Single audio per request, no chunking needed
 - **Format:** Same as Vision single-image mode
 
@@ -970,11 +971,26 @@ data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345
 data: [DONE]
 ```
 
-The final chunk carries `"finish_reason": "length"` instead of `"stop"` when the generation budget
+The last chunk with a choice carries `"finish_reason": "length"` instead of `"stop"` when the generation budget
 cut the answer. A prompt that fills the context window never reaches the stream — it is rejected
 with HTTP 400 `context_length_exceeded` before the response starts.
 
-**Note:** `stream_options.include_usage` is not supported.
+#### Token usage in a stream
+
+A stream carries no token counts unless the request asks for them, on `/v1/chat/completions` and
+`/v1/completions` alike: `"stream_options": {"include_usage": true}`. Every chunk then carries
+`"usage": null`, and one more chunk follows the last one with a choice — its `choices` is empty and
+its `usage` holds the counts for the whole request. `data: [DONE]` comes after it:
+
+```json
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"mlx-community/Llama-3.2-3B-Instruct-4bit","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":null}
+
+data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"mlx-community/Llama-3.2-3B-Instruct-4bit","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}
+```
+
+On `/v1/completions` both are `text_completion` objects. A stream that fails part-way or is
+interrupted ends without the usage chunk. Without `"stream": true` the option is ignored — the
+response carries `usage` anyway.
 
 #### Closing the connection
 
@@ -1556,7 +1572,8 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 **Endpoint surface:** unchanged. **Response shapes** move in four places: `finish_reason` gains
 `"length"`, the `error` a failed stream carries is an object where it was a string, `GET /health`
 says `"ok"` where it said `"healthy"`, and every `GET /v1/models` row gains `loaded`. A new **400**
-error type `context_length_exceeded` exists. Request shapes are unchanged. See *Generation budget*
+error type `context_length_exceeded` exists. Requests gain one optional field, `stream_options` (see
+[Token usage in a stream](#token-usage-in-a-stream)). See *Generation budget*
 and *Server state* below.
 
 **Two rejects stop looking like faults.** An audio upload above the size limit (**413**) and
@@ -1967,6 +1984,7 @@ When switching from Vision or Audio to Text model mid-conversation:
 ## Changelog
 
 - **Unreleased:** 2.0.8 — generation budget, `finish_reason`, stream failures, server state
+  - **NEW:** `stream_options.include_usage` — a stream that asks for it ends with a usage chunk (`choices: []`) before `[DONE]`; without it the stream is unchanged.
   - **CHANGED:** default text `max_tokens` is `min(32768, context_length − prompt tokens)`; an explicit value is clamped to the window too.
   - **NEW:** `finish_reason: "length"` when the budget cut the answer.
   - **NEW: 400** `context_length_exceeded` — prompt fills the window, rejected before any token; `detail` carries `prompt_tokens` and `context_length`. A status even on `stream: true`.

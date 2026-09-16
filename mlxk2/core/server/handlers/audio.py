@@ -35,8 +35,11 @@ async def handle_audio_chat_completion(
     temperature: float,
     stream: bool,
     get_audio_model_fn: Callable[[str, bool], "AudioRunner"],
-    emulate_sse_fn: Callable[[str, int, str, str, Optional[str]], AsyncGenerator[str, None]],
+    emulate_sse_fn: Callable[
+        [str, int, str, str, Optional[str], Optional[Dict[str, int]]], AsyncGenerator[str, None]
+    ],
     count_tokens_fn: Callable[[str], int],
+    include_usage: bool = False,
 ) -> Union[Dict[str, Any], StreamingResponse]:
     """Handle audio STT chat completion with AudioRunner (ADR-020).
 
@@ -51,6 +54,7 @@ async def handle_audio_chat_completion(
         get_audio_model_fn: Function to load audio model
         emulate_sse_fn: Function to create SSE stream from batch response
         count_tokens_fn: Function to count tokens
+        include_usage: A stream ends with a usage chunk (``stream_options.include_usage``)
 
     Returns:
         ChatCompletionResponse dict or StreamingResponse
@@ -111,7 +115,10 @@ async def handle_audio_chat_completion(
     if stream:
         logger.info("Audio STT: emulating SSE stream (batch response as single event)")
         return StreamingResponse(
-            emulate_sse_fn(completion_id, created, request_model, generated_text, finish_reason),
+            emulate_sse_fn(
+                completion_id, created, request_model, generated_text, finish_reason,
+                usage if include_usage else None,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"}
         )

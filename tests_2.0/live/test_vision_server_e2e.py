@@ -17,6 +17,7 @@ Requires: HF_HOME set to model cache, httpx installed
 """
 
 import base64
+import json
 import pytest
 from pathlib import Path
 
@@ -361,3 +362,42 @@ class TestVisionServerE2E:
 
             print(f"\n✅ Text model response (after filtering): {text_response[:100]}...")
             print("\n✅ Multimodal history filtering works: Vision→Text switch succeeded")
+
+    @pytest.mark.live_e2e
+    def test_chunked_request_counts_its_own_chunks(self, vision_portfolio):
+        """A chunked request reports the tokens of its own chunks, batch and stream alike (#76).
+
+        Every chunk runs on a runner of its own, while the model's shared runner still holds
+        the single-image request before (5 completion tokens). Two chunks cut at 8 tokens
+        make 16; the test accepts 9 to 16, since a chunk can end earlier. Not parametrized:
+        the smallest vision model within the RAM budget.
+        """
+        images = [Path(__file__).parent.parent / "assets" / name for name in ("T1.png", "T2.png")]
+        candidates = sorted(
+            (info["ram_needed_gb"], info["id"]) for key, info in vision_portfolio.items()
+            if not should_skip_model(key, vision_portfolio)[0]
+        )
+        if not candidates:
+            pytest.skip("No vision models available within RAM budget")
+        model_id = candidates[0][1]
+
+        def payload(paths, max_tokens, **extra):
+            content = [{"type": "text", "text": "Describe this image in detail."}]
+            content += [{"type": "image_url", "image_url": {"url": image_to_base64_data_url(p)}} for p in paths]
+            messages = [{"role": "user", "content": content}]
+            return {"model": model_id, "messages": messages, "max_tokens": max_tokens, **extra}
+
+        with LocalServer(model_id, port=8781, timeout=90) as server_url:
+            url = f"{server_url}/v1/chat/completions"
+            timeout = model_timeout(SERVER_REQUEST_TIMEOUT, model_id)
+            before = httpx.post(url, json=payload(images[:1], 5), timeout=timeout).json()
+            batch = httpx.post(url, json=payload(images, 8, chunk=1), timeout=timeout).json()
+            streamed = payload(images, 8, chunk=1, stream=True, stream_options={"include_usage": True})
+            with httpx.stream("POST", url, json=streamed, timeout=timeout) as response:
+                events = [json.loads(line[6:]) for line in response.iter_lines() if line.startswith("data: {")]
+
+        print(f"\n{model_id}: before {before['usage']} · chunked {batch['usage']} · stream {events[-1].get('usage')}")
+        assert before["usage"]["completion_tokens"] == 5, before["usage"]
+        assert 8 < batch["usage"]["completion_tokens"] <= 16, batch["usage"]
+        assert batch["usage"]["prompt_tokens"] > before["usage"]["prompt_tokens"], (batch["usage"], before["usage"])
+        assert events[-1]["choices"] == [] and events[-1]["usage"] == batch["usage"], events[-1]
