@@ -2089,7 +2089,7 @@ tests_2.0/
 ├── test_serve_embed_proxy_route.py    # Route tests for POST /v1/embeddings on serve (ADR-015 D2: 501 unconfigured, proxying, backend error passthrough)
 ├── test_serve_option_validation.py    # `serve` validates its options before it announces a start
 ├── test_serve_signal_teardown.py      # Supervisor teardown on SIGINT/SIGTERM/SIGHUP against a real child, escalation, exit codes (#60)
-├── test_serve_supervisor.py           # Supervisor command/env construction with Popen mocked (module + extra_env seam, --embed-backend config bridge)
+├── test_serve_supervisor.py           # Supervisor command/env construction with Popen mocked (module + extra_env seam, --embed-backend config bridge, search-path setting)
 ├── test_server_api_minimal.py         # Minimal OpenAI-compatible server endpoints (SSE, JSON)
 ├── test_server_api.py.disabled        # Disabled server API tests (WIP/expanded scenarios)
 ├── test_server_audio.py               # Audio server unit tests (ADR-020 Phase 4: request detection, Base64 decoding, format validation)
@@ -2104,6 +2104,7 @@ tests_2.0/
 ├── test_server_token_limits_api.py    # Server token limit enforcement
 ├── test_server_usage_counts.py        # `usage` carries the runner's token counts, not a word estimate
 ├── test_server_vision.py              # Vision server unit tests (ADR-012 Phase 3: ChatMessage, image detection, helpers)
+├── test_start_directory_isolation.py  # No command runs Python found in the directory it was started in: the serve worker, the interpreters it starts, and the ones every command starts underneath
 ├── test_stop_tokens_live.py           # Stop token validation with real models (marker: live_stop_tokens, ADR-009)
 ├── test_token_limits.py               # Dynamic token calculation; server vs run policies
 ├── test_unreadable_model_location.py  # Unreadable cache or workspace home: `run` reports the path, not an internal name or a traceback (real CLI)

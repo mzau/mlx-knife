@@ -9,6 +9,29 @@
   place — an older release that does not carry the fixes below. Upgrading the interpreter is
   the only way onto this release.
 
+### Security
+
+- `mlxk serve` and `mlxk embed-serve` keep the directory they are started in off the server
+  process's module search path. The worker used to start as `python -m …`, and `-m` puts that
+  directory first, so a `mlxk2/` package there — or a module named like one of the server's
+  dependencies, `fastapi.py`, `uvicorn/` — was executed instead of the installed one, with no
+  sign of it in the output. `mlxk clone` copies every file of a model repository into the
+  workspace, so a model directory can carry such files and starting the server inside it was
+  enough. The worker now starts with that directory off its path and the package root the
+  running `mlxk` was imported from on it instead, and the setting reaches the interpreters the
+  worker starts in turn: uvicorn's `--reload` worker and multiprocessing's resource tracker.
+
+  One thing changes for development: `mlxk serve` started inside a checkout, with mlx-knife
+  installed non-editable, now runs the installed package in the worker rather than the
+  checkout. `python -m mlxk2.cli serve` in that checkout runs the checkout, as before.
+
+- Every command keeps that directory off the search path of the interpreters it starts
+  underneath itself. Python starts those as `python -c …` in the directory the command runs in
+  — multiprocessing's resource tracker is one of them, and a single progress bar is enough to
+  start it — so `mlxk run --audio` inside a model directory executed a `multiprocessing/`
+  package lying there. A command's own search path was never affected: a console script has its
+  own directory first, not the one it was started in.
+
 ### Testing
 
 - The live-test exclusion list `KNOWN_BROKEN_MODELS` is per capability: an entry names the

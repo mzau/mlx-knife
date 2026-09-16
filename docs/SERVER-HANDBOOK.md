@@ -1142,10 +1142,13 @@ processes. There is no `--log-file` option.
 **Behavior:**
 - No auto-restart
 - Direct uvicorn process
+- `python -m` searches the directory it is started in before the installed packages — unlike
+  `mlxk serve`, which keeps that directory out. Start it where you trust the files, or add
+  `-P`
 
 **Start:**
 ```bash
-python -m mlxk2.core.server_base
+python -P -m mlxk2.core.server_base
 ```
 
 ---

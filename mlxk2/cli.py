@@ -149,6 +149,13 @@ def _bootstrap_hf_home():
     # Non-workspace: respect user HF_HOME or use HuggingFace default
 
 _bootstrap_hf_home()
+
+# The command itself is safe - a console script has its own directory first on the search path,
+# not the one it was started in. Interpreters started underneath are not: multiprocessing runs
+# its resource tracker as `python -c …`, and a progress bar is enough to start one, so a
+# transcription in a model directory used to run a `multiprocessing/` package lying there. The
+# setting is inherited by every one of them; it does not change this process's own search path.
+os.environ["PYTHONSAFEPATH"] = "1"
 # =============================================================================
 
 import argparse

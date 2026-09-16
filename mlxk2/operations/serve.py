@@ -9,8 +9,30 @@ import sys
 import time
 from typing import Optional
 
+import mlxk2
+
 from ..core.parent_watch import PARENT_ALIVE_FD_ENV
 from ..core.server_base import _operator_ceiling_from_env, run_server
+
+# Where the mlxk2 that is running right now was imported from. The worker is told, so both
+# processes run the same copy even when the CLI was started as `python -m mlxk2.cli` inside a
+# checkout that sits beside another installation.
+_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(mlxk2.__file__)))
+
+# How the worker starts. `-m` used to put the start directory first on its module search path,
+# so a `mlxk2/` or a `fastapi.py` lying there ran instead of the installed package - and `clone`
+# copies every file of a model repository into the workspace. PYTHONSAFEPATH below keeps that
+# directory off; this puts the root above on instead, unless it is on the path already.
+_WORKER_BOOTSTRAP = (
+    "import sys\n"
+    "module, root = sys.argv[1:3]\n"
+    "del sys.argv[1:]\n"
+    "import os.path, runpy\n"
+    "real = os.path.realpath(root)\n"
+    "if not any(os.path.realpath(p) == real for p in sys.path):\n"
+    "    sys.path.insert(0, root)\n"
+    "runpy.run_module(module, run_name='__main__', alter_sys=True)\n"
+)
 
 # Every stop signal must reach the same teardown. Before issue #60 only SIGINT did, so
 # `kill`, a shell trap or launchd killed the supervisor and left the child holding the port.
@@ -81,10 +103,20 @@ def _run_supervised_uvicorn(
     if extra_env:
         env.update(extra_env)
 
+    # Keeps the start directory off the worker's module search path - and off the path of every
+    # interpreter started from it in turn: uvicorn's --reload worker and multiprocessing's
+    # resource tracker are `-c` children that inherit the directory. Set after extra_env, so no
+    # caller can drop it.
+    env["PYTHONSAFEPATH"] = "1"
+
+    # The module stays an argument of its own: `pkill -f <module>` still finds the worker, and
+    # the bootstrap is one constant string rather than code assembled per call.
     cmd = [
         sys.executable,
-        "-m",
+        "-c",
+        _WORKER_BOOTSTRAP,
         module,
+        _PACKAGE_ROOT,
     ]
 
     # Signals cannot cover SIGKILL on us, or our own crash. The child watches this pipe's

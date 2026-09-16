@@ -1370,9 +1370,9 @@ def run_server(
         raise
 
 
-# CLI entrypoint for supervised mode (python -m mlxk2.core.server_base)
-# This allows the supervised subprocess to use the full run_server() logic
-# including proper JSON log configuration via MLXK2_LOG_JSON env var
+# Entrypoint of the supervised worker: operations/serve.py runs this module as __main__ in a
+# subprocess, so the worker uses the full run_server() logic including the JSON log
+# configuration from MLXK2_LOG_JSON.
 if __name__ == "__main__":
     import os
 

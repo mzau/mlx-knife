@@ -42,7 +42,7 @@ def _run_with_capture(**kwargs):
 def test_default_targets_server_base():
     rc, cap = _run_with_capture(port=8000)
     assert rc == 0
-    assert cap["cmd"][-2:] == ["-m", "mlxk2.core.server_base"]
+    assert cap["cmd"][1:4] == ["-c", serve_mod._WORKER_BOOTSTRAP, "mlxk2.core.server_base"]
     assert cap["env"]["MLXK2_HOST"] == "127.0.0.1"
     assert cap["env"]["MLXK2_PORT"] == "8000"
 
@@ -54,10 +54,32 @@ def test_module_override_targets_embed_server_base():
         extra_env={"MLXK2_EMBED_MODEL": "bge-small", "MLXK2_EMBED_CPU": "1"},
     )
     assert rc == 0
-    assert cap["cmd"][-2:] == ["-m", "mlxk2.core.embed_server_base"]
+    assert cap["cmd"][1:4] == ["-c", serve_mod._WORKER_BOOTSTRAP, "mlxk2.core.embed_server_base"]
     assert cap["env"]["MLXK2_EMBED_MODEL"] == "bge-small"
     assert cap["env"]["MLXK2_EMBED_CPU"] == "1"
     assert cap["env"]["MLXK2_PORT"] == "8002"
+
+
+def test_the_module_stays_its_own_argument():
+    """`pkill -f mlxk2.core.server_base` (conftest, and every operator) has to keep matching,
+    and `-m` must not come back: it is what put the start directory on the search path."""
+    _, cap = _run_with_capture(port=8000)
+    assert "-m" not in cap["cmd"]
+    assert "mlxk2.core.server_base" in cap["cmd"]
+
+
+def test_the_start_directory_is_kept_off_the_workers_search_path(monkeypatch):
+    monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    _, cap = _run_with_capture(port=8000)
+    assert cap["env"]["PYTHONSAFEPATH"] == "1"
+
+
+def test_a_caller_cannot_drop_the_search_path_setting(monkeypatch):
+    """extra_env is merged first on purpose; a backend passing its own environment must not
+    be able to hand the worker back the directory it was started in."""
+    monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    _, cap = _run_with_capture(port=8002, extra_env={"PYTHONSAFEPATH": ""})
+    assert cap["env"]["PYTHONSAFEPATH"] == "1"
 
 
 def test_extra_env_absent_by_default():

@@ -215,8 +215,8 @@ def create_embeddings(request: EmbeddingRequest):
     return EmbeddingResponse(**result)
 
 
-# CLI entrypoint for supervised mode (python -m mlxk2.core.embed_server_base).
-# Reads config from env vars set by operations/embed_serve.py before Popen.
+# Entrypoint of the supervised worker: operations/serve.py runs this module as __main__ in a
+# subprocess. Reads config from env vars set by operations/embed_serve.py before Popen.
 if __name__ == "__main__":
     from .parent_watch import watch_supervisor
 
