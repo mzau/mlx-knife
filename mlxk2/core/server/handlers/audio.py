@@ -45,7 +45,7 @@ async def handle_audio_chat_completion(
     Args:
         request_model: Model name/path
         messages: List of message dicts (already converted from ChatMessage)
-        max_tokens: Max tokens for generation
+        max_tokens: The request's token budget, handed on as is; None keeps the model's default
         temperature: Sampling temperature
         stream: Whether to stream response
         get_audio_model_fn: Function to load audio model
@@ -92,7 +92,7 @@ async def handle_audio_chat_completion(
         runner.transcribe,
         audio=list(audio),
         prompt=prompt or "Transcribe this audio.",
-        max_tokens=max_tokens or 4096,
+        max_tokens=max_tokens,
         temperature=temperature,
     )
 
@@ -201,7 +201,6 @@ async def handle_transcription(
             runner.transcribe,
             audio=[(filename, content)],
             prompt=effective_prompt,
-            max_tokens=4096,
             temperature=temperature,
             language=language,
             task=task,

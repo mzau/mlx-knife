@@ -542,6 +542,7 @@ mlx-knife automatically routes audio models to the optimal backend:
 |---------|-------|------|--------|
 | Temperature | 0.0 | 0.7 | Greedy decoding (STT best practice) |
 | Default Prompt | "Transcribe this audio." (not on `--translate`) | - | Minimal prompt for pure transcription; on translate it would bias the decoder back toward transcribing |
+| Max tokens | The model's own default; `--max-tokens` is passed on unclamped | 32768, clamped to the context window minus the prompt | A transcription ends with its audio. A model that transcribes in one pass stops at its budget, so raise `--max-tokens` if a long transcript ends early; Whisper decodes in 30-second windows and ignores it |
 
 **💡 Quick Start:**
 

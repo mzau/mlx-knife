@@ -2058,6 +2058,7 @@ tests_2.0/
 ├── test_issue_27.py                   # Health policy exploration with real models (marker: issue27)
 ├── test_issue_30_preflight.py         # Preflight for gated/private/not-found repos (Issue #30)
 ├── test_issue_37_private_org_regression.py  # Issue #37 private/org MLX model detection (marker: live_run)
+├── test_issue_59.py                   # Issue #59: a given max_tokens reaches the transcription backend, none is invented, below 1 is refused
 ├── test_issue_70.py                   # Issue #70: an empty name is no search pattern (resolver, bootstrap, rm) and an empty path is not the working directory (push, convert)
 ├── test_issue_73.py                   # Issue #73: one detokenizer per generation, not per decode
 ├── test_json_api_list.py              # JSON API list contract (shape/fields)

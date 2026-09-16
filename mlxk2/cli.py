@@ -443,7 +443,7 @@ def main():
         metavar="N",
         help="Process images in batches of N (default: 1 for maximum safety)",
     )
-    run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate (default 32768; always clamped to the model's context window minus the prompt)")
+    run_parser.add_argument("--max-tokens", type=int, help="Maximum tokens to generate (default 32768, any value clamped to the model's context window minus the prompt; audio: the model's own default, a given value passed on unclamped)")
     run_parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature (default: 0.7, audio: 0.0)")
     run_parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling parameter (default: 0.9)")
     run_parser.add_argument("--repetition-penalty", type=float, default=1.1, help="Repetition penalty (default: 1.1)")

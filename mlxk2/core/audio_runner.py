@@ -182,7 +182,7 @@ class AudioRunner:
         self,
         audio: Sequence[Tuple[str, bytes]],
         prompt: Optional[str] = None,
-        max_tokens: int = 4096,  # Ignored (Whisper generates full transcription)
+        max_tokens: Optional[int] = None,
         temperature: float = 0.0,
         language: Optional[str] = None,
         task: Optional[str] = None,
@@ -192,7 +192,8 @@ class AudioRunner:
         Args:
             audio: List of (filename, bytes) tuples for audio files
             prompt: Optional context for transcription (improves domain-specific accuracy)
-            max_tokens: Ignored (Whisper generates full transcription automatically)
+            max_tokens: Token budget handed to the model; None keeps the model's own
+                default. Models whose generate() takes no budget (Whisper) ignore it.
             temperature: Sampling temperature (0.0 = deterministic, best for accuracy)
             language: Language code (e.g., 'en', 'de'). Auto-detect if None.
             task: Whisper task ('transcribe' or 'translate'). None lets mlx-audio
@@ -203,6 +204,9 @@ class AudioRunner:
         Returns:
             Transcription text. If MLXK2_AUDIO_SEGMENTS=1, includes segment table.
         """
+        # mlx-lm's generate loop, which LLM-based ASR models run, reads a negative budget as unbounded.
+        if max_tokens is not None and max_tokens < 1:
+            raise ValueError(f"max_tokens must be at least 1 (got {max_tokens})")
         if not audio:
             return ""
 
@@ -242,7 +246,7 @@ class AudioRunner:
         self,
         audio_path: str,
         prompt: Optional[str] = None,
-        max_tokens: int = 4096,  # Ignored
+        max_tokens: Optional[int] = None,
         temperature: float = 0.0,
         language: Optional[str] = None,
         task: Optional[str] = None,
@@ -276,6 +280,9 @@ class AudioRunner:
                 gen_kwargs["initial_prompt"] = prompt
             if temperature is not None:
                 gen_kwargs["temperature"] = temperature
+            # Only the caller's budget, never one of ours: the model's default applies otherwise (#59).
+            if max_tokens is not None:
+                gen_kwargs["max_tokens"] = max_tokens
             if language:
                 gen_kwargs["language"] = language
             if task:

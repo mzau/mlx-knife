@@ -871,10 +871,13 @@ No window guard: the budget is the ceiling alone. The operator ceiling applies h
 
 Text budgets from every level are then clamped to the context window as above.
 
-**Audio stands outside this chain.** Both `/v1/audio/*` endpoints always ask for **4096** tokens,
-and a chat request against an audio model passes its own `max_tokens` through unclamped, falling
-back to 4096. The operator ceiling reaches neither. The number is nominal in any case: the
-transcription backend produces the whole transcript regardless of the budget it is handed.
+**Audio stands outside this chain.** The server sets no token budget for a transcription model.
+A chat request's `max_tokens` reaches the model unchanged and unclamped; without one, and on both
+`/v1/audio/*` endpoints, which take no budget field, the model's own default applies. The operator
+ceiling reaches none of them. What the budget does depends on the model: one that transcribes in a
+single pass stops at it, so a long transcript can end early at the model's default and a larger
+`max_tokens` lifts that; one that decodes in fixed windows, such as Whisper, takes no budget and
+ignores the value.
 
 #### finish_reason
 
@@ -1416,7 +1419,7 @@ batch. Reduce the batch size or retry.
 | Vision model RAM | 70% system | Metal OOM prevention |
 | Text model RAM | 70% (warning) | Swap tolerance |
 | Vision max_tokens | 2048 (default) | Stateless, slow inference; set explicitly on server and CLI |
-| Audio max_tokens | 4096, and the operator ceiling does not apply | Nominal — the transcription backend produces the whole transcript regardless |
+| Audio max_tokens | None of its own — the model's default; a chat request's `max_tokens` passes unclamped, the operator ceiling does not apply | A transcription ends with its audio; a server-side cap could only cut it short |
 | Text max_tokens | 32768 (default), clamped to context_length − prompt | Runaway guard |
 
 ---
@@ -1598,8 +1601,8 @@ install). Operators on size-constrained images can drop the allowance they were 
 | More vision models are listed | A check withheld every checkpoint carrying `temporal_patch_size` while transformers reported 5.x. Those models load and answer correctly, so it is gone and they appear. A client that hard-coded the shorter list should re-read `/v1/models`. |
 
 **Generation budget** ([#66](https://github.com/mzau/mlx-knife/issues/66)) — for **text**,
-`min(ceiling, context_length − prompt tokens)`, the same rule the CLI applies. Vision and audio
-keep their own ceiling with no window guard; see
+`min(ceiling, context_length − prompt tokens)`, the same rule the CLI applies. Vision keeps its own
+ceiling with no window guard, and a transcription model runs at its own default; see
 [Token Limits](#token-limits-text-vs-multimodal-models):
 
 | Change | 2.0.7 | 2.0.8 | Effect on clients |
@@ -1612,6 +1615,7 @@ keep their own ceiling with no window guard; see
 | `max_tokens` below 1 | accepted | **400** `validation_error` | |
 | `/v1/models` `context_length` | `4096` when no window was known | `null` | The number was invented; `null` means "no window guard". |
 | Vision / audio-chat default | 2048 on the server, inherited from mlx-vlm on the CLI | 2048, set explicitly on both | No wire change. |
+| `max_tokens` against a transcription model | dropped before the model; it always ran at its own default | reaches the model unclamped; without it, the model's own default | A single-pass transcript that ended early can be completed with a larger `max_tokens`. |
 | `max_completion_tokens` | ignored | ignored | Unchanged — use `max_tokens`. |
 
 **Server state** ([#64](https://github.com/mzau/mlx-knife/issues/64)) — see [GET /health](#get-health):
@@ -1978,6 +1982,7 @@ When switching from Vision or Audio to Text model mid-conversation:
   - **NEW:** `loaded` on every `GET /v1/models` row — `true` on the model in memory.
   - **FIXED:** `GET /health` and `GET /v1/models` answer while the server works. A non-streaming generation, a model load, a vision answer or a transcription silenced both for its whole duration ([#64](https://github.com/mzau/mlx-knife/issues/64)), and a model listing held up `GET /health`.
   - **FIXED:** a request naming the loaded model by its listed `id` no longer loads it again when the model had been loaded under another spelling.
+  - **FIXED:** a chat request's `max_tokens` reaches a transcription model; it was dropped, so a model that transcribes in one pass always stopped at its own default. The `/v1/audio/*` endpoints still take no budget.
   - **DOCUMENTED:** what a `200` from `GET /health` does not tell; one model operation at a time; a stream fails when another model is requested; a batch request runs on after its client has gone.
   - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (524 MB smaller install).
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.

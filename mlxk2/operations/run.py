@@ -619,7 +619,7 @@ def run_model(
                     result = runner.transcribe(
                         audio=list(audio),
                         prompt=effective_prompt,
-                        max_tokens=max_tokens or 4096,
+                        max_tokens=max_tokens,
                         temperature=temperature,
                         language=language,
                         task="translate" if translate else None,

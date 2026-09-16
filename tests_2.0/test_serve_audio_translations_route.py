@@ -129,3 +129,10 @@ def test_handler_transcribe_keeps_synthetic_prompt_default():
 def test_handler_user_prompt_threads_through_on_translate():
     _, kwargs = _run_handler(task="translate", prompt="medical vocabulary")
     assert kwargs["prompt"] == "medical vocabulary"
+
+
+def test_handler_passes_no_token_budget():
+    # #59: the endpoints have no budget field, so the model's own default applies; the handler
+    # used to hand on 4096, harmless only while the runner dropped it.
+    _, kwargs = _run_handler(task=None, prompt=None)
+    assert kwargs.get("max_tokens") is None

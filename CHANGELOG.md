@@ -164,6 +164,15 @@
   the value SERVER-HANDBOOK gives a generation whose backend reports no reason, and the one
   `run --json` reports for a transcription. Before 2.0.8-beta.1 both asserted `"stop"`. Issue #69.
 
+- `--max-tokens` on `mlxk run --audio`, and `max_tokens` in a chat request against a transcription
+  model, never reached the model: the transcription runner accepted the value and left it out of
+  the call. A model that transcribes in one pass stopped at its own default budget whatever was
+  asked — a long transcript ended mid-word, and raising the value changed nothing. The value is now
+  handed on unclamped; without one, the model's own default applies as before. Whisper decodes in
+  30-second windows and takes no budget, so nothing changes there. A `--max-tokens` below 1 on an
+  audio run is refused, as on a text run. The `/v1/audio/*` endpoints take no budget field. Present
+  since 2.0.4-beta.9. Issue #59.
+
 - `mlxk run` answered a model location it could not read with the name of one of its own
   variables — `local variable 'model_path' referenced before assignment`, typed `InternalError`
   under `--json` — when the model cache was unreadable, and with a Python traceback when the

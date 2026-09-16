@@ -356,3 +356,40 @@ class TestAudioChatFinishReason:
     def test_batch_and_stream_agree(self):
         assert self._complete(stream=True) is None
         assert self._complete(stream=False) is None
+
+
+class TestAudioChatMaxTokens:
+    """#59: a chat request's `max_tokens` reaches the transcription unchanged; without one the
+    server sets none, so the model's own budget applies. It used to hand on 4096."""
+
+    @staticmethod
+    def _transcribe_kwargs(max_tokens):
+        import asyncio
+
+        from mlxk2.core.server.handlers.audio import handle_audio_chat_completion
+        from mlxk2.core.server.streaming import emulate_sse_stream
+
+        received = {}
+
+        class Runner:
+            def transcribe(self, **kwargs):
+                received.update(kwargs)
+                return "a transcript"
+
+        audio = base64.b64encode(b"RIFF....WAVEfmt ").decode()
+        messages = [{"role": "user", "content": [
+            {"type": "input_audio", "input_audio": {"data": audio, "format": "wav"}}]}]
+
+        asyncio.run(handle_audio_chat_completion(
+            "org/stt-model", messages, max_tokens, 0.0, False,
+            get_audio_model_fn=lambda model, verbose: Runner(),
+            emulate_sse_fn=emulate_sse_stream,
+            count_tokens_fn=lambda text: len(text.split()),
+        ))
+        return received
+
+    def test_request_value_is_passed_on(self):
+        assert self._transcribe_kwargs(32768)["max_tokens"] == 32768
+
+    def test_no_request_value_passes_no_budget(self):
+        assert self._transcribe_kwargs(None)["max_tokens"] is None

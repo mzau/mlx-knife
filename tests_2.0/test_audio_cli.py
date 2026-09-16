@@ -228,7 +228,8 @@ class TestPromptThreading:
 
     # --- run path half: what run.py hands to AudioRunner -------------------
 
-    def _transcribe_kwargs(self, tmp_path, prompt=None, translate=None):
+    @staticmethod
+    def _transcribe_kwargs(tmp_path, prompt=None, translate=None, max_tokens=None):
         """Drive run_model_enhanced's MLX_AUDIO branch with a faked runner.
 
         `mlxk2.core.audio_runner` is injected rather than patched: importing it pulls
@@ -270,6 +271,7 @@ class TestPromptThreading:
                 prompt=prompt,
                 audio=[("clip.wav", clip.read_bytes())],
                 translate=translate,
+                max_tokens=max_tokens,
                 json_output=True,
             )
 
@@ -355,6 +357,23 @@ class TestPromptThreading:
         """Non-regression on the other side of the same branch."""
         kwargs = self._vision_kwargs(tmp_path, images=[("pic.jpg", b"\xff\xd8\xff")])
         assert kwargs["prompt"] == "Describe the image."
+
+
+class TestMaxTokensThreading:
+    """What the run path hands AudioRunner as `max_tokens` (Issue #59).
+
+    Audio gets no mlx-knife default: without `--max-tokens` the run path passes None, so the
+    model's own budget applies. It used to pass 4096, which went unnoticed only because the
+    runner dropped the value anyway.
+    """
+
+    def test_no_flag_passes_no_budget(self, tmp_path):
+        kwargs = TestPromptThreading._transcribe_kwargs(tmp_path)
+        assert kwargs["max_tokens"] is None
+
+    def test_flag_value_is_passed_on(self, tmp_path):
+        kwargs = TestPromptThreading._transcribe_kwargs(tmp_path, max_tokens=32768)
+        assert kwargs["max_tokens"] == 32768
 
 
 class TestAudioTestAssets:
