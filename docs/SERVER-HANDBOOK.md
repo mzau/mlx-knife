@@ -41,7 +41,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 ```
 
 **Requirements (2.0.8 pin set):**
-- Python 3.10–3.14. Every version in that range installs from wheels alone — `mlx-audio` is a **base** dependency, so an interpreter without a macOS-ARM `miniaudio` wheel would fail at install time; there is no audio-free install variant.
+- Python 3.11–3.14. Every version in that range installs from wheels alone — `mlx-audio` is a **base** dependency, so an interpreter without a macOS-ARM `miniaudio` wheel would fail at install time; there is no audio-free install variant.
 - `mlx>=0.30.0,<0.32.1`
 - `mlx-lm==0.31.3` (text backend)
 - `mlx-vlm==0.6.10` (vision + multimodal audio)
@@ -410,7 +410,7 @@ A man said to the universe, Sir, I exist.
 - Whisper: `whisper-large`, `mlx-community/whisper-large-v3-turbo-4bit`
 - Voxtral: `mlx-community/Voxtral-Mini-3B-2507-bf16` (upstream tokenizer issues)
 
-**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.14).
+**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.11–3.14).
 
 **Translation:** for audio-to-English translation, use the dedicated
 [`POST /v1/audio/translations`](#post-v1audiotranslations) endpoint (or the CLI
@@ -492,7 +492,7 @@ client.audio.translations.create(
 | Not an audio model at all | **400** | a text or vision model |
 | Audio model that cannot translate | **422** | whisper-turbo (reduced decoder), `whisper-*.en` (no `<\|translate\|>` token), non-Whisper STT (Voxtral, VibeVoice) |
 
-**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.10–3.14).
+**Note:** This endpoint needs `mlx-audio` — included in the base install (Python 3.11–3.14).
 
 ---
 
@@ -740,8 +740,8 @@ Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 - Same content = same ID (content-hash based)
 
 **Python Version:**
-- ✅ Python 3.10+ required (mlx-vlm dependency)
-- ❌ Python 3.9: Vision requests → HTTP 501
+- ✅ Python 3.11–3.14 (the supported range; the vision backend itself needs 3.10+)
+- ❌ Below that: Vision requests → HTTP 501
 
 ---
 
@@ -812,8 +812,8 @@ When switching from Audio to Text model mid-conversation:
 - Text model sees `[n audio(s) were attached]` placeholder
 
 **Python Version:**
-- ✅ Python 3.10+ required (same as Vision)
-- ❌ Python 3.9: Audio requests → HTTP 501
+- ✅ Python 3.11–3.14 (same as Vision)
+- ❌ Below that: Audio requests → HTTP 501
 
 ---
 
@@ -1213,17 +1213,17 @@ python -m mlxk2.core.server_base
 
 ### Vision/Audio Require Python 3.10+
 
-mlx-knife itself requires Python 3.10+ (`requires-python >=3.10`), so a normal `pip install`
-cannot land on 3.9. This 501 only appears when running from a source checkout on an unsupported
-interpreter.
+mlx-knife itself requires Python 3.11+ (`requires-python >=3.11`), so a normal `pip install`
+cannot land below that. This 501 only appears when running from a source checkout on an
+unsupported interpreter.
 
 **Symptom:** HTTP 501 "Vision models require Python 3.10+"
 
 **Solution:**
 ```bash
-# Upgrade Python (3.10-3.14 required)
-pyenv install 3.10
-pyenv local 3.10
+# Upgrade Python (3.11-3.14 required)
+pyenv install 3.11
+pyenv local 3.11
 
 # Reinstall — the vision and audio backends are base dependencies,
 # there are no extras to select
@@ -1373,7 +1373,7 @@ no macOS-ARM `miniaudio` wheel exists and the build from source fails.
 
 **Solution:**
 ```bash
-# Use Python 3.10-3.14, then reinstall
+# Use Python 3.11-3.14, then reinstall
 pip install --force-reinstall mlx-knife
 ```
 
@@ -1899,7 +1899,7 @@ Hello world.
 - Use `multipart/form-data` content type (not `application/json`)
 - File field name must be `file`
 - Maximum file size: 50 MB — see [Limits Summary](#limits-summary) for what that means per format
-- Requires `mlx-audio` on the server — included in the base install (Python 3.10–3.14)
+- Requires `mlx-audio` on the server — included in the base install (Python 3.11–3.14)
 
 ### Embeddings: Model Identity & Change Detection
 

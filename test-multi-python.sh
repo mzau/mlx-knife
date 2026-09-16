@@ -5,10 +5,10 @@
 echo "🧪 MLX Knife 2.0 (mlxk2) Multi-Python Version Testing"
 echo "=========================================="
 echo "Prerequisites: Python versions should be available as:"
-echo "  - python3.10, python3.11, python3.12, python3.13, python3.14 (full support: text + vision + audio)"
-echo "Note: Python 3.9 not supported (MLX 0.30+ requires 3.10+)"
+echo "  - python3.11, python3.12, python3.13, python3.14 (full support: text + vision + audio)"
+echo "Note: Python 3.10 and older are not supported (requires-python >=3.11)"
 echo "Note: an interpreter that is not on PATH is reported as 'Not Available', not as a failure"
-echo "Usage: $0 [version ...]   e.g. '$0 3.14' or '$0 3.14 3.10' — no argument runs all of them"
+echo "Usage: $0 [version ...]   e.g. '$0 3.14' or '$0 3.14 3.11' — no argument runs all of them"
 echo ""
 
 # Colors for output
@@ -18,16 +18,16 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Python versions to test (bash 3.2 compatible)
-# Note: Python 3.9 dropped (MLX 0.30+ requires 3.10+)
+# Note: Python 3.10 and older dropped (requires-python >=3.11)
 # Note: versioned installs do not always expose the interpreter under these names;
 #       a missing one is counted as "Not Available" and does not fail the run.
-PYTHON_COMMANDS=("python3.10" "python3.11" "python3.12" "python3.13" "python3.14")
-VERSION_NAMES=("3.10" "3.11" "3.12" "3.13" "3.14")
+PYTHON_COMMANDS=("python3.11" "python3.12" "python3.13" "python3.14")
+VERSION_NAMES=("3.11" "3.12" "3.13" "3.14")
 RESULTS=()
 
 # Optional: version names as arguments run only those, in the order given. Two things
 # that a full run cannot separate: a version's own cost and its position in the run
-# (the last one meets the warmest machine), so `… 3.14 3.10` measures the same pair the
+# (the last one meets the warmest machine), so `… 3.14 3.11` measures the same pair the
 # other way round. Without arguments every version is tried, as before.
 SELECTED=()
 if [ $# -gt 0 ]; then

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### ⚠️ Upgrade Notes
+
+- **Python 3.11 or later is required** (`requires-python >=3.11`; the supported range is
+  3.11–3.14). On Python 3.10, `pip install -U mlx-knife` says nothing and leaves 2.0.7 in
+  place — an older release that does not carry the fixes below. Upgrading the interpreter is
+  the only way onto this release.
+
 ### Testing
 
 - The live-test exclusion list `KNOWN_BROKEN_MODELS` is per capability: an entry names the

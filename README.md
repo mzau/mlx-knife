@@ -10,7 +10,7 @@
 
 [![GitHub Release](https://img.shields.io/badge/stable-2.0.7-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Python 3.10-3.14](https://img.shields.io/badge/python-3.10--3.14-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11-3.14](https://img.shields.io/badge/python-3.11--3.14-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
 
 **Release Notes:** See [CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md) for detailed changes, fixes, and migration guides.
@@ -74,7 +74,8 @@ already there honest.
   path, and no server process survives its supervisor.
 
 The MLX stack moves to mlx-vlm 0.6.10 / mlx-audio 0.4.8 / transformers 5.14.1 — torch-free,
-a 524 MB (36 %) smaller install — and Python 3.10–3.14 are supported.
+a 524 MB (36 %) smaller install. **Python 3.11 or later is required**; on 3.10 `pip` installs
+2.0.7, which does not carry this release's security fixes.
 
 ## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
@@ -91,7 +92,7 @@ Robust handling of SIGPIPE and early pipe termination (`| head`, `| grep -m1`).
 
 ## Requirements
 - macOS with Apple Silicon
-- Python 3.10-3.14 (see Python Compatibility below)
+- Python 3.11-3.14 (see Python Compatibility below)
 - 8GB+ RAM recommended + RAM to run LLM
 
 ## ⚖️ Model Usage and Licenses
@@ -115,10 +116,12 @@ This license applies **only** to the `mlx-knife` code and **does not extend** to
 
 ### Python Compatibility
 
-✅ **Python 3.10 - 3.14** - Full support (Text + Vision + Audio)
+✅ **Python 3.11 - 3.14** - Full support (Text + Vision + Audio)
+❌ **Python 3.10** - Use version 2.0.7 (the newest release that runs on it)
 ❌ **Python 3.9** - Use version 2.0.3 (text + cache management only)
 
-**Recommended:** Python 3.10 or 3.11 for best compatibility.
+On an interpreter below 3.11, `pip install mlx-knife` silently installs one of those older
+releases instead, and they do not carry the current security fixes — upgrade Python first.
 
 
 
@@ -131,7 +134,7 @@ pip install mlx-knife
 mlxk --version  # → mlxk 2.0.7
 ```
 
-**Requirements:** macOS Apple Silicon, Python 3.10-3.14
+**Requirements:** macOS Apple Silicon, Python 3.11-3.14
 **Includes:** Text, Vision, Audio (Whisper STT), EXIF metadata, Unix pipes
 
 ### 2. Developer Installation
@@ -145,7 +148,7 @@ mlxk --version  # → mlxk 2.0.7
 pytest -v
 ```
 
-**Requirements:** macOS Apple Silicon, Python 3.10-3.14
+**Requirements:** macOS Apple Silicon, Python 3.11-3.14
 
 ### Migrating from 1.x
 
@@ -368,11 +371,10 @@ MLX Knife supports multiple input modalities beyond text. All multi-modal featur
 
 ### Vision
 
-Image analysis via the `--image` flag (CLI and server). Requires Python 3.10+. Stable since 2.0.4.
+Image analysis via the `--image` flag (CLI and server). Stable since 2.0.4.
 
 #### Requirements
 
-- **Python 3.10+** (mlx-vlm dependency)
 - **Backend:** mlx-vlm 0.4+ (included in base install)
 
 #### Usage
@@ -524,7 +526,6 @@ Some legacy mlx-vlm conversions need a one-time index repair before they load �
 > **🎙️ Audio Transcription:** Speech-to-text via Whisper models (mlx-audio backend). Works out-of-the-box with PyPI install. Backward compatible with Gemma-3n multimodal audio (mlx-vlm).
 
 **Requirements:**
-- **Python 3.10+** (mlx-audio dependency, included in base install)
 - **No system dependencies for WAV/MP3/FLAC:** decoded in-process via miniaudio (no ffmpeg or Homebrew required); other container formats need ffmpeg, see Limitations below
 
 **Reference model:** `mlx-community/whisper-large-v3-turbo-4bit` (~464 MB, supports >10 min audio, 4bit + 8bit variants both verified). See [`docs/MODEL-COVERAGE.md`](https://github.com/mzau/mlx-knife/blob/main/docs/MODEL-COVERAGE.md) for the full per-release verified list.
@@ -1047,7 +1048,7 @@ Control server behavior without command-line flags:
 
 ### Vision Processing
 
-Control vision model behavior (Python 3.10+, beta):
+Control vision model behavior (beta):
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|

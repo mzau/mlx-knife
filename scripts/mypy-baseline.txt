@@ -6,7 +6,7 @@
 # count RISES. It never demands that the list shrink, and a smaller count is reported, not
 # rewarded — refresh this file deliberately after a cleanup, never to make a red run green.
 #
-# Measured identical on 3.10 and 3.14 (2026-09-12), so one number covers the whole matrix.
+# Measured identical on 3.11, 3.12 and 3.14 (2026-09-16), so one number covers the whole matrix.
 # Regenerate the per-file list with:
 #
 #   python -m mypy mlxk2/ | grep "error:" | cut -d: -f1 | sort | uniq -c | sort -rn

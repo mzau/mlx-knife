@@ -916,8 +916,7 @@ states the same boundary:
 
 | Python Version | Status | Reason |
 |----------------|--------|--------|
-| 3.9            | ❌ Not supported | MLX 0.30+ requires 3.10+ |
-| 3.10.x         | ✅ Supported | text + vision + audio |
+| 3.9, 3.10      | ❌ Not supported | `requires-python >=3.11` |
 | 3.11.x         | ✅ Supported | text + vision + audio |
 | 3.12.x         | ✅ Supported | text + vision + audio |
 | 3.13.x         | ✅ Supported | text + vision + audio; verified in a separate run, see the note below |
@@ -928,7 +927,7 @@ boundary moved up when `miniaudio` began publishing macOS-ARM wheels for the who
 before that, `mlx-audio` (a base dependency, not an extra) made 3.13+ fail at install time.
 
 The matrix only covers interpreters that are on `PATH` under the names it probes
-(`python3.10` … `python3.14`); one that is missing is reported as *Not Available* and does not
+(`python3.11` … `python3.14`); one that is missing is reported as *Not Available* and does not
 fail the run. A versioned install that keeps its interpreter off `PATH` — which is how 3.13 is
 commonly installed alongside a newer default — therefore has to be verified by pointing a venv
 at it directly.
@@ -937,7 +936,7 @@ Per-version pass/skip counts are **not carried here**: they move with every test
 with the environment (see the note under Test Results above). Re-measure at release with
 `bash test-multi-python.sh`, which builds a fresh venv per version and runs the default suite
 plus ruff. Version names as arguments narrow the run to those, in the order given
-(`bash test-multi-python.sh 3.14 3.10`) — useful when a single version needs a second look, and
+(`bash test-multi-python.sh 3.14 3.11`) — useful when a single version needs a second look, and
 when a timing difference has to be told apart from the position in the run: the version that goes
 last meets the warmest machine.
 
@@ -1390,7 +1389,7 @@ pytest tests_2.0/test_issue_27.py -m issue27 -v
 
 **Requirements:**
 - Vision model must exist in user cache (pull it first if needed)
-- Python 3.10+ (mlx-vlm dependency - tests skip on Python 3.9)
+- Python 3.11+ (the supported range; the tests skip below the mlx-vlm boundary of 3.10)
 - CoW (macOS/APFS, same volume) eliminates disk space concerns; otherwise ~24GB free space needed
 
 ## Manual MLX Chat Model Smoke Test (2.0)

@@ -296,7 +296,7 @@ pytest -m live_stop_tokens -v
 
 ## Python Version Compatibility
 
-**Tests validated on Python 3.10-3.14** (Python 3.9 not supported since 2.0.4)
+**Tests validated on Python 3.11-3.14** (3.10 and older are not supported)
 
 Multi-version testing:
 ```bash
@@ -305,11 +305,11 @@ Multi-version testing:
 
 # Or only the versions named, in the order given
 ./test-multi-python.sh 3.14
-./test-multi-python.sh 3.14 3.10
+./test-multi-python.sh 3.14 3.11
 
 # Manual verification
-python3.10 -m venv test_310
-source test_310/bin/activate
+python3.11 -m venv test_311
+source test_311/bin/activate
 pip install -e .[test] && pytest
 ```
 
