@@ -83,8 +83,10 @@ def test_without_stop_the_runners_reason_stands(surface):
 class StreamingRunner(Runner):
     """Emits the answer token by token, so the stop check runs where it really runs."""
 
-    def generate_streaming(self, **kwargs):
+    def generate_streaming(self, record=None, **kwargs):
         yield from ["one ", "two ", "STOP", " three"]
+        if record is not None:  # a stream reads how it ended from its record, as MLXRunner writes it
+            record.last_finish_reason = self.last_finish_reason
 
 
 @pytest.mark.parametrize("surface", sorted(SURFACES))

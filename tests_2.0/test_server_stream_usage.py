@@ -35,7 +35,7 @@ TEXT = {
 
 
 class Runner:
-    """The text runner surface a request touches; fills the request's counts as MLXRunner does."""
+    """The text runner surface a request touches; fills the request's record as MLXRunner does."""
 
     last_prompt_tokens = 11
     last_completion_tokens = 2
@@ -50,12 +50,12 @@ class Runner:
     def generate_batch(self, **kwargs):
         return "AB"
 
-    def generate_streaming(self, counts=None, **kwargs):
-        if counts is not None:
-            counts.last_prompt_tokens, counts.last_completion_tokens = 11, 0
+    def generate_streaming(self, record=None, **kwargs):
+        if record is not None:
+            record.last_prompt_tokens, record.last_completion_tokens = 11, 0
         for piece in self.pieces:
-            if counts is not None:
-                counts.last_completion_tokens += 1
+            if record is not None:
+                record.last_completion_tokens += 1
             yield piece
 
 
@@ -156,7 +156,7 @@ def test_a_batch_request_ignores_the_option(surface):
 
 def test_a_failed_stream_sends_no_usage_chunk():
     class Exploding(Runner):
-        def generate_streaming(self, counts=None, **kwargs):
+        def generate_streaming(self, record=None, **kwargs):
             yield "part"
             raise RuntimeError("backend exploded")
 
@@ -293,30 +293,45 @@ def _mlx_runner(tmp_path, tokens=10):
 
 
 def test_a_stream_left_early_keeps_its_count(tmp_path):
-    from mlxk2.core.server.streaming import TokenCounts
+    from mlxk2.core.server.streaming import GenerationRecord
 
-    counts = TokenCounts()
+    record = GenerationRecord()
     with _mlx_runner(tmp_path) as runner:
-        stream = runner.generate_streaming("one two three", counts=counts)
+        stream = runner.generate_streaming("one two three", record=record)
         for _ in range(4):
             next(stream)
-    assert (counts.last_prompt_tokens, counts.last_completion_tokens) == (3, 4)
+    assert (record.last_prompt_tokens, record.last_completion_tokens) == (3, 4)
 
 
 def test_a_generation_served_meanwhile_leaves_the_count_alone(tmp_path):
     """A request served between two steps of a stream rewrites the runner's own attributes."""
-    from mlxk2.core.server.streaming import TokenCounts
+    from mlxk2.core.server.streaming import GenerationRecord
 
-    first, second = TokenCounts(), TokenCounts()
+    first, second = GenerationRecord(), GenerationRecord()
     with _mlx_runner(tmp_path) as runner:
-        stream = runner.generate_streaming("one two three", counts=first)
+        stream = runner.generate_streaming("one two three", record=first)
         next(stream)
         next(stream)
-        list(runner.generate_streaming("one two three four five", counts=second))
+        list(runner.generate_streaming("one two three four five", record=second))
         next(stream)
         assert runner.last_prompt_tokens == 5
     assert (first.last_prompt_tokens, first.last_completion_tokens) == (3, 3)
     assert (second.last_prompt_tokens, second.last_completion_tokens) == (5, 10)
+
+
+def test_a_generation_served_meanwhile_leaves_the_budget_and_reason_alone(tmp_path):
+    """The log line and the final chunk read the record, so it keeps its own budget and exit."""
+    from mlxk2.core.server.streaming import GenerationRecord
+
+    first, second = GenerationRecord(), GenerationRecord()
+    with _mlx_runner(tmp_path) as runner:
+        stream = runner.generate_streaming("one two three", max_tokens=10, record=first)
+        next(stream)
+        list(runner.generate_streaming("one two three four five", max_tokens=20, record=second))
+        list(stream)
+        assert runner.last_max_tokens == 20
+    assert (first.last_max_tokens, first.last_completion_tokens, first.last_finish_reason) == (10, 10, "length")
+    assert (second.last_max_tokens, second.last_completion_tokens, second.last_finish_reason) == (20, 10, None)
 
 
 # --- what an OpenAI client reads ---------------------------------------------------

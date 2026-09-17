@@ -19,7 +19,9 @@ from fastapi.responses import StreamingResponse
 
 from ...runner.token_limits import apply_stop_sequences
 from ..inference import in_worker
-from ..streaming import TokenCounts, finish_reason_of, log_generation_end, stopped_on_sequence, usage_of
+from ..streaming import (
+    GenerationRecord, finish_reason_of, generate_recorded, log_generation_end, stopped_on_sequence, usage_of,
+)
 
 if TYPE_CHECKING:
     from ...runner import MLXRunner  # noqa: F401
@@ -140,8 +142,8 @@ async def handle_text_chat_completion(
         prompt = ctx.extract_text(messages)
 
         # Vision model WITHOUT images: the vision ceiling applies (stateless, no window guard)
-        generated_text = await in_worker(
-            runner.generate,
+        generated_text, record = await in_worker(
+            generate_recorded, runner, runner.generate,
             prompt=prompt,
             images=None,
             max_tokens=ctx.get_effective_max_tokens_vision(max_tokens),
@@ -150,9 +152,9 @@ async def handle_text_chat_completion(
             repetition_penalty=repetition_penalty or 1.0,
         )
         generated_text, stopped = apply_stop_sequences(generated_text, stop)
-        finish_reason = "stop" if stopped else finish_reason_of(runner)
+        finish_reason = "stop" if stopped else finish_reason_of(record)
 
-        usage = usage_of(runner, prompt, generated_text, ctx.count_tokens)
+        usage = usage_of(record, prompt, generated_text, ctx.count_tokens)
 
         # Graceful degradation: emulate SSE for stream=true
         if stream:
@@ -218,7 +220,8 @@ async def handle_text_chat_completion(
         # The chat template runs on the tokenizer, so it belongs in the same worker
         # call as the generation it prepares rather than beside it on the loop.
         prompt = runner._format_conversation(message_dicts)
-        return runner.generate_batch(
+        return generate_recorded(
+            runner, runner.generate_batch,
             prompt=prompt,
             max_tokens=ctx.get_effective_max_tokens(max_tokens),
             temperature=temperature,
@@ -228,12 +231,12 @@ async def handle_text_chat_completion(
             use_chat_stop_tokens=True
         )
 
-    generated_text = await in_worker(_format_and_generate)
-    log_generation_end(logger, runner, request_model, stream=False)
+    generated_text, record = await in_worker(_format_and_generate)
+    log_generation_end(logger, record, request_model, stream=False)
 
     generated_text, stopped = apply_stop_sequences(generated_text, stop)
     total_prompt = ctx.extract_text(messages)
-    usage = usage_of(runner, total_prompt, generated_text, ctx.count_tokens)
+    usage = usage_of(record, total_prompt, generated_text, ctx.count_tokens)
 
     return {
         "id": completion_id,
@@ -247,7 +250,7 @@ async def handle_text_chat_completion(
                     "role": "assistant",
                     "content": generated_text
                 },
-                "finish_reason": "stop" if stopped else finish_reason_of(runner)
+                "finish_reason": "stop" if stopped else finish_reason_of(record)
             }
         ],
         "usage": usage
@@ -364,8 +367,8 @@ async def handle_vision_chat_completion(
 
     if len(images) <= chunk_size:
         # Single batch (no chunking)
-        generated_text = await in_worker(
-            runner.generate,
+        generated_text, counted = await in_worker(
+            generate_recorded, runner, runner.generate,
             prompt=prompt,
             images=images if images else None,
             audio=effective_audio,
@@ -376,8 +379,7 @@ async def handle_vision_chat_completion(
             image_id_map=image_id_map if images else None,
             stop=stop,
         )
-        finish_reason = finish_reason_of(runner)
-        counted = runner
+        finish_reason = finish_reason_of(counted)
     else:
         # Multi-chunk processing
         if stream:
@@ -483,7 +485,7 @@ def process_vision_chunks_server(
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
     stop: Optional[List[str]] = None,
-) -> Tuple[str, Optional[str], TokenCounts]:
+) -> Tuple[str, Optional[str], GenerationRecord]:
     """Process vision images in batches with isolated model instances per chunk.
 
     Each chunk creates a fresh VisionRunner to prevent state leakage between batches.
@@ -513,7 +515,7 @@ def process_vision_chunks_server(
     # Process each chunk with fresh runner
     all_results = []
     finish_reason: Optional[str] = None
-    counts = TokenCounts()
+    record = GenerationRecord()
     for chunk in chunks:
         with VisionRunner(model_path, model_name, verbose=False) as runner:
             chunk_result = runner.generate(
@@ -530,7 +532,7 @@ def process_vision_chunks_server(
             )
             chunk_reason = finish_reason_of(runner)
             stopped = stopped_on_sequence(runner)
-            counts.add(runner)
+            record.add(runner)
         all_results.append(chunk_result)
         if stopped:
             finish_reason = "stop"
@@ -538,4 +540,4 @@ def process_vision_chunks_server(
         if chunk_reason == "length" or finish_reason is None:
             finish_reason = chunk_reason
 
-    return "\n\n".join(all_results), finish_reason, counts
+    return "\n\n".join(all_results), finish_reason, record

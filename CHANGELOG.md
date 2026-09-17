@@ -98,6 +98,9 @@
 - `usage` of a chunked vision request is the sum over its own chunks instead of the counts of the
   model's previous request. Present since 2.0.8-beta.1. Issue #76.
 
+- The `Generation finished` log line of a stream on `serve` carries the stream's own `prompt_tokens`
+  and `max_tokens` instead of those of a request answered while it streamed. Present since 2.0.8-beta.1.
+
 - `mlxk run` with an unreadable model cache or workspace home names the path (`execution_error`)
   instead of an internal variable error or a traceback. Present since 2.0.4.
 

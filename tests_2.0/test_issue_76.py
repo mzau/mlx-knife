@@ -54,9 +54,9 @@ def test_the_response_sums_its_chunks_not_the_shared_runner():
 
 
 def test_counts_add_up_over_the_chunks():
-    from mlxk2.core.server.streaming import TokenCounts
+    from mlxk2.core.server.streaming import GenerationRecord
 
-    counts = TokenCounts()
+    counts = GenerationRecord()
     counts.add(_runner(3, 8))
     counts.add(_runner(4, 8))
     assert (counts.last_prompt_tokens, counts.last_completion_tokens) == (7, 16)
@@ -66,19 +66,19 @@ def test_counts_add_up_over_the_chunks():
 @pytest.mark.parametrize("uncounted", [None, True, "3"], ids=["none", "bool", "str"])
 def test_one_uncounted_chunk_leaves_the_sum_unknown(first, uncounted):
     """A later counted chunk must not pass for the whole request, nor must a bool pass for a count."""
-    from mlxk2.core.server.streaming import TokenCounts
+    from mlxk2.core.server.streaming import GenerationRecord
 
     chunks = [_runner(uncounted, uncounted), _runner(3, 8)]
-    counts = TokenCounts()
+    counts = GenerationRecord()
     for chunk in chunks if first else reversed(chunks):
         counts.add(chunk)
     assert (counts.last_prompt_tokens, counts.last_completion_tokens) == (None, None)
 
 
 def test_a_chunk_runner_without_the_attributes_counts_as_uncounted():
-    from mlxk2.core.server.streaming import TokenCounts
+    from mlxk2.core.server.streaming import GenerationRecord
 
-    counts = TokenCounts()
+    counts = GenerationRecord()
     counts.add(object())
     counts.add(_runner(3, 8))
     assert counts.last_prompt_tokens is None

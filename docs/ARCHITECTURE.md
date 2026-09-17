@@ -296,7 +296,7 @@ Backends (e.g., `VisionRunner`) should be loaded **once per process** and reused
 - Vision chunking is the deliberate exception: a **fresh** `VisionRunner` per chunk, to keep
   KV-cache and decoder state from accumulating across chunks. Both surfaces do it — `operations/run.py`
   and, on the server, `handlers/chat.py` (batch) and `streaming.py` (per-chunk SSE). The server adds
-  each chunk's token counts into a `TokenCounts` of the request; the model's shared runner holds
+  each chunk's token counts into a `GenerationRecord` of the request; the model's shared runner holds
   another request's ([#76](https://github.com/mzau/mlx-knife/issues/76))
 - Temporary files: Track and clean up on exit
 - Context managers: Use `with` statements for resource safety
@@ -314,10 +314,14 @@ entire state (naive five fields, SPM and BPE four each), nothing carried over. K
 runner fields are overwritten by the next generation the way `last_finish_reason` and its
 siblings are. Two generations on one runner can no longer run at the same moment — see §Model
 Thread — but they still interleave: a batch answer can run between two steps of a stream on the
-same runner, which is one more reason per-generation state does not belong on it. A stream's token
-counts therefore go into a `TokenCounts` the caller holds: `generate_streaming(counts=…)` writes the
-prompt count at the start and the completion count after every token, because a stream left at a
-`stop` sequence never reaches `_end_generation`.
+same runner, which is one more reason per-generation state does not belong on it. What a request
+reports about its generation — `usage`, `finish_reason`, the `Generation finished` line — is therefore
+read from a `GenerationRecord` the request holds, never from the runner after an `await`. A batch
+answer is one call on the model thread, and `generate_recorded` copies the runner's `last_*` inside
+that call: the thread takes the next request as soon as it returns, and that generation resets the
+runner before the event loop reads it. A stream spans many calls, so `generate_streaming(record=…)`
+writes into it — the prompt count and budget at the start, the completion count after every token,
+because a stream left at a `stop` sequence never reaches `_end_generation`, and the exit at the end.
 
 ### 6. Explicit Error Codes for Servers
 
@@ -501,11 +505,7 @@ and its images are decoded.
 of its steps, so a request for another model is served there, unloads the runner, and the stream
 fails at its next step (measured). On the blocked loop the same could happen between two yields. A
 non-streaming request whose client has gone is not stopped either: nothing reads the disconnect, and
-a thread cannot be cancelled from outside. `finish_reason`, the `Generation finished` log line and a
-batch response's `usage` read the runner's `last_*` on the loop, after the model thread has returned.
-Another generation on the same runner that begins or ends before that read — the next queued request,
-or a second stream — overwrites them; the log line's prompt count is overwritten by any generation
-served while a stream runs.
+a thread cannot be cancelled from outside.
 
 ---
 
@@ -545,6 +545,7 @@ served while a stream runs.
 
 ## Changelog
 
+- **2026-09-17 (request-bound generation record):** Principle #5: `TokenCounts` became `GenerationRecord` and carries the budget and the exit as well. A batch answer copies the runner into it in the same model-thread call as the generation; a stream's runner writes budget and exit into it. `usage` and `finish_reason` read it on every text and vision path, the `Generation finished` line on the text paths. §Model Thread, *Not covered*: the entry on these reads is gone. Before, the log line of a stream carried the prompt count and budget of any request served while it streamed, and a batch answer read the runner after the model thread could already have begun the next generation.
 - **2026-09-16 (request-bound token counts):** Principle #5: the token counts of a stream and of a chunked vision request go into the request's `TokenCounts`; the shared runner's `last_*` belong to whichever generation ran last, which is how a chunked batch reported another request's `usage` ([#76](https://github.com/mzau/mlx-knife/issues/76)). §Model Thread, *Not covered*: `finish_reason`, the log line and batch `usage` still read the runner.
 - **2026-09-14 (server state):** `GET /v1/models` rows carry `loaded` (ADR-029): *Two surfaces* lists the field, and §Thread Safety records that the `ModelManager` cache is keyed by the model directory a spec reaches rather than by the request's spelling — which is what makes the flag match a row, and what stopped a request for the listed id from loading the model a second time — and that it records the runner kind. §Model Thread: the listing moved to a helper thread, with the logger-level lock that made safe; reading a request stays on the loop; *Not covered* corrected — the eviction window is the whole stream, not only the time before its first step, measured by requesting another model mid-stream; and a disconnected non-streaming request runs on. §Thread Safety no longer says the model thread keeps a switch from freeing a runner mid-generation: it serializes operations, and a stream spans many of them. Principle #5 said two generations on one runner can no longer overlap; they cannot run at the same moment, but a batch answer still runs between two steps of a stream.
 - **2026-09-14 (references de-anchored):** Line numbers replaced by the symbols they meant. Nine of thirteen checkable anchors pointed at the wrong line — `cli.py:647` by 467 lines and at a different feature entirely — because a line number rots on the next commit to the file and nothing reads it back. `docs/SERVER-HANDBOOK.md` carries none and is checked by `scripts/check-handbook-contract.py`, which is the form that holds. Also: `TESTING-DETAILS.md` lives at the repo root, not under `docs/`; §Historical pointed at a file that exists nowhere; the JSON API entry no longer names a spec version the spec itself owns.

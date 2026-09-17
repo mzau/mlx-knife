@@ -35,9 +35,10 @@ from .server.streaming import (
     generate_chat_stream as _generate_chat_stream_impl,
     stream_vision_chunks as _stream_vision_chunks_impl,
     emulate_sse_stream as _emulate_sse_stream_impl,
-    TokenCounts,
+    GenerationRecord,
     count_tokens,
     finish_reason_of,
+    generate_recorded,
     log_generation_end,
     usage_of,
 )
@@ -711,8 +712,8 @@ async def create_completion(request: CompletionRequest):
             completion_id = f"cmpl-{uuid.uuid4()}"
             created = int(time.time())
 
-            generated_text = await in_worker(
-                runner.generate_batch,
+            generated_text, record = await in_worker(
+                generate_recorded, runner, runner.generate_batch,
                 prompt=prompt,
                 max_tokens=get_effective_max_tokens(request.max_tokens),
                 temperature=get_effective_temperature(request.temperature),
@@ -720,13 +721,13 @@ async def create_completion(request: CompletionRequest):
                 repetition_penalty=request.repetition_penalty,
                 use_chat_template=False
             )
-            log_generation_end(logger, runner, request.model, stream=False)
+            log_generation_end(logger, record, request.model, stream=False)
 
             generated_text, stopped = apply_stop_sequences(
                 generated_text,
                 request.stop if isinstance(request.stop, list) else ([request.stop] if request.stop else None),
             )
-            usage = usage_of(runner, prompt, generated_text, count_tokens)
+            usage = usage_of(record, prompt, generated_text, count_tokens)
 
             return CompletionResponse(
                 id=completion_id,
@@ -737,7 +738,7 @@ async def create_completion(request: CompletionRequest):
                         "index": 0,
                         "text": generated_text,
                         "logprobs": None,
-                        "finish_reason": "stop" if stopped else finish_reason_of(runner)
+                        "finish_reason": "stop" if stopped else finish_reason_of(record)
                     }
                 ],
                 usage=usage
@@ -879,7 +880,7 @@ def _process_vision_chunks_server(
     repetition_penalty: float,
     audio: Optional[List[tuple]] = None,
     stop: Optional[List[str]] = None,
-) -> Tuple[str, Optional[str], TokenCounts]:
+) -> Tuple[str, Optional[str], GenerationRecord]:
     """Process vision images in batches with isolated model instances per chunk.
 
     Delegates to extracted chat handler module (Phase 1 refactoring).

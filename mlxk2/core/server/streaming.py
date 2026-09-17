@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from threading import Event
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeGuard
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, TypeGuard
 
 from ...errors import internal_error
 from .inference import drive, in_worker
@@ -92,17 +92,21 @@ def count_tokens(text: str) -> int:
     return int(len(text.split()) * 1.3)  # Approximation, convert to int
 
 
-class TokenCounts:
-    """One request's token counts, apart from the runner its model shares with other requests.
+class GenerationRecord:
+    """One request's generation — token counts, budget, how it ended — apart from the runner its
+    model shares with other requests.
 
-    The attributes carry the runner's names, so ``usage_of`` reads either. A text stream hands
-    it to the runner, which keeps it current per token; a chunked vision request adds up the
-    runners of its chunks.
+    The attributes carry the runner's names, so ``usage_of``, ``finish_reason_of`` and
+    ``log_generation_end`` read either. A text stream hands it to the runner, which keeps it
+    current; a batch answer copies the runner into it (``generate_recorded``); a chunked vision
+    request adds up the counts of its chunks' runners.
     """
 
     def __init__(self) -> None:
         self.last_prompt_tokens: Optional[int] = None
         self.last_completion_tokens: Optional[int] = None
+        self.last_max_tokens: Optional[int] = None
+        self.last_finish_reason: Optional[str] = None
         self._chunks = 0
 
     def add(self, runner: Any) -> None:
@@ -115,6 +119,19 @@ class TokenCounts:
             else:
                 setattr(self, name, None)
         self._chunks += 1
+
+
+def generate_recorded(runner, generate: Callable[..., str], /, **kwargs: Any) -> Tuple[str, GenerationRecord]:
+    """One batch generation and the runner's record of it, taken in the same model-thread call.
+
+    Once that call returns, the model thread may begin the next request, whose generation resets
+    the runner before the event loop could read it.
+    """
+    text = generate(**kwargs)
+    record = GenerationRecord()
+    for name in ("last_prompt_tokens", "last_completion_tokens", "last_max_tokens", "last_finish_reason"):
+        setattr(record, name, getattr(runner, name, None))
+    return text, record
 
 
 def usage_of(runner, prompt: str, generated: str, estimate) -> Dict[str, int]:
@@ -185,7 +202,7 @@ async def generate_completion_stream(
     logger = _get_logger()
     completion_id = f"cmpl-{uuid.uuid4()}"
     created = int(time.time())
-    counts = TokenCounts()
+    record = GenerationRecord()
     pieces: List[str] = []  # the streamed text, for the estimate should the runner count nothing
 
     # Yield initial response
@@ -217,7 +234,7 @@ async def generate_completion_stream(
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             use_chat_template=False,  # Raw completion mode
-            counts=counts,
+            record=record,
         )):
             # Stop promptly if server is shutting down
             if shutdown_event.is_set():
@@ -303,7 +320,7 @@ async def generate_completion_stream(
     # Final response (skip if shutting down)
     if shutdown_event.is_set():
         return
-    log_generation_end(logger, runner, request_model, stream=True)
+    log_generation_end(logger, record, request_model, stream=True)
     final_response = {
         "id": completion_id,
         "object": "text_completion",
@@ -314,14 +331,14 @@ async def generate_completion_stream(
                 "index": 0,
                 "text": "",
                 "logprobs": None,
-                "finish_reason": "stop" if stopped_on_sequence else finish_reason_of(runner)
+                "finish_reason": "stop" if stopped_on_sequence else finish_reason_of(record)
             }
         ]
     }
 
     yield _event(final_response, include_usage)
     if include_usage:
-        usage = usage_of(counts, prompt, "".join(pieces), count_tokens)
+        usage = usage_of(record, prompt, "".join(pieces), count_tokens)
         yield _usage_event(completion_id, "text_completion", created, request_model, usage)
     yield "data: [DONE]\n\n"
 
@@ -355,7 +372,7 @@ async def generate_chat_stream(
     logger = _get_logger()
     completion_id = f"chatcmpl-{uuid.uuid4()}"
     created = int(time.time())
-    counts = TokenCounts()
+    record = GenerationRecord()
     pieces: List[str] = []  # the streamed text, for the estimate should the runner count nothing
 
     # Let the runner format with chat templates (the tokenizer belongs to the
@@ -390,7 +407,7 @@ async def generate_chat_stream(
             repetition_penalty=repetition_penalty,
             use_chat_template=False,  # Already applied in _format_conversation
             use_chat_stop_tokens=True,  # Server NEEDS chat stop tokens to prevent self-conversations
-            counts=counts,
+            record=record,
         )):
             # Stop promptly if server is shutting down
             if shutdown_event.is_set():
@@ -486,7 +503,7 @@ async def generate_chat_stream(
     # Final response (skip if shutting down)
     if shutdown_event.is_set():
         return
-    log_generation_end(logger, runner, request_model, stream=True)
+    log_generation_end(logger, record, request_model, stream=True)
     final_response = {
         "id": completion_id,
         "object": "chat.completion.chunk",
@@ -496,14 +513,14 @@ async def generate_chat_stream(
             {
                 "index": 0,
                 "delta": {},
-                "finish_reason": "stop" if stopped_on_sequence else finish_reason_of(runner)
+                "finish_reason": "stop" if stopped_on_sequence else finish_reason_of(record)
             }
         ]
     }
 
     yield _event(final_response, include_usage)
     if include_usage:
-        usage = usage_of(counts, prompt, "".join(pieces), count_tokens)
+        usage = usage_of(record, prompt, "".join(pieces), count_tokens)
         yield _usage_event(completion_id, "chat.completion.chunk", created, request_model, usage)
     yield "data: [DONE]\n\n"
 
@@ -560,7 +577,7 @@ async def stream_vision_chunks(
     chunks = [images[i:i+chunk_size] for i in range(0, len(images), chunk_size)]
     total_images = len(images)
     finish_reason: Optional[str] = None  # aggregated over chunks: any "length" wins
-    counts = TokenCounts()
+    record = GenerationRecord()
     answer: List[str] = []
 
     # Initial role event
@@ -620,7 +637,7 @@ async def stream_vision_chunks(
                     total_images=total_images,
                     stop=stop,
                 )
-                counts.add(runner)
+                record.add(runner)
                 return text, finish_reason_of(runner), stopped_on_sequence(runner)
 
         try:
@@ -690,7 +707,7 @@ async def stream_vision_chunks(
     }
     yield _event(final_event, include_usage)
     if include_usage:
-        usage = usage_of(counts, prompt, "".join(answer), count_tokens)
+        usage = usage_of(record, prompt, "".join(answer), count_tokens)
         yield _usage_event(completion_id, "chat.completion.chunk", created, model, usage)
     yield "data: [DONE]\n\n"
 

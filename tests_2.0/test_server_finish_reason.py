@@ -39,10 +39,12 @@ class Runner:
         self.seen.update(kwargs)
         return "ok"
 
-    def generate_streaming(self, **kwargs):
+    def generate_streaming(self, record=None, **kwargs):
         self.seen.update(kwargs)
         yield "A"
         yield "B"
+        if record is not None:  # a stream reads how it ended from its record, as MLXRunner writes it
+            record.last_finish_reason = getattr(self, "last_finish_reason", None)
 
 
 # surface -> (path, request body, stream flag)

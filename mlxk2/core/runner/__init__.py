@@ -481,11 +481,12 @@ class MLXRunner:
         )
         return self.last_max_tokens
 
-    def _end_generation(self, generated: int, stopped: bool, budget: int) -> None:
+    def _end_generation(self, generated: int, stopped: bool, budget: int, record: Any = None) -> None:
         """Name the exit: interrupt, model stop, budget, or unknown (generator ended early).
 
         ``budget`` is the caller's own, not ``last_max_tokens``: a second generation
-        starting on this runner meanwhile would otherwise be the yardstick.
+        starting on this runner meanwhile would otherwise be the yardstick. A stream's
+        ``record`` gets the same count and reason.
         """
         self.last_completion_tokens = generated
         if self._interrupted:
@@ -496,6 +497,8 @@ class MLXRunner:
             self.last_finish_reason = FINISH_LENGTH
         else:
             self.last_finish_reason = None
+        if record is not None:
+            record.last_completion_tokens, record.last_finish_reason = generated, self.last_finish_reason
 
     def generate_streaming(
         self,
@@ -508,7 +511,7 @@ class MLXRunner:
         use_chat_template: bool = True,
         use_chat_stop_tokens: bool = False,
         hide_reasoning: bool = False,
-        counts: Any = None,
+        record: Any = None,
     ) -> Iterator[str]:
         """Generate text with streaming output.
 
@@ -522,10 +525,10 @@ class MLXRunner:
             use_chat_template: Apply tokenizer's chat template if available
             use_chat_stop_tokens: Include chat turn markers as stop tokens
             hide_reasoning: Hide reasoning section for reasoning models
-            counts: Kept current with this generation's ``last_prompt_tokens`` and
-                ``last_completion_tokens``. The runner's own attributes belong to whichever
-                generation started last; this object belongs to the caller, and holds the
-                count even when the caller stops reading early.
+            record: Kept current with this generation's ``last_prompt_tokens``,
+                ``last_completion_tokens``, ``last_max_tokens`` and ``last_finish_reason``. The
+                runner's own attributes belong to whichever generation started last; this object
+                belongs to the caller, and holds the count even when the caller stops reading early.
 
         Yields:
             Generated tokens as they are produced
@@ -548,8 +551,9 @@ class MLXRunner:
         # Raises before any token is produced when the prompt fills the window.
         prompt_tokens = self._encode_prompt(formatted_prompt)
         effective_max_tokens = self._begin_generation(prompt_tokens, max_tokens)
-        if counts is not None:
-            counts.last_prompt_tokens, counts.last_completion_tokens = len(prompt_tokens), 0
+        if record is not None:
+            record.last_prompt_tokens, record.last_completion_tokens = len(prompt_tokens), 0
+            record.last_max_tokens = effective_max_tokens
         # Ensure MLX core is available
         mx_core = self._mx
         if mx_core is None:
@@ -624,14 +628,14 @@ class MLXRunner:
                         generator.close()
                 except Exception:
                     pass
-                self._end_generation(len(generated_tokens), stopped=False, budget=effective_max_tokens)
+                self._end_generation(len(generated_tokens), stopped=False, budget=effective_max_tokens, record=record)
                 yield "\n[Generation interrupted by user]"
                 break
 
             token_id = token.item() if hasattr(token, 'item') else token
             generated_tokens.append(token_id)
-            if counts is not None:
-                counts.last_completion_tokens = len(generated_tokens)
+            if record is not None:
+                record.last_completion_tokens = len(generated_tokens)
 
             # Use sliding window for proper decoding
             start_idx = max(0, len(generated_tokens) - context_window)
@@ -679,7 +683,7 @@ class MLXRunner:
 
                     if earliest_token:
                         # Found stop token - yield remaining text before it and stop
-                        self._end_generation(len(generated_tokens), stopped=True, budget=effective_max_tokens)
+                        self._end_generation(len(generated_tokens), stopped=True, budget=effective_max_tokens, record=record)
                         text_before_stop = accumulated_response[:earliest_pos]
                         previously_yielded_length = len(accumulated_response) - len(new_text)
                         if len(text_before_stop) > previously_yielded_length:
@@ -709,7 +713,7 @@ class MLXRunner:
                 break
 
         if not self._interrupted:
-            self._end_generation(len(generated_tokens), stopped=stopped, budget=effective_max_tokens)
+            self._end_generation(len(generated_tokens), stopped=stopped, budget=effective_max_tokens, record=record)
 
         # Finalize reasoning parser if used
         if reasoning_parser:
