@@ -118,7 +118,7 @@ JSON output example:
 
 Notes:
 - Regular command responses (e.g., `list`, `show`) do not include a separate protocol tag; the spec version is reported by the `version` command in `data.json_api_spec_version`.
-- `system` object is `null` on non-macOS platforms where `sysctl hw.memsize` is unavailable (0.1.6+).
+- `system` is carried by `version --json` (0.1.6+) and `list --json` (0.2.4+); `null` on non-macOS platforms where `sysctl hw.memsize` is unavailable.
 
 ## Commands Overview
 
@@ -218,10 +218,15 @@ All commands support `--json` for machine-readable output. Commands that accept 
         "framework": "MLX",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat", "vision"],
+        "context_length": 4096,
         "health": "healthy",
         "runtime_compatible": true,
         "reason": null,
-        "cached": true
+        "cached": true,
+        "origin": null,
+        "content_hash": null,
+        "hash_modified": null,
+        "clean": null
       }
     ],
     "count": 1
@@ -244,10 +249,16 @@ All commands support `--json` for machine-readable output. Commands that accept 
       "framework": "MLX",
       "model_type": "chat",
       "capabilities": ["text-generation", "chat"],
+      "context_length": 4096,
       "health": "healthy",
       "runtime_compatible": true,
       "reason": null,
-      "cached": false
+      "cached": false,
+      "origin": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "content_hash": "sha256:7d8f3a1c04b6e29f5a0c1d84b37e6f92ac5518d0e4b7a1c3f6928d45b0ec7132",
+      "hash_modified": "2025-12-29T14:30:00Z",
+      "clean": true,
+      "quantization": {"group_size": 64, "bits": 4}
     },
     "metadata": {
       "model_type": "llama",
@@ -271,6 +282,7 @@ mlxk-json list "Llama" --json                # Fuzzy matching
 - Returns all cached models with complete metadata
 - Performs both integrity and runtime compatibility checks (0.1.5+)
 - Pattern filter is a case-insensitive substring match on `name`
+- `data.system` carries the node's total RAM (0.2.4+), the same object as `version --json`; present even when no model matches.
 
 **JSON Schema:**
 ```json
@@ -287,10 +299,15 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "framework": "MLX",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
+        "context_length": 4096,
         "health": "healthy",
         "runtime_compatible": true,
         "reason": null,
-        "cached": true
+        "cached": true,
+        "origin": null,
+        "content_hash": null,
+        "hash_modified": null,
+        "clean": null
       },
       {
         "name": "mlx-community/mxbai-embed-large-v1",
@@ -300,10 +317,15 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "framework": "MLX",
         "model_type": "embedding",
         "capabilities": ["embeddings"],
+        "context_length": 512,
         "health": "healthy",
         "runtime_compatible": true,
         "reason": null,
-        "cached": true
+        "cached": true,
+        "origin": null,
+        "content_hash": null,
+        "hash_modified": null,
+        "clean": null
       },
       {
         "name": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
@@ -313,10 +335,15 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "framework": "GGUF",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
+        "context_length": null,
         "health": "healthy",
         "runtime_compatible": false,
         "reason": "Framework GGUF not executable with mlx-lm (requires MLX)",
-        "cached": true
+        "cached": true,
+        "origin": null,
+        "content_hash": null,
+        "hash_modified": null,
+        "clean": null
       },
       {
         "name": "mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit",
@@ -326,10 +353,15 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "framework": "MLX",
         "model_type": "chat",
         "capabilities": ["text-generation", "chat"],
+        "context_length": 262144,
         "health": "healthy",
         "runtime_compatible": false,
         "reason": "Model architecture 'qwen3_next' requires mlx-lm >= 0.28.0 (current: 0.27.1)",
-        "cached": true
+        "cached": true,
+        "origin": null,
+        "content_hash": null,
+        "hash_modified": null,
+        "clean": null
       },
       {
         "name": "corrupted/incomplete-download",
@@ -339,13 +371,21 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "framework": "MLX",
         "model_type": "unknown",
         "capabilities": [],
+        "context_length": null,
         "health": "unhealthy",
         "runtime_compatible": false,
         "reason": "config.json missing",
-        "cached": true
+        "cached": true,
+        "origin": null,
+        "content_hash": null,
+        "hash_modified": null,
+        "clean": null
       }
     ],
-    "count": 12
+    "count": 12,
+    "system": {
+      "memory_total_bytes": 137438953472
+    }
   },
   "error": null
 }
@@ -358,7 +398,10 @@ mlxk-json list "Llama" --json                # Fuzzy matching
   "command": "list",
   "data": {
     "models": [],
-    "count": 0
+    "count": 0,
+    "system": {
+      "memory_total_bytes": 137438953472
+    }
   },
   "error": null
 }
@@ -467,11 +510,17 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
       "framework": "MLX",
       "model_type": "chat",
       "capabilities": ["text-generation", "chat"],
+      "context_length": 4096,
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
       "runtime_compatible": true,
       "reason": null,
-      "cached": true
+      "cached": true,
+      "origin": null,
+      "content_hash": null,
+      "hash_modified": null,
+      "clean": null,
+      "quantization": {"group_size": 64, "bits": 4}
     },
     "metadata": {
       "model_type": "phi3",
@@ -500,11 +549,17 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
       "framework": "MLX",
       "model_type": "chat",
       "capabilities": ["text-generation", "chat"],
+      "context_length": 4096,
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
       "runtime_compatible": true,
       "reason": null,
-      "cached": true
+      "cached": true,
+      "origin": null,
+      "content_hash": null,
+      "hash_modified": null,
+      "clean": null,
+      "quantization": {"group_size": 64, "bits": 4}
     },
     "files": [
       {"name": "config.json", "size": "1.2KB", "type": "config"},
@@ -534,11 +589,17 @@ mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
       "framework": "MLX",
       "model_type": "chat",
       "capabilities": ["text-generation", "chat"],
+      "context_length": 4096,
       "last_modified": "2024-10-15T08:23:41Z",
       "health": "healthy",
       "runtime_compatible": true,
       "reason": null,
-      "cached": true
+      "cached": true,
+      "origin": null,
+      "content_hash": null,
+      "hash_modified": null,
+      "clean": null,
+      "quantization": {"group_size": 64, "bits": 4}
     },
     "config": {
       "architectures": ["Phi3ForCausalLM"],

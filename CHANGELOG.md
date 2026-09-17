@@ -124,6 +124,10 @@
 - ADR-020 corrected: Whisper does use `temperature`, and a single value replaces mlx-audio's
   fallback schedule.
 
+- JSON API specification: the `list` and `show` examples carry the fields the responses have returned
+  since 0.2.0 — `context_length`, `origin`, `content_hash`, `hash_modified`, `clean` — and the `list`
+  section documents the `system` object it returns since 0.2.4.
+
 ## [2.0.8-beta.2] - 2026-09-11
 
 ### Security

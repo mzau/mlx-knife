@@ -503,8 +503,8 @@ def _load_config_json(path: Path) -> Optional[Dict[str, Any]]:
 def build_system_object() -> Optional[Dict[str, Any]]:
     """The envelope's ``system`` block: what this node has, not what a model needs.
 
-    Carried by ``version --json`` since 0.1.6 and by ``list`` / ``health`` since
-    0.2.4 — "does this model fit here" cost two calls before. ``None`` where the
+    Carried by ``version --json`` since 0.1.6 and by ``list`` since 0.2.4 —
+    "does this model fit here" cost two calls before. ``None`` where the
     figure is unavailable, never a zero standing in for unknown.
     """
     from ..core.capabilities import _get_system_memory_bytes
