@@ -4,245 +4,122 @@
 
 ### ⚠️ Upgrade Notes
 
-- **Python 3.11 or later is required** (`requires-python >=3.11`; the supported range is
-  3.11–3.14). On Python 3.10, `pip install -U mlx-knife` says nothing and leaves 2.0.7 in
-  place — an older release that does not carry the fixes below. Upgrading the interpreter is
-  the only way onto this release.
+- **Python 3.11 or later is required** (3.11–3.14). On Python 3.10, `pip install -U mlx-knife`
+  installs at most 2.0.7, without a notice.
 
 ### Security
 
-- `mlxk serve` and `mlxk embed-serve` keep the directory they are started in off the server
-  process's module search path. The worker used to start as `python -m …`, and `-m` puts that
-  directory first, so a `mlxk2/` package there — or a module named like one of the server's
-  dependencies, `fastapi.py`, `uvicorn/` — was executed instead of the installed one, with no
-  sign of it in the output. `mlxk clone` copies every file of a model repository into the
-  workspace, so a model directory can carry such files and starting the server inside it was
-  enough. The worker now starts with that directory off its path and the package root the
-  running `mlxk` was imported from on it instead, and the setting reaches the interpreters the
-  worker starts in turn: uvicorn's `--reload` worker and multiprocessing's resource tracker.
+- `mlxk serve` and `mlxk embed-serve` no longer import Python modules from the directory they are
+  started in: a `mlxk2/`, `fastapi.py` or `uvicorn/` there — for instance in a cloned model
+  directory — ran instead of the installed package. `mlxk serve` started inside a checkout with a
+  non-editable install now runs the installed package; `python -m mlxk2.cli serve` runs the checkout.
 
-  One thing changes for development: `mlxk serve` started inside a checkout, with mlx-knife
-  installed non-editable, now runs the installed package in the worker rather than the
-  checkout. `python -m mlxk2.cli serve` in that checkout runs the checkout, as before.
-
-- Every command keeps that directory off the search path of the interpreters it starts
-  underneath itself. Python starts those as `python -c …` in the directory the command runs in
-  — multiprocessing's resource tracker is one of them, and a single progress bar is enough to
-  start it — so `mlxk run --audio` inside a model directory executed a `multiprocessing/`
-  package lying there. A command's own search path was never affected: a console script has its
-  own directory first, not the one it was started in.
+- Python child processes of any `mlxk` command, such as multiprocessing's resource tracker, no
+  longer import modules from the start directory: `mlxk run --audio` inside a model directory ran a
+  `multiprocessing/` package there.
 
 ### Testing
 
-- The live-test exclusion list `KNOWN_BROKEN_MODELS` is per capability: an entry names the
-  capabilities it breaks, `is_known_broken()` takes the capability as a required argument, and the
-  per-axis discovery functions apply it — so a checkpoint whose text loader fails keeps the vision
-  coverage it earns. Every entry was re-measured against the shipped pins and records that
-  condition instead of an upstream issue number; five of seven did not survive. Details:
-  TESTING-DETAILS → *Known-broken exclusion*.
+- `KNOWN_BROKEN_MODELS` names the capabilities an entry breaks, and a model stays in the discovery
+  of the others. Every entry was re-measured against the shipped pins; five of seven were removed.
 
-- Live tests no longer depend on what `PATH` happens to provide: the vision tests invoke
-  `sys.executable -m mlxk2.cli` instead of a bare `mlxk`, and five live modules that carried only
-  `live_e2e` now also carry the `live` umbrella marker, so the default run stops selecting modules
-  it then skips.
+- The vision live tests run `sys.executable -m mlxk2.cli` instead of `mlxk` from `PATH`, and five
+  live modules that carried only `live_e2e` also carry `live`.
 
-- The opt-in index bootstrap in the Issue #27 test fixtures, and its `MLXK2_BOOTSTRAP_INDEX`
-  switch. It swallowed a failed download and let the test skip with "No safetensors/pytorch index
-  found" — a claim about the model, not about the network. Nothing downloads now, so that skip
-  reason is true as written.
+- Removed the index bootstrap of the Issue #27 fixtures (`MLXK2_BOOTSTRAP_INDEX`); a failed download
+  surfaced as a skip about the model.
 
-- Live-test time limits are staged by model size instead of by the file they happen to sit in.
-  Each call site keeps its own value as the *work* term and lower bound; what a model of that
-  size costs to become resident is added on top, in three tiers calibrated against the measured
-  penalty. Before, the file holding models up to 29.7 GB allowed 90 s while the file holding
-  models up to 8.9 GB allowed 180 s, so the largest model the RAM gate admits was structurally
-  always the first to hit a wall — three timeouts on one checkpoint, and no baseline left to
-  attribute a new failure to. Details: TESTING-DETAILS → *Time Limits: Staged by Model Size*.
+- Live-test time limits scale with model size instead of the test file. TESTING-DETAILS → *Time
+  Limits: Staged by Model Size*.
 
-- `test_pipe_from_list_json` pipes a capped sample of `list --json` rather than the whole
-  listing. Its prompt grew with the model inventory, so the row measured the cache's size
-  instead of what it checks — that stdin `-` is read.
+- `test_pipe_from_list_json` pipes a capped sample of `list --json`, not the whole listing.
 
-- The *Known Model Quality Issues* chapter in TESTING-DETAILS. Its header promised that tests
-  fail over the issues it listed, while its only entry had long since been handled — a closed
-  case presented as an open hazard. What was durable about it is already published elsewhere:
-  the earliest-position stop-token rule in ADR-011, and the `mlxk run --verbose` multiple-EOS
-  diagnostic in the test execution guide. The per-model observation itself is model empiricism
-  and no longer sits in the test documentation.
+- Removed the *Known Model Quality Issues* chapter from TESTING-DETAILS; its only entry was resolved.
 
-- `test_server_e2e.py` asks `GET /health` while a non-streaming and a streaming request run on the
-  same model, each probe with Kubernetes' default one-second timeout. The row fails against the
-  server as it was before every model operation moved to one worker thread, and passes now. The
-  health and model-list rows check the new body and `loaded`.
+- `test_server_e2e.py` probes `GET /health` with a one-second timeout while a streaming and a
+  non-streaming request run.
 
-- Two tests in `test_vision_chunk_streaming.py` exercised no server code.
-  `test_sse_format_compliance` sent its request through patches that got HTTP 400 before any stream
-  existed, so its per-event checks never ran; it now streams a chunked vision request through the
-  real server wiring and checks the OpenAI fields of every event.
-  `test_multi_chunk_streams_multiple_content_events` checked a hand-written event stream in its own
-  app against itself and is removed. The two stream wrappers in `server_base` that nothing called,
-  `generate_chat_stream` and `_stream_vision_chunks`, are removed as well.
+- `test_vision_chunk_streaming.py`: `test_sse_format_compliance` streams through the real server
+  wiring; it never reached a stream before. Removed: `test_multi_chunk_streams_multiple_content_events`,
+  which tested only itself, and the uncalled `generate_chat_stream` and `_stream_vision_chunks` in
+  `server_base`.
 
 ### Changed
 
-- `mypy mlxk2/` is held against a baseline instead of merely counted: `scripts/mypy-baseline.txt`
-  carries the current total, `test-multi-python.sh` fails a Python version when that total rises,
-  and `ignore_missing_imports` moves into `pyproject.toml` so every caller reads the same number.
-  The documented pre-commit chain drops mypy — with pre-existing errors, `&&` kept the tests from
-  ever running.
+- `mypy mlxk2/` is held against `scripts/mypy-baseline.txt`: `test-multi-python.sh` fails a Python
+  version whose error count rises. `ignore_missing_imports` moved to `pyproject.toml`; the documented
+  pre-commit chain no longer runs mypy.
 
-- `GET /health` on `serve` answers `{"status": "ok", "service": "mlx-knife-server-2.0"}` where it
-  said `healthy`. The status code is the answer; `healthy` stays the word `mlxk health` uses for a
-  model's files (ADR-029). SERVER-HANDBOOK → *GET /health*, and *From 2.0.7 → 2.0.8* for clients.
+- `GET /health` on `serve` answers `"status": "ok"` instead of `"healthy"`. SERVER-HANDBOOK → *From
+  2.0.7 → 2.0.8*. Issue #64.
 
 ### Added
 
-- `loaded` on every `GET /v1/models` row: `true` on the model in memory, `false` on the others.
-  SERVER-HANDBOOK → *GET /v1/models*.
+- `loaded` on every `GET /v1/models` row. Issue #64.
 
 - `stream_options.include_usage` on `POST /v1/chat/completions` and `POST /v1/completions`, in
-  OpenAI's form: every chunk carries `"usage": null`, and one more chunk before `data: [DONE]` has
-  empty `choices` and the counts for the whole request. A stream cut at a `stop` sequence counts
-  the tokens generated up to the match. Without the option the stream is unchanged; on a batch
-  request it is ignored. SERVER-HANDBOOK → *Token usage in a stream*. Issue #17.
+  OpenAI's form. Issue #17.
 
-- `benchmarks/tools/chronos_gauge.py` measures `mlxk serve` against `mlx_lm.server` with
-  [mlx-chronos](https://github.com/igurss/mlx-chronos): the same protocol against both servers,
-  one after the other on the same model and port — time to first token, request and decode
-  throughput, RAM — printed side by side with their ratio. mlx-chronos runs from its own virtual
-  environment and never enters the development or test environment. `--model` takes what mlxk
-  takes — a cached `org/name`, or a workspace model by its bare name — and the gauge refuses a
-  busy GPU and any model mlxk would not run. Setup and how to read the table: TESTING-DETAILS →
-  *Server Overhead Gauge (mlx-chronos)*, and `benchmarks/README.md` for the whole tool.
+- `benchmarks/tools/chronos_gauge.py`: `mlxk serve` against `mlx_lm.server`, measured with
+  [mlx-chronos](https://github.com/igurss/mlx-chronos). TESTING-DETAILS → *Server Overhead Gauge
+  (mlx-chronos)*.
 
-- `benchmarks/tools/stream_overhead.py` measures streamed against unstreamed generation on one
-  runner and prints the cost per token with their ratio. The ratio is what travels between
-  machines: both halves are measured in the same process on the same model, so a value far
-  above 1 means streaming pays for something the model does not. Needs nothing installed, and
-  is deliberately not a test — it measures time, and a loaded machine would fail it with
-  nothing wrong in the code. Pick a small model with a large vocabulary; on a large model
-  per-token overhead hides inside the forward pass.
+- `benchmarks/tools/stream_overhead.py`: per-token cost of streamed against unstreamed generation.
 
 ### Fixed
 
-- `serve` no longer goes silent while it works. `GET /health` and `GET /v1/models` were
-  unreachable for the whole of a non-streaming generation, a cold model load, a vision answer
-  or a transcription, because every one of those ran on the event loop: measured, a 9.1 s
-  completion swallowed two of three health probes and answered the third only after 2548 ms, and
-  3.1 GB load plus a seven-minute transcription left the endpoint dead for 220 s. A supervisor
-  reads that silence as a dead process and restarts a working server (#64). Every model
-  operation — loading, batch and streaming generation, vision chunks, transcription, the
-  startup preload and the shutdown cleanup — now runs on one worker thread, and the single
-  worker is what serializes requests, which the blocked loop had been doing by accident. Under
-  the same load the probes answer in 1-3 ms. A pool would not do: an `mx.array` carries the
-  stream it was made on, so a model loaded on the main thread raises `There is no Stream(gpu,
-  N) in current thread` when it is generated with anywhere else — for some checkpoints and not
-  others.
+- `serve` answers `GET /health` and `GET /v1/models` while it generates, loads a model or
+  transcribes. Both went unanswered until the operation finished, so a liveness probe would take the
+  busy server for dead. Issue #64.
 
-- Streaming was far slower than the same generation unstreamed — 65x on a 300-token answer,
-  53 s where the unstreamed request took 0.8 s. `tokenizer.detokenizer` is a factory rather
-  than an attribute: every read builds a new instance over the whole vocabulary, about 61 ms
-  for a 151k BPE vocabulary. The decode helper read it on each call and the streaming loop
-  called it up to three times per token, against a forward pass of roughly 1 ms. One instance
-  now serves a whole generation, reset per decode as before, and streaming lands on the
-  unstreamed cost: 176 ms per token became 3 ms, which is what the unstreamed path costs
-  as well — the ratio between them went from 66x to 1. Text is
-  unchanged. It affected every interactive `mlxk run` — a terminal streams — and every client
-  sending `"stream": true`. Present since 2.0.4-beta.5. Issue #73.
+- Streaming is no longer many times slower than the same generation unstreamed (65x for a 301-token
+  answer on `serve`). Present since 2.0.4-beta.5. Issue #73.
 
-- An empty model name selected a model. The resolver matched workspace directories and cached
-  models by case-insensitive substring, and `""` is contained in every name, so a caller that
-  named no model was served whatever the filesystem listed first — in directory order, and
-  without being told which model had answered. `POST /v1/chat/completions` with `"model": ""`
-  replied **200** from an arbitrary workspace model and echoed the empty name back; `mlxk rm ""
-  --force` deleted a cached model; `mlxk run ""` started inside a model directory loaded that
-  directory. An empty or whitespace-only name is now refused the way an unknown name is refused
-  — **404** `model_not_found` on the server, matching the neighbouring cases — and so is
-  `@<revision>` with no name in front of it, which reached the same match-everything path
-  through the revision lookup. `run`, `show`, `rm`, `embed` and `embed-serve` refuse it, as
-  does a model named in a server request. Two verbs read an empty argument as *no* argument
-  and still do: `mlxk health ""` checks every model, the way `mlxk health` without a pattern
-  does, and `serve --model ""` starts without a preloaded model. Present since 2.0.5.
+- An empty model name no longer selects an arbitrary model: `mlxk rm "" --force` deleted a cached
+  model, and `serve` answered `"model": ""` with a model the client never chose. `run`, `show`, `rm`,
+  `embed`, `embed-serve` and server requests (404 `model_not_found`) refuse it; `mlxk health ""` and
+  `serve --model ""` still mean no pattern and no preload. Present since 2.0.5. Issue #70.
 
-- An empty path named the working directory in `push` and `convert`, the two verbs that take a
-  path without resolving a name. `mlxk push "" <repo>` uploaded the working directory, and
-  `mlxk convert "" <target>` converted it — with `MLXK_WORKSPACE_HOME` set, the workspace home
-  instead — and left a partial workspace at the target once the output check failed; an empty
-  target could write into the working directory. Both refuse an empty or whitespace-only path
-  with `ValidationError`, the type the JSON API names for empty input. Present since
-  2.0.0-alpha.2 for `push` and 2.0.4-beta.5 for `convert`.
+- `push` and `convert` refuse an empty path instead of using the working directory:
+  `mlxk push "" <repo>` uploaded it. Present since 2.0.0-alpha.2 (`push`) and 2.0.4-beta.5
+  (`convert`).
 
-- An audio transcription through `POST /v1/chat/completions` claimed `finish_reason: "stop"` in
-  the batch response, written unconditionally although the transcription backend reports no
-  reason, while the same request as a stream ended with `null`. Both transports carry `null` now —
-  the value SERVER-HANDBOOK gives a generation whose backend reports no reason, and the one
-  `run --json` reports for a transcription. Before 2.0.8-beta.1 both asserted `"stop"`. Issue #69.
+- Audio transcriptions through `POST /v1/chat/completions` no longer claim `finish_reason: "stop"`;
+  batch and stream both report `null`. Issue #69.
 
-- `--max-tokens` on `mlxk run --audio`, and `max_tokens` in a chat request against a transcription
-  model, never reached the model: the transcription runner accepted the value and left it out of
-  the call. A model that transcribes in one pass stopped at its own default budget whatever was
-  asked — a long transcript ended mid-word, and raising the value changed nothing. The value is now
-  handed on unclamped; without one, the model's own default applies as before. Whisper decodes in
-  30-second windows and takes no budget, so nothing changes there. A `--max-tokens` below 1 on an
-  audio run is refused, as on a text run. The `/v1/audio/*` endpoints take no budget field. Present
-  since 2.0.4-beta.9. Issue #59.
+- `--max-tokens` on `mlxk run --audio` and `max_tokens` in chat requests to transcription models reach
+  the model (Whisper takes no budget), so a long transcript is no longer cut off at the model's
+  default; a value below 1 is refused. Present since 2.0.4-beta.9. Issue #59.
 
 - `mlxk run --audio` and `mlxk serve` no longer write `transcript.txt` into the working directory,
   which overwrote an existing file and failed the transcription in a read-only directory. Present
   since 2.0.4-beta.9. Issue #77.
 
-- `usage` of a vision request split into chunks — more images than `chunk` — reported the token
-  counts of the model's previous request, or the word estimate when there was none: each chunk
-  runs on a runner of its own, and the counts were read afterwards from the model's shared runner.
-  The response carries the sum over its chunks. Present since 2.0.8-beta.1. Issue #76.
+- `usage` of a chunked vision request is the sum over its own chunks instead of the counts of the
+  model's previous request. Present since 2.0.8-beta.1. Issue #76.
 
-- `mlxk run` answered a model location it could not read with the name of one of its own
-  variables — `local variable 'model_path' referenced before assignment`, typed `InternalError`
-  under `--json` — when the model cache was unreadable, and with a Python traceback when the
-  workspace home was. Every run, with or without an image or audio attached, now ends in the
-  error that stopped it, naming the path it could not read, typed `execution_error`; a model is
-  reported as not found only when the lookup completed. Present since 2.0.4 on `--image` and
-  `--audio` runs and since 2.0.6 on text runs; the traceback since 2.0.5.
+- `mlxk run` with an unreadable model cache or workspace home names the path (`execution_error`)
+  instead of an internal variable error or a traceback. Present since 2.0.4.
 
-- A request naming the loaded model by its `/v1/models` id loaded it a second time when the
-  server had loaded it under another spelling — `serve --model Qwen2.5-0.5B`, then a request for
-  `mlx-community/Qwen2.5-0.5B-Instruct-4bit` — and every alternation between the two spellings
-  loaded it again. A workspace preloaded by path and requested by its listed name did the same.
-  The model cache is keyed by the model directory a name reaches, so another spelling — another
-  case, on a case-insensitive volume — finds the model in memory.
+- A request naming the loaded model under another spelling no longer loads it again. Issue #64.
 
-- `GET /health` waited while `GET /v1/models` read the model directories. The listing runs off the
-  event loop.
+- `GET /health` no longer waits while `GET /v1/models` reads the model directories. Issue #64.
 
-- `examples/rag-server`: `/health` names the RAG server itself instead of repeating mlx-knife's
-  service string, and tells a backend that took the connection but did not answer in time
-  (`timeout`) from one it cannot reach (`unreachable`); a failed answer reads `http <code>`.
+- `examples/rag-server`: `/health` names the RAG server and tells a backend `timeout` from
+  `unreachable`. Issue #64.
 
 ### Documentation
 
-- SERVER-HANDBOOK states what `serve` can say about its state — one word per question, with the
-  ones it cannot answer marked — and what its single model thread guarantees: one model operation
-  at a time, a stream sharing its turn token by token, a stream failing when another model is
-  requested, and a non-streaming request running on after its client has gone. ADR-029 records
-  the vocabulary, with its prior-art survey.
+- SERVER-HANDBOOK states what `serve` can report about its state and what its single model thread
+  guarantees; ADR-029 records the vocabulary. Issue #64.
 
-- README says what a vision run samples with: the CLI samples at 0.7 unless `--temperature` is
-  given, while the server's vision path decodes greedily at 0.0 and ignores the value a request
-  sends, so `--temperature 0` is what makes a CLI description reproducible. The audio defaults
-  table now contrasts audio with *text* rather than with "text/vision" — both of its cells were
-  untrue for vision, which has a temperature of its own on one surface and a default prompt on
-  both. SERVER-HANDBOOK → *POST /v1/chat/completions* states the server side.
+- README: a vision run on the CLI samples at 0.7 unless `--temperature` is given; the server's
+  vision path always decodes greedily.
 
-- SERVER-HANDBOOK defines a `null` `context_length` on `GET /v1/models` by what it means: no
-  window is known for the model, so a text model has no window guard — unknown, not unlimited.
-  It said `null` meant the model's `config.json` states no window, which is more than the server
-  checks. *GET /v1/models* and *Token Limits*.
+- SERVER-HANDBOOK: a `null` `context_length` on `GET /v1/models` means no known window, not unlimited.
 
-- ADR-020 gains a correction: its note that Whisper ignores `temperature` is wrong — the value
-  reaches the decoder, and `0.0` selects an exact argmax. What is true was never written down:
-  mlx-audio's own default is a schedule of rising temperatures the decoder escalates through when
-  a window fails its quality checks, and passing a single number replaces that schedule rather
-  than seeding it.
+- ADR-020 corrected: Whisper does use `temperature`, and a single value replaces mlx-audio's
+  fallback schedule.
 
 ## [2.0.8-beta.2] - 2026-09-11
 
