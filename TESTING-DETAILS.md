@@ -1785,35 +1785,40 @@ A limit has two terms:
    - Validates: Output length > 10 characters
    - **N tests** (one per audio model in portfolio)
 
+5. **test_transcription_leaves_working_directory_untouched[audio_XX]** (parametrized)
+   - Runs `mlxk run --audio` in a directory holding a `transcript.txt` of its own
+   - Validates: exit 0, the file unchanged, nothing added (Issue #77)
+   - **N tests** (one per audio model in portfolio)
+
 **Test Class: TestAudioSegments**
 
-5. **test_segment_metadata_optional[audio_XX]** (parametrized)
+6. **test_segment_metadata_optional[audio_XX]** (parametrized)
    - Validates: No segment metadata without `MLXK2_AUDIO_SEGMENTS=1`
    - **N tests** (one per audio model in portfolio)
 
 **Test Class: TestAudioTranscriptionsServer** (Server `/v1/audio/transcriptions` endpoint)
 
-6. **test_transcription_endpoint_json[audio_XX]** (parametrized)
+7. **test_transcription_endpoint_json[audio_XX]** (parametrized)
    - JSON response format validation
    - **N tests** (one per audio model in portfolio)
 
-7. **test_transcription_endpoint_text_format[audio_XX]** (parametrized)
+8. **test_transcription_endpoint_text_format[audio_XX]** (parametrized)
    - Plain text response format validation
    - **N tests** (one per audio model in portfolio)
 
-8. **test_transcription_endpoint_verbose_json[audio_XX]** (parametrized)
+9. **test_transcription_endpoint_verbose_json[audio_XX]** (parametrized)
    - Verbose JSON with task/duration fields
    - **N tests** (one per audio model in portfolio)
 
-9. **test_transcription_endpoint_mp3[audio_XX]** (parametrized)
+10. **test_transcription_endpoint_mp3[audio_XX]** (parametrized)
    - MP3 format support via server endpoint
    - **N tests** (one per audio model in portfolio)
 
-10. **test_transcription_endpoint_with_language[audio_XX]** (parametrized)
+11. **test_transcription_endpoint_with_language[audio_XX]** (parametrized)
     - Explicit language parameter (`language: "en"`)
     - **N tests** (one per audio model in portfolio)
 
-11. **test_transcription_endpoint_rejects_oversized_audio[audio_XX]** (parametrized)
+12. **test_transcription_endpoint_rejects_oversized_audio[audio_XX]** (parametrized)
     - Validates: HTTP 413 for files > 50 MB (MAX_AUDIO_SIZE_BYTES)
     - Prevents resource exhaustion from large uploads
     - **N tests** (one per audio model in portfolio)
@@ -2069,6 +2074,7 @@ tests_2.0/
 ├── test_issue_70.py                   # Issue #70: an empty name is no search pattern (resolver, bootstrap, rm) and an empty path is not the working directory (push, convert)
 ├── test_issue_73.py                   # Issue #73: one detokenizer per generation, not per decode
 ├── test_issue_76.py                   # Issue #76: a chunked vision request's usage is the sum of its own chunks, not the shared runner's last counts
+├── test_issue_77.py                   # Issue #77: a transcription writes nothing into the working directory, and a read-only one does not fail it
 ├── test_json_api_list.py              # JSON API list contract (shape/fields)
 ├── test_json_api_show.py              # JSON API show contract (base/files/config)
 ├── test_legacy_formats.py             # Legacy model format detection (Issue #37)

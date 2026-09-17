@@ -306,8 +306,10 @@ class AudioRunner:
             # For 60min podcasts, this provides best accuracy vs latency balance
             gen_kwargs["chunk_duration"] = 30.0
 
-            # Call generate_transcription
-            result = self._generate_fn(**gen_kwargs)
+            # generate_transcription saves every result, by default to ./transcript.txt (#77).
+            with tempfile.TemporaryDirectory(prefix="mlxk-transcript-") as output_dir:
+                gen_kwargs["output_path"] = os.path.join(output_dir, "transcript")
+                result = self._generate_fn(**gen_kwargs)
 
             # Extract transcription text
             text = self._extract_text(result)

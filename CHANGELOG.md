@@ -187,6 +187,10 @@
   audio run is refused, as on a text run. The `/v1/audio/*` endpoints take no budget field. Present
   since 2.0.4-beta.9. Issue #59.
 
+- `mlxk run --audio` and `mlxk serve` no longer write `transcript.txt` into the working directory,
+  which overwrote an existing file and failed the transcription in a read-only directory. Present
+  since 2.0.4-beta.9. Issue #77.
+
 - `usage` of a vision request split into chunks — more images than `chunk` — reported the token
   counts of the model's previous request, or the word estimate when there was none: each chunk
   runs on a runner of its own, and the counts were read afterwards from the model's shared runner.

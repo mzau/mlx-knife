@@ -103,6 +103,49 @@ class TestAudioTranscription:
         assert "universe" in output or "man" in output or "exist" in output, \
             f"Expected 'universe', 'man', or 'exist' in transcription for {model_id}: {result.stdout}"
 
+    def test_transcription_leaves_working_directory_untouched(
+        self, audio_model_info, audio_model_key, tmp_path
+    ):
+        """A transcription writes nothing into the working directory (Issue #77).
+
+        mlx-audio saves every result, by default to ./transcript.txt; the runner hands it a
+        path of its own. Run against the real library, so a renamed parameter — which its
+        signature filter would drop — brings the file back and fails here.
+        """
+        if audio_model_key == "_skipped":
+            pytest.skip("Run with -m live_e2e or -m wet")
+        if audio_model_key == "_no_audio_models":
+            pytest.skip("No audio models found in cache")
+
+        model_id = audio_model_info["id"]
+        audio_file = AUDIO_ASSETS / "A MAN SAID TO THE UNIVERSE SIR I EXIST.wav"
+
+        if not audio_file.exists():
+            pytest.skip(f"Audio asset not found: {audio_file}")
+
+        notes = tmp_path / "transcript.txt"
+        notes.write_text("my own notes")
+
+        result = subprocess.run(
+            [
+                PYTHON, "-m", "mlxk2.cli", "run", model_id,
+                "--audio", str(audio_file),
+                "--max-tokens", "100",
+                "--temperature", "0",
+                "--no-stream"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=model_timeout(180, model_id),
+            env=os.environ,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, f"Command failed for {model_id}: {result.stderr}"
+        assert result.stdout.strip(), f"Empty transcription for {model_id}"
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["transcript.txt"]
+        assert notes.read_text() == "my own notes", \
+            f"{model_id} overwrote transcript.txt in the working directory"
+
     def test_transcribe_longer_audio_wav(self, audio_model_info, audio_model_key):
         """Test transcription of longer audio clip (~14 seconds, WAV).
 
