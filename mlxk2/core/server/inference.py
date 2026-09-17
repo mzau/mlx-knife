@@ -26,11 +26,12 @@ lifespan preload included.
 ``contextvars`` are copied into the worker the way ``asyncio.to_thread`` does it, so
 ``request_id`` still reaches the generation's own log line.
 
-Neither closed nor opened here: nothing holds a runner for the length of a stream. The
-worker is free between two steps, so a request for another model is served there, unloads
-the runner, and the stream fails at its next step — measured 2026-09-14, after 13 tokens.
-On the loop the same could happen between two yields; it closes with a request-bound
-generation state.
+Opened here, not closed: nothing holds a runner across a request's calls into this worker.
+A request acquires its runner in one call and generates in a later one, so another model's
+load can be served in between — the stream then fails at its next step (measured
+2026-09-14, after 13 tokens), and a non-streaming request with 500 *Model not loaded*
+(measured 2026-09-17 with a stubbed loader). On the blocked loop only a stream had such a
+gap. Both close with a request-bound generation state.
 """
 
 from __future__ import annotations

@@ -501,11 +501,13 @@ sets process-wide logger levels, which is why those are saved and restored under
 **Still on the loop:** reading a request. A large upload delays `GET /health` while its body is read
 and its images are decoded.
 
-**Not covered:** nothing holds a runner for the length of a stream. The worker is free between two
-of its steps, so a request for another model is served there, unloads the runner, and the stream
-fails at its next step (measured). On the blocked loop the same could happen between two yields. A
-non-streaming request whose client has gone is not stopped either: nothing reads the disconnect, and
-a thread cannot be cancelled from outside.
+**Not covered:** nothing holds a runner across a request's worker calls. A request acquires its
+runner in one call and generates in a later one, so the worker is free in between — for a stream
+between two of its steps, on every other path between acquiring and generating. A request for
+another model served in that gap unloads the runner: the stream fails at its next step, and a
+non-streaming request fails with **500** *Model not loaded*, its own load wasted (both measured).
+A non-streaming request whose client has gone is not stopped either: nothing reads the disconnect,
+and a thread cannot be cancelled from outside.
 
 ---
 
@@ -545,6 +547,7 @@ a thread cannot be cancelled from outside.
 
 ## Changelog
 
+- **2026-09-17 (acquire and use are separate worker calls):** §Model Thread, *Not covered*: the gap in which a model switch unloads a request's runner is not the stream's alone. A request acquires its runner in one worker call and generates in a later one, so a non-streaming request answers **500** *Model not loaded* when another model is requested in between.
 - **2026-09-17 (request-bound generation record):** Principle #5: `TokenCounts` became `GenerationRecord` and carries the budget and the exit as well. A batch answer copies the runner into it in the same model-thread call as the generation; a stream's runner writes budget and exit into it. `usage` and `finish_reason` read it on every text and vision path, the `Generation finished` line on the text paths. §Model Thread, *Not covered*: the entry on these reads is gone. Before, the log line of a stream carried the prompt count and budget of any request served while it streamed, and a batch answer read the runner after the model thread could already have begun the next generation.
 - **2026-09-16 (request-bound token counts):** Principle #5: the token counts of a stream and of a chunked vision request go into the request's `TokenCounts`; the shared runner's `last_*` belong to whichever generation ran last, which is how a chunked batch reported another request's `usage` ([#76](https://github.com/mzau/mlx-knife/issues/76)). §Model Thread, *Not covered*: `finish_reason`, the log line and batch `usage` still read the runner.
 - **2026-09-14 (server state):** `GET /v1/models` rows carry `loaded` (ADR-029): *Two surfaces* lists the field, and §Thread Safety records that the `ModelManager` cache is keyed by the model directory a spec reaches rather than by the request's spelling — which is what makes the flag match a row, and what stopped a request for the listed id from loading the model a second time — and that it records the runner kind. §Model Thread: the listing moved to a helper thread, with the logger-level lock that made safe; reading a request stays on the loop; *Not covered* corrected — the eviction window is the whole stream, not only the time before its first step, measured by requesting another model mid-stream; and a disconnected non-streaming request runs on. §Thread Safety no longer says the model thread keeps a switch from freeing a runner mid-generation: it serializes operations, and a stream spans many of them. Principle #5 said two generations on one runner can no longer overlap; they cannot run at the same moment, but a batch answer still runs between two steps of a stream.

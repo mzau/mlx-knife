@@ -1215,8 +1215,8 @@ python -P -m mlxk2.core.server_base
 
 ### Concurrent Requests
 - **One model operation at a time.** Loading a model, a batch answer, one step of a stream, a vision
-  chunk and a transcription never overlap. Requests are accepted concurrently and wait for their
-  turn; there is no queue limit and no busy status.
+  chunk and a transcription never overlap. Requests naming the same model are accepted concurrently
+  and wait for their turn; there is no queue limit and no busy status.
 - **A stream shares the turn step by step** — a text stream token by token, a multi-image vision
   stream image chunk by chunk. A request that arrives mid-stream is served between two steps, and the
   stream pauses for as long as that request's work takes — a whole batch answer, a model load, a
@@ -1224,6 +1224,10 @@ python -P -m mlxk2.core.server_base
 - **`GET /health` and `GET /v1/models` do not wait** — they answer while a model operation runs.
 - **One model in memory.** A request naming another model unloads the current one first — also
   while a stream is still using it, and that stream then fails part-way (see [finish_reason](#finish_reason)).
+  A non-streaming request fails too when another model is requested after it has the model and
+  before it has generated: **500** `internal_error`, *Model not loaded*. The server does
+  not arbitrate between requests naming different models — do not overlap them; `loaded` on
+  [`GET /v1/models`](#get-v1models) says which model is in memory.
 - **Leaving does not cancel a batch request.** A client that closes a non-streaming request — its
   own timeout included — leaves the generation running until it ends on its own, and requests behind
   it wait. Closing a stream does stop it (see [Closing the connection](#closing-the-connection)).
@@ -1643,11 +1647,13 @@ ceiling with no window guard, and a transcription model runs at its own default;
 | `GET /health` and `GET /v1/models` while the server works | no answer for the whole of a non-streaming generation, a model load, a vision answer or a transcription; a model listing held up `GET /health` | answer while the server works; a large upload delays them while it is read | No longer silent for the length of a generation. |
 | `loaded` on `GET /v1/models` | absent | `true` on the model in memory, `false` on every other row | Additive. |
 | The loaded model, named by its listed `id` | loaded again when it had been loaded under another spelling | served from memory | |
-| Concurrency | documented as one request at a time | one model operation at a time; a stream shares its turn step by step | See [Concurrent Requests](#concurrent-requests). |
+| Concurrency | documented as one request at a time | one model operation at a time; a stream shares its turn step by step, and a model switch can fail a request that is already under way | Do not overlap requests naming different models. See [Concurrent Requests](#concurrent-requests). |
 
 **Client updates required:**
 - Decide on `GET /health` by its status code; a check for `"status": "healthy"` fails from this release on.
 - Keep your own request timeout: `GET /health` answering does not mean a generation is progressing.
+- Do not overlap requests that name different models: the one whose model is unloaded before it has
+  generated answers **500** `internal_error`, streaming or not.
 - Accept a boolean `loaded` on `GET /v1/models` rows.
 - Handle `finish_reason: "length"` — offer "continue", raise `max_tokens`, or shorten the prompt.
 - Drop any branch keyed on `finish_reason: "error"`, and read a failed stream's `error` as an object
@@ -2001,6 +2007,7 @@ When switching from Vision or Audio to Text model mid-conversation:
   - **FIXED:** `GET /health` and `GET /v1/models` answer while the server works. A non-streaming generation, a model load, a vision answer or a transcription silenced both for its whole duration ([#64](https://github.com/mzau/mlx-knife/issues/64)), and a model listing held up `GET /health`.
   - **FIXED:** a request naming the loaded model by its listed `id` no longer loads it again when the model had been loaded under another spelling.
   - **FIXED:** a chat request's `max_tokens` reaches a transcription model; it was dropped, so a model that transcribes in one pass always stopped at its own default. The `/v1/audio/*` endpoints still take no budget.
+  - **CHANGED:** requests naming different models must not overlap: a non-streaming request whose model is unloaded before it has generated answers **500** `internal_error`.
   - **DOCUMENTED:** what a `200` from `GET /health` does not tell; one model operation at a time; a stream fails when another model is requested; a batch request runs on after its client has gone.
   - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (524 MB smaller install).
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.

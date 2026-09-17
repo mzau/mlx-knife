@@ -53,6 +53,10 @@
 - `GET /health` on `serve` answers `"status": "ok"` instead of `"healthy"`. SERVER-HANDBOOK → *From
   2.0.7 → 2.0.8*. Issue #64.
 
+- On `serve`, requests naming different models must not overlap: a request whose model is unloaded
+  before it has generated answers 500 `internal_error`, a non-streaming one too.
+  SERVER-HANDBOOK → *Concurrent Requests*.
+
 ### Added
 
 - `loaded` on every `GET /v1/models` row. Issue #64.

@@ -6,6 +6,11 @@ and 3 carry their own conditions.
 The two Decision blocks below are one unit: the words are only admissible if the
 mechanism can answer them, and the mechanism is only meaningful once the words exist.
 **Created:** 2026-09-13
+**Updated:** 2026-09-17 — Stage 1 and §Implementation count a **third** window, opened by Stage 2:
+acquiring a runner and generating with it are separate calls to the model thread, so a model switch
+in between fails the request that is already under way. 2026-09-14 — §Consequences and the Stage 3
+*due when* corrected on #65: a backend fault does raise, but not identifiably, and #65 waits on no
+upstream release.
 **When:** [#64](https://github.com/mzau/mlx-knife/issues/64) was the pull. The vocabulary came
 *before* any surface word changed, because the words decide what an endpoint is allowed to claim.
 **Related:** ADR-003 (Server/Run port — the origin of the constant this ADR replaces),
@@ -310,15 +315,18 @@ architectural change, no new failure modes. Makes `progressing` expressible and 
 it, because the batch path gains a request-bound structure either way.
 *Due when:* `progressing` is to be claimed anywhere, or a consumer's timeout must leave the
 server in a defined state.
-The same request-bound structure closes two windows measured 2026-09-14 and recorded in the
-handbook as the server's behaviour: a request for another model, served between two steps of a
+The same request-bound structure closes three windows recorded in the handbook as the server's
+behaviour. Two were measured 2026-09-14: a request for another model, served between two steps of a
 stream, unloads the runner and the stream fails; and a non-streaming request keeps generating
-after its client has gone, while the requests behind it wait. The field treats both as defects —
-vLLM, SGLang, llama.cpp and Ollama stop a generation whose client left, and llama.cpp, Ollama,
-LocalAI and mlx-lm's own server let a running generation finish before loading another model.
-For a one-user, one-client server both are rare, which is why they are recorded rather than
-fixed. ⚠ Starlette's `BaseHTTPMiddleware`, which `serve` uses, makes `request.is_disconnected()`
-always false; a disconnect has to be read from `receive()`.
+after its client has gone, while the requests behind it wait. The third came with Stage 2 and was
+measured 2026-09-17: a request acquires its runner in one model-thread call and generates in a
+later one, so another model's load in between leaves it without a runner — it answers 500, while
+the request that overtook it is served. The field treats all three as defects — vLLM, SGLang,
+llama.cpp and Ollama stop a generation whose client left, and llama.cpp, Ollama, LocalAI and
+mlx-lm's own server let a running generation finish before loading another model. For a one-user,
+one-client server they are rare, which is why they are recorded rather than fixed. ⚠ Starlette's
+`BaseHTTPMiddleware`, which `serve` uses, makes `request.is_disconnected()` always false; a
+disconnect has to be read from `receive()`.
 
 **Stage 2 — every model touch off the event loop. Built 2026-09-14.** Not a pool: an `mx.array`
 carries the stream it was made on, so a model loaded on the main thread raises *"There is no
@@ -488,7 +496,9 @@ during every measurement.
 - **Still on the loop: reading a request.** Parsing the body and decoding its images runs before any
   model work; a vision request carrying 38 MB of images held `GET /health` up for 401 ms at most.
   Below a one-second probe timeout, so recorded rather than moved.
-- **Recorded, not fixed:** the two windows under Stage 1.
+- **Recorded, not fixed:** the three windows under Stage 1 — the third of them opened by Stage 2. A
+  request acquires its runner in one call to the model thread and generates in a later one, so a
+  model switch in between takes the runner away from it.
 
 ---
 
