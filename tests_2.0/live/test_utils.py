@@ -208,19 +208,21 @@ def calculate_vision_model_ram_gb(size_bytes: int, system_memory_bytes: int) -> 
     References:
         - ADR-012 (Vision Support Roadmap)
         - ADR-016 (Memory-Aware Model Loading)
-        - capabilities.py MEMORY_THRESHOLD_PERCENT = 0.70
+        - capabilities.py MEMORY_THRESHOLD_PERCENT (imported, not mirrored)
     """
+    from mlxk2.core.capabilities import MEMORY_THRESHOLD_PERCENT
+
     if system_memory_bytes == 0:
         return float('inf')  # Cannot determine, skip
 
     memory_ratio = size_bytes / system_memory_bytes
 
-    # Vision models crash above 70% due to Vision Encoder overhead
-    if memory_ratio > 0.70:
+    # Vision models crash above the threshold due to Vision Encoder overhead
+    if memory_ratio > MEMORY_THRESHOLD_PERCENT:
         return float('inf')  # Signal: Too large, will be skipped
 
     # Return actual size (no 1.2x multiplier for vision)
-    # Encoder overhead is handled by conservative 0.70 threshold
+    # Encoder overhead is handled by the conservative threshold
     return size_bytes / (1024**3)
 
 

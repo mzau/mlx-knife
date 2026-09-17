@@ -91,8 +91,8 @@ def _get_memory_pressure() -> int:
 
 
 def _wait_for_memory_release(
-    min_free_gb: float = 20.0,
-    timeout_seconds: float = 30.0,
+    min_free_gb: float,
+    timeout_seconds: float,
     poll_interval: float = 1.0,
 ) -> bool:
     """Wait for system memory to be released after server shutdown.
@@ -106,8 +106,8 @@ def _wait_for_memory_release(
     2. Available memory >= min_free_gb (enough free+speculative pages)
 
     Args:
-        min_free_gb: Minimum free memory required (default 20 GB for vision models)
-        timeout_seconds: Maximum wait time (default 30s for GPU cache release)
+        min_free_gb: Minimum free memory required
+        timeout_seconds: Maximum wait time for GPU cache release
         poll_interval: Time between memory checks (default 1s)
 
     Returns:

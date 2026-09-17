@@ -22,7 +22,7 @@ from ..core.capabilities import (
     VISION_MODEL_TYPES, AUDIO_MODEL_TYPES, STT_MODEL_TYPES,
     Capability, Backend, extract_chat_template,
     detect_audio_translate_en_capability, classify_embedder,
-    detect_vision_capability,
+    detect_vision_capability, _get_model_size_bytes,
 )
 from ..core.remote_code import MODEL_FILE_REASON, declared_model_file
 
@@ -490,17 +490,6 @@ def _iso8601_utc_from_mtime(p: Path) -> str:
         return "1970-01-01T00:00:00Z"
 
 
-def _total_size_bytes(path: Path) -> int:
-    try:
-        total = 0
-        for f in path.rglob("*"):
-            if f.is_file():
-                total += f.stat().st_size
-        return total
-    except Exception:
-        return 0
-
-
 def _load_config_json(path: Path) -> Optional[Dict[str, Any]]:
     try:
         fp = path / "config.json"
@@ -648,7 +637,7 @@ def build_model_object(hf_name: str, model_root: Path, selected_path: Optional[P
     model_obj = {
         "name": hf_name,
         "hash": commit_hash,
-        "size_bytes": _total_size_bytes(base),
+        "size_bytes": _get_model_size_bytes(base),
         "last_modified": _iso8601_utc_from_mtime(base),
         "framework": framework,
         "model_type": model_type,

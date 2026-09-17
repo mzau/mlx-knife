@@ -6,7 +6,6 @@ Ported from 1.x with 2.0 architecture integration.
 import hashlib
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -19,7 +18,6 @@ from ..core.remote_code import UntrustedModelCodeError, reject_untrusted_model_c
 from ..operations.health import check_runtime_compatibility
 from ..operations.common import (
     _load_config_json,
-    _total_size_bytes,
     audio_runtime_compatibility,
     detect_audio_backend,
     detect_audio_capability,
@@ -30,32 +28,12 @@ from ..operations.common import (
     read_tokenizer_hints,
     vision_runtime_compatibility,
 )
-from ..core.capabilities import Backend
-
-
-# Memory threshold for pre-load checks (ADR-016)
-# Vision models crash above ~70% due to Vision Encoder overhead
-MEMORY_THRESHOLD_PERCENT = 0.70
-
-
-def _get_system_memory_bytes() -> Optional[int]:
-    """Get total system memory in bytes via sysctl (macOS only).
-
-    Returns:
-        Total memory in bytes, or None if unavailable.
-    """
-    try:
-        result = subprocess.run(
-            ["sysctl", "-n", "hw.memsize"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return int(result.stdout.strip())
-    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
-        pass
-    return None
+from ..core.capabilities import (
+    MEMORY_THRESHOLD_PERCENT,
+    Backend,
+    _get_model_size_bytes,
+    _get_system_memory_bytes,
+)
 
 
 def _format_bytes_gb(size_bytes: int) -> str:
@@ -119,7 +97,7 @@ def check_memory_before_load(
         # Cannot determine system memory - proceed (backwards compatible)
         return None
 
-    model_size = _total_size_bytes(model_path)
+    model_size = _get_model_size_bytes(model_path)
     if model_size == 0:
         # Cannot determine model size - proceed
         return None
@@ -132,57 +110,6 @@ def check_memory_before_load(
             f"({_format_bytes_gb(system_memory)}). Vision models crash with Metal OOM "
             f"due to Vision Encoder overhead. Aborting."
         )
-
-    return None
-
-
-def check_memory_for_server(
-    model_path,
-    is_vision_model: bool,
-    model_name: str,
-    logger=None,
-) -> Optional[str]:
-    """Check memory threshold for server mode (ADR-016).
-
-    Vision models: Return error message for HTTP 507 if >70%
-    Text models: Log warning only (swaps gracefully, no abort)
-
-    Args:
-        model_path: Path to model snapshot directory
-        is_vision_model: Whether the model has vision capability
-        model_name: Model name for logging
-        logger: Logger instance for text model warnings
-
-    Returns:
-        Error message string for vision models if should abort (for HTTP 507),
-        None otherwise. Text models only log warning, never return error.
-    """
-    system_memory = _get_system_memory_bytes()
-    if system_memory is None:
-        return None
-
-    model_size = _total_size_bytes(model_path)
-    if model_size == 0:
-        return None
-
-    threshold = int(system_memory * MEMORY_THRESHOLD_PERCENT)
-    if model_size > threshold:
-        if is_vision_model:
-            # Vision model exceeds 70% - abort to prevent Metal OOM crash
-            return (
-                f"Model size ({_format_bytes_gb(model_size)}) exceeds 70% of system memory "
-                f"({_format_bytes_gb(system_memory)}). Vision models crash with Metal OOM "
-                f"due to Vision Encoder overhead."
-            )
-        else:
-            # Text model exceeds 70% - log warning only (swaps gracefully)
-            if logger:
-                logger.warning(
-                    f"Model size {_format_bytes_gb(model_size)} exceeds 70% of "
-                    f"{_format_bytes_gb(system_memory)} system memory. "
-                    f"Expect extreme slowness due to swapping.",
-                    model=model_name,
-                )
 
     return None
 

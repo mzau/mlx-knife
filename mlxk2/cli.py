@@ -161,8 +161,7 @@ os.environ["PYTHONSAFEPATH"] = "1"
 import argparse
 import json
 import signal
-import subprocess
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # Suppress huggingface_hub progress bars (used by mlx-vlm during model loading)
 # These progress bars are informational only and can confuse users since
@@ -177,6 +176,7 @@ from .operations.rm import rm_operation
 from .operations.push import push_operation
 from .operations.show import show_model_operation
 from .operations.run import run_model_enhanced
+from .core.capabilities import _get_system_memory_bytes
 from .spec import JSON_API_SPEC_VERSION
 from .output.human import (
     render_list,
@@ -212,26 +212,6 @@ def format_embed_jsonl(result: Dict[str, Any]) -> str:
     """
     records = result.get("data", {}).get("records", [])
     return "\n".join(json.dumps(rec, ensure_ascii=False) for rec in records)
-
-
-def _get_system_memory_bytes() -> Optional[int]:
-    """Get total system memory in bytes via sysctl (macOS only).
-
-    Returns:
-        Total memory in bytes, or None if unavailable.
-    """
-    try:
-        result = subprocess.run(
-            ["sysctl", "-n", "hw.memsize"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return int(result.stdout.strip())
-    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
-        pass
-    return None
 
 
 def print_result(result: Dict[str, Any], render_func=None, json_mode=False, **render_kwargs):
