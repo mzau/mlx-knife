@@ -132,6 +132,9 @@
   since 0.2.0 — `context_length`, `origin`, `content_hash`, `hash_modified`, `clean` — and the `list`
   section documents the `system` object it returns since 0.2.4.
 
+- ADR-023: the workaround policy tells a bridge, retired by a canary, from a shim, retired at a
+  release; the STT reject of `convert --quantize` is named as `not_implemented`.
+
 ## [2.0.8-beta.2] - 2026-09-11
 
 ### Security

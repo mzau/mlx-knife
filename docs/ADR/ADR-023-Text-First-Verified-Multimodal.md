@@ -2,8 +2,9 @@
 
 **Status:** Accepted
 **Created:** 2026-04-17
+**Updated:** 2026-09-18 — the Workaround-Sunset Policy tells a bridge, retired by a canary, from a shim (amendment decided 2026-07-16). §3 names the error type of the STT reject.
 **Related:** ADR-018 (Convert Operation), ADR-020 (Audio Backend Architecture), ADR-022 (Workspace-First Paradigm)
-**Target:** 2.0.5
+**Target:** 2.0.5 (shipped); the bridge amendment shipped in 2.0.8-beta.1
 
 ---
 
@@ -94,7 +95,8 @@ per-line comments noting the upstream version they were verified against.
 with the following policy order:
 
 1. `model_type` in `VISION_QUANTIZE_TYPES` → vision backend
-2. `model_type` in `STT_MODEL_TYPES` → reject (STT quantization not implemented)
+2. `model_type` in `STT_MODEL_TYPES` → reject with `ErrorType.NOT_IMPLEMENTED`
+   (HTTP 501): a known class whose quantization is not implemented
 3. config carries `vision_config` or `audio_config` but type is unknown
    → **hard reject** with `ErrorType.UNSUPPORTED_MULTIMODAL` (HTTP 501)
 4. otherwise → text backend
@@ -153,6 +155,23 @@ fallback decision recorded:
 
 **No new workarounds are accepted without an upstream issue link AND a
 sunset marker.** This is enforceable via `grep -rn "sunset-by" mlxk2/`.
+
+**Amendment (decided 2026-07-16): shim or bridge.** The rule above is written
+for a *shim*: mlx-knife supplying what upstream cannot. It does not fit a
+*bridge*: upstream regressed, or fixed a problem without releasing the fix,
+and mlx-knife carries upstream's own behaviour for the pinned release — its
+own code or its own fix. A bridge adds nothing upstream lacks (see the
+non-goal below), so it has no release deadline, and the affected model stays
+on the verified list.
+
+- A shim is marked `# WORKAROUND: <upstream-issue> — sunset-by <version>` and
+  keeps the sunset above.
+- A bridge is marked `# WORKAROUND: <upstream-issue> — bridge, retires via <canary>`.
+  The canary is a test that reports when upstream no longer needs the bridge;
+  retiring it is then a judgment call, never an automatic switch-off at a version.
+- A bridge marker is valid only if the canary it names exists.
+
+`grep -rn "WORKAROUND" mlxk2/` lists both kinds.
 
 ### Non-goal: mlx-knife does not exceed upstream
 
