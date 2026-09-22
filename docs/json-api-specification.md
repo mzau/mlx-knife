@@ -1232,7 +1232,7 @@ Single-shot generation. Interactive mode (no prompt) has no JSON form.
 
 - `"stop"` — the model ended its turn (EOS or a stop sequence).
 - `"length"` — the generation budget cut the answer: `--max-tokens`, the tool's default ceiling, or what the model's context window still held after the prompt. The text is a prefix of what the model would have said.
-- `null` — no reason is known: audio transcription (no generation budget applies), or a backend that reported none.
+- `null` — no reason is known: audio transcription, or a backend that reported none.
 
 A prompt that fills the model's context window is rejected before anything is generated: `status: "error"`, `error.type: "context_length_exceeded"`, exit code 1. The message names the prompt length and the window.
 
