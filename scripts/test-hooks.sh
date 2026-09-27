@@ -19,14 +19,13 @@ cleanup() {
 trap cleanup EXIT
 
 git worktree add -f "$WT" HEAD >/dev/null
-git -C "$WT" config user.email "local@test"
-git -C "$WT" config user.name "Local Test"
 
 (
   cd "$WT"
   echo "test" > AGENTS.md
   git add -f AGENTS.md
-  if git commit -m "should be blocked by pre-commit" >/dev/null 2>&1; then
+  # Identity only for this commit: `git config` in a linked worktree writes the shared .git/config.
+  if git -c user.name="Local Test" -c user.email="local@test" commit -m "should be blocked by pre-commit" >/dev/null 2>&1; then
     echo "ERROR: pre-commit did NOT block committing AGENTS.md" >&2
     exit 2
   else
@@ -48,7 +47,8 @@ else
 fi
 
 echo "[3/3] Testing pre-push override..."
-if ALLOW_PUSH=1 printf "refs/heads/%s 0 refs/heads/%s 0\n" "$BR" "$BR" | "$HOOKS/pre-push" >/dev/null 2>&1; then
+# The override belongs to the hook, the right side of the pipe.
+if printf "refs/heads/%s 0 refs/heads/%s 0\n" "$BR" "$BR" | ALLOW_PUSH=1 "$HOOKS/pre-push" >/dev/null 2>&1; then
   echo "OK: pre-push override allowed"
 else
   echo "ERROR: pre-push override failed" >&2
