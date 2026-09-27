@@ -188,7 +188,7 @@ def resolve_model_display_id(model_id: str) -> str:
     """Normalize a model_id for report display, aware of clone vs. convert workspaces.
 
     Benchmark JSONL may record model identity as an absolute workspace path
-    (e.g. "/Volumes/mz-SSD/mlx-models/Qwen2.5-Coder-32B-Instruct-8bit"). The
+    (e.g. "/Volumes/External/mlx-models/Qwen2.5-Coder-32B-Instruct-8bit"). The
     workspace sentinel (`.mlxk_workspace.json`) tells us what kind of workspace
     it is; clones and converts need different display behavior:
 

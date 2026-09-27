@@ -589,7 +589,7 @@ class VisionRunner:
 1. Install mlx-audio: `pip install mlx-audio`
 2. Pull Whisper: `mlxk pull mlx-community/whisper-large-v3-turbo-4bit`
 3. Test CLI: `mlxk run whisper-large-v3-turbo-4bit --audio test.wav`
-4. Test workspace paths: Use User's Voxtral models (`../voxtral-ref/mlx-vlm/var/voxtral/`)
+4. Test workspace paths: Use a local Voxtral workspace (e.g. `~/mlx-models/voxtral`)
 5. Test audio formats: WAV (native), MP3 (if ffmpeg available)
 6. Test server API: curl with audio in OpenAI format
 7. Test segment metadata: `MLXK2_AUDIO_SEGMENTS=1 mlxk run ...`
@@ -727,7 +727,7 @@ pip install mlx-knife[all]  # Same as Beta.8
 ### Models Referenced
 - **mlx-community/whisper-large-v3-turbo-4bit** (1.5GB, primary STT model)
 - **mlx-community/gemma-3n-E2B-it-4bit** (2.1GB, multimodal, Beta.8 compatible)
-- **User's Voxtral models:** `../voxtral-ref/mlx-vlm/var/voxtral/` (workspace testing)
+- **Local Voxtral workspace:** e.g. `~/mlx-models/voxtral` (workspace testing)
 
 ---
 
