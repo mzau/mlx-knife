@@ -154,11 +154,11 @@ runtime_compatible?
 │     │      ├─ mlx-audio not installed?
 │     │      │  └─→ False ("mlx-audio not installed")
 │     │      │
-│     │      ├─ model_type NOT in [whisper*, voxtral]?
-│     │      │  └─→ False ("Model type '{x}' not supported by mlx-audio")
+│     │      ├─ model_type NOT in [whisper*, vibevoice*]?
+│     │      │  └─→ False ("Model type '{x}' not supported (supported: whisper, vibevoice)")
 │     │      │
 │     │      └─ tekken.json exists WITHOUT tokenizer.json?
-│     │         └─→ False ("Voxtral tekken.json tokenizer not supported")
+│     │         └─→ False ("Voxtral tekken.json tokenizer not supported by mlx-audio")
 │     │
 │     └─[3b] audio_backend == MLX_VLM?
 │            │
@@ -507,7 +507,9 @@ between two of its steps, on every other path between acquiring and generating. 
 another model served in that gap unloads the runner: the stream fails at its next step, and a
 non-streaming request fails with **500** *Model not loaded*, its own load wasted (both measured).
 A non-streaming request whose client has gone is not stopped either: nothing reads the disconnect,
-and a thread cannot be cancelled from outside.
+and a thread cannot be cancelled from outside. The same holds for a stream that arrives as one
+event — a single image chunk, audio, a text request to a vision model: its answer is generated
+before the response exists, so there is no response generator for the runtime to finalize.
 
 ---
 
@@ -547,6 +549,7 @@ and a thread cannot be cancelled from outside.
 
 ## Changelog
 
+- **2026-09-23 (streams that arrive as one event; STT gate):** §Model Thread, *Not covered*: a stream that arrives as one event is generated before its response exists, so closing the connection does not stop it (measured: a single-image request ran to the end, a multi-image stream stopped after its running chunk). The runtime decision tree names the STT types the check admits, `whisper` and `vibevoice`, with the messages the code returns.
 - **2026-09-17 (acquire and use are separate worker calls):** §Model Thread, *Not covered*: the gap in which a model switch unloads a request's runner is not the stream's alone. A request acquires its runner in one worker call and generates in a later one, so a non-streaming request answers **500** *Model not loaded* when another model is requested in between.
 - **2026-09-17 (request-bound generation record):** Principle #5: `TokenCounts` became `GenerationRecord` and carries the budget and the exit as well. A batch answer copies the runner into it in the same model-thread call as the generation; a stream's runner writes budget and exit into it. `usage` and `finish_reason` read it on every text and vision path, the `Generation finished` line on the text paths. §Model Thread, *Not covered*: the entry on these reads is gone. Before, the log line of a stream carried the prompt count and budget of any request served while it streamed, and a batch answer read the runner after the model thread could already have begun the next generation.
 - **2026-09-16 (request-bound token counts):** Principle #5: the token counts of a stream and of a chunked vision request go into the request's `TokenCounts`; the shared runner's `last_*` belong to whichever generation ran last, which is how a chunked batch reported another request's `usage` ([#76](https://github.com/mzau/mlx-knife/issues/76)). §Model Thread, *Not covered*: `finish_reason`, the log line and batch `usage` still read the runner.

@@ -7,7 +7,9 @@ undocumented for a whole release line. This checks the parts that are mechanical
 
   routes        every route the servers declare appears in the handbook
   status codes  every status the servers raise appears in the status-code section
-  error types   the error table matches the ErrorType enum, both directions
+  error types   the error table lists exactly the types a server response can carry, each one
+                in the ErrorType enum
+  status pairs  a status written next to an error type is the table's status for that type
   pins          the requirements block matches pyproject.toml
   pointers      no source paths or code constants leak into the contract
   language      no roadmap wording (the handbook states what is, not what may come)
@@ -109,6 +111,11 @@ def rule_routes(hb: str) -> str:
     return f"{len(declared)} declared, {len(declared) - len(missing)} documented"
 
 
+def listed_statuses(hb: str) -> set[int] | None:
+    section = re.search(r"^## HTTP Status Codes$(.*?)^---", hb, re.M | re.S)
+    return {int(c) for c in re.findall(r"\*\*(\d{3})\b", section.group(1))} if section else None
+
+
 def rule_status_codes(hb: str) -> str:
     raised = set()
     for src in SERVER_SOURCES:
@@ -117,11 +124,10 @@ def rule_status_codes(hb: str) -> str:
         raised |= {int(c) for c in re.findall(r"HTTPException\(\s*(\d{3})", text)}
     raised = {c for c in raised if c >= 400}
 
-    section = re.search(r"^## HTTP Status Codes$(.*?)^---", hb, re.M | re.S)
-    if not section:
+    listed = listed_statuses(hb)
+    if listed is None:
         fail("status codes", "no '## HTTP Status Codes' section found")
         return "section missing"
-    listed = {int(c) for c in re.findall(r"\*\*(\d{3})\b", section.group(1))}
 
     missing = sorted(raised - listed)
     if missing:
@@ -129,19 +135,78 @@ def rule_status_codes(hb: str) -> str:
     return f"{len(raised)} raised, {len(listed)} listed"
 
 
+# A row of the error table: `type` | status | meaning.
+ERROR_ROW = re.compile(r"^\|\s*`([a-z_]+)`\s*\|\s*(\d{3})\s*\|", re.M)
+
+
+def enum_values() -> dict[str, str]:
+    """ErrorType member name -> the type string a response carries."""
+    block = re.search(r"class ErrorType\b.*?(?=\nclass |\n@|\Z)", ERRORS.read_text(), re.S)
+    return dict(re.findall(r'^\s*([A-Z_]+)\s*=\s*["\']([a-z_]+)["\']', block.group(0), re.M)) if block else {}
+
+
+def server_error_types(hb: str) -> set[str]:
+    """The types a server response can carry. A status-to-type mapping entry counts only for a
+    status the handbook lists — the status rule holds every raised status to that list — so a
+    mapped status no server path raises does not bring its type along. Every other type a server
+    module names, directly or through an `errors.py` constructor, counts as it stands."""
+    values = enum_values()
+    listed = listed_statuses(hb) or set()
+    constructors = {
+        func.group(1): values[name]
+        for func in re.finditer(r"^def (\w+)\(.*?(?=^def |\Z)", ERRORS.read_text(), re.M | re.S)
+        for name in re.findall(r"type=ErrorType\.([A-Z_]+)", func.group(0))
+        if name in values
+    }
+    mapping = re.compile(r"(\d{3}):\s*ErrorType\.([A-Z_]+)")
+    carried = set()
+    for src in SERVER_SOURCES:
+        text = src.read_text()
+        carried |= {values[n] for s, n in mapping.findall(text) if int(s) in listed and n in values}
+        named = mapping.sub("", text)
+        carried |= {values[n] for n in re.findall(r"ErrorType\.([A-Z_]+)", named) if n in values}
+        carried |= {constructors[c] for c in re.findall(r"\b(\w+)\(", named) if c in constructors}
+    return carried
+
+
 def rule_error_types(hb: str) -> str:
-    enum_block = re.search(r"class ErrorType\b.*?(?=\nclass |\n@|\Z)", ERRORS.read_text(), re.S)
-    if not enum_block:
+    values = set(enum_values().values())
+    if not values:
         fail("error types", "ErrorType enum not found")
         return "enum missing"
-    values = set(re.findall(r'=\s*["\']([a-z_]+)["\']', enum_block.group(0)))
-    documented = set(re.findall(r"^\|\s*`([a-z_]+)`\s*\|\s*\d{3}\s*\|", hb, re.M))
+    documented = {m.group(1) for m in ERROR_ROW.finditer(hb)}
+    carried = server_error_types(hb)
 
-    if undocumented := sorted(values - documented):
-        fail("error types", f"in the enum but not in the handbook table: {undocumented}")
     if phantom := sorted(documented - values):
         fail("error types", f"documented but not in the enum: {phantom}")
-    return f"{len(values)} in enum, {len(documented)} in table"
+    if undocumented := sorted(carried - documented):
+        fail("error types", f"a server response can carry these, the table does not list them: {undocumented}")
+    if foreign := sorted((documented & values) - carried):
+        fail("error types", f"in the table, but no server response carries them: {foreign}")
+    return f"{len(carried)} a server response can carry, {len(documented)} in table"
+
+
+def rule_status_pairs(hb: str) -> str:
+    # A status written right before an error type, as in "**422** `capability_not_supported`" or
+    # "HTTP 500 `internal_error`". A pair split across lines is not seen.
+    table = {m.group(1): m.group(2) for m in ERROR_ROW.finditer(hb)}
+    values = set(enum_values().values())
+    pair = re.compile(r"(?:\*\*|HTTP\s+)(\d{3})(?:\*\*)?\s+`([a-z_]+)`")
+    checked, wrong = 0, []
+    for lineno, line in enumerate(hb.splitlines(), 1):
+        if ERROR_ROW.match(line):
+            continue
+        for status, etype in pair.findall(line):
+            if etype in table:
+                checked += 1
+                if status != table[etype]:
+                    wrong.append(f"line {lineno}: {status} `{etype}`, the table says {table[etype]}")
+            elif etype in values:
+                checked += 1
+                wrong.append(f"line {lineno}: {status} `{etype}`, a type no server response carries")
+    if wrong:
+        fail("status pairs", "; ".join(wrong))
+    return f"{checked - len(wrong)} of {checked} pairs agree with the table"
 
 
 def rule_pins(hb: str) -> str:
@@ -347,6 +412,7 @@ def main() -> int:
         ("routes", rule_routes),
         ("status codes", rule_status_codes),
         ("error types", rule_error_types),
+        ("status pairs", rule_status_pairs),
         ("pins", rule_pins),
         ("pointers", rule_pointers),
         ("language", rule_language),

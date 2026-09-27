@@ -120,7 +120,7 @@ mlxk serve (vision) → mlx_vlm.server (exists! OpenAI-compatible)
   - Per-image overhead varies by model, resolution, system RAM
 - **Solution:** Automatic batch processing in `run.py`
   - **Global numbering:** Assign `Image 1..N` once per `mlxk run` invocation and preserve numbering across internal chunks and OOM-driven chunk-size reduction
-  - **Pipe-friendly output:** Prefer a stable, compact per-image index so the result can be piped into a chat-only model for synthesis (see `examples/vision_pipe.sh`)
+  - **Pipe-friendly output:** Prefer a stable, compact per-image index so the result can be piped into a chat-only model for synthesis (see `examples/pipes/vision_pipe.sh`)
   - No upper limit - process 1000+ images via batching
   - Default: 5 images per batch, configurable via `MLXK2_VISION_BATCH_SIZE`
   - Automatic chunk-size reduction on OOM

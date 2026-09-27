@@ -261,6 +261,8 @@ Machine-readable output stamps a **portable identity**, never a local filesystem
 
 **Same-model rule.** Embeddings are only comparable within one model's vector space. A consumer
 compares `(model, content_hash)` across records to detect a mismatch before mixing them.
+For a workspace, `content_hash` is the hash as last pinned: after editing its files, re-pin it with
+`mlxk show <name> --recalc-hash`.
 
 **Determinism caveat (embeddings).** Embeddings are *not* bit-reproducible across devices or
 library builds: CPU and GPU vectors of the same model and text diverge (≈0.98 cosine on a 4-bit

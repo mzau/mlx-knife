@@ -54,8 +54,11 @@
   2.0.7 → 2.0.8*. Issue #64.
 
 - On `serve`, requests naming different models must not overlap: a request whose model is unloaded
-  before it has generated answers 500 `internal_error`, a non-streaming one too.
-  SERVER-HANDBOOK → *Concurrent Requests*.
+  before it has generated fails, with 500 `internal_error` before its response starts and with the
+  terminal `error` event after. SERVER-HANDBOOK → *Concurrent Requests*.
+
+- `scripts/check-handbook-contract.py` holds the error table to the types a server response can
+  carry, and a status written next to an error type to the table's status for it.
 
 ### Added
 
@@ -134,6 +137,47 @@
 
 - ADR-023: the workaround policy tells a bridge, retired by a canary, from a shim, retired at a
   release; the STT reject of `convert --quantize` is named as `not_implemented`.
+
+- SERVER-HANDBOOK states the scope of its rules: the 422 for media applies to the last user message;
+  a model switch fails a request with 500 before its response starts and with an `error` event
+  after; closing a stream stops it at its next step, and one that arrives as one event runs to the
+  end. The error table lists the types a server response can carry.
+
+- SERVER-HANDBOOK corrected: `unsupported_multimodal` was never a server error; VibeVoice, not
+  Voxtral, transcribes since 2.0.5; `/v1/models` never listed embedders; the image-ID example
+  carries the marker the server reads. ARCHITECTURE: the STT decision tree names VibeVoice.
+
+- README: a workspace's `content_hash` is the hash as last pinned; re-pin it after editing its files.
+
+### Known Issues
+
+- **A stream that arrives as one event runs on after the client closes it** — a single image,
+  audio, or a text request to a vision model; requests behind it wait. SERVER-HANDBOOK → *Closing
+  the connection*.
+- **On `serve`, a request can fail when another request names a different model** before the first
+  has generated. SERVER-HANDBOOK → *Concurrent Requests*.
+- **`serve` keeps answering `GET /health` after an inference-backend fault** and fails every
+  request; restart it from outside. Issue #65.
+- **A `stop` sequence split across two tokens is not seen in a stream**; batch answers are cut
+  correctly. Issue #68.
+- **Vision and audio paths can execute checkpoint code declared via `auto_map`**; see
+  `SECURITY.md`. Issue #71.
+- **A single `temperature` value, the default `0.0` included, turns off Whisper's decoding
+  fallback** on `mlxk run --audio` and the server's transcription paths. Issue #74.
+- **`mlxk run` on a vision model prints no answer when the generation reaches the vision default of
+  2048 tokens**, with an image or with audio; pass `--max-tokens` or `--json`. Issue #79.
+- **Vision embedding checkpoints (e.g. `Qwen3-VL-Embedding`) are listed as runnable `chat+vision`
+  models**; they are not supported, and a run yields empty or repetitive output.
+- **Embeddings (experimental):** a bge/e5 workspace whose path names neither family is pooled as a
+  generic model (Issue #81); through `serve --embed-backend`, a backend error carries the
+  backend's `request_id`, not the response's `X-Request-ID` (Issue #80).
+- **Text-only `mlxk run` against multimodal VLMs fails late with a loader error**; pass `--image`
+  or `--audio`. Issue #53.
+- **`convert --quantize` routes text-only checkpoints of vision families to the vision backend.**
+  Issue #63.
+- **`/v1/chat/completions` has no switch for the chat template**: a template that injects its own
+  instruction applies to every request; `/v1/completions` takes a prompt the client formats itself.
+  Issue #40.
 
 ## [2.0.8-beta.2] - 2026-09-11
 

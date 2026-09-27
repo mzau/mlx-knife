@@ -5,7 +5,7 @@ of it. The latest stable release is 2.0.7: its endpoint surface is the same, its
 shapes differ in places, and the [Migration Guide](#migration-guide) records every difference.
 **Scope:** what the server does today. Planned work, deferred features and target releases are
 deliberately absent — this is a contract, not a roadmap.
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-23
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -62,7 +62,7 @@ MLX Knife implements a **subset** of the OpenAI API with documented behavioral d
 | `/v1/audio/transcriptions` | ✅ Supported | OpenAI Whisper API |
 | `/v1/audio/translations` | ✅ Supported | OpenAI Whisper translations API — speech→English (multilingual non-turbo Whisper; non-capable models → 400/422). See [POST /v1/audio/translations](#post-v1audiotranslations) |
 | `/v1/embeddings` | ✅ Supported (experimental) | OpenAI Embeddings API. Served by the separate `embed-serve` backend; `serve` proxies it via `--embed-backend`. Returns **501** on a plain `serve` started without `--embed-backend` (embeddings not enabled). See [Embeddings Backend](#embeddings-backend-embed-serve) |
-| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` and `loaded` fields. Does **not** list embedders — they belong to the separate `embed-serve` backend, whose model list is not merged in |
+| `/v1/models` | ✅ Supported | HF cache + workspace models (ADR-022); extended with `context_length` and `loaded` fields. Does **not** list embedders — they belong to the separate `embed-serve` backend |
 | `/health` | ✅ Custom | MLX Knife extension — `live`: `200` while the process runs; no model or backend state (see [GET /health](#get-health)) |
 
 ### Authentication
@@ -87,8 +87,8 @@ A common mistake is implementing auth for JSON endpoints but forgetting `multipa
 ### CORS (Browser Clients)
 
 Both `serve` and the `embed-serve` backend send permissive CORS headers, so the
-OpenAI surface (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`,
-`/v1/audio/*`) is callable **directly from a browser**.
+OpenAI surface (`serve`: `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, `/v1/audio/*`;
+`embed-serve`: `/v1/embeddings`) is callable **directly from a browser**.
 
 Preflight (`OPTIONS`) → `200`:
 ```
@@ -133,14 +133,15 @@ X-Request-ID: <unique-id>       (all responses, MLX Knife extension)
 
 **X-Request-ID** (MLX Knife extension):
 - Present on **every response** (success and error)
-- Same ID appears in error response body as `"request_id"`
+- Same ID appears in error response body as `"request_id"` — except for an error the embedding
+  backend returns through `serve --embed-backend`: that body carries the backend's own ID
 - Use for request correlation and distributed tracing
 
 ### Behavioral Deviations from OpenAI
 
 | Behavior | OpenAI | MLX Knife | Reason |
 |----------|--------|-----------|--------|
-| Vision history | Full history to model | Only last user message | Prevents pattern reproduction (hallucinations) |
+| Vision history | Full history to model | Images or audio in the last user message: only that message | Prevents pattern reproduction (hallucinations) |
 | Image URLs | HTTP URLs + Base64 + File IDs | Base64 data URLs only | No external fetching |
 | Audio+Vision | Both processed | The audio is dropped, the images are processed | |
 | Multi-audio | Supported | 1 per request | mlx-vlm limitation |
@@ -165,30 +166,27 @@ MLX Knife uses an extended error envelope (ADR-004), not the OpenAI format:
 }
 ```
 
-**Error types** (the taxonomy is shared with the CLI; rows marked *CLI only* have no server path and never appear in a response):
+**Error types** — every type a server response can carry:
 
 | Type | HTTP | Meaning |
 |------|------|---------|
 | `validation_error` | 400 | Invalid request payload (e.g. an image over 20 MB or more than 50 MB of images in one request, malformed audio, `max_tokens` below 1) |
 | `context_length_exceeded` | 400 | The prompt fills the model's context window; nothing is left to generate. The message names prompt tokens and window, `detail` carries both as `{"prompt_tokens", "context_length"}`; never retryable |
-| `access_denied` | 403 | File / cache permission denied — *CLI only*; no server path raises 403 |
 | `model_not_found` | 404 | Model spec does not resolve to a cached / workspace model |
 | `not_found` | 404 | No endpoint matches the request path — most often a base URL that already ends in `/v1` |
 | `method_not_allowed` | 405 | The endpoint exists, but not for this method; the response carries an `Allow` header |
-| `ambiguous_match` | 400 | Model spec matches multiple cached models — *CLI only*; the server answers such a spec with 404 `model_not_found` |
 | `payload_too_large` | 413 | Audio upload above the 50 MB limit, on either audio endpoint |
-| `capability_not_supported` | 422 | The request is well-formed and the feature exists, but *this* model cannot serve it — a request carrying images or audio while the loaded model is text-only, or `/v1/audio/translations` against a model that cannot translate |
-| `download_failed` | 503 | HF download failed mid-stream — *CLI only*; the server never downloads |
-| `push_operation_failed` | 500 | `mlxk push` failed — *CLI only* |
+| `capability_not_supported` | 422 | The request is well-formed and the feature exists, but *this* model cannot serve it — images or audio in the last user message while the loaded model is text-only (media in earlier messages become placeholders, see [Cross-Model Workflows](#cross-model-workflows-visionaudio--text)), or `/v1/audio/translations` against a model that cannot translate |
 | `server_shutdown` | 503 | Lifespan shutdown in progress; new requests are rejected |
 | `insufficient_memory` | 507 | Model exceeds the memory threshold (ADR-016) |
 | `not_implemented` | 501 | The server cannot run this: a missing dependency, an audio model of unknown backend, a checkpoint the runtime reports incompatible (a declared `model_file` included), or `/v1/embeddings` without `--embed-backend` |
-| `unsupported_multimodal` | 501 | Model uses a multimodal class outside the verified-multimodal list (ADR-023) — *CLI only* (`convert --quantize`); a server response never carries it |
 | `bad_gateway` | 502 | Embed backend (`serve --embed-backend`) unreachable / connection failed / connect-timeout (retryable; ADR-015) |
 | `gateway_timeout` | 504 | Embed backend read-timeout on a slow / large batch (retryable; ADR-015) |
 | `internal_error` | 500 | Unexpected backend failure |
 
 (`bad_gateway` / `gateway_timeout` are raised only by the `serve --embed-backend` proxy; a backend's own `4xx`/`5xx` envelopes otherwise pass through verbatim.)
+
+The CLI's `--json` output has error types of its own; see `docs/json-api-specification.md`.
 
 **Status and type always agree.** A fixed mapping binds the two, so routing on either one gives the
 same answer; the type is the more specific of the two where a status carries two meanings — 400
@@ -197,9 +195,9 @@ status maps to exactly one type.
 
 Two types describe a request the server declines rather than fails. `not_implemented` — the server
 cannot run this. `capability_not_supported` — the feature exists and the request is fine, but the
-model you named cannot serve it; `POST /v1/audio/translations` against a whisper-turbo or `.en`
-variant is the case you will meet (see [the reject matrix](#post-v1audiotranslations)). Neither is
-`retryable`.
+model you named cannot serve it. The cases you will meet: images or audio in the last user message
+for a text-only model, and `POST /v1/audio/translations` against a whisper-turbo or `.en` variant
+(see [the reject matrix](#post-v1audiotranslations)). Neither is `retryable`.
 
 ---
 
@@ -208,6 +206,9 @@ variant is the case you will meet (see [the reject matrix](#post-v1audiotranslat
 ### POST /v1/chat/completions
 
 **OpenAI-compatible chat completion endpoint.**
+
+Every request is formatted with the model's chat template (a plain fallback when the model has
+none); no request field bypasses it. `/v1/completions` takes a prompt the client formats itself.
 
 **Request:**
 ```json
@@ -366,7 +367,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | `language` | String | ❌ | Language code (e.g., `en`, `de`). Auto-detect if omitted. |
 | `prompt` | String | ❌ | Optional context to guide transcription |
 | `response_format` | String | ❌ | `json` (default), `text`, `verbose_json` |
-| `temperature` | Float | ❌ | Sampling temperature (default: 0.0 for greedy) |
+| `temperature` | Float | ❌ | Sampling temperature (default: 0.0 for greedy); for Whisper the only decoding temperature, see [Audio Support](#audio-support) |
 
 **Response (JSON - default):**
 ```json
@@ -447,7 +448,7 @@ client.audio.translations.create(
 | `language` | String | ❌ | **Source**-language hint (e.g. `de`). Auto-detected if omitted. Never sets the output language — output is always English. A documented superset of the OpenAI translations spec (which has no `language` field). |
 | `prompt` | String | ❌ | Optional vocabulary/context bias hint (no synthetic default is injected on the translate path) |
 | `response_format` | String | ❌ | `json` (default), `text`, `verbose_json` |
-| `temperature` | Float | ❌ | Sampling temperature (default: 0.0 for greedy) |
+| `temperature` | Float | ❌ | Sampling temperature (default: 0.0 for greedy); for Whisper the only decoding temperature, see [Audio Support](#audio-support) |
 
 **Response (JSON - default):**
 ```json
@@ -502,7 +503,7 @@ curl -X POST http://localhost:8000/v1/embeddings \
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | String | ✅ | Model ID. The backend serves a **single** model, so this is informational (the loaded model answers regardless). The response echoes the canonical `org/name` **selector** (and adds a `system_fingerprint` realization token — see Notes). |
+| `model` | String | ✅ | Model ID. The backend serves a **single** model, so this is informational (the loaded model answers regardless). The response names the served model and adds a `system_fingerprint` realization token — see Notes. |
 | `input` | String or String[] | ✅ | One text, or a batch (one vector per item, in order). |
 | `encoding_format` | String | ❌ | `base64` (**default** — little-endian float32, what the OpenAI SDK decodes) or `float` (raw JSON array, handy for `curl`). |
 | `dimensions` | Integer | ❌ | Accepted only if equal to the model's native width; any other value → **400** (no Matryoshka truncation). |
@@ -535,9 +536,12 @@ docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).
 
 **Notes:**
 - Vectors are **L2-normalized**. `usage` token counts are best-effort.
-- **`model` vs `system_fingerprint` (the same-model rule).** `model` is the clean, re-sendable
-  **selector** (`org/name`, identical to the `/v1/models` id). `system_fingerprint` is the
-  **realization token** `hash.device` (e.g. `a1b2c3d4.gpu`) — the change-detection signal. A vector
+- **`model` vs `system_fingerprint` (the same-model rule).** `model` identifies the model served by
+  the embedding backend — its `org/name` when the model was pulled or cloned from the Hub.
+  Embedders are not listed by `serve`'s `/v1/models`; read the served identity from an embeddings
+  response, or directly from the embedding backend's `/health`.
+  `system_fingerprint` is the **realization token** `hash.device` (e.g. `a1b2c3d4.gpu`) — the
+  change-detection signal. A vector
   space is fixed by the model, its revision/quant **and** the device (CPU and GPU vectors differ);
   any of those changing — the backend restarted on a different model, a re-quant
   under the same name, or a `--cpu` flip — flips `system_fingerprint`. **Compare it by equality:** pin
@@ -573,13 +577,13 @@ models follow alphabetically. Being listed is a prediction: a listed model can s
 when a request names it.
 
 > **Embedders are excluded.** Embedding models (e.g. `bge-*`, `Qwen3-Embedding-*`) are
-> **not** listed here — they are served by the separate `embed-serve` backend, whose model
-> list is not merged in. `mlxk list` does show embedders.
+> **not** listed here — they are served by the separate `embed-serve` backend, which has no model
+> list. `mlxk list` does show embedders.
 
 > **No per-model capability label and no `dimensions` field.** Entries carry no capability
-> label (e.g. `chat` / `+vision` / `+audio`) — an unsupported modality is signalled at
-> **request** time with HTTP **422** `capability_not_supported`, not advertised here — and no
-> embedding `dimensions`
+> label (e.g. `chat` / `+vision` / `+audio`) — a text-only model answers images or audio in the last
+> user message at **request** time with HTTP **422** `capability_not_supported`; it is not advertised
+> here — and no embedding `dimensions`
 > (read it from the first `/v1/embeddings` response: the returned vector's length).
 
 **Response:**
@@ -651,7 +655,7 @@ What the server can say about its state, one word per question:
 | Is the process alive and able to answer? | `live` | `GET /health` → `200` | startup, shutdown | yes |
 | Can it accept a request now? | `ready` | the same `200` | — | yes — the same answer as `live` on this server |
 | Is this model in memory? | `loaded` | `loaded` on a row of [`GET /v1/models`](#get-v1models) | each model load | yes |
-| Is a generation still producing, and since when? | `progressing` | — | a finished text generation, image answer or transcription | **no** — the server keeps no clock on a generation |
+| Is a generation still producing, and since when? | `progressing` | — | a finished text-model generation, image answer or transcription | **no** — the server keeps no clock on a generation |
 | Is the model complete on disk? | `healthy` | `mlxk health`; `health` in `mlxk list --json` and `mlxk show --json` | — | yes — never on the HTTP surface |
 
 **`ready` is `live` here.** Without `--reload`, the port opens only once startup has finished — a
@@ -670,7 +674,7 @@ a refused connection as a dead server. A preload that fails ends the process.
   `200` here while it fails requests; restart it from outside (see [Supervised Mode](#supervised-mode-default)).
 - **Which model is loaded.** Read `loaded` on [`GET /v1/models`](#get-v1models).
 
-(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": "org/name", "system_fingerprint": "hash.device"}`. Its port opens only once its model has loaded, so every answer comes from a loaded model: with a single model, `ready` and `loaded` are one fact. The `system_fingerprint` matches the `/v1/embeddings` response, so a client **talking directly to the backend port** can poll that `/health` to detect a model/device swap without an embed request. **Through the `serve` gateway the backend's `/health` is not exposed** — a gateway client detects swaps reactively, from the next `/v1/embeddings` response.)
+(The `embed-serve` backend has its own `/health` — see [Embeddings Backend](#embeddings-backend-embed-serve) — which returns `{"status": "ok", "model": …, "system_fingerprint": "hash.device"}`. Its port opens only once its model has loaded, so every answer comes from a loaded model: with a single model, `ready` and `loaded` are one fact. `model` and `system_fingerprint` match the `/v1/embeddings` response, so a client **talking directly to the backend port** can poll that `/health` to detect a model/device swap without an embed request. **Through the `serve` gateway the backend's `/health` is not exposed** — a gateway client detects swaps reactively, from the next `/v1/embeddings` response.)
 
 ---
 
@@ -678,7 +682,7 @@ a refused connection as a dead server. A preload that fails ends the process.
 
 ### Vision Support
 
-See `examples/vision_pipe.sh` for a practical Vision→Text pipeline example (CLI).
+See `examples/pipes/vision_pipe.sh` for a practical Vision→Text pipeline example (CLI).
 
 **Supported:**
 - ✅ Base64 data URLs (`data:image/jpeg;base64,...`)
@@ -693,14 +697,14 @@ See `examples/vision_pipe.sh` for a practical Vision→Text pipeline example (CL
 
 - **Stateless Server:** No server-side state required
 - **Sequential Images:** Only images from the **last user message** are processed
-- **Each request is independent:** The model sees only the last user message; the generation budget has no context-window guard (see [Token Limits](#token-limits-text-vs-multimodal-models))
+- **Each request is independent:** when the last user message carries images, the model sees only that message; otherwise it answers from the conversation's text (see [Vision: Stateless Prompt](#vision-stateless-prompt-history-based-ids)). The generation budget has no context-window guard (see [Token Limits](#token-limits-text-vs-multimodal-models))
 
 #### Stable Image IDs (History-Based)
 
 Image numbers ("Image 1, 2, 3...") stay stable across requests: the server scans the full `messages[]` array (which clients send with each request per OpenAI API) and assigns IDs chronologically based on content hash:
 
 ```
-Request 1: beach.jpg (hash: 5c691ddb) → Image 1
+Request 1: beach.jpg (hash: 5733332c) → Image 1
 Request 2: beach.jpg + mountain.jpg in history → Image 1, Image 2
 Request 3: Re-upload beach.jpg → Still Image 1 (hash match)
 ```
@@ -776,12 +780,15 @@ which return the transcript.
 - **Stateless Server:** Same as Vision — no server-side state
 - **Single Audio:** Only one audio file per request
 - **Audio+Vision:** When both are present in chat, the audio is dropped and only the images are processed
-- **Temperature:** Fixed at 0.0 for a multimodal model (the vision path); an STT model defaults to 0.0
+- **Temperature:** Fixed at 0.0 for a multimodal model (the vision path); an STT model defaults to
+  0.0. Whisper decodes at that one value, the default included: a window that fails Whisper's quality
+  check is not retried at a higher temperature ([#74](https://github.com/mzau/mlx-knife/issues/74))
 
 **History Handling:**
 
 When switching from Audio to Text model mid-conversation:
-- Server filters `input_audio` content blocks
+- Server replaces `input_audio` blocks in earlier messages with a placeholder; audio in the last user
+  message is rejected (see [Cross-Model Workflows](#cross-model-workflows-visionaudio--text))
 - Text model sees `[n audio(s) were attached]` placeholder
 
 ---
@@ -814,11 +821,12 @@ The same request with `"max_tokens": 200000` → budget 130572, the window's rem
 
 #### Vision/Audio Models (VisionRunner)
 
-**Strategy:** stateless — each request is independent; with media, the model sees only the last
-user message. Applies to every request a vision model serves, media or not.
+**Strategy:** stateless — each request is independent; when the last user message carries images or
+audio, the model sees only that message.
 
-**Default:** **2048** tokens on server and CLI, set explicitly (not inherited from mlx-vlm).
-No window guard: the budget is the ceiling alone. The operator ceiling applies here too.
+**Default:** **2048** tokens on server and CLI, for every request a vision model serves, with media or
+without; set explicitly (not inherited from mlx-vlm). No window guard: the budget is the ceiling
+alone. The operator ceiling applies here too.
 
 **Override** — an explicit `max_tokens` in the request:
 ```json
@@ -864,8 +872,8 @@ the last chunk that carries a choice:
 These are OpenAI's values; `content_filter`, `tool_calls` and `function_call` are never emitted.
 
 **A stream that fails part-way** keeps `finish_reason: null` — a backend fault is not a generation
-outcome — and carries the failure in a top-level `error` object instead, in the same shape as an
-HTTP error body:
+outcome — and carries the failure in a top-level `error` object instead, with the `type` and `message` of
+an HTTP error body:
 
 ```json
 data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345678,"model":"...","choices":[{"index":0,"delta":{},"finish_reason":null}],"error":{"type":"internal_error","message":"..."}}
@@ -873,9 +881,9 @@ data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1702345
 
 The tokens already sent stand; that event is the last one, and **no `[DONE]` follows** — the stream
 did not complete. An OpenAI client needs no special handling: its SDK raises on the `error` key.
-Batch responses never carry `error` in the body — they fail with an HTTP status.
+A batch request never fails inside a `200` body — it fails with an HTTP error status.
 
-The server logs one line per text generation — `Generation finished: <reason>` with `request_id`,
+The server logs one line per text-model generation that runs to its end — `Generation finished: <reason>` with `request_id`,
 `model`, `stream`, `prompt_tokens`, `completion_tokens`, `max_tokens` and `finish_reason` — so a
 cut answer is visible operator-side as well.
 
@@ -906,11 +914,12 @@ cut answer is visible operator-side as well.
 - ✅ **True streaming:** Tokens streamed as generated
 - **Format:** SSE (`data: {...}\n\n`)
 - **Completion:** `data: [DONE]\n\n`
+- A text request to a vision model is served by that model and arrives as one event (see [Vision Models](#vision-models))
 
 #### Vision Models
 - ✅ **Per-chunk streaming:** Real SSE events as each image chunk completes (2.0.4-beta.7+)
 - **Multiple images:** Each chunk (1-5 images) streams as it finishes processing
-- **Single image:** Behaves like batch mode (one SSE event)
+- **Single image:** Behaves like batch mode (one SSE event); so does a request without images
 - **Format:** OpenAI-compatible SSE with per-chunk deltas
 
 #### Audio Models
@@ -961,22 +970,24 @@ response carries `usage` anyway.
 
 #### Closing the connection
 
-A client that closes a streaming connection stops the generation, and the machine is freed, not
-just the client.
+Closing a streaming connection stops the generation at the stream's next step: a text stream after
+the token being generated, a multi-image vision stream after the chunk being generated. A stream
+that arrives as one event (see [Streaming](#streaming-sse---server-sent-events)) has no such step:
+its generation runs to the end, as a non-streaming request does (see
+[Concurrent Requests](#concurrent-requests)), and requests behind it wait. Whatever runs before a
+response starts, a model load included, completes either way, and a stream whose client left before
+its response started can still run its first step — for a multi-image stream, one whole image chunk.
 
-Two consequences worth knowing:
-
-- **Nothing is logged for the abandoned generation.** The completion line a finished generation
-  writes never appears, so the server-side record shows the request starting and nothing else.
-  Tokens already delivered are the client's; there is no way to resume.
+- **A stream that stopped early writes no completion line;** a multi-image stream keeps the lines of
+  the chunks it delivered. A stream that arrives as one event runs to the end and logs as its
+  non-streaming form does. Tokens already delivered are the client's; there is no way to resume.
 - **The guarantee comes from the ASGI runtime, not from this server.** No code here watches for a
   disconnect. The runtime finalizes the response generator when the connection drops, and the
   generation takes no further step. A deployment that buffers the response — a proxy that reads
   ahead, for instance — can therefore keep the generation running after the client is gone.
 
-This holds for streams only: a non-streaming request keeps generating after its client has gone
-(see [Concurrent Requests](#concurrent-requests)). There is no explicit cancellation endpoint;
-closing a streaming connection is the way to abort.
+There is no explicit cancellation endpoint. Closing the connection is the only way to abort, and it
+stops only a stream that has steps.
 
 ### Embeddings Backend (embed-serve)
 
@@ -997,9 +1008,9 @@ A RAG client points at `serve` for both `/v1/embeddings` and `/v1/chat/completio
 backend port directly.
 
 > **Both halves are experimental and alpha-gated:** the `embed-serve` backend and the
-> `serve --embed-backend` proxy. `GET /v1/models` on `serve` does **not** advertise the backend's
-> embedders — embeddings work, but a client cannot discover the embedding model over HTTP. It has to
-> be configured, or read from `mlxk list` on the host.
+> `serve --embed-backend` proxy. `GET /v1/models` on `serve` does **not** list the backend's
+> embedders — embeddings work, but a client cannot list the embedding models over HTTP. The served
+> model's identity is in every embeddings response and in the backend's own `GET /health`.
 
 **Proxy behavior (`serve --embed-backend`):** serve forwards the request body to the backend
 **byte-for-byte** and returns the backend's response verbatim — the embed model is never loaded
@@ -1143,10 +1154,10 @@ python -P -m mlxk2.core.server_base
 
 ### Client Errors (4xx)
 - **400 Bad Request:** Invalid input (e.g., an oversized image or request, invalid format, validation failures incl. `max_tokens` below 1 — `validation_error`); a prompt that fills the model's context window (`context_length_exceeded`, `detail` carries `prompt_tokens` and `context_length`); for `/v1/embeddings`: empty or non-string `input` (incl. empty array items), unsupported `encoding_format` or `input_type`, or a non-native `dimensions` value)
-- **404 Not Found:** Model not found in cache or workspace, or a spec that matches several models (`model_not_found`); no endpoint matches the request path (`not_found`)
+- **404 Not Found:** Model not found in cache or workspace (`model_not_found`); no endpoint matches the request path (`not_found`)
 - **405 Method Not Allowed:** The endpoint exists, but not for this method (`method_not_allowed`); the response carries an `Allow` header. `HEAD` is not accepted where only `GET` is declared
 - **413 Payload Too Large:** Audio upload above the 50 MB limit (both audio endpoints) (`payload_too_large`)
-- **422 Unprocessable Entity:** The model cannot serve the request (`capability_not_supported`): a request carrying images or audio while the loaded model is text-only — the modality is rejected, never silently dropped — or `POST /v1/audio/translations` against an audio model that cannot translate
+- **422 Unprocessable Entity:** The model cannot serve the request (`capability_not_supported`): images or audio in the last user message while the loaded model is text-only — the modality is rejected, never silently dropped; media in earlier messages become placeholders — or `POST /v1/audio/translations` against an audio model that cannot translate
 
 ### Server Errors (5xx)
 - **500 Internal Server Error:** Unexpected backend failure
@@ -1177,17 +1188,19 @@ generation, per chunk of images (default 1, max 5 via `--chunk`).
 - **A stream shares the turn step by step** — a text stream token by token, a multi-image vision
   stream image chunk by chunk. A request that arrives mid-stream is served between two steps, and the
   stream pauses for as long as that request's work takes — a whole batch answer, a model load, a
-  transcription. A vision or audio request that streams as one event takes the turn whole.
+  transcription. A stream that arrives as one event takes the turn whole.
 - **`GET /health` and `GET /v1/models` do not wait** — they answer while a model operation runs.
-- **One model in memory.** A request naming another model unloads the current one first — also
-  while a stream is still using it, and that stream then fails part-way (see [finish_reason](#finish_reason)).
-  A non-streaming request fails too when another model is requested after it has the model and
-  before it has generated: **500** `internal_error`, *Model not loaded*. The server does
-  not arbitrate between requests naming different models — do not overlap them; `loaded` on
+- **One model in memory.** A request naming another model unloads the current one first, also while
+  another request still needs it. That request fails: with **500** `internal_error`, *Model not
+  loaded*, while its response has not started (no HTTP status has reached the client); once a
+  stream's response has started, with the terminal `error` event (see [finish_reason](#finish_reason)).
+  A stream that arrives as one event starts its response only when its answer is ready. The server
+  does not arbitrate between requests naming different models — do not overlap them; `loaded` on
   [`GET /v1/models`](#get-v1models) says which model is in memory.
 - **Leaving does not cancel a batch request.** A client that closes a non-streaming request — its
   own timeout included — leaves the generation running until it ends on its own, and requests behind
-  it wait. Closing a stream does stop it (see [Closing the connection](#closing-the-connection)).
+  it wait. Closing a stream stops it at its next step; one that arrives as one event runs to the end
+  (see [Closing the connection](#closing-the-connection)).
 - **Reason:** Metal backend, single GPU.
 
 ---
@@ -1428,11 +1441,10 @@ batch. Reduce the batch size or retry.
 
 | Change | Effect on operators |
 |--------|---------------------|
-| ADR-023 Text-First + Verified Multimodal | Multimodal models outside the verified list now reject with HTTP 501 `unsupported_multimodal`. Previously ran with risk of silent fallback. |
+| ADR-023 Text-First + Verified Multimodal | `mlxk convert --quantize` rejects multimodal types outside the verified list (CLI). No server change. |
 | Workspace model spec (CLI) | `--model <path-to-workspace-dir>` accepted by `mlxk serve --model` (path-based; transparent to API consumers). |
 
-**Client-visible:**
-- Models that previously partially-worked may now return 501. Clients should surface the new `unsupported_multimodal` type from the error envelope.
+**Client-visible:** none.
 
 ### From 2.0.5 → 2.0.6
 
@@ -1505,7 +1517,8 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 
 **Endpoint surface:** unchanged. Requests gain one optional field, `stream_options` (see
 [Token usage in a stream](#token-usage-in-a-stream)). The tables below list every change a client
-or operator sees, 2.0.7 against 2.0.8.
+or operator sees, 2.0.7 against 2.0.8. Corrections to earlier handbooks, with no change in
+behaviour, are listed under *Documented* in the [Changelog](#changelog).
 
 **413 and 422 carry their own types.** An audio upload above the size limit (**413**) and
 `POST /v1/audio/translations` against a model that cannot translate (**422**) carry
@@ -1516,7 +1529,7 @@ statuses. A client that special-cased `internal_error` on those two statuses sho
 
 | Change | 2.0.7 | 2.0.8 | Effect on clients |
 |--------|-------|-------|-------------------|
-| Images or audio for a text-only model | **200**, the media dropped | **422** `capability_not_supported` | Send media only to a model that takes it. |
+| Images or audio in the last user message for a text-only model | **200**, the media dropped | **422** `capability_not_supported` | Send media only to a model that takes it; media in earlier messages stay allowed. |
 | Images for `qwen2_5_vl` / `qwen3_5` checkpoints | **200**, answered without the image | answered with the image | |
 | `"model": ""` | answered by an arbitrary model | **404** `model_not_found` | |
 | A checkpoint whose `config.json` declares `model_file` | loaded, its module executed | **501** `not_implemented`; not listed | |
@@ -1603,8 +1616,9 @@ ceiling with no window guard, and a transcription model runs at its own default;
 **Client updates required:**
 - Decide on `GET /health` by its status code; a check for `"status": "healthy"` fails from this release on.
 - Keep your own request timeout: `GET /health` answering does not mean a generation is progressing.
-- Do not overlap requests that name different models: the one whose model is unloaded before it has
-  generated answers **500** `internal_error`, streaming or not.
+- Do not overlap requests that name different models. A model switch can fail an in-flight request:
+  before its response starts with HTTP **500** `internal_error`; after an SSE response has started
+  with the terminal `error` event, `finish_reason: null`, and no `[DONE]`.
 - Accept a boolean `loaded` on `GET /v1/models` rows.
 - Handle `finish_reason: "length"` — offer "continue", raise `max_tokens`, or shorten the prompt.
 - Accept `finish_reason: null` on a transcription; a check for `"stop"` fails from this release on.
@@ -1612,8 +1626,9 @@ ceiling with no window guard, and a transcription model runs at its own default;
   rather than a string. An OpenAI SDK client needs no change: it raises on the `error` key either way.
 - Accept `null` for `/v1/models` `context_length`; deserializing it as a non-nullable integer breaks.
 - Handle **400** `context_length_exceeded` by shortening history; `detail` carries the two numbers.
-- Send images or audio only to a model that takes them: a text-only model answers **422**
-  `capability_not_supported` instead of answering without the media.
+- Send images or audio in the last user message only to a model that takes them: a text-only model
+  answers **422** `capability_not_supported` instead of answering without the media. Media in
+  earlier messages stay allowed and reach a text model as placeholders.
 - Read an unmatched path (**404**) and a wrong method (**405**) from the error envelope's `type`,
   not from a `detail` key.
 - Expect `stop` to cut a batch answer; it was accepted and ignored there.
@@ -1635,7 +1650,7 @@ ceiling with no window guard, and a transcription model runs at its own default;
 - **ADR-016:** Memory-Aware Loading (HTTP 507 rationale)
 - **ADR-020:** Audio Backend Architecture (STT routing, MLX_AUDIO vs MLX_VLM)
 - **ADR-022:** Workspace-First Paradigm (background; surface-transparent on the server)
-- **ADR-023:** Text-First + Verified Multimodal (HTTP 501 `unsupported_multimodal` policy + the Workaround-Sunset Policy that retired the `torch` / `torchvision` base deps)
+- **ADR-023:** Text-First + Verified Multimodal (the verified-multimodal reject of `mlxk convert --quantize`; the Workaround-Sunset Policy that retired the `torch` / `torchvision` base deps)
 - **ADR-024:** Pre-Execution Capability-Mismatch Reject (Class A — CLI-side; surface-transparent on the server today)
 - **ADR-025:** content_hash v2 (background; surface-transparent on the server)
 - **ADR-029:** Server State Vocabulary (`live` on `GET /health`, `loaded` on `GET /v1/models`; `healthy` stays the CLI's file-integrity word)
@@ -1672,7 +1687,7 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 - ✅ Complete assistant responses (including `<!-- mlxk:filenames -->` markers)
 - ⚠️ Media payloads (Base64) can be dropped after first Vision request (see [Image ID Persistence](#image-id-persistence-stateless))
 
-**Note:** For Vision models, the server only forwards the last user message to the model (stateless prompt), but still scans the full history for image ID reconstruction.
+**Note:** For Vision models, a request whose last user message carries images forwards only that message to the model (stateless prompt); the server still scans the full history for image ID reconstruction.
 
 ### Vision Messages Format
 
@@ -1700,13 +1715,15 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 
 | Aspect | Behavior | Reason |
 |--------|----------|--------|
-| **Prompt to model** | Only last user message | Prevents pattern reproduction (model copying old mappings) |
+| **Prompt to model** | Images in the last user message: only that message | Prevents pattern reproduction (model copying old mappings) |
 | **Image ID assignment** | Full history scanned | Consistent numbering across session (Image 1, 2, 3...) |
 
 **What this means:**
-- The Vision model does NOT see previous assistant responses
-- But image numbering remains stable across the conversation
-- Follow-up questions about image descriptions should use a **Text model** (which has full history)
+- When the last user message carries images, the Vision model sees only that message. Otherwise it
+  answers from the conversation's text; images sent earlier are not seen again
+- Image numbering remains stable across the conversation
+- The Vision model describes each image on its own; for questions across images or about their
+  descriptions, switch to a **Text model** (see [Cross-Model Workflows](#cross-model-workflows-visionaudio--text))
 
 **Recommended workflow:**
 ```
@@ -1747,7 +1764,7 @@ Same image content = same ID (content-hash based).
    <!-- mlxk:filenames -->
    | Image | Filename | Original | Location | Date | Camera |
    |-------|----------|----------|----------|------|--------|
-   | 1 | image_5733332c.jpeg | beach.jpg | 📍 34.0522°N, 118.2437°W | 📅 2024-06-15 | iPhone 14 |
+   | 1 | image_5733332c.jpeg | image_5733332c.jpeg | 📍 34.0522°N, 118.2437°W | 📅 2024-06-15 | iPhone 14 |
 
    </details>
 
@@ -1755,12 +1772,14 @@ Same image content = same ID (content-hash based).
    ```
 
    **Note:** EXIF columns (Original, Location, Date, Camera) are enabled by default.
-   Disable with `MLXK2_EXIF_METADATA=0` for minimal output (Image, Filename only).
+   Disable with `MLXK2_EXIF_METADATA=0` for minimal output (Image, Filename only). A data URL
+   carries no file name, so *Original* repeats the generated name.
 
-3. **Client Storage Optimization:** Client can **drop Base64 from history**, keep only:
+3. **Client Storage Optimization:** Client can **drop Base64 from history**, keep only the text and
+   the assistant response as the server sent it:
    ```json
    {"role": "user", "content": "describe"}
-   {"role": "assistant", "content": "A sandy beach...\n\n<!-- mlxk:filenames -->\n..."}
+   {"role": "assistant", "content": "<details>\n<summary>📸 Image Metadata (1 image)</summary>\n\n<!-- mlxk:filenames -->\n| Image | Filename | Original | Location | Date | Camera |\n|-------|----------|----------|----------|------|--------|\n| 1 | image_5733332c.jpeg | image_5733332c.jpeg | 📍 34.0522°N, 118.2437°W | 📅 2024-06-15 | iPhone 14 |\n\n</details>\n\nA sandy beach with blue water."}
    ```
 
 4. **Request 3 (Vision after Text):** Client sends mountain.jpg with text-only history
@@ -1768,12 +1787,12 @@ Same image content = same ID (content-hash based).
    {
      "messages": [
        {"role": "user", "content": "describe"},
-       {"role": "assistant", "content": "Beach...\n\n| 1 | image_5733332c.jpeg |"},
+       {"role": "assistant", "content": "<details>\n<summary>📸 Image Metadata (1 image)</summary>\n\n<!-- mlxk:filenames -->\n| Image | Filename | Original | Location | Date | Camera |\n|-------|----------|----------|----------|------|--------|\n| 1 | image_5733332c.jpeg | image_5733332c.jpeg | 📍 34.0522°N, 118.2437°W | 📅 2024-06-15 | iPhone 14 |\n\n</details>\n\nA sandy beach with blue water."},
        {"role": "user", "content": "What color?"},
        {"role": "assistant", "content": "Blue."},
        {"role": "user", "content": [
          {"type": "text", "text": "new picture"},
-         {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
        ]}
      ]
    }
@@ -1837,7 +1856,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | `language` | ❌ | Language code (`en`, `de`, etc.). Auto-detect if omitted. |
 | `prompt` | ❌ | Optional context to guide transcription |
 | `response_format` | ❌ | `json` (default), `text`, `verbose_json` |
-| `temperature` | ❌ | Sampling temperature (default: 0.0) |
+| `temperature` | ❌ | Sampling temperature (default: 0.0); for Whisper the only decoding temperature, see [Audio Support](#audio-support) |
 
 **Response Formats** — `json` (default):
 
@@ -1888,7 +1907,9 @@ The response carries two identity fields:
 }
 ```
 
-- `model` — the **selector** (`org/name`): what you send, what `/v1/models` lists. Stable, re-sendable.
+- `model` — identifies the model served by the embedding backend. Embedders are not listed by
+  `serve`'s `/v1/models`; read the served identity from an embeddings response, or directly from the
+  embedding backend's `/health`.
 - `system_fingerprint` — the **realization token** `hash.device`: the change-detection signal. It flips
   when the backend's model, its revision/quant, or its device (`--cpu` vs GPU) changes — the three
   things that change the vector space. Additive mlxk field (standard on OpenAI chat/completions).
@@ -1908,18 +1929,23 @@ The RAG extension fields (`input_type: "document" | "query"`, `instruct`) and `e
 
 ### Cross-Model Workflows (Vision/Audio → Text)
 
+A text-only model rejects images or audio in the last user message with **422**
+`capability_not_supported`. Media in earlier messages remain permitted as conversation history and
+are replaced with textual placeholders.
+
 When switching from Vision or Audio to Text model mid-conversation:
 
 1. **Client:** Continue sending full message list (media payloads can be stripped if mapping tables exist)
-2. **Server:** Automatically filters any remaining media for text models, replaces with placeholders
-3. **Result:** Text model sees `[n image(s) were attached]` or `[n audio(s) were attached]`
+2. **Server:** Replaces media still present in earlier messages with placeholders for a text model
+3. **Result:** Text model sees `[n image(s) were attached]` or `[n audio(s) were attached]` where the
+   media were; stripped payloads leave only the text. Either way, what an image showed reaches the
+   text model through the vision model's answer in the history
 
 **Example workflow:**
 ```
 1. Vision model: User sends 2 images → Model describes both
-2. Vision model: User asks "What's different?" → Model compares
-3. Switch to Text model: User asks "Which is better for vacation?"
-4. Text model: Sees "[2 image(s) were attached]" in history, can reference the conversation
+2. Switch to Text model: User asks "What's different?"
+3. Text model: Receives the conversation with "[2 image(s) were attached]" and both descriptions, compares the descriptions
 ```
 
 **Storage optimization:** After the first Vision request, clients can drop Base64 payloads from history while preserving assistant responses with `<!-- mlxk:filenames -->` markers. The server reconstructs image IDs from these markers.
@@ -1947,13 +1973,13 @@ When switching from Vision or Audio to Text model mid-conversation:
   - `/v1/models` `context_length` is `null` when no window is known for the model (was a hard-coded `4096`).
   - A failed stream carries a top-level `error` object, keeps `finish_reason: null`, and ends.
   - A transcription through `/v1/chat/completions` reports `finish_reason: null` in batch and stream; the batch answer claimed `"stop"`.
-  - Requests naming different models must not overlap: a non-streaming request whose model is unloaded before it has generated answers **500** `internal_error`.
+  - Requests naming different models must not overlap: a request whose model is unloaded before it has generated fails — with **500** `internal_error` before its response starts, with the terminal `error` event after.
   - `mlxk serve` takes one teardown path for Ctrl-C, `SIGTERM` and `SIGHUP`, and stops itself if its supervisor dies. Exit `143` on signal, `137` when forced.
   - Python 3.11–3.14 (was 3.10–3.12).
   - Dep-wave: `mlx-vlm==0.6.10`, `mlx-audio==0.4.8`, `transformers==5.14.1`, `mlx>=0.30.0,<0.32.1`; `torch`/`torchvision` dropped as base deps (524 MB smaller install).
 
   **Fixed**
-  - Images or audio for a text-only model are rejected with **422** `capability_not_supported`; the request was answered with the media dropped.
+  - Images or audio in the last user message for a text-only model are rejected with **422** `capability_not_supported`; the request was answered with the media dropped.
   - **413** and **422** carry `payload_too_large` / `capability_not_supported`; both reported `internal_error`, so a deliberate reject looked like a server fault.
   - `/v1/models` lists vision models it withheld — a check rejected every checkpoint carrying `temporal_patch_size` under transformers 5.x, and those models load and answer correctly.
   - A vision model outside the type whitelist (`qwen2_5_vl`, `qwen3_5`) is served by the vision backend; the server's own probe called it text-only, so an image request was answered without the image. The server now decides with the detector behind `mlxk list`.
@@ -1971,13 +1997,16 @@ When switching from Vision or Audio to Text model mid-conversation:
   - `mlxk serve --json` prints one JSON document when an option is rejected, not two.
 
   **Documented**
-  - What a `200` from `GET /health` does not tell; one model operation at a time; a stream fails when another model is requested; a batch request runs on after its client has gone; closing a streaming connection stops the generation, and nothing is logged for it.
+  - What a `200` from `GET /health` does not tell; one model operation at a time; a stream fails when another model is requested; a batch request runs on after its client has gone; closing a streaming connection stops the generation at the stream's next step — one that arrives as one event runs to the end — and a stream that stopped early writes no completion line.
+  - A request to a vision model whose last user message carries no images is answered from the conversation's text; with images there, only that message reaches the model. Every chat request is formatted with the model's chat template.
+  - Corrected: earlier handbooks listed `unsupported_multimodal` as a server error (501); no release has sent it. The verified-list check it names belongs to `mlxk convert --quantize`; the server has no such check, and its 501 is `not_implemented`. A client branch for `unsupported_multimodal` can be dropped.
+  - Corrected: earlier handbooks named Voxtral as a transcription model where VibeVoice belonged: VibeVoice has transcribed since 2.0.5, and no stable release has run Voxtral.
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.
 
 - **2026-07-24:** 2.0.7 stable — embeddings + audio translation, embeddings model identity
   - **NEW:** the `/v1/embeddings` response (and `embed-serve` `/health`) carries
     `system_fingerprint` = `hash.device` — a change-detection token so a RAG client detects a
-    model/revision/device swap; `model` stays the clean `org/name` selector (= `/v1/models` id).
+    model/revision/device swap; `model` stays the clean `org/name` selector.
     Additive field (standard on OpenAI chat/completions). ADR-015 §Model Identity.
   - **NEW:** `/v1/embeddings` (OpenAI Embeddings API), served by the new `mlxk embed-serve`
     backend (separate single-model process; ADR-015). Experimental — requires
@@ -2004,7 +2033,7 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 - **2026-04-18:** 2.0.5 stable
   - Endpoint surface unchanged.
-  - ADR-023 enforced: multimodal models outside the verified list reject with HTTP 501 `unsupported_multimodal` (was: silent fallback risk).
+  - ADR-023: `mlxk convert --quantize` rejects multimodal types outside the verified list (CLI; the server is unchanged).
   - Dep-wave: `mlx-lm==0.31.1`, `mlx-audio==0.4.1`, `transformers>=5.0.0,<5.5.0`.
   - CLI: workspace clone (`mlxk clone`) introduced; workspace paths accepted by `mlxk serve --model <path>` (transparent to API consumers).
 
