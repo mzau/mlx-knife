@@ -131,9 +131,10 @@
 - ADR-020 corrected: Whisper does use `temperature`, and a single value replaces mlx-audio's
   fallback schedule.
 
-- JSON API specification: the `list` and `show` examples carry the fields the responses have returned
-  since 0.2.0 — `context_length`, `origin`, `content_hash`, `hash_modified`, `clean` — and the `list`
-  section documents the `system` object it returns since 0.2.4.
+- JSON API specification: the `list` and `show` examples carry the fields the responses return —
+  `context_length`, `origin`, `content_hash`, `hash_modified`, `clean`, and `display_name` on a
+  workspace entry of `list` — and the `list` section documents the `system` object; it no longer
+  says `list` returns cached models only.
 
 - ADR-023: the workaround policy tells a bridge, retired by a canary, from a shim, retired at a
   release; the STT reject of `convert --quantize` is named as `not_implemented`.
@@ -145,9 +146,13 @@
 
 - SERVER-HANDBOOK corrected: `unsupported_multimodal` was never a server error; VibeVoice, not
   Voxtral, transcribes since 2.0.5; `/v1/models` never listed embedders; the image-ID example
-  carries the marker the server reads. ARCHITECTURE: the STT decision tree names VibeVoice.
+  carries the marker the server reads; the 2.0.3 → 2.0.4 migration no longer lists a vision
+  `max_tokens` change. ARCHITECTURE: the STT decision tree names VibeVoice.
 
 - README: a workspace's `content_hash` is the hash as last pinned; re-pin it after editing its files.
+
+- MODEL-COVERAGE: `gemma3n` states that its mlx-community uploads need `--repair-index` and that
+  about 30 s of audio are heard.
 
 ### Known Issues
 

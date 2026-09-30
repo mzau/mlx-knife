@@ -279,7 +279,7 @@ mlxk-json list "Llama" --json                # Fuzzy matching
 ```
 
 **Behavior:**
-- Returns all cached models with complete metadata
+- Returns all cache and workspace models with complete metadata
 - Performs both integrity and runtime compatibility checks (0.1.5+)
 - Pattern filter is a case-insensitive substring match on `name`
 - `data.system` carries the node's total RAM (0.2.4+), the same object as `version --json`; present even when no model matches.
@@ -308,6 +308,25 @@ mlxk-json list "Llama" --json                # Fuzzy matching
         "content_hash": null,
         "hash_modified": null,
         "clean": null
+      },
+      {
+        "name": "/Users/me/mlx-models/Qwen2.5-Coder-1.5B-Instruct-4bit",
+        "hash": null,
+        "size_bytes": 880175263,
+        "last_modified": "2026-06-07T21:17:14Z",
+        "framework": "MLX",
+        "model_type": "chat",
+        "capabilities": ["text-generation", "chat"],
+        "context_length": 32768,
+        "health": "healthy",
+        "runtime_compatible": true,
+        "reason": null,
+        "cached": false,
+        "origin": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+        "content_hash": "sha256:dea386cbccb3fafab06987d252e4e5d51ed9928c64c42164c608ea0cd891bdf4",
+        "hash_modified": "2026-06-07T19:17:14.274801Z",
+        "clean": true,
+        "display_name": "Qwen2.5-Coder-1.5B-Instruct-4bit"
       },
       {
         "name": "mlx-community/mxbai-embed-large-v1",

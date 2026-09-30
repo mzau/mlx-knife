@@ -133,6 +133,8 @@ defined in [ADR-023](docs/ADR/ADR-023-Text-First-Verified-Multimodal.md).
 
 ## Test Execution Guide
 
+Commands assume an activated virtual environment (TESTING.md → *Quick Start*).
+
 | Target | How to Run | Markers / Env | Includes | Network |
 |---|---|---|---|---|
 | Default suite | `pytest -v` | — | JSON-API (list/show/health), Human-Output, Model-Resolution, Health-Policy, Push Offline (`--check-only`, `--dry-run`), Spec/Schema checks | No |

@@ -60,6 +60,8 @@ already there honest.
   model as not runnable, with the reason.
   Code declared through `auto_map` is a separate mechanism that mlx-knife cannot prevent —
   see [SECURITY.md](https://github.com/mzau/mlx-knife/blob/main/SECURITY.md#code-in-model-directories).
+- **A model directory cannot stand in for mlx-knife.** `serve`, `embed-serve` and `run --audio`
+  no longer import Python modules from the directory they are started in.
 - **The generation budget holds.** `--max-tokens` and `max_tokens` mean the same on CLI and
   server: at most 32768 tokens (2048 for vision), never more than the context window minus
   the prompt. A cut answer reports `finish_reason: "length"`; a prompt that fills the window
@@ -72,10 +74,16 @@ already there honest.
   agree on which models can see.
 - **`serve` stops when you stop it.** Ctrl-C, `SIGTERM` and `SIGHUP` share one teardown
   path, and no server process survives its supervisor.
+- **Streaming is no longer many times slower** than the same generation unstreamed.
 
 The MLX stack moves to mlx-vlm 0.6.10 / mlx-audio 0.4.8 / transformers 5.14.1 — torch-free,
 a 524 MB (36 %) smaller install. **Python 3.11 or later is required**; on 3.10 `pip` installs
 2.0.7, which does not carry this release's security fixes.
+
+Details: [CHANGELOG.md](https://github.com/mzau/mlx-knife/blob/main/CHANGELOG.md). Every change
+a server client sees is listed in the
+[SERVER-HANDBOOK](https://github.com/mzau/mlx-knife/blob/main/docs/SERVER-HANDBOOK.md) under
+*From 2.0.7 → 2.0.8*.
 
 ## Unix Pipe Integration (Beta)
 Chain models with standard Unix pipes - no temp files needed:
@@ -220,7 +228,7 @@ mlxk run "Phi-4" "Hello"                    # Fuzzy match
 mlxk show "Qwen3@e96" --json                # Specific version
 ```
 
-### Local Paths (2.0.4-beta.6+)
+### Local Paths
 
 | Format | Example |
 |--------|---------|
@@ -373,7 +381,7 @@ MLX Knife supports multiple input modalities beyond text. All multi-modal featur
 
 ### Vision
 
-Image analysis via the `--image` flag (CLI and server). Stable since 2.0.4.
+Image analysis via the `--image` flag (CLI and server).
 
 #### Requirements
 
@@ -806,7 +814,7 @@ done
 
 MLX Knife provides rich human-readable output by default (without `--json` flag).
 
-**Error Handling (2.0.3+):** Errors print to stderr for clean pipe workflows:
+**Error Handling:** Errors print to stderr for clean pipe workflows:
 ```bash
 mlxk show badmodel | grep ...      # Errors don't contaminate stdout
 mlxk pull badmodel > log 2> err    # Capture errors separately
@@ -830,7 +838,7 @@ Download models from HuggingFace:
 mlxk pull "mlx-community/Phi-3-mini-4k-instruct-4bit"
 ```
 
-**Interrupted downloads (2.0.4-beta.5+):** If a download fails (network issue, Ctrl-C), `mlxk pull` will detect this and prompt to resume:
+**Interrupted downloads:** If a download fails (network issue, Ctrl-C), `mlxk pull` will detect this and prompt to resume:
 
 ```bash
 $ mlxk pull "model-name"
@@ -1051,7 +1059,7 @@ Control server behavior without command-line flags:
 
 ### Vision Processing
 
-Control vision model behavior (beta):
+Control vision model behavior:
 
 | Variable | Description | Default | Since |
 |----------|-------------|---------|-------|
@@ -1145,7 +1153,7 @@ MLXK2_MAX_TOKENS=1024 mlxk serve --max-tokens 4096  # Ceiling 4096, not 1024
 
 ## HuggingFace Cache Safety
 
-MLX-Knife 2.0 respects standard HuggingFace cache structure and practices:
+MLX-Knife respects standard HuggingFace cache structure and practices:
 
 ### Best Practices for Shared Environments
 - **Read operations** (`list`, `health`, `show`) always safe with concurrent processes
@@ -1192,14 +1200,9 @@ workspace/
 | Models | **Exactly one** model per workspace | Many models (models--org--repo1, models--org--repo2, ...) |
 | Purpose | Portable working directory | Download cache (managed) |
 | Health Check | Standalone (no cache needed) | Requires cache structure |
-| Portability | **Goal:** USB stick, SMB share, any volume | Fixed location (HF_HOME) |
+| Portability | Any volume: APFS, SMB, NFS | Fixed location (HF_HOME) |
 | Ownership | User owns files | Managed by HuggingFace Hub |
 | Operations | `clone` (creates), `push` (uploads from) | `pull` (downloads to) |
-
-**Portability (Phase 1 limitation):**
-- **Current:** Same APFS volume as cache (CoW optimization)
-- **Community Goal:** Any location (USB stick, SMB share, different volumes)
-- **Future:** Cross-volume support planned
 
 **Typical workflow:**
 1. `mlxk pull org/model` → Downloads to cache
@@ -1243,7 +1246,7 @@ mlxk clone org/model ./workspace                   # → ./workspace
 - Human output: derived from JSON; add `--verbose` to include extras such as the commit URL or a short message variant. JSON schema is unchanged.
 - Local workspace check: use `--check-only` to validate a workspace without uploading. Produces `workspace_health` in JSON (no token/network required).
 - Dry-run planning: use `--dry-run` to compute a plan vs remote without uploading. Returns `dry_run: true`, `dry_run_summary {added, modified:null, deleted}`, and sample `added_files`/`deleted_files`.
-- Testing: see TESTING.md ("Push Testing (2.0)") for offline tests and opt-in live checks with markers/env.
+- Testing: see TESTING-DETAILS.md (*Push Testing Details*) for offline tests and opt-in live checks with markers/env.
 - Carefully review the result on the Hub after pushing.
 - Responsibility: **You are responsible for complying with Hugging Face Hub policies and applicable laws (e.g., copyright/licensing) for any uploaded content.**
 
@@ -1321,22 +1324,19 @@ MLXK2_ENABLE_PIPES=1 mlxk run pixtral --image photos/*.jpg "Describe each pictur
 
 ## Testing
 
-The 2.0 test suite runs by default (pytest discovery points to `tests_2.0/`):
+The test suite runs by default (pytest discovery points to `tests_2.0/`):
 
 ```bash
-# Run 2.0 tests (default)
+# Run the tests (default)
 pytest -v
 
-# Explicitly run legacy 1.x tests (not maintained on this branch)
-pytest tests/ -v
-
-# Test categories (2.0 example):
+# Test categories (example):
 # - ADR-002 edge cases
 # - Integration scenarios
 # - Model naming logic
 # - Robustness testing
 
-# Current status: all current 2.0 tests pass (some optional schema tests may be skipped without extras)
+# Current status: all current tests pass (some optional schema tests may be skipped without extras)
 ```
 
 **Test Architecture:**
@@ -1357,12 +1357,12 @@ This branch follows the established MLX-Knife development patterns:
 
 ```bash
 # Run quality checks
-python test-multi-python.sh  # Tests across Python 3.9-3.14
-./run_linting.sh             # Code quality validation
+bash test-multi-python.sh    # Tests across Python 3.11-3.14
+ruff check mlxk2/            # Code quality validation
 
 # Key files:
-mlxk2/                       # 2.0.0 implementation
-tests_2.0/                   # 2.0 test suite
+mlxk2/                       # package source
+tests_2.0/                   # test suite
 docs/ADR/                    # Architecture decision records
 ```
 

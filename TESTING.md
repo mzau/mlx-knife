@@ -39,6 +39,10 @@ When dependencies like `transformers` or `mlx-lm` update their APIs, unit tests 
 
 ## Quick Start
 
+Run these commands inside an activated virtual environment. Without one, `pytest` and `python`
+resolve to whatever comes first on `PATH` — possibly another installation's `pytest`; macOS ships
+no `python` at all.
+
 ```bash
 # Install package + development tools (text-only tests)
 pip install -e ".[dev,test]"

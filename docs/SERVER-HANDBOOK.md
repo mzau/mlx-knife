@@ -1411,7 +1411,6 @@ batch. Reduce the batch size or retry.
 | Change | Before | After | Impact |
 |--------|--------|-------|--------|
 | Python version | 3.9+ | 3.10-3.12 | Upgrade required |
-| Vision `max_tokens` default | 1024 | 2048 | Longer responses |
 | Memory checks (Vision) | None | 70% RAM limit | HTTP 507 possible |
 
 **New Dependencies (auto-installed):**
@@ -1421,7 +1420,6 @@ batch. Reduce the batch size or retry.
 
 **Client Updates Required:**
 - Handle HTTP 507 (Insufficient Storage) for large Vision models
-- Update clients expecting `max_tokens: 1024` to handle 2048
 - Use `temperature: 0.0` for audio transcription consistency
 
 **Recommendations:**
