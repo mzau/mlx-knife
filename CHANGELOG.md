@@ -153,7 +153,7 @@
 
 - **A stream that arrives as one event runs on after the client closes it** — a single image,
   audio, or a text request to a vision model; requests behind it wait. SERVER-HANDBOOK → *Closing
-  the connection*.
+  the connection*. Issue #82.
 - **On `serve`, a request can fail when another request names a different model** before the first
   has generated. SERVER-HANDBOOK → *Concurrent Requests*.
 - **`serve` keeps answering `GET /health` after an inference-backend fault** and fails every

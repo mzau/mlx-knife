@@ -133,8 +133,9 @@ X-Request-ID: <unique-id>       (all responses, MLX Knife extension)
 
 **X-Request-ID** (MLX Knife extension):
 - Present on **every response** (success and error)
-- Same ID appears in error response body as `"request_id"` — except for an error the embedding
-  backend returns through `serve --embed-backend`: that body carries the backend's own ID
+- Same ID appears in error response body as `"request_id"`. Known issue
+  ([#80](https://github.com/mzau/mlx-knife/issues/80)): an error the embedding backend returns
+  through `serve --embed-backend` carries the backend's own ID in its body
 - Use for request correlation and distributed tracing
 
 ### Behavioral Deviations from OpenAI
@@ -546,7 +547,10 @@ docs = client.embeddings.create(model="bge-small-en-v1.5", input=corpus_chunks).
   any of those changing — the backend restarted on a different model, a re-quant
   under the same name, or a `--cpu` flip — flips `system_fingerprint`. **Compare it by equality:** pin
   a vector store to one `system_fingerprint`, and re-index the instant it differs instead of silently
-  mixing incomparable vectors. `embed-serve`'s `GET /health` carries the same `model` +
+  mixing incomparable vectors. Known issue ([#81](https://github.com/mzau/mlx-knife/issues/81)): for
+  some workspace models the vectors depend on the workspace's path — the same model files under
+  another name return different vectors, while `model` and `system_fingerprint` stay the same.
+  `embed-serve`'s `GET /health` carries the same `model` +
   `system_fingerprint`, so — **talking directly to the backend port** — you can poll for a swap without
   embedding; **through the `serve` gateway the backend's `/health` is not exposed**, so detection is
   reactive (from the next response — see [Embeddings Backend](#embeddings-backend-embed-serve)). Treat the token as **opaque**
@@ -578,7 +582,8 @@ when a request names it.
 
 > **Embedders are excluded.** Embedding models (e.g. `bge-*`, `Qwen3-Embedding-*`) are
 > **not** listed here — they are served by the separate `embed-serve` backend, which has no model
-> list. `mlxk list` does show embedders.
+> list. `mlxk list` does show embedders. Known issue: embedding models that also take images
+> are listed here as chat models; they are not supported.
 
 > **No per-model capability label and no `dimensions` field.** Entries carry no capability
 > label (e.g. `chat` / `+vision` / `+audio`) — a text-only model answers images or audio in the last
@@ -697,7 +702,7 @@ See `examples/pipes/vision_pipe.sh` for a practical Vision→Text pipeline examp
 
 - **Stateless Server:** No server-side state required
 - **Sequential Images:** Only images from the **last user message** are processed
-- **Each request is independent:** when the last user message carries images, the model sees only that message; otherwise it answers from the conversation's text (see [Vision: Stateless Prompt](#vision-stateless-prompt-history-based-ids)). The generation budget has no context-window guard (see [Token Limits](#token-limits-text-vs-multimodal-models))
+- **Each request is independent:** when the last user message carries images, the model sees only that message; when it carries neither images nor audio, the model answers from the conversation's text (see [Vision: Stateless Prompt](#vision-stateless-prompt-history-based-ids)). The generation budget has no context-window guard (see [Token Limits](#token-limits-text-vs-multimodal-models))
 
 #### Stable Image IDs (History-Based)
 
@@ -883,9 +888,9 @@ The tokens already sent stand; that event is the last one, and **no `[DONE]` fol
 did not complete. An OpenAI client needs no special handling: its SDK raises on the `error` key.
 A batch request never fails inside a `200` body — it fails with an HTTP error status.
 
-The server logs one line per text-model generation that runs to its end — `Generation finished: <reason>` with `request_id`,
-`model`, `stream`, `prompt_tokens`, `completion_tokens`, `max_tokens` and `finish_reason` — so a
-cut answer is visible operator-side as well.
+Each text-model generation that runs to its end logs a completion line, `Generation finished: <reason>`.
+Under `--log-json` the line carries `request_id`, `model`, `stream`, `prompt_tokens`,
+`completion_tokens`, `max_tokens` and `finish_reason` as fields.
 
 ---
 
@@ -971,16 +976,16 @@ response carries `usage` anyway.
 #### Closing the connection
 
 Closing a streaming connection stops the generation at the stream's next step: a text stream after
-the token being generated, a multi-image vision stream after the chunk being generated. A stream
-that arrives as one event (see [Streaming](#streaming-sse---server-sent-events)) has no such step:
-its generation runs to the end, as a non-streaming request does (see
-[Concurrent Requests](#concurrent-requests)), and requests behind it wait. Whatever runs before a
-response starts, a model load included, completes either way, and a stream whose client left before
+the token being generated, a multi-image vision stream after the chunk being generated. Known issue
+([#82](https://github.com/mzau/mlx-knife/issues/82)): a stream that arrives as one event (see
+[Streaming](#streaming-sse---server-sent-events)) has no such step — its generation runs to the end,
+and requests behind it wait (see [Concurrent Requests](#concurrent-requests)). Whatever runs before
+a response starts, a model load included, completes either way. A stream whose client left before
 its response started can still run its first step — for a multi-image stream, one whole image chunk.
 
 - **A stream that stopped early writes no completion line;** a multi-image stream keeps the lines of
   the chunks it delivered. A stream that arrives as one event runs to the end and logs as its
-  non-streaming form does. Tokens already delivered are the client's; there is no way to resume.
+  non-streaming form does. There is no way to resume.
 - **The guarantee comes from the ASGI runtime, not from this server.** No code here watches for a
   disconnect. The runtime finalizes the response generator when the connection drops, and the
   generation takes no further step. A deployment that buffers the response — a proxy that reads
@@ -1199,8 +1204,8 @@ generation, per chunk of images (default 1, max 5 via `--chunk`).
   [`GET /v1/models`](#get-v1models) says which model is in memory.
 - **Leaving does not cancel a batch request.** A client that closes a non-streaming request — its
   own timeout included — leaves the generation running until it ends on its own, and requests behind
-  it wait. Closing a stream stops it at its next step; one that arrives as one event runs to the end
-  (see [Closing the connection](#closing-the-connection)).
+  it wait. Closing a stream stops it at its next step; one that arrives as one event runs to the end,
+  a known issue (see [Closing the connection](#closing-the-connection)).
 - **Reason:** Metal backend, single GPU.
 
 ---
@@ -1719,8 +1724,9 @@ Clients MUST follow the OpenAI Chat Completions API format. MLX Knife is designe
 | **Image ID assignment** | Full history scanned | Consistent numbering across session (Image 1, 2, 3...) |
 
 **What this means:**
-- When the last user message carries images, the Vision model sees only that message. Otherwise it
-  answers from the conversation's text; images sent earlier are not seen again
+- When the last user message carries images, the Vision model sees only that message. With neither
+  images nor audio there, it answers from the conversation's text; images sent earlier are not seen
+  again
 - Image numbering remains stable across the conversation
 - The Vision model describes each image on its own; for questions across images or about their
   descriptions, switch to a **Text model** (see [Cross-Model Workflows](#cross-model-workflows-visionaudio--text))
@@ -1912,7 +1918,9 @@ The response carries two identity fields:
   embedding backend's `/health`.
 - `system_fingerprint` — the **realization token** `hash.device`: the change-detection signal. It flips
   when the backend's model, its revision/quant, or its device (`--cpu` vs GPU) changes — the three
-  things that change the vector space. Additive mlxk field (standard on OpenAI chat/completions).
+  things that change the vector space. Known issue ([#81](https://github.com/mzau/mlx-knife/issues/81)):
+  for some workspace models the workspace's path changes it too, and the token does not flip.
+  Additive mlxk field (standard on OpenAI chat/completions).
 
 **Client MUST, for any persisted vector store:**
 
@@ -1998,7 +2006,7 @@ When switching from Vision or Audio to Text model mid-conversation:
 
   **Documented**
   - What a `200` from `GET /health` does not tell; one model operation at a time; a stream fails when another model is requested; a batch request runs on after its client has gone; closing a streaming connection stops the generation at the stream's next step — one that arrives as one event runs to the end — and a stream that stopped early writes no completion line.
-  - A request to a vision model whose last user message carries no images is answered from the conversation's text; with images there, only that message reaches the model. Every chat request is formatted with the model's chat template.
+  - A request to a vision model whose last user message carries neither images nor audio is answered from the conversation's text; with images there, only that message reaches the model. Every chat request is formatted with the model's chat template.
   - Corrected: earlier handbooks listed `unsupported_multimodal` as a server error (501); no release has sent it. The verified-list check it names belongs to `mlxk convert --quantize`; the server has no such check, and its 501 is `not_implemented`. A client branch for `unsupported_multimodal` can be dropped.
   - Corrected: earlier handbooks named Voxtral as a transcription model where VibeVoice belonged: VibeVoice has transcribed since 2.0.5, and no stable release has run Voxtral.
   - Before/after per change, and what clients must update: *From 2.0.7 → 2.0.8* in the Migration Guide.
