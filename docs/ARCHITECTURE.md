@@ -1,6 +1,6 @@
 # MLX Knife Architecture
 
-**Stand: 2.0.7 (July 2026)**
+**Stand: 2.0.8 (September 2026)**
 
 ## Core Principles
 
@@ -386,9 +386,9 @@ Workspace Model implementation (ADR-022, ADR-025):
 | Clean-check hot path | `is_workspace_clean` | `operations/workspace.py` |
 | Algorithm constants | `HASH_ALGORITHM_V2`, `CATCHALL_FULL_READ_CAP`, `SAFETENSORS_HEADER_MAX`, `DEFAULT_EXCLUDE_PATTERNS` | `operations/workspace.py` |
 
-Dependency stack (`pyproject.toml:41-52`):
+Dependency stack (`pyproject.toml`, `dependencies`):
 
-| Package | 2.0.7 (released) | 2.0.8 (this tree) | Note |
+| Package | 2.0.7 | 2.0.8 | Note |
 |---|---|---|---|
 | `mlx` | `>=0.30.0,<0.32` | `>=0.30.0,<0.32.1` | Apple Silicon ML framework; 0.32.1+ breaks Qwen VL vision with the pinned mlx-vlm |
 | `mlx-lm` | `==0.31.3` | `==0.31.3` | Text backend; Gemma 4 + KV-cache fixes |

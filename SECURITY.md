@@ -100,6 +100,11 @@ mlxk server --host 0.0.0.0 --port 8000
 - The API becomes accessible from your network
 - No built-in authentication or rate limiting
 - Anyone on your network can use your models
+- A client can make the server load any directory on the host that contains a `config.json`
+  by naming it in the `model` field — by design ([ADR-022](docs/ADR/ADR-022-Workspace-First-Paradigm.md)).
+  Loading a vision or audio model can run Python the checkpoint declares through `auto_map`
+  ([#71](https://github.com/mzau/mlx-knife/issues/71), see *Code in Model Directories*); on a
+  network, a remote client decides which of those directories is loaded
 - Could potentially be exposed to the internet (check firewall!)
 
 **Recommendations for network access:**
@@ -186,20 +191,26 @@ The 2.0 alpha introduces an alpha upload capability. Treat it as opt‑in, with 
 
 ## Supported Versions
 
-We provide security updates for the versions below. 2.0.7 is a feature release and
-carries no security fixes over 2.0.6; it does add new network surfaces, both
-experimental and opt-in (see *Embeddings Backend* above).
+We provide security updates for the versions below. 2.0.8 fixes two vulnerabilities that
+affect every earlier 2.0 release:
 
-mlx-knife up to and including 2.0.8b1, installed with mlx-lm 0.31.0 or later, executes the file
-a model's `config.json` names in `model_file` when it loads that model through mlx-lm
-(CVE-2026-5843); this includes 2.0.6 and 2.0.7 below. The refusal described in
-*Code in Model Directories* ships in the 2.0.8 pre-release (`pip install --pre mlx-knife`).
+- mlx-knife up to and including 2.0.8b1, installed with mlx-lm 0.31.0 or later, executes the
+  file a model's `config.json` names in `model_file` when it loads that model through mlx-lm
+  (CVE-2026-5843, GHSA-9q3w-6wx3-7vh9). 2.0.8 refuses such a model; see *Code in Model
+  Directories*.
+- mlx-knife 2.0.0 up to and including 2.0.8b2 runs commands with the directory they are started
+  from on the module search path of the processes they start — the `serve` and `embed-serve`
+  server process, and the interpreters Python starts underneath any command — so Python modules
+  found there are executed (GHSA-3pcp-w323-9wmv).
+
+2.0.8 requires Python 3.11 or later. On Python 3.10, 2.0.7 is the last installable release and
+receives no fix; the workarounds in both advisories apply to it.
 
 | Version | Security Support |
 | ------- | ---------------- |
-| 2.0.7   | :white_check_mark: Recommended — current stable |
-| 2.0.6   | :warning: Supported — upgrade to 2.0.7 recommended |
-| < 2.0.6 | :x: Upgrade recommended |
+| 2.0.8   | :white_check_mark: Recommended — current stable (Python ≥ 3.11) |
+| 2.0.7   | :warning: Not patched — last release for Python 3.10; apply the workarounds in GHSA-9q3w-6wx3-7vh9 and GHSA-3pcp-w323-9wmv |
+| < 2.0.7 | :x: Upgrade recommended |
 
 ## Additional Resources
 

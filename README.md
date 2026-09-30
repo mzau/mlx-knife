@@ -6,9 +6,9 @@
 
 <p align="center"><i>What mlx-knife is — at a glance. Release notes: <a href="CHANGELOG.md">CHANGELOG.md</a>.</i></p>
 
-**Current Version: 2.0.7** (stable)
+**Current Version: 2.0.8** (stable)
 
-[![GitHub Release](https://img.shields.io/badge/stable-2.0.7-blue.svg)](https://github.com/mzau/mlx-knife/releases)
+[![GitHub Release](https://img.shields.io/badge/stable-2.0.8-blue.svg)](https://github.com/mzau/mlx-knife/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.11-3.14](https://img.shields.io/badge/python-3.11--3.14-blue.svg)](https://www.python.org/downloads/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-green.svg)](https://support.apple.com/en-us/HT211814)
@@ -51,7 +51,7 @@ produce a broken workspace).
 
 ## What's New in 2.0.8
 
-The **bugfix** release (in development): 2.0.7 added capabilities, 2.0.8 makes the ones
+The **bugfix** release: 2.0.7 added capabilities, 2.0.8 makes the ones
 already there honest.
 
 - **A checkpoint that names its own Python in `model_file` is refused.** Loading it would
@@ -139,7 +139,7 @@ releases instead, and they do not carry the current security fixes — upgrade P
 
 ```bash
 pip install mlx-knife
-mlxk --version  # → mlxk 2.0.7
+mlxk --version  # → mlxk 2.0.8
 ```
 
 **Requirements:** macOS Apple Silicon, Python 3.11-3.14
@@ -152,7 +152,7 @@ git clone https://github.com/mzau/mlx-knife.git
 cd mlx-knife
 pip install -e ".[dev,test]"
 
-mlxk --version  # → mlxk 2.0.7
+mlxk --version  # → mlxk 2.0.8
 pytest -v
 ```
 
@@ -1397,7 +1397,7 @@ Apache License 2.0 — see `LICENSE` (root) and `mlxk2/NOTICE`.
 
 <p align="center">
   <b>Made with ❤️ by The BROKE team <img src="broke-logo.png" alt="BROKE Logo" width="30" align="middle"></b><br>
-  <i>Version 2.0.7 | July 2026</i><br>
+  <i>Version 2.0.8 | September 2026</i><br>
   <i>Supported by Anthropic Claude Code</i><br>
   <a href="https://github.com/mzau/broke-nchat">💬 Web UI: nChat - lightweight chat interface</a> •
   <a href="https://github.com/mzau/broke-cluster">🔮 Multi-node: BROKE Cluster</a>

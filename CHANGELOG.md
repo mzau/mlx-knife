@@ -1,158 +1,208 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.8] - 2026-09-30
 
 ### ⚠️ Upgrade Notes
 
 - **Python 3.11 or later is required** (3.11–3.14). On Python 3.10, `pip install -U mlx-knife`
-  installs at most 2.0.7, without a notice.
+  installs at most 2.0.7, without a notice; 2.0.7 does not carry this release's security fixes.
+- **Server clients:** every change on the wire — `GET /health` answers `"status": "ok"`, the
+  default generation budget, the new status codes — is listed in SERVER-HANDBOOK → *From 2.0.7 →
+  2.0.8*.
 
 ### Security
 
-- `mlxk serve` and `mlxk embed-serve` no longer import Python modules from the directory they are
-  started in: a `mlxk2/`, `fastapi.py` or `uvicorn/` there — for instance in a cloned model
-  directory — ran instead of the installed package. `mlxk serve` started inside a checkout with a
-  non-editable install now runs the installed package; `python -m mlxk2.cli serve` runs the checkout.
+- A checkpoint whose `config.json` declares `model_file` is refused before any backend is called:
+  mlx-lm executes that file on load (CVE-2026-5843, GHSA-9q3w-6wx3-7vh9). The refusal covers `run`,
+  `serve`, `embed`, `embed-serve` and `convert --quantize` and has no switch; `list` and `show`
+  report such a model as not runnable. Code declared through `auto_map` is not covered (Issue #71).
+  Issue #72.
 
-- Python child processes of any `mlxk` command, such as multiprocessing's resource tracker, no
-  longer import modules from the start directory: `mlxk run --audio` inside a model directory ran a
-  `multiprocessing/` package there.
+- mlx-knife no longer runs Python modules found in the directory a command is started in: `serve`
+  and `embed-serve` imported a `mlxk2/`, `fastapi.py` or `uvicorn/` there instead of the installed
+  package, and `run --audio` ran a `multiprocessing/` package there (GHSA-3pcp-w323-9wmv). `mlxk
+  serve` inside a checkout with a non-editable install now runs the installed package. Present since
+  2.0.0.
 
-### Testing
+### Added
 
-- `KNOWN_BROKEN_MODELS` names the capabilities an entry breaks, and a model stays in the discovery
-  of the others. Every entry was re-measured against the shipped pins; five of seven were removed.
+- `stream_options.include_usage` on `POST /v1/chat/completions` and `POST /v1/completions`, in
+  OpenAI's form. Issue #17.
 
-- The vision live tests run `sys.executable -m mlxk2.cli` instead of `mlxk` from `PATH`, and five
-  live modules that carried only `live_e2e` also carry `live`.
+- `loaded` on every `GET /v1/models` row. Issue #64.
 
-- Removed the index bootstrap of the Issue #27 fixtures (`MLXK2_BOOTSTRAP_INDEX`); a failed download
-  surfaced as a skip about the model.
+- JSON API 0.2.4: `run --json` carries `finish_reason` (`"stop"`, `"length"` or `null`),
+  `context_length_exceeded` joins the error types, `list --json` carries the `system` object and
+  each model's `context_length`, and every workspace health entry carries `managed`. Additive.
+  Issue #67.
 
-- Live-test time limits scale with model size instead of the test file. TESTING-DETAILS → *Time
-  Limits: Staged by Model Size*.
-
-- `test_pipe_from_list_json` pipes a capped sample of `list --json`, not the whole listing.
-
-- Removed the *Known Model Quality Issues* chapter from TESTING-DETAILS; its only entry was resolved.
-
-- `test_server_e2e.py` probes `GET /health` with a one-second timeout while a streaming and a
-  non-streaming request run.
-
-- `test_vision_chunk_streaming.py`: `test_sse_format_compliance` streams through the real server
-  wiring; it never reached a stream before. Removed: `test_multi_chunk_streams_multiple_content_events`,
-  which tested only itself, and the uncalled `generate_chat_stream` and `_stream_vision_chunks` in
-  `server_base`.
+- `examples/photo-rag/`: a private photo library made searchable — describe, catalog, embed,
+  search — with a test run that grades itself against the photographs shipped in the repository.
+  It uses no feature of this release and runs against 2.0.7 as well.
 
 ### Changed
 
-- `mypy mlxk2/` is held against `scripts/mypy-baseline.txt`: `test-multi-python.sh` fails a Python
-  version whose error count rises. `ignore_missing_imports` moved to `pyproject.toml`; the documented
-  pre-commit chain no longer runs mypy.
+- `GET /health` on `serve` answers `"status": "ok"` instead of `"healthy"`. Issue #64.
 
-- `GET /health` on `serve` answers `"status": "ok"` instead of `"healthy"`. SERVER-HANDBOOK → *From
-  2.0.7 → 2.0.8*. Issue #64.
+- Supported Python is 3.11–3.14, was 3.10–3.12. Every supported version installs from wheels,
+  without a C compiler or the macOS SDK.
+
+- Dependencies: mlx-vlm 0.6.10, mlx-audio 0.4.8, transformers 5.14.1, `mlx<0.32.1`; torch,
+  torchvision and `datasets` are dropped, and the install is 524 MB (36 %) smaller.
+
+- A model whose `config.json` states no context window reports `context_length: null` on
+  `/v1/models` instead of an invented 4096; `null` means no known window, and only the 32768
+  ceiling applies.
 
 - On `serve`, requests naming different models must not overlap: a request whose model is unloaded
   before it has generated fails, with 500 `internal_error` before its response starts and with the
   terminal `error` event after. SERVER-HANDBOOK → *Concurrent Requests*.
 
-- `scripts/check-handbook-contract.py` holds the error table to the types a server response can
-  carry, and a status written next to an error type to the table's status for it.
-
-### Added
-
-- `loaded` on every `GET /v1/models` row. Issue #64.
-
-- `stream_options.include_usage` on `POST /v1/chat/completions` and `POST /v1/completions`, in
-  OpenAI's form. Issue #17.
-
-- `benchmarks/tools/chronos_gauge.py`: `mlxk serve` against `mlx_lm.server`, measured with
-  [mlx-chronos](https://github.com/igurss/mlx-chronos). TESTING-DETAILS → *Server Overhead Gauge
-  (mlx-chronos)*.
-
-- `benchmarks/tools/stream_overhead.py`: per-token cost of streamed against unstreamed generation.
+- The Whisper tokenizer workaround for mlx-audio#645 no longer depends on the mlx-audio version;
+  a canary test reports when upstream makes it redundant. A second workaround, without effect, is
+  removed.
 
 ### Fixed
 
+- The default generation budget ignored the prompt, and a cut answer said `"stop"`: `run` could
+  generate up to the whole context window, `serve` up to half of it. Both now generate at most
+  `min(32768, window − prompt)` tokens, clamp an explicit `max_tokens` to the window, report a cut
+  as `finish_reason: "length"`, and reject a prompt that fills the window before generating
+  (400 `context_length_exceeded`; exit 1 on the CLI). Issue #66.
+
+- `serve --max-tokens` and `MLXK2_MAX_TOKENS` reach every text and vision request; they reached
+  none. A value that is not a whole number of at least 1 is refused at start.
+
 - `serve` answers `GET /health` and `GET /v1/models` while it generates, loads a model or
-  transcribes. Both went unanswered until the operation finished, so a liveness probe would take the
+  transcribes, and `GET /health` no longer waits for `GET /v1/models`; a liveness probe took the
   busy server for dead. Issue #64.
 
 - Streaming is no longer many times slower than the same generation unstreamed (65x for a 301-token
   answer on `serve`). Present since 2.0.4-beta.5. Issue #73.
 
+- An image or audio file sent to a text-only model is rejected with 422 `capability_not_supported`
+  instead of answered with 200 as though it had been read.
+
+- Vision checkpoints of `qwen2_vl`, `qwen2_5_vl` and `qwen3_5` run: a gate reported them not
+  runnable under transformers 5.x, and the server's own vision probe answered some of them on the
+  text backend with the image dropped. `list`, `run` and `serve` now share one detector.
+
+- `stop` cuts batch answers on text, completions and vision and reports `finish_reason: "stop"`; the
+  field was accepted and ignored.
+
+- `usage` on text and vision responses carries the runner's token counts instead of a word-count
+  estimate.
+
+- `temperature` defaults per surface, 0.7 for generation and 0.0 for audio, so a chat request to a
+  transcription model no longer samples at 0.7.
+
+- A stream that fails part-way ends with a top-level `error` object and `finish_reason: null`,
+  instead of `finish_reason: "error"` followed by a second terminal chunk and `[DONE]`.
+
+- 404 on an unmatched path and 405 on a wrong method carry the error envelope (`not_found`,
+  `method_not_allowed`) instead of `{"detail": …}`.
+
+- 422 on `POST /v1/audio/translations` and 413 on an oversized audio upload carry
+  `capability_not_supported` and `payload_too_large` instead of `internal_error`. Issue #62.
+
+- `serve --json` checks its options before printing its `starting` envelope, so a rejected option
+  no longer puts two JSON documents on stdout; the envelope's `max_tokens` is the ceiling in effect.
+
+- `serve` and `embed-serve` stop their server process when the supervisor is stopped by a signal or
+  killed; it stayed on the port, and a restart talked to the old model. Issue #60.
+
+- A request naming the loaded model under another spelling no longer loads it again. Issue #64.
+
 - An empty model name no longer selects an arbitrary model: `mlxk rm "" --force` deleted a cached
-  model, and `serve` answered `"model": ""` with a model the client never chose. `run`, `show`, `rm`,
-  `embed`, `embed-serve` and server requests (404 `model_not_found`) refuse it; `mlxk health ""` and
-  `serve --model ""` still mean no pattern and no preload. Present since 2.0.5. Issue #70.
+  model, and `serve` answered `"model": ""` with a model the client never chose. It is refused, on
+  the server with 404 `model_not_found`; `mlxk health ""` and `serve --model ""` still mean no
+  pattern and no preload. Present since 2.0.5. Issue #70.
 
 - `push` and `convert` refuse an empty path instead of using the working directory:
   `mlxk push "" <repo>` uploaded it. Present since 2.0.0-alpha.2 (`push`) and 2.0.4-beta.5
   (`convert`).
 
-- Audio transcriptions through `POST /v1/chat/completions` no longer claim `finish_reason: "stop"`;
-  batch and stream both report `null`. Issue #69.
+- `mlxk run … --audio FILE --translate` no longer sends Whisper the prompt
+  `"Transcribe this audio."`, which pulled a translation back toward transcription. Issue #61.
 
-- `--max-tokens` on `mlxk run --audio` and `max_tokens` in chat requests to transcription models reach
-  the model (Whisper takes no budget), so a long transcript is no longer cut off at the model's
-  default; a value below 1 is refused. Present since 2.0.4-beta.9. Issue #59.
+- `--max-tokens` on `mlxk run --audio` and `max_tokens` in chat requests to transcription models
+  reach the model, so a long transcript is no longer cut off at the model's default; a value below 1
+  is refused. Present since 2.0.4-beta.9. Issue #59.
+
+- Audio transcriptions through `POST /v1/chat/completions` report `finish_reason: null` in batch and
+  stream instead of `"stop"`. Issue #69.
 
 - `mlxk run --audio` and `mlxk serve` no longer write `transcript.txt` into the working directory,
   which overwrote an existing file and failed the transcription in a read-only directory. Present
   since 2.0.4-beta.9. Issue #77.
 
-- `usage` of a chunked vision request is the sum over its own chunks instead of the counts of the
-  model's previous request. Present since 2.0.8-beta.1. Issue #76.
-
-- The `Generation finished` log line of a stream on `serve` carries the stream's own `prompt_tokens`
-  and `max_tokens` instead of those of a request answered while it streamed. Present since 2.0.8-beta.1.
+- `MLXK2_ENABLE_PIPES`, `MLXK2_ENABLE_ALPHA_FEATURES` and `MLXK2_DEBUG` read their value: `=0`
+  switched the feature on.
 
 - `mlxk run` with an unreadable model cache or workspace home names the path (`execution_error`)
   instead of an internal variable error or a traceback. Present since 2.0.4.
 
-- A request naming the loaded model under another spelling no longer loads it again. Issue #64.
-
-- `GET /health` no longer waits while `GET /v1/models` reads the model directories. Issue #64.
+- Error messages no longer advertise an `mlx-knife[audio]` extra, which never existed, and the
+  Voxtral reject no longer cites a closed pull request as an open issue.
 
 - `examples/rag-server`: `/health` names the RAG server and tells a backend `timeout` from
   `unreachable`. Issue #64.
 
 ### Documentation
 
-- SERVER-HANDBOOK states what `serve` can report about its state and what its single model thread
-  guarantees; ADR-029 records the vocabulary. Issue #64.
+- SERVER-HANDBOOK describes the server that ships: every status code it returns (413 and 422 were
+  missing), `/health` as liveness, what closing a stream does, what `serve` can report about its
+  state (ADR-029), and every change against 2.0.7 under *From 2.0.7 → 2.0.8*. The environment
+  variables, limits, quoted error messages and error table were corrected against the code.
 
-- README: a vision run on the CLI samples at 0.7 unless `--temperature` is given; the server's
-  vision path always decodes greedily.
+- README: `MLXK2_HOST` / `MLXK2_PORT` are no longer shown as a way to bind `serve`; a CLI vision run
+  samples at 0.7 unless `--temperature` is given; a workspace's `content_hash` is re-pinned after
+  its files are edited. README and SERVER-HANDBOOK state that `serve --log-json` writes all logs to
+  stderr.
 
-- SERVER-HANDBOOK: a `null` `context_length` on `GET /v1/models` means no known window, not unlimited.
+- `clean` means one thing in README, ADR-022 and ADR-025: the workspace content is unchanged since
+  `content_hash` was last pinned.
 
-- ADR-020 corrected: Whisper does use `temperature`, and a single value replaces mlx-audio's
-  fallback schedule.
+- `MLXK2_EXIF_METADATA`: extraction is on by default and `=0` turns it off; a docstring and ADR-017
+  said the opposite.
 
-- JSON API specification: the `list` and `show` examples carry the fields the responses return —
-  `context_length`, `origin`, `content_hash`, `hash_modified`, `clean`, and `display_name` on a
-  workspace entry of `list` — and the `list` section documents the `system` object; it no longer
-  says `list` returns cached models only.
+- ADR-020: Whisper uses `temperature`, and a single value replaces mlx-audio's fallback schedule.
+  ADR-014 names the shipped `--no-reasoning` flag. ADR-023 tells a bridge, retired by a canary, from
+  a shim, retired at a release.
 
-- ADR-023: the workaround policy tells a bridge, retired by a canary, from a shim, retired at a
-  release; the STT reject of `convert --quantize` is named as `not_implemented`.
+- JSON API specification: the `list` and `show` examples carry the fields the responses return, and
+  `list` is no longer described as returning cached models only.
 
-- SERVER-HANDBOOK states the scope of its rules: the 422 for media applies to the last user message;
-  a model switch fails a request with 500 before its response starts and with an `error` event
-  after; closing a stream stops it at its next step, and one that arrives as one event runs to the
-  end. The error table lists the types a server response can carry.
+- `SECURITY.md`: *Code in Model Directories* states what mlx-knife refuses and what it cannot
+  prevent; *API Server* states that a client can make a network-bound `serve` load any model
+  directory on the host.
 
-- SERVER-HANDBOOK corrected: `unsupported_multimodal` was never a server error; VibeVoice, not
-  Voxtral, transcribes since 2.0.5; `/v1/models` never listed embedders; the image-ID example
-  carries the marker the server reads; the 2.0.3 → 2.0.4 migration no longer lists a vision
-  `max_tokens` change. ARCHITECTURE: the STT decision tree names VibeVoice.
+- `NOTICE` credits miniaudio for audio I/O instead of soundfile/libsndfile.
 
-- README: a workspace's `content_hash` is the hash as last pinned; re-pin it after editing its files.
+- MODEL-COVERAGE: `qwen2_vl` and `kimi_vl` are verified for vision, `kimi_vl` after `--repair-index`; `gemma3n` states that its
+  mlx-community uploads need `--repair-index` and that about 30 s of audio are heard.
 
-- MODEL-COVERAGE: `gemma3n` states that its mlx-community uploads need `--repair-index` and that
-  about 30 s of audio are heard.
+- TESTING-DETAILS lists the Python versions and test files as they are, and the release reference
+  numbers as measured.
+
+### Testing and Tooling
+
+- `KNOWN_BROKEN_MODELS` names the capabilities an entry breaks, and a model stays in the discovery
+  of the others. Every entry was re-measured against the shipped pins; five of seven were removed.
+
+- Live-test time limits scale with model size; the vision live tests run `sys.executable -m
+  mlxk2.cli` instead of `mlxk` from `PATH`; the Issue #27 index bootstrap (`MLXK2_BOOTSTRAP_INDEX`)
+  is removed. TESTING-DETAILS → *Time Limits: Staged by Model Size*.
+
+- `scripts/check-handbook-contract.py` checks the decidable part of the SERVER-HANDBOOK against the
+  tree.
+
+- `test-multi-python.sh` holds `mypy mlxk2/` against `scripts/mypy-baseline.txt`; ruff's rule set is
+  pinned with an explicit `select`.
+
+- `benchmarks/tools/chronos_gauge.py` compares `mlxk serve` with `mlx_lm.server` using
+  [mlx-chronos](https://github.com/igurss/mlx-chronos); `benchmarks/tools/stream_overhead.py`
+  measures the per-token cost of streaming. TESTING-DETAILS → *Server Overhead Gauge (mlx-chronos)*.
 
 ### Known Issues
 
@@ -183,258 +233,6 @@
 - **`/v1/chat/completions` has no switch for the chat template**: a template that injects its own
   instruction applies to every request; `/v1/completions` takes a prompt the client formats itself.
   Issue #40.
-
-## [2.0.8-beta.2] - 2026-09-11
-
-### Security
-
-- A checkpoint whose `config.json` declares `model_file` is refused before any backend is
-  called. mlx-lm imports and executes that file from inside the checkpoint to build the
-  model's architecture (CVE-2026-5843); upstream put the same key behind
-  `trust_remote_code`, and no release carries it — the pinned 0.31.3 executes
-  unconditionally, as does every mlx-vlm that has the branch. The refusal is
-  unconditional: there is no flag, option or environment variable that enables it. It
-  covers `run`, `serve`, `embed`, `embed-serve` and `convert --quantize`; `list` and `show`
-  report such a model as not runnable with the same reason, so no surface calls it
-  compatible while the runner refuses it. A canary says when the mlx-lm half of the guard
-  becomes redundant — the mlx-vlm half has no upstream gate to wait for.
-
-  This closes the `model_file` mechanism only. Python a checkpoint declares through
-  transformers' `auto_map` is a separate surface and is not covered: mlx-vlm forces
-  `trust_remote_code=True` for the model types it ships processors for, and mlx-audio
-  hardcodes it in its STT loaders, so the vision and audio paths can still execute
-  checkpoint-supplied code. Tracked separately.
-
-- `SECURITY.md` gains *Code in Model Directories*: what mlx-knife refuses, what it cannot
-  prevent, and what can be seen before a model loads. Its recommendations of a specific
-  organization as a download source are removed.
-
-### Changed
-
-- Supported Python widens from 3.10–3.12 to **3.10–3.14**. The boundary was never mlx-knife's:
-  `mlx-audio` is a base dependency with no audio-free install variant, and `miniaudio` beneath
-  it published no macOS-ARM wheel above 3.12, so an install fell back to a build from source
-  and failed. Wheels now cover the whole range, and every supported version installs without a
-  C compiler or the macOS SDK. Classifiers, the multi-version matrix and the documented
-  boundary follow; `requires-python` is unchanged at `>=3.10`.
-
-## [2.0.8-beta.1] - 2026-09-08
-
-### Added
-
-- `examples/photo-rag/` — a private photo library made searchable: walk, describe one
-  photograph per request, derive a catalog from an append-only log, embed and search.
-  Runs against released 2.0.7 with **no change to mlx-knife**. `geo-test-run.py` drives the
-  documented command line and grades itself against the photographs shipped with the project.
-- Four camera HEIC at 1024 px under `tests_2.0/assets/geo-test/heic/`, so the `sips`
-  conversion branch is demonstrable for any clone rather than asserted.
-
-### Changed
-
-- A model whose `config.json` states no context window is reported as `null` by `/v1/models`
-  `context_length` and by the runner, where 4096 was invented before; with no window known there
-  is no window guard, only the 32768 ceiling. The vision default of 2048 tokens is now set
-  explicitly on the CLI as well as the server instead of being inherited from mlx-vlm.
-- JSON API 0.2.3 → 0.2.4 ([#67](https://github.com/mzau/mlx-knife/issues/67)):
-  `run --json` data carries `finish_reason` (`"stop"` / `"length"` / `null`),
-  `context_length_exceeded` joins the error types, and the schema title is reconciled with the
-  spec — it said 0.2.2. A test now holds the four places the version lives (`mlxk2.spec`, the
-  schema title, the spec header and its newest Version History entry) to one value, importing
-  `jsonschema` hard so a broken `[test]` install fails instead of skipping. Additive; no
-  breaking change. `list --json` also carries the `system` object that only `version --json`
-  had; the model object carries `context_length`; health entries for workspaces carry
-  `managed` on every branch (one of three did, outside the schema). The `clean` description
-  now says "since the last pin" (`clone`, `convert`, `--recalc-hash`), not "since clone";
-  behaviour unchanged. Canonical text: `docs/json-api-specification.md` → Version History.
-- `mlx-audio` moves `0.4.4` → `0.4.8`. The regression that held the pin — 0.4.6 handed
-  resampling to the decoder, whose stopband is far too shallow for an ASR front-end
-  ([mlx-audio#870](https://github.com/Blaizzy/mlx-audio/issues/870)) — is fixed upstream and
-  re-measured here as identical to 0.4.4 to two decimals; a 4-minute 44.1 kHz stereo
-  transcription is byte-identical across the two versions. A guard now drives synthetic tones
-  through the real load path, because this class of defect is invisible to the audio assets in
-  this repository: they are 16 kHz mono and never resample.
-- Dependency wave for 2.0.8 — mlx-vlm 0.6.10, transformers 5.14.1, `mlx<0.32.1`, mlx-audio 0.4.8,
-  torch/torchvision and `datasets` dropped. **No server-code change**; endpoints and payloads
-  are identical. Canonical text: SERVER-HANDBOOK → Migration Notes → *From 2.0.7 → 2.0.8*.
-  The `mlx` bound moves to `<0.32.1` rather than following mlx-vlm's floor upward: measured
-  against the pinned mlx-vlm, 0.32.2 breaks Qwen VL vision before inference and 0.32.1 aborts
-  the interpreter after producing correct output. The three versions and how far the scope was
-  checked are recorded at the pin.
-- SERVER-HANDBOOK describes the server that exists rather than the one that is planned. Eleven
-  forward-looking statements and four pointers into the source are gone; HTTP **413** and
-  **422** are documented (both were absent from the status list and both reported
-  `internal_error`); `/health` is stated as liveness, not readiness; the audio size limit is
-  given once instead of as two contradicting figures. It also answers what happens when a
-  streaming client closes the connection, which it never did: the generation stops, nothing is
-  logged for it, and the guarantee rests on the ASGI runtime rather than on code in this server.
-  `scripts/check-handbook-contract.py` checks the decidable part of that contract before a
-  release commit. Five more of its rules hold what a full audit found drifting: the environment
-  block against the variables the server reads (seven were effective and unnamed; the binding
-  variables showed an address `serve` never uses), the Limits table against its constants (the
-  image count per request is not limited — five is the chunk), quoted error messages against the
-  code (three were paraphrases or inventions), example ports against the default, and every JSON
-  example against a parser (four carried `//` comments). The README no longer shows `MLXK2_HOST`
-  and `MLXK2_PORT` as a way to bind the server: the supervisor sets both from the flags on every
-  start, so an exported value never reaches it.
-- The rest of that audit is corrected by hand. The error table marks the five types the server never
-  emits (`access_denied`, `ambiguous_match`, `download_failed`, `push_operation_failed`,
-  `unsupported_multimodal`) as CLI-only, and the precedence paragraph names the two statuses that
-  carry two types, 400 and 404; a model spec that matches several models is answered **404**
-  `model_not_found`, and the 501 causes listed are the server's own. The audio SSE emulation is three
-  events and `[DONE]`, not one; access logs go to stderr with and without `--log-json`; the 2.0.4
-  pins read `==`; the 2.0.7 changelog entry carries the tag date; `prompt` is on the transcription
-  form table; the vision example no longer advertises a `temperature` the vision paths fix at 0.0;
-  the torch-free re-verification names the models it covered, and the install shrinks by 524 MB
-  (36 %), not 1 GB — the same two corrections in ARCHITECTURE. README states the operator
-  ceiling's contract: a whole number of at least 1, or `serve` refuses to start; the flag wins.
-- ruff's rule set is pinned with an explicit `select` instead of inheriting whatever the
-  installed ruff version defaults to.
-
-### Fixed
-
-- A request carrying images or audio for a text-only model answered **200** with the media
-  silently dropped: it was routed to the text path, which filters the image parts out and replies
-  about the text alone, so the client never learned its image had been thrown away. It is now
-  rejected with **422** `capability_not_supported` before anything is generated — the promise that
-  lets `/v1/models` carry no per-model capability label at all. Canonical text: SERVER-HANDBOOK →
-  *Models* and *HTTP Status Codes*.
-- The server probed vision with a detector of its own. It lacked the `vision_config` branch
-  `list` decides by, and it read `temporal_patch_size` / `video_preprocessor_config.json` as
-  "video model, not vision", so a vision model outside the type whitelist whose checkpoint carries
-  those markers — `qwen2_5_vl`, `qwen3_5` — was loaded on the text backend: a **200** with the
-  image dropped, for a model `/v1/models` lists as vision. One detector now serves `list`,
-  `health`, `run` and the server; `list` output is unchanged.
-- `mlxk serve --json` printed its `starting` envelope before checking its options, so a rejected
-  `--chunk`, `--embed-backend` or `--max-tokens`, or a `--model` that did not resolve, put **two**
-  JSON documents on stdout: a reader that parses the first one sees a server coming up, and
-  `json.load` fails on the pair. The options, the model included, are checked before anything is
-  printed. The envelope's `max_tokens` now reports the ceiling that
-  will apply — it named the flag, so an operator who set `MLXK2_MAX_TOKENS` was shown `null`.
-- Router rejects carry the ADR-004 envelope. An unmatched path (**404**) and a wrong method
-  (**405**) are raised by Starlette's router before any endpoint runs, as the base
-  `HTTPException` — whose class hierarchy does not include FastAPI's subclass, the one our
-  handler was registered for. Both left as `{"detail": ...}`: no error type, no `request_id` to
-  match against a log line. Two server-only error types are new, `not_found` and
-  `method_not_allowed`; the 405 keeps its `Allow` header. Canonical text: SERVER-HANDBOOK →
-  *Error Types* and *HTTP Status Codes*.
-- `stop` reached neither batch surface. `generate_batch` has no such parameter, so the field was
-  accepted by the request model and dropped, and the client received the whole answer. Every batch
-  surface — text, completions and vision — now cuts the text at the first matching sequence, removes it, and reports
-  `finish_reason: "stop"` — the tokens generated past the cut still count in `usage`. On the
-  vision paths the sequences apply to the model's text, not to the image-metadata header the
-  runner prepends. A chunked vision stream, a batch answer per chunk, cuts each chunk's text the
-  same way and generates no chunk past the match. On the stream the check is still per token, so
-  a sequence split across two of them is not seen. Canonical text: SERVER-HANDBOOK → *Chat
-  Completions* → sampling fields.
-- The sampling temperature followed the request model instead of the surface. `temperature`
-  defaulted to `0.7` there, which made "unset" indistinguishable from an explicit `0.7`, so a
-  default chat request against Whisper or Voxtral transcribed at `0.7` while the two audio file
-  endpoints correctly used `0.0`. It is now unset by default and resolved per surface — `0.7` for
-  generation, `0.0` for audio — the rule the CLI has always applied.
-- `usage` reported a word-count estimate (`len(text.split()) * 1.3`) on every surface: a reply the
-  ceiling cut at five tokens came back as `completion_tokens: 2`, contradicting the
-  `Generation finished` line logged beside it, which uses the runner's real numbers. Text and
-  vision responses now carry those numbers; the audio backend records none, so there the estimate
-  stands, as it does on `/v1/embeddings`.
-- Feature gates opened for **any** non-empty value, so `MLXK2_ENABLE_PIPES=0` and
-  `MLXK2_ENABLE_ALPHA_FEATURES=0` switched the feature **on** — the check was plain truthiness.
-  They now read the value: `1`, `true`, `yes` and `on` open a gate, everything else keeps it shut.
-  `MLXK2_DEBUG`, which decides whether streaming errors are printed, had the same defect and the
-  same fix.
-- `mlxk serve --max-tokens N` and `MLXK2_MAX_TOKENS=N` reached no request on the text and vision
-  paths. `serve` supervises, and uvicorn imports `server_base` a second time under its real name:
-  the ceiling was set on the module copy that starts the server, never on the copy that answers,
-  while the startup line reported the value it had accepted. It is now read where the rest of the
-  per-process configuration is read, in the lifespan hook of the copy that serves. A ceiling below
-  1 or one that is not a whole number is refused before the server starts, naming whichever of the
-  two the operator used. The audio paths still generate on a fixed budget and are not covered by
-  the ceiling. Canonical text: SERVER-HANDBOOK → *Token Limits* → *Precedence*.
-- A stream that failed part-way reported `finish_reason: "error"` — a value the OpenAI enum does
-  not define — then carried on to emit a second, contradicting terminal chunk saying `"stop"`,
-  followed by `[DONE]`, so the stream also claimed to have completed. The failure now travels in a
-  top-level `error` **object** (`type` and `message`, the shape an HTTP error body has), the
-  choice keeps `finish_reason: null`, and the stream ends there. An OpenAI SDK client raises with
-  the actual message where it previously raised with a generic placeholder, because it reads that
-  key and expects an object. Tokens already sent stand. Canonical text: SERVER-HANDBOOK →
-  *Token Limits* → `finish_reason`.
-- The default generation budget ignored the prompt, and a cut answer said `"stop"`
-  ([#66](https://github.com/mzau/mlx-knife/issues/66)): `run` handed the model its whole
-  context window as `max_tokens` (262144 tokens on a 256K-context model), `serve` half of it,
-  and neither subtracted the prompt — prompt plus output could exceed the window, and when the
-  budget ran out the answer was reported as finished. Both surfaces now generate
-  `min(32768, window − prompt)`; an explicit `max_tokens` is clamped to the window too. A cut
-  is reported as `finish_reason: "length"` on the server and in `run --json`, and the CLI says
-  so on stderr, naming the bound that was active. A prompt that fills the window is rejected
-  before anything is generated: HTTP 400 `context_length_exceeded` carrying the prompt and
-  window sizes, `Error:` + exit 1 on the CLI. Canonical text: SERVER-HANDBOOK → Migration
-  Notes → *From 2.0.7 → 2.0.8*.
-- `mlxk run … --audio FILE --translate` sent Whisper the synthetic prompt
-  `"Transcribe this audio."` as `initial_prompt`
-  ([#61](https://github.com/mzau/mlx-knife/issues/61)) — decoder context pulling a
-  non-English source back toward transcription, next to the very token that asks for
-  translation. The CLI filled the prompt slot for every `--audio` run, before anything knew
-  the backend or the task; the run path now applies the default, on transcribe only, which is
-  the rule the server has been applying all along. Transcription is unchanged on both
-  surfaces, and a positional prompt still threads through as an explicit vocabulary bias.
-- Two deliberate rejects went out labelled as a server fault
-  ([#62](https://github.com/mzau/mlx-knife/issues/62)): the status→type mapping had no entry
-  for **422** (`POST /v1/audio/translations` against a model that cannot translate) or for
-  **413** (an audio upload above the size limit, on either audio endpoint), so both fell back
-  to `error.type: "internal_error"` with the status itself correct. They now carry
-  `capability_not_supported` and `payload_too_large`. A test holds every status the server
-  raises against the mapping, so the next one added cannot repeat this quietly — that is what
-  let 413 follow 422. Canonical text: SERVER-HANDBOOK → *Error Response Format*.
-- A vision runtime check rejected any checkpoint carrying `temporal_patch_size` while
-  transformers reported 5.x, citing a `video_processor_class_from_name()` bug. Measured on
-  transformers 5.14.1: that function does not raise, and the affected checkpoints answer
-  `run --image` correctly. The gate is removed — `qwen2_vl` / `qwen2_5_vl` / `qwen3_5`
-  checkpoints report `Runtime: yes` again, and a type mlx-lm genuinely does not know still says
-  so, with the accurate reason. The verdict also drove live-test discovery, so the models it
-  refused were never exercised and nothing could contradict it.
-- A version gate switched the two Whisper workarounds off at `mlx-audio >= 0.5`, betting on a
-  fix upstream never promised — 0.5.0 shipped 2026-08-17 with the issue still open. The gate is
-  removed rather than re-aimed: one workaround was provably dead and is deleted with it, the
-  other is now unconditional, and a canary (`tests_2.0/test_audio_bridge_canary.py`) reports
-  when upstream makes it redundant. At the pinned mlx-audio, transcripts are byte-identical and
-  upstream's alignment-heads loading runs again.
-- Three messages advertised an `mlx-knife[audio]` extra that has never existed; the Voxtral
-  reject cited `mlx-audio#450`, a pull request closed unmerged rather than an open issue; and
-  `NOTICE` attributed the bundled tiktoken vocabularies to the wrong issue, with a rationale
-  that described upstream's code rather than ours. Each now states what is actually the case.
-- `mlxk serve` and `mlxk embed-serve` left the server process running and the port bound
-  when the supervisor was stopped by a signal or killed outright
-  ([#60](https://github.com/mzau/mlx-knife/issues/60)) — a restart then talked to the old
-  server with the old model and said nothing. Stopping either one now also reports the exit
-  status a shell reports (`143`/`137` instead of `241`). Canonical text: SERVER-HANDBOOK →
-  *Supervised Mode*.
-- `NOTICE` credited soundfile/libsndfile; audio I/O is miniaudio (MIT). The ffmpeg/ffprobe
-  boundary for container formats is now stated in terms a client can act on.
-- `mlxk serve --log-json` routes application *and* access logs to stderr — a bare `| tee`
-  captures nothing. Documented in README and SERVER-HANDBOOK.
-- Five lines that shipped in the 2.0.7 wheel cited notes that are not part of the repository;
-  they cite the published documents now.
-- Two forward-promises in shipped ADRs had expired: ADR-018 Phase 4 and ADR-024's surgical
-  reject both named 2.0.7 and did not ship there. Open promises now state the condition that
-  makes them due rather than a release number (convention in `docs/ADR/README.md`).
-- ADR-014's CLI-symmetry table named a `--show-reasoning` flag that has never existed; the
-  shipped one is `--no-reasoning`.
-- `clean` was defined three ways: ADR-022 still described the `.hf_cache/` state its draft
-  planned, README called the `Clean` column "workspace integrity", and ADR-025's threat model
-  called the hash a security property. All now say one thing — the workspace content is unchanged
-  since `content_hash` was last pinned by `clone`, `convert` or `show --recalc-hash`, as far as the
-  hash detects; nothing about health or runnability — and `--recalc-hash` is named for what it is,
-  the author's re-pin. ADR-016's audit note names `list` alone for the `system` block.
-- `MLXK2_EXIF_METADATA` was described backwards in two places: a `vision_runner` docstring
-  said `=1` enables EXIF extraction, and ADR-017 called the flag opt-in. The code reads
-  `!= "0"` — extraction is on by default and `=0` is what turns it off. The wrong docstring
-  shipped in the 2.0.7 wheel, in the same file as a second docstring that had it right.
-  README and SERVER-HANDBOOK were correct throughout. ADR-017 is published with the
-  correction.
-- TESTING-DETAILS claimed Python 3.9, 3.13 and 3.14 as verified while the project excludes all
-  three, documented a `live_cross_volume` marker that exists nowhere, invented a cleanup
-  timeout, and gave an rsync path missing the cache's `hub/` segment. Its inventory now lists
-  every test file, and per-release numbers are marked provisional until a release passes its
-  acceptance run.
 
 ## [2.0.7] - 2026-07-24
 

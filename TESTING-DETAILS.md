@@ -4,7 +4,7 @@ This document contains version-specific details, complete file listings, and imp
 
 ## Current Status
 
-Released: **2.0.7**. Per-release detail belongs in [CHANGELOG.md](CHANGELOG.md); this section
+Released: **2.0.8**. Per-release detail belongs in [CHANGELOG.md](CHANGELOG.md); this section
 carries only what a test run should be able to reproduce.
 
 ### Test Results (Official Reference)
@@ -19,29 +19,30 @@ cannot be mistaken for a release reference.
 | Measured | Environment | passed | skipped | deselected |
 |---|---|---|---|---|
 | 2.0.5 (release) | macOS 26.4, M2 Max 64GB, Python 3.10 | 749 | 6 | — |
-| 2.0.8 dev, 2026-08-07 *(provisional)* | empty env | 992 | 18 | 96 |
-| 2.0.8 dev, 2026-08-07 *(provisional)* | `+ HF_HOME` | 999 | 11 | 112 |
-| 2.0.8 dev, 2026-08-07 *(provisional)* | `+ MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_ENABLE_PIPES=1` | 999 | **48** | 112 |
-| 2.0.8 dev, 2026-08-07 *(provisional)* | `+ MLXK_WORKSPACE_HOME` | 999 | 48 | **126** |
+| 2.0.8 (release) | empty env | 1451 | 16 | 108 |
+| 2.0.8 (release) | `+ HF_HOME` | 1462 | 5 | 124 |
+| 2.0.8 (release) | `+ MLXK2_ENABLE_ALPHA_FEATURES=1`, `MLXK2_ENABLE_PIPES=1` | 1462 | 1 | **165** |
+| 2.0.8 (release) | `+ MLXK_WORKSPACE_HOME` | 1462 | 1 | **179** |
 
-*(2.0.8 rows: macOS 26.6, M2 Max 64GB, Python 3.10.18. Each row adds one variable to the row
-above it.)*
+*(2.0.8 rows: macOS 26.7, M2 Max 64GB, Python 3.14.5, measured 2026-09-30. Each row adds one
+variable to the row above it.)*
 
 > **Every one of the three numbers moves with the environment, and each moves for its own
-> reason** — which is why a bare "992 passed" is not comparable to anything.
+> reason** — which is why a bare "1451 passed" is not comparable to anything.
 >
-> - `HF_HOME` — seven tests need a cached model to run at all: `passed` rises, `skipped` falls.
+> - `HF_HOME` — eleven tests need a cached model to run at all: `passed` rises, `skipped` falls.
 >   Portfolio discovery also parametrizes live tests per cached model, so `deselected` rises.
-> - **Feature gates — a rising `skipped` here is not a regression.** With a gate closed, the
->   four alpha modules skip at *module* level: one line each. Open the gate and they are
->   collected, so their 41 individual tests each skip with "Run with `-m live_e2e` or
->   `-m wet`". Four become 41, while `passed` and `deselected` do not move at all.
+> - Feature gates — with a gate closed, the four alpha modules skip at *module* level: one line
+>   each. Open the gate and they are collected; their 41 tests carry the `live` marker and are
+>   deselected. `skipped` falls by four, `deselected` rises by 41, `passed` does not move.
 > - `MLXK_WORKSPACE_HOME` — workspace models join the portfolio, adding 14 more parametrized
 >   live tests to the deselected pile. Note the spelling: the code reads `MLXK_WORKSPACE_HOME`,
 >   not `MLXK2_…`; the misspelled variant is silently ignored, and `deselected` is where you
->   would notice (112 vs 126).
+>   would notice (165 vs 179).
 > - `MLXK2_LIVE_CLONE` / `MLXK2_LIVE_CHV2` change nothing here: those tests carry the `live`
 >   marker and are *deselected*, never skipped.
+> - The one skip left in every row is the mlx-vlm half of the `model_file` canary: the pinned
+>   mlx-vlm has no `model_file` branch for it to check.
 >
 > The empty-env row is the one that measures code and pins alone. The numbers worth watching
 > are `passed` and `failed`; `skipped` mostly reports how much of the suite this environment
@@ -52,19 +53,20 @@ above it.)*
 Default suite runs on 16GB. Full integration: 64GB recommended. Apple Silicon (M-series)
 required for MLX.
 
-**Full integration (`./scripts/test-wet-umbrella.sh`)** — last recorded full run is 2.0.5,
-taken *before* Phase 1 was split path-scoped into 1a/1b/1c (see the nanobind note below), so
-the shape is not directly comparable to a run made today:
+**Full integration (`./scripts/test-wet-umbrella.sh`)** — 2.0.8 acceptance run, 2026-09-17
+(macOS 26.7, M2 Max 64GB, Python 3.14.5):
 ```
-Phase 1 (portfolio tests):   170 passed, 61 skipped, 751 deselected
-Phase 2-4 (live operations): 3+3+3 passed
+Phase 1a (live dir):          403 passed, 102 skipped, 6 deselected
+Phase 1b (non-live):           13 passed, 1453 deselected
+Phase 1c (stop tokens):        37 passed
+Phase 2  (pull):                3 passed
+Phase 3  (clone):               3 passed, 136 deselected
+Phase 4  (vision→geo pipe):     3 passed, 136 deselected
 ```
 
 > Phase 1 counts are **portfolio-bound**: they reflect the set of models
-> the maintainer has locally available at release time. 2.0.5 was
-> measured with a smaller text portfolio than 2.0.4b10 (selective model
-> rotation to free disk for convert/quantize work), so a lower Phase 1
-> test count here does not imply a regression in coverage — the
+> the maintainer has locally available at release time, so a lower
+> count in a later release does not imply a regression in coverage — the
 > `Verified in` column of [`docs/MODEL-COVERAGE.md`](docs/MODEL-COVERAGE.md)
 > is the authoritative statement of which model types were empirically
 > exercised in this release.
