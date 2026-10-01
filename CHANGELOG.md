@@ -8,6 +8,11 @@
   name 2.0.8 as released. ADR-012, ADR-018 and ADR-025 give shipped phases their version and
   deferred ones no target release.
 
+### Testing and Tooling
+
+- `scripts/check-handbook-contract.py` fails on "unreleased" in the SERVER-HANDBOOK once the
+  CHANGELOG is cut to a final version.
+
 ## [2.0.8] - 2026-09-30
 
 ### ⚠️ Upgrade Notes
