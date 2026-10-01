@@ -1,0 +1,710 @@
+Starting memory monitor (interval: 200ms)
+Running: ./scripts/test-wet-umbrella.sh
+------------------------------------------------------------
+🌂 Wet Umbrella: Running all real tests...
+
+📦 Phase 1a: wet — live dir tests...
+
+📊 Benchmark reporting enabled: ~/umbrella-20260930-2246-benchmark.jsonl
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/venv-314-dev/bin/python3.14
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collecting ... collected 511 items / 6 deselected / 505 selected
+
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_00] PASSED [  0%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_01] PASSED [  0%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_02] PASSED [  0%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_03] PASSED [  0%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_04] PASSED [  0%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_05] PASSED [  1%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_short_audio_wav[audio_06] PASSED [  1%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_00] PASSED [  1%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_01] PASSED [  1%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_02] PASSED [  1%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_03] PASSED [  2%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_04] PASSED [  2%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_05] PASSED [  2%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcription_leaves_working_directory_untouched[audio_06] PASSED [  2%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_00] PASSED [  2%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_01] PASSED [  3%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_02] PASSED [  3%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_03] PASSED [  3%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_04] PASSED [  3%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_05] PASSED [  3%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_longer_audio_wav[audio_06] PASSED [  4%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_00] PASSED [  4%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_01] PASSED [  4%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_02] PASSED [  4%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_03] PASSED [  4%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_04] PASSED [  5%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_05] PASSED [  5%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_transcribe_mp3_format[audio_06] PASSED [  5%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_00] PASSED [  5%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_01] PASSED [  5%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_02] PASSED [  6%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_03] PASSED [  6%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_04] PASSED [  6%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_05] PASSED [  6%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscription::test_audio_output_not_empty[audio_06] PASSED [  6%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_00] PASSED [  7%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_01] PASSED [  7%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_02] PASSED [  7%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_03] PASSED [  7%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_04] PASSED [  7%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_05] PASSED [  8%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioSegments::test_segment_metadata_optional[audio_06] PASSED [  8%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_00] PASSED [  8%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_01] PASSED [  8%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_02] PASSED [  8%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_03] PASSED [  9%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_04] PASSED [  9%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_05] PASSED [  9%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_json[audio_06] PASSED [  9%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_00] PASSED [  9%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_01] PASSED [ 10%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_02] PASSED [ 10%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_03] PASSED [ 10%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_04] PASSED [ 10%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_05] PASSED [ 10%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_text_format[audio_06] PASSED [ 11%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_00] PASSED [ 11%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_01] PASSED [ 11%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_02] PASSED [ 11%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_03] PASSED [ 11%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_04] PASSED [ 12%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_05] PASSED [ 12%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_verbose_json[audio_06] PASSED [ 12%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_00] PASSED [ 12%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_01] PASSED [ 12%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_02] PASSED [ 13%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_03] PASSED [ 13%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_04] PASSED [ 13%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_05] PASSED [ 13%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_mp3[audio_06] PASSED [ 13%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_00] PASSED [ 14%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_01] PASSED [ 14%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_02] PASSED [ 14%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_03] PASSED [ 14%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_04] PASSED [ 14%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_05] PASSED [ 15%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_with_language[audio_06] PASSED [ 15%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_00] PASSED [ 15%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_01] PASSED [ 15%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_02] PASSED [ 15%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_03] PASSED [ 16%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_04] PASSED [ 16%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_05] PASSED [ 16%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranscriptionsServer::test_transcription_endpoint_rejects_oversized_audio[audio_06] PASSED [ 16%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_00] PASSED [ 16%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_01] SKIPPED [ 17%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_02] SKIPPED [ 17%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_03] PASSED [ 17%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_04] PASSED [ 17%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_05] PASSED [ 17%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_rejects_incapable_model_422[audio_06] PASSED [ 18%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_00] SKIPPED [ 18%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_01] PASSED [ 18%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_02] PASSED [ 18%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_03] SKIPPED [ 18%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_04] SKIPPED [ 19%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_05] SKIPPED [ 19%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_verbose_task_is_translate[audio_06] SKIPPED [ 19%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_00] SKIPPED [ 19%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_01] PASSED [ 19%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_02] PASSED [ 20%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_03] SKIPPED [ 20%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_04] SKIPPED [ 20%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_05] SKIPPED [ 20%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_german_fixture_to_english[audio_06] SKIPPED [ 20%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_00] SKIPPED [ 20%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_01] PASSED [ 21%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_02] PASSED [ 21%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_03] SKIPPED [ 21%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_04] SKIPPED [ 21%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_05] SKIPPED [ 21%]
+tests_2.0/live/test_audio_e2e_live.py::TestAudioTranslationsServer::test_translation_openai_sdk[audio_06] SKIPPED [ 22%]
+tests_2.0/live/test_audio_resample_guard.py::test_energy_above_target_nyquist_is_rejected[8500] PASSED [ 22%]
+tests_2.0/live/test_audio_resample_guard.py::test_energy_above_target_nyquist_is_rejected[12000] PASSED [ 22%]
+tests_2.0/live/test_audio_resample_guard.py::test_passband_survives[1000] PASSED [ 22%]
+tests_2.0/live/test_audio_resample_guard.py::test_passband_survives[3000] PASSED [ 22%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_00] PASSED [ 23%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_01] PASSED [ 23%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_02] PASSED [ 23%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_03] PASSED [ 23%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_04] PASSED [ 23%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_05] PASSED [ 24%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_06] PASSED [ 24%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_07] SKIPPED [ 24%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_08] PASSED [ 24%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_09] SKIPPED [ 24%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_10] SKIPPED [ 25%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_11] PASSED [ 25%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_12] PASSED [ 25%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_13] PASSED [ 25%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_14] PASSED [ 25%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_15] PASSED [ 26%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_16] PASSED [ 26%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_17] PASSED [ 26%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_18] SKIPPED [ 26%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_19] SKIPPED [ 26%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_20] PASSED [ 27%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_21] PASSED [ 27%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_22] PASSED [ 27%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_23] PASSED [ 27%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_24] PASSED [ 27%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_25] PASSED [ 28%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_26] PASSED [ 28%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_27] PASSED [ 28%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_28] PASSED [ 28%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_29] PASSED [ 28%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_30] PASSED [ 29%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_31] PASSED [ 29%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandBasic::test_run_command[text_32] PASSED [ 29%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_00] PASSED [ 29%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_01] PASSED [ 29%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_02] PASSED [ 30%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_03] PASSED [ 30%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_04] PASSED [ 30%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_05] PASSED [ 30%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_06] PASSED [ 30%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_07] SKIPPED [ 31%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_08] PASSED [ 31%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_09] SKIPPED [ 31%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_10] SKIPPED [ 31%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_11] PASSED [ 31%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_12] PASSED [ 32%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_13] PASSED [ 32%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_14] PASSED [ 32%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_15] PASSED [ 32%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_16] PASSED [ 32%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_17] PASSED [ 33%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_18] SKIPPED [ 33%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_19] SKIPPED [ 33%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_20] PASSED [ 33%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_21] PASSED [ 33%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_22] PASSED [ 34%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_23] PASSED [ 34%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_24] PASSED [ 34%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_25] PASSED [ 34%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_26] PASSED [ 34%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_27] PASSED [ 35%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_28] PASSED [ 35%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_29] PASSED [ 35%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_30] PASSED [ 35%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_31] PASSED [ 35%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandJSON::test_run_json_output[text_32] PASSED [ 36%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandExitCodes::test_run_invalid_model_exit_code_text PASSED [ 36%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandExitCodes::test_run_invalid_model_exit_code_json PASSED [ 36%]
+tests_2.0/live/test_cli_e2e.py::TestRunCommandStopTokens::test_run_no_visible_stop_tokens_mxfp4 PASSED [ 36%]
+tests_2.0/live/test_cli_pipe_live.py::TestPipeModeSingleModel::test_stdin_dash_appends_trailing_text PASSED [ 36%]
+tests_2.0/live/test_cli_pipe_live.py::TestPipeModeSingleModel::test_json_interactive_error_path PASSED [ 37%]
+tests_2.0/live/test_cli_pipe_live.py::TestPipeModeSingleModel::test_pipe_from_list_json PASSED [ 37%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a1_fresh_clone_writes_v2_sentinel PASSED [ 37%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a2_file_index_covers_files PASSED [ 37%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a3_file_index_includes_safetensors_header PASSED [ 37%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a4_clean_after_fresh_clone PASSED [ 38%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a5_convert_repair_index_writes_v2 PASSED [ 38%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a8_list_hash_column_strips_prefix PASSED [ 38%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a9_list_json_content_hash_pattern PASSED [ 38%]
+tests_2.0/live/test_content_hash_v2_live.py::test_a10_show_long_form_prefix_plus_16_hex PASSED [ 38%]
+tests_2.0/live/test_content_hash_v2_live.py::test_b1_to_b6_repair_creates_different_hash PASSED [ 39%]
+tests_2.0/live/test_embed_encoder_live.py::test_single_line_jsonl_normalized[bge-small-en-v1.5-4bit-384] PASSED [ 39%]
+tests_2.0/live/test_embed_encoder_live.py::test_single_line_jsonl_normalized[multilingual-e5-small-mlx-384] PASSED [ 39%]
+tests_2.0/live/test_embed_encoder_live.py::test_batch_passthrough_and_cosine[bge-small-en-v1.5-4bit-384] PASSED [ 39%]
+tests_2.0/live/test_embed_encoder_live.py::test_batch_passthrough_and_cosine[multilingual-e5-small-mlx-384] PASSED [ 39%]
+tests_2.0/live/test_embed_encoder_live.py::test_query_differs_from_document[bge-small-en-v1.5-4bit-384] PASSED [ 40%]
+tests_2.0/live/test_embed_encoder_live.py::test_query_differs_from_document[multilingual-e5-small-mlx-384] PASSED [ 40%]
+tests_2.0/live/test_embed_pipe_live.py::test_single_line_jsonl_normalized PASSED [ 40%]
+tests_2.0/live/test_embed_pipe_live.py::test_batch_passthrough_and_cosine PASSED [ 40%]
+tests_2.0/live/test_embed_pipe_live.py::test_json_envelope PASSED        [ 40%]
+tests_2.0/live/test_embed_pipe_live.py::test_query_differs_from_document PASSED [ 40%]
+tests_2.0/live/test_embed_pipe_live.py::test_cpu_device_stamp_and_determinism PASSED [ 41%]
+tests_2.0/live/test_embed_serve_live.py::test_health[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 41%]
+tests_2.0/live/test_embed_serve_live.py::test_float_single[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 41%]
+tests_2.0/live/test_embed_serve_live.py::test_base64_matches_float[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 41%]
+tests_2.0/live/test_embed_serve_live.py::test_batch_order_and_cosine[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 41%]
+tests_2.0/live/test_embed_serve_live.py::test_dimensions_mismatch_422_or_400[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 42%]
+tests_2.0/live/test_embed_serve_live.py::test_concurrent_requests_serialized[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 42%]
+tests_2.0/live/test_embed_serve_live.py::test_openai_sdk_use_case_4[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 42%]
+tests_2.0/live/test_embed_serve_live.py::test_cli_parity[Qwen3-Embedding-0.6B-4bit-DWQ] PASSED [ 42%]
+tests_2.0/live/test_embed_serve_live.py::test_health[bge-small-en-v1.5-4bit] PASSED [ 42%]
+tests_2.0/live/test_embed_serve_live.py::test_float_single[bge-small-en-v1.5-4bit] PASSED [ 43%]
+tests_2.0/live/test_embed_serve_live.py::test_base64_matches_float[bge-small-en-v1.5-4bit] PASSED [ 43%]
+tests_2.0/live/test_embed_serve_live.py::test_batch_order_and_cosine[bge-small-en-v1.5-4bit] PASSED [ 43%]
+tests_2.0/live/test_embed_serve_live.py::test_dimensions_mismatch_422_or_400[bge-small-en-v1.5-4bit] PASSED [ 43%]
+tests_2.0/live/test_embed_serve_live.py::test_concurrent_requests_serialized[bge-small-en-v1.5-4bit] PASSED [ 43%]
+tests_2.0/live/test_embed_serve_live.py::test_openai_sdk_use_case_4[bge-small-en-v1.5-4bit] PASSED [ 44%]
+tests_2.0/live/test_embed_serve_live.py::test_cli_parity[bge-small-en-v1.5-4bit] PASSED [ 44%]
+tests_2.0/live/test_embed_serve_live.py::test_health[multilingual-e5-small-mlx] PASSED [ 44%]
+tests_2.0/live/test_embed_serve_live.py::test_float_single[multilingual-e5-small-mlx] PASSED [ 44%]
+tests_2.0/live/test_embed_serve_live.py::test_base64_matches_float[multilingual-e5-small-mlx] PASSED [ 44%]
+tests_2.0/live/test_embed_serve_live.py::test_batch_order_and_cosine[multilingual-e5-small-mlx] PASSED [ 45%]
+tests_2.0/live/test_embed_serve_live.py::test_dimensions_mismatch_422_or_400[multilingual-e5-small-mlx] PASSED [ 45%]
+tests_2.0/live/test_embed_serve_live.py::test_concurrent_requests_serialized[multilingual-e5-small-mlx] PASSED [ 45%]
+tests_2.0/live/test_embed_serve_live.py::test_openai_sdk_use_case_4[multilingual-e5-small-mlx] PASSED [ 45%]
+tests_2.0/live/test_embed_serve_live.py::test_cli_parity[multilingual-e5-small-mlx] PASSED [ 45%]
+tests_2.0/live/test_fim_e2e.py::test_fim_completion_end_to_end PASSED    [ 46%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmoke::test_a1_list_json PASSED [ 46%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmoke::test_a2_show_json PASSED [ 46%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmoke::test_a3_health_json PASSED [ 46%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmoke::test_a6_health_error_json PASSED [ 46%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmoke::test_a7_convert_error_json PASSED [ 47%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmoke::test_a8_version_json PASSED [ 47%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmokeWrite::test_a4_clone_error_json PASSED [ 47%]
+tests_2.0/live/test_json_smoke.py::TestJsonSmokeWrite::test_a5_convert_json PASSED [ 47%]
+tests_2.0/live/test_list_human_live.py::test_live_list_human_variants SKIPPED [ 47%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_portfolio_contains_only_text_models PASSED [ 48%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_portfolio_contains_only_vision_models PASSED [ 48%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_and_vision_portfolios_are_disjoint PASSED [ 48%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_00] PASSED [ 48%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_01] PASSED [ 48%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_02] PASSED [ 49%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_03] PASSED [ 49%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_04] PASSED [ 49%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_05] PASSED [ 49%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_06] PASSED [ 49%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_07] PASSED [ 50%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_08] PASSED [ 50%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_09] PASSED [ 50%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_10] PASSED [ 50%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_11] PASSED [ 50%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_12] PASSED [ 51%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_13] PASSED [ 51%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_14] PASSED [ 51%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_15] PASSED [ 51%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_16] PASSED [ 51%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_17] PASSED [ 52%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_18] PASSED [ 52%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_19] PASSED [ 52%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_20] PASSED [ 52%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_21] PASSED [ 52%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_22] PASSED [ 53%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_23] PASSED [ 53%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_24] PASSED [ 53%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_25] PASSED [ 53%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_26] PASSED [ 53%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_27] PASSED [ 54%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_28] PASSED [ 54%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_29] PASSED [ 54%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_30] PASSED [ 54%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_31] PASSED [ 54%]
+tests_2.0/live/test_portfolio_fixtures.py::test_text_model_info_fixture_works[text_32] PASSED [ 55%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_00] PASSED [ 55%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_01] PASSED [ 55%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_02] PASSED [ 55%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_03] PASSED [ 55%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_04] PASSED [ 56%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_05] PASSED [ 56%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_06] PASSED [ 56%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_07] PASSED [ 56%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_08] PASSED [ 56%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_09] PASSED [ 57%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_10] PASSED [ 57%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_11] PASSED [ 57%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_12] PASSED [ 57%]
+tests_2.0/live/test_portfolio_fixtures.py::test_vision_model_info_fixture_works[vision_13] PASSED [ 57%]
+tests_2.0/live/test_portfolio_fixtures.py::test_show_text_portfolio PASSED [ 58%]
+tests_2.0/live/test_portfolio_fixtures.py::test_show_vision_portfolio PASSED [ 58%]
+tests_2.0/live/test_portfolio_fixtures.py::test_exclusions_are_capability_scoped PASSED [ 58%]
+tests_2.0/live/test_portfolio_fixtures.py::test_chat_broken_models_still_reach_their_working_axes PASSED [ 58%]
+tests_2.0/live/test_push_live.py::test_live_push_json_success SKIPPED    [ 58%]
+tests_2.0/live/test_serve_cli_signals_live.py::test_signalling_the_supervisor_leaves_nothing_behind[sigterm] PASSED [ 59%]
+tests_2.0/live/test_serve_cli_signals_live.py::test_signalling_the_supervisor_leaves_nothing_behind[sighup] PASSED [ 59%]
+tests_2.0/live/test_serve_cli_signals_live.py::test_signalling_the_supervisor_leaves_nothing_behind[sigkill] PASSED [ 59%]
+tests_2.0/live/test_serve_embed_proxy_live.py::test_proxy_parity_with_direct_backend PASSED [ 59%]
+tests_2.0/live/test_serve_embed_proxy_live.py::test_proxy_base64_default PASSED [ 59%]
+tests_2.0/live/test_serve_embed_proxy_live.py::test_proxy_batch_order PASSED [ 60%]
+tests_2.0/live/test_serve_embed_proxy_live.py::test_proxy_openai_sdk_one_base_url PASSED [ 60%]
+tests_2.0/live/test_serve_embed_proxy_live.py::test_proxy_backend_down_returns_502 PASSED [ 60%]
+tests_2.0/live/test_serve_embed_proxy_live.py::test_proxy_unconfigured_returns_501 PASSED [ 60%]
+tests_2.0/live/test_server_e2e.py::TestServerHealthEndpoints::test_health_endpoint PASSED [ 60%]
+tests_2.0/live/test_server_e2e.py::TestServerHealthEndpoints::test_health_answers_while_generating PASSED [ 60%]
+tests_2.0/live/test_server_e2e.py::TestServerHealthEndpoints::test_v1_models_list PASSED [ 61%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_00] PASSED [ 61%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_01] PASSED [ 61%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_02] PASSED [ 61%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_03] PASSED [ 61%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_04] PASSED [ 62%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_05] PASSED [ 62%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_06] PASSED [ 62%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_07] SKIPPED [ 62%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_08] PASSED [ 62%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_09] SKIPPED [ 63%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_10] SKIPPED [ 63%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_11] PASSED [ 63%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_12] PASSED [ 63%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_13] PASSED [ 63%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_14] PASSED [ 64%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_15] PASSED [ 64%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_16] PASSED [ 64%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_17] PASSED [ 64%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_18] SKIPPED [ 64%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_19] SKIPPED [ 65%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_20] PASSED [ 65%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_21] PASSED [ 65%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_22] PASSED [ 65%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_23] PASSED [ 65%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_24] PASSED [ 66%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_25] PASSED [ 66%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_26] PASSED [ 66%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_27] PASSED [ 66%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_28] PASSED [ 66%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_29] PASSED [ 67%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_30] PASSED [ 67%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_31] PASSED [ 67%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsBatch::test_chat_completions_batch[text_32] PASSED [ 67%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_00] PASSED [ 67%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_01] PASSED [ 68%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_02] PASSED [ 68%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_03] PASSED [ 68%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_04] PASSED [ 68%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_05] PASSED [ 68%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_06] PASSED [ 69%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_07] SKIPPED [ 69%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_08] PASSED [ 69%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_09] SKIPPED [ 69%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_10] SKIPPED [ 69%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_11] PASSED [ 70%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_12] PASSED [ 70%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_13] PASSED [ 70%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_14] PASSED [ 70%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_15] PASSED [ 70%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_16] PASSED [ 71%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_17] PASSED [ 71%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_18] SKIPPED [ 71%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_19] SKIPPED [ 71%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_20] PASSED [ 71%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_21] PASSED [ 72%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_22] PASSED [ 72%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_23] PASSED [ 72%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_24] PASSED [ 72%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_25] PASSED [ 72%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_26] PASSED [ 73%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_27] PASSED [ 73%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_28] PASSED [ 73%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_29] PASSED [ 73%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_30] PASSED [ 73%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_31] PASSED [ 74%]
+tests_2.0/live/test_server_e2e.py::TestChatCompletionsStreaming::test_chat_completions_streaming[text_32] PASSED [ 74%]
+tests_2.0/live/test_server_e2e.py::TestCompletionsBatch::test_completions_batch_basic PASSED [ 74%]
+tests_2.0/live/test_server_e2e.py::TestCompletionsStreaming::test_completions_streaming_basic PASSED [ 74%]
+tests_2.0/live/test_server_models_workspace_live.py::test_v1_models_matches_default_list_view PASSED [ 74%]
+tests_2.0/live/test_server_models_workspace_live.py::test_v1_models_preloaded_workspace_dedup_and_chat PASSED [ 75%]
+tests_2.0/live/test_show_portfolio.py::test_show_portfolio PASSED        [ 75%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_00] SKIPPED [ 75%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_01] PASSED [ 75%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_02] SKIPPED [ 75%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_03] SKIPPED [ 76%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_04] SKIPPED [ 76%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_05] SKIPPED [ 76%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_06] SKIPPED [ 76%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_07] SKIPPED [ 76%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_08] SKIPPED [ 77%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_09] SKIPPED [ 77%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_10] SKIPPED [ 77%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_11] SKIPPED [ 77%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_12] SKIPPED [ 77%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_13] SKIPPED [ 78%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_14] SKIPPED [ 78%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_15] SKIPPED [ 78%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_16] SKIPPED [ 78%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_17] SKIPPED [ 78%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_18] SKIPPED [ 79%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_19] SKIPPED [ 79%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_20] SKIPPED [ 79%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_21] SKIPPED [ 79%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_22] SKIPPED [ 79%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_23] SKIPPED [ 80%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_24] SKIPPED [ 80%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_25] PASSED [ 80%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_26] SKIPPED [ 80%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_27] SKIPPED [ 80%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_28] SKIPPED [ 80%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_29] SKIPPED [ 81%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_30] PASSED [ 81%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_31] SKIPPED [ 81%]
+tests_2.0/live/test_streaming_parity.py::TestRunnerStreamingParity::test_runner_streaming_batch_identical[text_32] SKIPPED [ 81%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_00] SKIPPED [ 81%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_01] PASSED [ 82%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_02] SKIPPED [ 82%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_03] SKIPPED [ 82%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_04] SKIPPED [ 82%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_05] SKIPPED [ 82%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_06] SKIPPED [ 83%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_07] SKIPPED [ 83%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_08] SKIPPED [ 83%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_09] SKIPPED [ 83%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_10] SKIPPED [ 83%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_11] SKIPPED [ 84%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_12] SKIPPED [ 84%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_13] SKIPPED [ 84%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_14] SKIPPED [ 84%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_15] SKIPPED [ 84%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_16] SKIPPED [ 85%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_17] SKIPPED [ 85%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_18] SKIPPED [ 85%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_19] SKIPPED [ 85%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_20] SKIPPED [ 85%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_21] SKIPPED [ 86%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_22] SKIPPED [ 86%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_23] SKIPPED [ 86%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_24] SKIPPED [ 86%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_25] PASSED [ 86%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_26] SKIPPED [ 87%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_27] SKIPPED [ 87%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_28] SKIPPED [ 87%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_29] SKIPPED [ 87%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_30] PASSED [ 87%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_31] SKIPPED [ 88%]
+tests_2.0/live/test_streaming_parity.py::TestServerStreamingParity::test_server_api_streaming_batch_identical[text_32] SKIPPED [ 88%]
+tests_2.0/live/test_streaming_parity.py::TestCrossInterfaceParity::test_runner_vs_server_consistency PASSED [ 88%]
+tests_2.0/live/test_vision_e2e_live.py::TestVisionDeterministicQueries::test_chess_position_e6 PASSED [ 88%]
+tests_2.0/live/test_vision_e2e_live.py::TestVisionDeterministicQueries::test_contract_name_extraction PASSED [ 88%]
+tests_2.0/live/test_vision_e2e_live.py::TestVisionDeterministicQueries::test_mug_color_identification PASSED [ 89%]
+tests_2.0/live/test_vision_e2e_live.py::TestVisionDeterministicQueries::test_chart_axis_label_reading PASSED [ 89%]
+tests_2.0/live/test_vision_e2e_live.py::TestVisionDeterministicQueries::test_large_image_support PASSED [ 89%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_00] PASSED [ 89%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_01] PASSED [ 89%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_02] SKIPPED [ 90%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_03] PASSED [ 90%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_04] PASSED [ 90%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_05] PASSED [ 90%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_06] PASSED [ 90%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_07] PASSED [ 91%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_08] PASSED [ 91%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_09] PASSED [ 91%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_10] PASSED [ 91%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_11] PASSED [ 91%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_12] PASSED [ 92%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_single_image_chat_completion[vision_13] PASSED [ 92%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_00] PASSED [ 92%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_01] PASSED [ 92%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_02] SKIPPED [ 92%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_03] PASSED [ 93%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_04] PASSED [ 93%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_05] PASSED [ 93%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_06] PASSED [ 93%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_07] PASSED [ 93%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_08] PASSED [ 94%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_09] PASSED [ 94%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_10] PASSED [ 94%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_11] PASSED [ 94%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_12] PASSED [ 94%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_streaming_graceful_degradation[vision_13] PASSED [ 95%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_00] PASSED [ 95%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_01] PASSED [ 95%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_02] SKIPPED [ 95%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_03] PASSED [ 95%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_04] PASSED [ 96%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_05] PASSED [ 96%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_06] PASSED [ 96%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_07] PASSED [ 96%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_08] PASSED [ 96%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_09] PASSED [ 97%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_10] PASSED [ 97%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_11] PASSED [ 97%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_12] PASSED [ 97%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_text_request_still_works_on_vision_model[vision_13] PASSED [ 97%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_vision_to_text_model_switch_filters_images PASSED [ 98%]
+tests_2.0/live/test_vision_server_e2e.py::TestVisionServerE2E::test_chunked_request_counts_its_own_chunks PASSED [ 98%]
+tests_2.0/live/test_vm_stat_parsing.py::test_parse_vm_stat_page_size_apple_silicon PASSED [ 98%]
+tests_2.0/live/test_vm_stat_parsing.py::test_parse_vm_stat_page_size_fallback PASSED [ 98%]
+tests_2.0/live/test_workspace_live.py::TestCloneShorthand::test_resolve_clone_target_strips_org PASSED [ 98%]
+tests_2.0/live/test_workspace_live.py::TestCloneShorthand::test_resolve_clone_target_strips_revision PASSED [ 99%]
+tests_2.0/live/test_workspace_live.py::TestCloneShorthand::test_clone_target_collision_detected PASSED [ 99%]
+tests_2.0/live/test_workspace_live.py::TestCloneShorthand::test_clone_bare_target_resolves_to_ws_home PASSED [ 99%]
+tests_2.0/live/test_workspace_live.py::TestConvertBareNames::test_convert_bare_source_resolves PASSED [ 99%]
+tests_2.0/live/test_workspace_live.py::TestConvertBareNames::test_convert_quantize_bare_names PASSED [ 99%]
+tests_2.0/live/test_workspace_live.py::TestConvertBareNames::test_convert_json_output_valid PASSED [100%]
+
+=============================== warnings summary ===============================
+tests_2.0/live/test_cli_pipe_live.py::TestPipeModeSingleModel::test_stdin_dash_appends_trailing_text
+  <repo>/venv-314-dev/lib/python3.14/site-packages/_pytest/fixtures.py:1313: PytestRemovedIn10Warning: Class-scoped fixture defined as instance method is deprecated.
+  Instance attributes set in this fixture will NOT be visible to test methods,
+  as each test gets a new instance while the fixture runs only once per class.
+  Use @classmethod decorator and set attributes on cls instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#class-scoped-fixture-as-instance-method
+    fixturefunc = resolve_fixture_function(fixturedef, request)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==== 403 passed, 102 skipped, 6 deselected, 1 warning in 3232.22s (0:53:52) ====
+
+📦 Phase 1b: wet — non-live tests...
+
+📊 Benchmark reporting enabled: ~/umbrella-20260930-2246-benchmark.jsonl
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/venv-314-dev/bin/python3.14
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collecting ... collected 1466 items / 1453 deselected / 13 selected
+
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_copy_real_model_and_list PASSED [  7%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_partial_download_simulation_health PASSED [ 15%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_index_missing_shards_unhealthy PASSED [ 23%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_index_delete_shard_is_unhealthy PASSED [ 30%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_index_truncate_shard_is_unhealthy PASSED [ 38%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_index_lfs_pointer_is_unhealthy PASSED [ 46%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_user_cache_health_ok_readonly PASSED [ 53%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_vision_model_missing_preprocessor_is_unhealthy PASSED [ 61%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_vision_model_invalid_preprocessor_is_unhealthy PASSED [ 69%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_vision_model_missing_tokenizer_json_is_unhealthy PASSED [ 76%]
+tests_2.0/test_issue_27.py::TestIssue27Exploration::test_vision_model_complete_is_healthy PASSED [ 84%]
+tests_2.0/test_issue_37_private_org_regression.py::test_private_org_mlx_model_runs_without_unknown_framework_error PASSED [ 92%]
+tests_2.0/test_issue_37_private_org_regression.py::test_framework_detection_for_renamed_mlx_community_model PASSED [100%]
+
+=============================== warnings summary ===============================
+venv-314-dev/lib/python3.14/site-packages/starlette/testclient.py:53
+  <repo>/venv-314-dev/lib/python3.14/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 13 passed, 1453 deselected, 1 warning in 4.49s ================
+
+🛑 Phase 1c: stop-tokens regression (Issue #32; runs when models present)...
+
+📊 Benchmark reporting enabled: ~/umbrella-20260930-2246-benchmark.jsonl
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/venv-314-dev/bin/python3.14
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collecting ... collected 37 items
+
+tests_2.0/test_stop_tokens_live.py::TestStopTokensValidation::test_mxfp4_stop_token_filtering PASSED [  2%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensValidation::test_qwen25_no_self_conversation PASSED [  5%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensValidation::test_llama32_regression_control PASSED [  8%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_00] PASSED [ 10%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_01] PASSED [ 13%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_02] PASSED [ 16%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_03] PASSED [ 18%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_04] PASSED [ 21%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_05] PASSED [ 24%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_06] PASSED [ 27%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_07] PASSED [ 29%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_08] PASSED [ 32%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_09] PASSED [ 35%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_10] PASSED [ 37%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_11] PASSED [ 40%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_12] PASSED [ 43%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_13] PASSED [ 45%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_14] PASSED [ 48%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_15] PASSED [ 51%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_16] PASSED [ 54%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_17] PASSED [ 56%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_18] PASSED [ 59%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_19] PASSED [ 62%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_20] PASSED [ 64%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_21] PASSED [ 67%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_22] PASSED [ 70%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_23] PASSED [ 72%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_24] PASSED [ 75%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_25] PASSED [ 78%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_26] PASSED [ 81%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_27] PASSED [ 83%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_28] PASSED [ 86%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_29] PASSED [ 89%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_30] PASSED [ 91%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_31] PASSED [ 94%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_single_model[discovered_32] PASSED [ 97%]
+tests_2.0/test_stop_tokens_live.py::TestStopTokensEmpiricalMapping::test_empirical_mapping_generate_report PASSED [100%]
+
+======================== 37 passed in 188.27s (0:03:08) ========================
+
+📥 Phase 2: Isolated Cache WRITE - Pull tests...
+
+📊 Benchmark reporting enabled: ~/umbrella-20260930-2246-benchmark.jsonl
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/venv-314-dev/bin/python3.14
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collecting ... collected 3 items
+
+tests_2.0/test_resumable_pull.py::TestResumablePullRealDownload::test_pull_resume_with_subprocess_interrupt <repo>/venv-314-dev/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py:189: UserWarning: The `resume_download` argument is deprecated and ignored in `snapshot_download`. Downloads always resume whenever possible.
+  warnings.warn(
+
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]
+Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  6.81it/s]
+Fetching 11 files:  18%|█▊        | 2/11 [00:00<00:01,  6.79it/s]
+Fetching 11 files:  27%|██▋       | 3/11 [00:00<00:01,  6.93it/s]
+Fetching 11 files:  36%|███▋      | 4/11 [00:00<00:01,  5.94it/s]PASSED [ 33%]
+tests_2.0/test_resumable_pull.py::TestResumablePullCLI::test_force_resume_works_in_non_interactive_mode PASSED [ 66%]
+tests_2.0/test_resumable_pull.py::TestResumablePullCLI::test_non_interactive_without_force_resume_fails PASSED [100%]
+
+======================== 3 passed in 250.89s (0:04:10) =========================
+
+🔄 Phase 3: Isolated Cache WRITE - Clone tests...
+
+📊 Benchmark reporting enabled: ~/umbrella-20260930-2246-benchmark.jsonl
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/venv-314-dev/bin/python3.14
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collecting ... collected 139 items / 136 deselected / 3 selected
+
+tests_2.0/live/test_clone_live.py::test_live_clone_workflow_adr007_phase1 PASSED [ 33%]
+tests_2.0/live/test_clone_live.py::test_live_clone_health_check_integration PASSED [ 66%]
+tests_2.0/live/test_clone_live.py::test_live_clone_workspace_validation PASSED [100%]
+
+====================== 3 passed, 136 deselected in 26.44s ======================
+
+🖼️  Phase 4: Vision→Geo Pipe tests...
+
+📊 Benchmark reporting enabled: ~/umbrella-20260930-2246-benchmark.jsonl
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- <repo>/venv-314-dev/bin/python3.14
+cachedir: .pytest_cache
+rootdir: <repo>
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collecting ... collected 139 items / 136 deselected / 3 selected
+
+tests_2.0/live/test_pipe_vision_geo.py::TestVisionGeoPipeline::test_vision_batch_processing_chunk_1 PASSED [ 33%]
+tests_2.0/live/test_pipe_vision_geo.py::TestVisionGeoPipeline::test_vision_to_geo_pipe PASSED [ 66%]
+tests_2.0/live/test_pipe_vision_geo.py::TestVisionGeoPipeline::test_vision_chunk_isolation_no_hallucination PASSED [100%]
+
+=============================== warnings summary ===============================
+tests_2.0/live/test_pipe_vision_geo.py::TestVisionGeoPipeline::test_vision_batch_processing_chunk_1
+tests_2.0/live/test_pipe_vision_geo.py::TestVisionGeoPipeline::test_vision_batch_processing_chunk_1
+tests_2.0/live/test_pipe_vision_geo.py::TestVisionGeoPipeline::test_vision_to_geo_pipe
+  <repo>/venv-314-dev/lib/python3.14/site-packages/_pytest/fixtures.py:1313: PytestRemovedIn10Warning: Class-scoped fixture defined as instance method is deprecated.
+  Instance attributes set in this fixture will NOT be visible to test methods,
+  as each test gets a new instance while the fixture runs only once per class.
+  Use @classmethod decorator and set attributes on cls instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#class-scoped-fixture-as-instance-method
+    fixturefunc = resolve_fixture_function(fixturedef, request)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========== 3 passed, 136 deselected, 3 warnings in 387.99s (0:06:27) ===========
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 Wet Umbrella Summary:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ✅ Phase 1a: wet — live dir (User Cache READ + Workspace): PASSED
+  ✅ Phase 1b: wet — non-live (issue27 + issue37): PASSED
+  ✅ Phase 1c: stop-tokens regression (-m live_stop_tokens; per-model skip): PASSED
+  ✅ Phase 2: Pull: PASSED
+  ✅ Phase 3: Clone: PASSED
+  ✅ Phase 4: Vision→Geo Pipe: PASSED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ All phases completed successfully!
+------------------------------------------------------------
+Memory Monitor Summary:
+  Duration:     4093.1s (6918 samples)
+  RAM free:     0.0 - 35.9 GB
+  Swap peak:    0.0 MB
+  CPU load:     max 26.1, avg 8.9
+  CPU user/sys: max 64% / 56%
+  GPU device:   max 100%, avg 33%
+  GPU renderer: max 100%, avg 21%
+  Exit code:    0
+  Output:       ~/umbrella-20260930-2246-memory.jsonl
