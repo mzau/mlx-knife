@@ -66,7 +66,7 @@ Examples are published as their underlying feature ships:
   broke-cluster's model-routing dimension.
 - **rag-server/** is live as of 2.0.7 — `mlxk embed` ships experimental
   (alpha-gated); the embeddings work doubled as its dogfooding / acceptance artifact.
-- **photo-rag/** rides nothing. It consumes released 2.0.7 and needs **no change to
+- **photo-rag/** rides nothing. It runs on 2.0.7 and 2.0.8 and needs **no change to
   mlx-knife**, so it is coupled to no later release and waits for none. Its
   `geo-test-run.py` grades the whole pipeline against the photographs shipped with the
   project, which is how that claim stays checkable rather than asserted.

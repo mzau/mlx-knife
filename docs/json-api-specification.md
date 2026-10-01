@@ -106,8 +106,8 @@ JSON output example:
   "status": "success",
   "command": "version",
   "data": {
-    "cli_version": "2.0.5-beta.1",
-    "json_api_spec_version": "0.2.0",
+    "cli_version": "2.0.8",
+    "json_api_spec_version": "0.2.4",
     "system": {
       "memory_total_bytes": 137438953472
     }

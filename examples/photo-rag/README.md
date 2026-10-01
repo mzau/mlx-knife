@@ -16,7 +16,7 @@ This is written for **one person's own collection**. Everything here assumes tha
 through `mlxk serve` with base64 `image_url`; the `<!-- mlxk:filenames -->` metadata block
 the server prepends to every vision answer; and `mlxk embed --batch` / `--query`
 (experimental, alpha-gated — the scripts set the flag for their own subprocesses).
-Verified on 2.0.7. **Nothing here requires a change to mlx-knife.**
+Verified on 2.0.7 and 2.0.8. **Nothing here requires a change to mlx-knife.**
 **Requires:** a vision model you serve yourself; an embedding model in your cache; Python
 `httpx pillow numpy`; macOS `/usr/bin/sips` for HEIC/RAW
 **Run:** see *Try it in five minutes* — no photo library needed

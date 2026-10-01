@@ -1,11 +1,10 @@
 # MLX Knife Server Handbook
 
-**Version:** 2.0.8, unreleased — the tree as it stands; the 2.0.8 betas published so far carry part
-of it. The latest stable release is 2.0.7: its endpoint surface is the same, its request and response
+**Version:** 2.0.8 stable. Against 2.0.7 the endpoint surface is the same, request and response
 shapes differ in places, and the [Migration Guide](#migration-guide) records every difference.
 **Scope:** what the server does today. Planned work, deferred features and target releases are
 deliberately absent — this is a contract, not a roadmap.
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-10-01
 
 > **Audience:** Server operators, DevOps, API consumers
 > **For implementation details:** See `ARCHITECTURE.md` and `docs/ADR/` (developer documentation)
@@ -45,7 +44,7 @@ MLXK2_ENABLE_ALPHA_FEATURES=1 mlxk serve --port 8000 --embed-backend http://127.
 
 The pins are exact (ADR-023), `mlx` excepted: an upstream bump goes through an mlx-knife release. Do not loosen them on `pip install`.
 
-> **On released 2.0.7 (PyPI):** the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, `torch`/`torchvision` as base deps. *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide) lists every difference.
+> **2.0.7**, the last release for Python 3.10, carries the previous pin set — `mlx-vlm==0.6.2`, `transformers==5.5.4`, `torch`/`torchvision` as base deps. *From 2.0.7 → 2.0.8* in the [Migration Guide](#migration-guide) lists every difference.
 
 ---
 
@@ -1515,8 +1514,6 @@ same-model rule — pin the store to the response `system_fingerprint` and re-in
 ---
 
 ### From 2.0.7 → 2.0.8
-
-> Unreleased. This records what the tree carries beyond released 2.0.7.
 
 **Endpoint surface:** unchanged. Requests gain one optional field, `stream_options` (see
 [Token usage in a stream](#token-usage-in-a-stream)). The tables below list every change a client

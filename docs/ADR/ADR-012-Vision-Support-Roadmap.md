@@ -3,7 +3,7 @@
 - **Status:** Implemented (Phase 1 complete, 2.0.4-beta.1)
 - **Authors:** mlx-knife maintainers
 - **Date:** 2024-11-11
-- **Updated:** 2025-12-04
+- **Updated:** 2026-10-01 (Phase 1c marked shipped); 2025-12-04
 
 ## Context
 
@@ -113,7 +113,7 @@ mlxk serve (vision) → mlx_vlm.server (exists! OpenAI-compatible)
   - Chart label reading (Y-axis label: Tokens)
   - Large image support (2.7MB test asset validates 10MB limit)
 
-**Phase 1c (CLI Batch Processing):** Planned for 2.0.5-beta
+**Phase 1c (CLI Batch Processing):** shipped 2.0.4-beta.6
 - **Problem:** Vision models have per-image memory overhead
   - 1 image: ~3-5 GB RAM ✅
   - 24 images: ~181 GB RAM ❌ (Metal OOM crash)
@@ -295,9 +295,7 @@ Both `mlxk serve` (mlx-lm) and `mlx_vlm.server` use FastAPI:
 - Phase 0 (backend research): ✅
 - Phase 1a (detection): ✅
 - Phase 1b (run --image): ✅
+- Phase 1c (CLI batch processing): ✅ (2.0.4-beta.6)
 - Phase 2 (health checks): ✅
 - Phase 3 (server): ✅ (2.0.4-beta.1)
 - Phase 4 (docs + gate removal): ✅ (2.0.4-beta.1)
-
-**Remaining effort:**
-- Phase 1c (CLI batch processing): Planned for 2.0.5-beta

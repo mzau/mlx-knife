@@ -35,7 +35,7 @@ custom Python files, and every subdirectory.
 identical `content_hash` to its source — `Clean: ✓` is not a
 trustworthy integrity indicator. Manual repairs (adding
 `spatial_merge_size: 2` to `processor_config.json` for the documented
-`mistral3` workflow; the 2.0.6-planned `--repair-config`) share the
+`mistral3` workflow; the planned `--repair-config`, now ADR-018 Phase 4) share the
 same blindness: they modify semantically critical files that v1
 never reads.
 

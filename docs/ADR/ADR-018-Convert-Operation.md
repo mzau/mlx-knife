@@ -3,7 +3,7 @@
 **Status:** Implemented through Phase 3 (Phase 2 shipped in 2.0.5; Phase 3 content_hash v2 shipped in 2.0.6 via ADR-025); Phase 4 (`--repair` unified detection-driven) deferred — it was named for 2.0.7 and did not ship there.
 **When (Phase 4):** nothing pulls it. The two-step workflow it would collapse (`--repair-index`, then the manual `spatial_merge_size` edit) is documented and works; only legacy pre-2026-03 conversions need it at all, and that set does not grow.
 **Created:** 2025-12-18
-**Updated:** 2026-05-11 (Phase 3 shipped 2.0.6; Phase 4 deferred 2.0.6→2.0.7 — not implemented in main); 2026-04-20 (Phase 2 shipped 2.0.5; Phase 3 delegated to ADR-025; Phase 4 `--repair` unified design added from session)
+**Updated:** 2026-10-01 (version targets: shipped phases in the past tense, Phase 4 by its condition); 2026-05-11 (Phase 3 shipped 2.0.6; Phase 4 deferred 2.0.6→2.0.7 — not implemented in main); 2026-04-20 (Phase 2 shipped 2.0.5; Phase 3 delegated to ADR-025; Phase 4 `--repair` unified design added from session)
 **Context:** Users need to (a) quantize MLX workspaces locally without polluting the HF cache and (b) repair MLX/HF compliance issues (notably safetensors index/shard mismatches and known config defects) in a deterministic way.
 
 **Phase Status:**
@@ -13,7 +13,7 @@
 - **Phase 1:** `--repair-index` — ✅ Implemented (2.0.4-beta.5)
 - **Phase 2:** `--quantize` (text + vision) + v1 content_hash — ✅ Shipped (2.0.5)
 - **Phase 3:** content_hash v2 algorithm — ✅ Shipped (2.0.6), design in [ADR-025](ADR-025-content-hash-v2.md)
-- **Phase 4:** `--repair` unified detection-driven repair — 🚧 Planned (deferred 2.0.6→2.0.7)
+- **Phase 4:** `--repair` unified detection-driven repair — 🚧 Deferred, nothing pulls it (see **When**)
 
 **Feature Gates:**
 - `clone`, `push`: **Production** (no gate required)
@@ -187,12 +187,12 @@ mlxk health ./ws-managed
 - Phase 0b (resumable clone) is **user convenience**, not blocking
 - Splitting allows 2.0.4 to ship community repair tool without waiting for resume feature
 - Clean dependency chain: 0a → Phase 1 (repair-index) → 2.0.4 stable
-- Phase 0b can mature in 2.0.5-beta with more testing/validation
+- Phase 0b can mature in a later beta with more testing/validation
 
 **Timeline:**
 - 2.0.4 stable blocked by mlx-vlm 0.3.10 PyPI release anyway
 - Use waiting time to implement 0a + Phase 1 (community value)
-- Phase 0b deferred to 2.0.5-beta (larger scope, more testing needed)
+- Phase 0b shipped 2.0.4-beta.6
 
 ---
 
@@ -253,7 +253,7 @@ Benefits:
 
 ---
 
-### Phase 0b: Resumable Clone (Deferred to 2.0.5-beta)
+### Phase 0b: Resumable Clone (shipped 2.0.4-beta.6)
 
 **Not critical for 2.0.4 community repair workflow.**
 
@@ -479,11 +479,11 @@ These defects can be fixed from the MLX model alone, without access to the origi
 |----|--------|-----------------|-----------|--------|--------|
 | A1 | **Index/Shard Mismatch** | mlx-vlm converted models (7+) | `health` → index mismatch | `--repair-index` | ✅ Phase 1 |
 | A2 | **Tokenizer PreTokenizer Regex** | EuroLLM, Mistral (transformers 4.39-4.57.2) | garbled output (Ġ, UTF-8 corruption) | Runtime fix in runner | ✅ Implemented |
-| A3 | **weights.npz → safetensors** | Whisper legacy | `health` → .npz detected | `--repair-weights` | ❌ Planned (2.0.7) |
-| A4 | **eos_token_id=null** | Various | config.json check | `--repair` (detect+warn) | 🚧 2.0.7 Phase 4 detection |
-| A5 | **video_processor=null** | Qwen2-VL, MiMo-VL, Qwen3-Omni | config.json check | `--repair` (detect+warn) | 🚧 2.0.7 Phase 4 detection |
+| A3 | **weights.npz → safetensors** | Whisper legacy | `health` → .npz detected | `--repair-weights` | ❌ Deferred (Phase 6) |
+| A4 | **eos_token_id=null** | Various | config.json check | `--repair` (detect+warn) | 🚧 Deferred (Phase 4) |
+| A5 | **video_processor=null** | Qwen2-VL, MiMo-VL, Qwen3-Omni | config.json check | `--repair` (detect+warn) | 🚧 Deferred (Phase 4) |
 | A6 | **Missing preprocessor_config.json** | mlx-community Whisper models | mlx-audio warning | `convert --add-preprocessor-config` | ❌ Future |
-| A7 | **spatial_merge_size wrong/missing** | Pixtral/Mistral3 models (mlx-vlm 0.1.19 era) | processor_config.json vs config.json | `--repair` (auto-fix) | 🚧 2.0.7 Phase 4 auto-fix |
+| A7 | **spatial_merge_size wrong/missing** | Pixtral/Mistral3 models (mlx-vlm 0.1.19 era) | processor_config.json vs config.json | `--repair` (auto-fix) | 🚧 Deferred (Phase 4) |
 
 #### Category B: Requires Original Model or Manual Intervention
 
@@ -611,7 +611,7 @@ if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
 ```
 
 **Repair:** `mlxk convert ./ws ./ws-fixed --repair`
-- Auto-fix (Phase 4, 2.0.7): copy `spatial_merge_size` from `config.json` to `processor_config.json`
+- Auto-fix (Phase 4, deferred): copy `spatial_merge_size` from `config.json` to `processor_config.json`
 - Deterministic — value is derivable from `config.json`, no heuristics needed
 
 **Upstream:**
@@ -656,7 +656,7 @@ if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
 |--------|------------|--------------------------|---------------|----------|
 | Index Mismatch | ✅ | ✅ | `--repair-index` | ✅ Done |
 | Tokenizer Regex | ⚠️ Runtime only | ✅ | Runtime workaround | ✅ Done |
-| spatial_merge_size | ✅ | ✅ | `--repair` auto-fix | **2.0.7 Phase 4** |
+| spatial_merge_size | ✅ | ✅ | `--repair` auto-fix | **Phase 4** (deferred) |
 | weights.npz | ✅ | ✅ | `--repair-weights` | Medium (future, separate mode) |
 | eos_token_id=null | ✅ | ⚠️ Needs heuristics | `--repair` detect+warn | Low (manual fix required) |
 | video_processor=null | ✅ | ⚠️ Model-specific | `--repair` detect+warn | Low (manual fix required) |
@@ -664,7 +664,7 @@ if config.get("spatial_merge_size") != proc_config.get("spatial_merge_size"):
 | Missing tokenizer.json | ✅ | ❌ | Re-convert | N/A |
 | chat_template | ⚠️ Runtime | ⚠️ Complex | Manual | N/A |
 
-### `--repair` Unified Detection-Driven Repair (Phase 4, deferred 2.0.6→2.0.7)
+### `--repair` Unified Detection-Driven Repair (Phase 4, deferred)
 
 **Session design 2026-04-20.** The earlier per-defect `--repair-config` /
 `--repair-weights` / `--repair-all` placeholders are consolidated into one
@@ -674,14 +674,14 @@ umbrella flag: `--repair`. Rationale below.
 # Historical (2.0.4 / 2.0.5) — unchanged, backward-compatible
 mlxk convert ./ws ./ws-fixed --repair-index     # Unconditional index rebuild
 
-# Phase 4 (2.0.6)
+# Phase 4 (deferred)
 mlxk convert ./ws ./ws-fixed --repair           # Detection-driven unified repair
 ```
 
 #### `--repair` Semantics
 
 - Walks the workspace and detects known defect classes (see Category A
-  table above). For 2.0.6 Phase 4 the detector set is:
+  table above). For Phase 4 the detector set is:
   - **A1** safetensors index/shard mismatch → auto-fix (index rebuild)
   - **A7** `spatial_merge_size` mismatch → auto-fix (copy from `config.json`)
   - **A4** `eos_token_id=null` → detect + warn (manual fix; needs heuristics)
@@ -698,8 +698,8 @@ mlxk convert ./ws ./ws-fixed --repair           # Detection-driven unified repai
   detection. Kept for backward compatibility with 2.0.4 workflows and
   as the explicit "I know what I'm doing" escape hatch.
 - `--repair`: **detection-driven** — rebuilds index *if detected as
-  broken*, plus all other safe config repairs in one pass. This is the
-  recommended default from 2.0.6 onward.
+  broken*, plus all other safe config repairs in one pass. Once shipped,
+  it is the recommended default.
 
 #### Sentinel Audit Trail
 
@@ -802,8 +802,8 @@ Only implement repairs that are:
   - **Tests:** 11 new tests, all passing
 
 - [x] **Phase 2 (2.0.5):** `--quantize <bits>` for text + vision models + v1 content_hash — ✅ Shipped
-- [ ] **Phase 3 (2.0.6):** content_hash v2 algorithm — design in [ADR-025](ADR-025-content-hash-v2.md)
-- [ ] **Phase 4 (2.0.6 P2):** `--repair` unified detection-driven repair (A1+A7 auto-fix, A4+A5 detect+warn)
+- [x] **Phase 3 (2.0.6):** content_hash v2 algorithm — design in [ADR-025](ADR-025-content-hash-v2.md) — ✅ Shipped
+- [ ] **Phase 4 (deferred):** `--repair` unified detection-driven repair (A1+A7 auto-fix, A4+A5 detect+warn)
 - [ ] **Phase 5 (future):** Mixed recipes / advanced quant options
 - [ ] **Phase 6 (future):** `--repair-weights` npz → safetensors (A3 Whisper legacy) as separate mode
 
@@ -870,7 +870,7 @@ def _quantize_text_model(source: Path, target: Path, bits: int, group_size: int 
 > `content_hash` to its source — `Clean: ✓` is not trustworthy. The v2
 > replacement algorithm (include-by-default, stat-then-hash cache,
 > transport self-heal, `file_index` as portable recipe) is designed in
-> **[ADR-025](ADR-025-content-hash-v2.md)** and ships in 2.0.6 as
+> **[ADR-025](ADR-025-content-hash-v2.md)** and shipped in 2.0.6 as
 > Phase 3. The v1 description below is preserved for historical
 > context.
 

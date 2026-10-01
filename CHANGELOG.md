@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Documentation
+
+- SERVER-HANDBOOK, the `--version --json` example in the JSON API specification and `examples/`
+  name 2.0.8 as released. ADR-012, ADR-018 and ADR-025 give shipped phases their version and
+  deferred ones no target release.
+
 ## [2.0.8] - 2026-09-30
 
 ### ⚠️ Upgrade Notes
