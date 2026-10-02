@@ -20,7 +20,7 @@ Some drift is expected; each example states what it is runnable against.
 
 **Status legend**
 - ✅ **Runnable** — runs today against the named released mlxk.
-- 🟡 **Preview** — code is present but depends on an unreleased feature.
+- 🟡 **Preview** — code is present but depends on a feature no release carries yet.
 - 📋 **Planned** — use-case is defined; code lands with the feature it needs.
 
 ---
@@ -36,7 +36,7 @@ Some drift is expected; each example states what it is runnable against.
 
    ```
    **Status:** ✅ Runnable | 🟡 Preview | 📋 Planned
-   **Runnable against:** <released mlxk version, or the unreleased feature it needs>
+   **Runnable against:** <released mlxk version, or the feature it waits for>
    **Requires:** <dependencies, env flags>
    **Run:** <a one-line invocation, or "not yet" for planned>
    ```

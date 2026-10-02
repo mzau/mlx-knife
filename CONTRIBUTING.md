@@ -8,9 +8,9 @@ We're a small team passionate about making MLX models accessible and easy to use
 
 ## 2.0 Stable – Contributor Notes
 
-- **Code path:** `mlxk2/` (entry points: `mlxk`, `mlxk-json`, `mlxk2`)
+- **Code path:** `mlxk2/` (entry points: `mlxk`, `mlxk2`)
 - **Default output:** Human-friendly tables/text; pass `--json` for machine-readable JSON API
-- **Full feature parity:** All commands available (`list`, `health`, `show`, `pull`, `rm`, `run`, `serve`)
+- **Commands:** `mlxk --help` lists them
 - **Tests:** Primary suite is `tests_2.0/` (see `pytest.ini`)
 - **Human output options:**
   - `list`: `--all` (all frameworks), `--health` (add column), `--verbose` (full org/model names)
@@ -79,7 +79,7 @@ Understanding what goes where:
 
 ```
 Repository structure:
-├── mlxk2/                       # 2.0 implementation (→ PyPI via mlxk-json)
+├── mlxk2/                       # 2.0 implementation (→ PyPI package mlx-knife)
 ├── tests_2.0/                   # 2.0 test suite
 ├── docs/                        # Documentation / ADRs
 ├── README.md                    # User documentation
@@ -113,7 +113,7 @@ This helps ensure contributors commit files to the right place and understand th
 
 **Prerequisites:**
 1. Apple Silicon Mac (M1/M2/M3)
-2. Python 3.9 or newer
+2. Python 3.11 or newer
 3. At least one MLX model installed:
    ```bash
    mlxk pull mlx-community/Phi-3-mini-4k-instruct-4bit
@@ -141,18 +141,10 @@ For detailed testing options, troubleshooting, and advanced workflows, see **[TE
 
 ## Python Version Requirements
 
-**Minimum**: Python 3.9 (the native macOS version on Apple Silicon)
+**Supported**: Python 3.11–3.14 (`requires-python = ">=3.11"`).
 
-We prioritize compatibility with:
-- **Python 3.9**: Native macOS version - MUST work
-- **Newer versions**: Should work, but 3.9 is our baseline
-
-You don't need to test on all Python versions! Just test with what you have:
-- If you have native macOS Python 3.9: Perfect! That's our main target
-- If you have a newer version: Great, test with that
-- Multiple versions installed? Bonus, but not required
-
-Mention your Python version in the PR description.
+You don't need to test on all Python versions. Test with what you have and mention it in the PR
+description; `bash test-multi-python.sh` runs the suite on every installed version.
 
 ## Development Workflow
 
@@ -170,7 +162,7 @@ Mention your Python version in the PR description.
 3. **Before submitting:**
    - Run the full test suite locally: `pytest -v`
    - Run code quality checks: `ruff check mlxk2/ --fix`
-   - Test with YOUR Python version (3.9+ required)
+   - Test with YOUR Python version (3.11+ required)
    - Update README.md if you've added features
 
 ## Testing
@@ -213,10 +205,6 @@ Bypass tokens (commit message): `[no-spec-bump]` or `[skip-spec-bump]` for forma
 - We use `ruff` for formatting and linting
 - Type hints are encouraged (checked with `mypy`)
 - Follow existing patterns in the codebase
-- **IMPORTANT**: Keep Python 3.9 compatibility!
-  - Prefer `typing.Optional`/`typing.Union` over `|` syntax
-  - Import from `typing` for hints
-  - Test with native macOS Python if possible
 
 ## Documentation
 
@@ -224,6 +212,27 @@ Bypass tokens (commit message): `[no-spec-bump]` or `[skip-spec-bump]` for forma
 - Update README.md for user-facing changes
 - Keep CLI help text (`--help`) up to date
 - Add comments for complex logic
+
+### Version numbers in prose
+
+A version is written so that a reader, and `tests_2.0/spec/test_version_prose.py`, can tell it
+from a section number, a measurement or a model name:
+
+- **mlx-knife versions:** three parts (`2.0.8`), or named: `MLX Knife 2.0`, `mlx-knife 2.0.8`,
+  `mlxk 2.0.8`, `Version 2.0`. Never a bare two-part number. A series is `2.0.x`.
+- **Schema versions:** always named: `JSON API 0.2.4`, `spec v0.2.4`, `schema v0.2.2` (the
+  benchmark report schema).
+- **Nothing unreleased carries a number:** no version after the current release, no schema
+  version after the current one. Write the state instead: deferred, not built, a tracking issue.
+- **"unreleased"** marks a document that describes the tree ahead of the release
+  ("From 2.0.8 → unreleased"). It enters with the first change that describes behavior the
+  release does not have, and the release commit removes it. The SERVER-HANDBOOK carries it in
+  the header and the migration section together.
+- **No "released" before a version** — the number says it.
+- **"latest/current release X"** and version echoes (the output shown for `--version`,
+  `"cli_version"`) name the newest release; `"json_api_spec_version"` names `mlxk2/spec.py`.
+- A name directly before a number makes it someone else's: `LibreSSL 2.8.3`,
+  `Apache License, Version 2.0`.
 
 ## Recognition
 

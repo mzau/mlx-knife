@@ -133,7 +133,7 @@ This document tracks schema evolution for MLX Knife test reports.
 
 ---
 
-### 1.0.0 (TBD - Phase 3, community-ready)
+### Phase 3 (community-ready)
 
 **Proposed changes:**
 - Stabilize all core fields (no more optional → required migrations)
@@ -154,17 +154,17 @@ This document tracks schema evolution for MLX Knife test reports.
 - Breaking changes allowed (no backward compatibility guarantees)
 - Focus: Learn what data is useful
 
-### Phase 1 (2.1+): Stabilization
+### Phase 1: Stabilization
 - Core fields stabilize
 - Backward-compatible additions only
 - Deprecation warnings for breaking changes (2 releases ahead)
 
-### Phase 2 (2.2+): Community-ready
+### Phase 2: Community-ready
 - Strict versioning (SemVer for schemas)
 - Migration scripts for all breaking changes
 - Validation tooling (`mlxk report validate`)
 
-### Phase 3 (2.3+): Production
+### Phase 3: Production
 - No breaking changes without major version bump
 - Formal governance (review process, audit log)
 - Long-term support (LTS) for stable schema versions
@@ -174,9 +174,9 @@ This document tracks schema evolution for MLX Knife test reports.
 ## Deprecation Process (Phase 2+)
 
 1. **Announcement:** Deprecation warning in schema, docs, and CLI
-2. **Grace Period:** 2 releases (e.g., 2.2 → 2.3 → 2.4)
+2. **Grace Period:** 2 releases
 3. **Migration Tools:** `mlxk report migrate` auto-upgrades
-4. **Breaking Change:** New major version (e.g., 2.0.0 → 3.0.0)
+4. **Breaking Change:** New major schema version
 5. **Legacy Support:** Old reports remain queryable (read-only)
 
 ---

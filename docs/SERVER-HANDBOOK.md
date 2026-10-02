@@ -1957,7 +1957,7 @@ When switching from Vision or Audio to Text model mid-conversation:
 
 ## Changelog
 
-- **2026-09-30:** 2.0.8 stable — everything below is stated against released 2.0.7.
+- **2026-09-30:** 2.0.8 stable — everything below is stated against 2.0.7.
 
   **Security**
   - A checkpoint whose `config.json` declares `model_file` is refused before any backend is called (CVE-2026-5843): **501** `not_implemented`, and `/v1/models` does not list it. mlx-lm imports and executes that file; the pinned release does so unconditionally.

@@ -167,13 +167,12 @@ Fixed issues with multi-EOS models:
 
 - **PyPI Package:** `mlx-knife` (unchanged)
 - **Primary Command:** `mlxk` (unchanged)
-- **Aliases:** `mlxk-json`, `mlxk2` (for backwards compatibility)
+- **Alias:** `mlxk2` (for backwards compatibility)
 
 ```bash
-# All three commands are identical
-mlxk --version       # → 2.0.0
-mlxk-json --version  # → 2.0.0
-mlxk2 --version      # → 2.0.0
+# Both commands are identical
+mlxk --version   # → mlxk 2.x.y
+mlxk2 --version  # → mlxk2 2.x.y
 ```
 
 ## Installation & Upgrade
@@ -185,7 +184,7 @@ mlxk2 --version      # → 2.0.0
 pip install --upgrade mlx-knife
 
 # Verify version
-mlxk --version  # Should show: mlxk 2.0.0
+mlxk --version  # Should show: mlxk 2.x.y
 ```
 
 ### Upgrade from 2.0.0-beta.x
@@ -198,8 +197,8 @@ pip uninstall mlx-knife -y
 pip install mlx-knife
 
 # Verify version
-mlxk --version   # Should show: mlxk 2.0.0
-mlxk2 --version  # Should show: mlxk2 2.0.0 (alias)
+mlxk --version   # Should show: mlxk 2.x.y
+mlxk2 --version  # Should show: mlxk2 2.x.y (alias)
 ```
 
 **Why clean reinstall for beta users?**
@@ -211,8 +210,8 @@ Beta versions used `mlxk2` as the primary command. A clean reinstall ensures all
 # Install from PyPI
 pip install mlx-knife
 
-# Or from GitHub release
-pip install https://github.com/mzau/mlx-knife/releases/download/v2.0.0/mlx_knife-2.0.0-py3-none-any.whl
+# Or with the wheel from a GitHub release (https://github.com/mzau/mlx-knife/releases)
+pip install mlx_knife-<version>-py3-none-any.whl
 ```
 
 ### Staying on 1.x (MIT License)

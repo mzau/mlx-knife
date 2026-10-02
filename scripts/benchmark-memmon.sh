@@ -34,7 +34,7 @@
 #   - Features:
 #     * Dedicated benchmark command (mlxk benchmark)
 #     * Standardized prompts (deterministic, temperature=0)
-#     * JSON report generation (schema v1.0)
+#     * JSON report generation (stable schema)
 #     * Community contribution workflow
 #   - Separation: Benchmark ≠ E2E tests (different purposes)
 #

@@ -249,9 +249,9 @@ Model not found in comparison file. Check:
 
 ---
 
-## Planned: Canonical Paths (v0.3.0)
+## Planned: Canonical Paths
 
-**Status:** Planned for Schema v0.3.0
+**Status:** Planned; needs a schema version bump
 
 ### Directory Structure
 

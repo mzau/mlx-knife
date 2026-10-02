@@ -12,8 +12,7 @@ undocumented for a whole release line. This checks the parts that are mechanical
   status pairs  a status written next to an error type is the table's status for that type
   pins          the requirements block matches pyproject.toml
   pointers      no source paths or code constants leak into the contract
-  language      no roadmap wording (the handbook states what is, not what may come); once the
-                CHANGELOG is cut to a final version, no "unreleased" either
+  language      no roadmap wording (the handbook states what is, not what may come)
   anchors       every internal link resolves
   env vars      every variable the server reads is in the environment block and vice versa;
                 the binding variables show the flag defaults
@@ -37,8 +36,6 @@ ROOT = Path(__file__).resolve().parent.parent
 HANDBOOK = ROOT / "docs/SERVER-HANDBOOK.md"
 PYPROJECT = ROOT / "pyproject.toml"
 ERRORS = ROOT / "mlxk2/errors.py"
-INIT = ROOT / "mlxk2/__init__.py"
-CHANGELOG = ROOT / "CHANGELOG.md"
 
 # The HTTP surface: the two server apps plus their extracted handlers.
 SERVER_SOURCES = sorted(
@@ -93,8 +90,6 @@ ROADMAP_PHRASES = [
     "future:",
     "may add",
 ]
-# Right while the handbook describes an unpublished tree, wrong in the release it ships with.
-PRERELEASE_PHRASES = ["unreleased"]
 
 failures: list[str] = []
 
@@ -247,26 +242,16 @@ def rule_pointers(hb: str) -> str:
     return "no source paths, no code constants"
 
 
-def _release_cut() -> str | None:
-    """The final version the tree releases; None mid-cycle ([Unreleased] on top) and at a beta."""
-    version = re.search(r'^__version__ = "([^"]+)"', INIT.read_text(), re.M).group(1)
-    top = re.search(r"^## \[([^\]]+)\]", CHANGELOG.read_text(), re.M).group(1)
-    return version if re.fullmatch(r"\d+(\.\d+)*", version) and top == version else None
-
-
 def rule_language(hb: str) -> str:
-    release = _release_cut()
-    phrases = ROADMAP_PHRASES + (PRERELEASE_PHRASES if release else [])
     hits = []
     for lineno, line in enumerate(hb.splitlines(), 1):
         lowered = line.lower()
-        for phrase in phrases:
+        for phrase in ROADMAP_PHRASES:
             if phrase in lowered:
                 hits.append(f"line {lineno}: {phrase!r}")
     if hits:
-        fail("language", "roadmap or pre-release wording — " + "; ".join(hits))
-    scope = f"release {release}" if release else "before the cut, 'unreleased' allowed"
-    return f"{len(phrases)} phrases checked ({scope}), none present"
+        fail("language", "roadmap wording — " + "; ".join(hits))
+    return f"{len(ROADMAP_PHRASES)} phrases checked, none present"
 
 
 def rule_anchors(hb: str) -> str:

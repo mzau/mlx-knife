@@ -576,10 +576,10 @@ This bug was discovered during beta.9 benchmark run and cost a full re-run.
 ```bash
 # Create new schema version (current on disk: report-v0.2.2.schema.json)
 cp benchmarks/schemas/report-v0.2.2.schema.json \
-   benchmarks/schemas/report-v0.2.3.schema.json
+   benchmarks/schemas/report-v<next>.schema.json
 
 # Edit schema: Add new fields with descriptions
-# Update: "title": "MLX Knife Benchmark Report Schema v0.2.3"
+# Update: "title": "MLX Knife Benchmark Report Schema v<next>"
 ```
 
 **2. Register pytest Hooks (CRITICAL)**
@@ -637,7 +637,7 @@ for key, value in item.user_properties:
 ```markdown
 # benchmarks/schemas/MIGRATIONS.md
 
-### 0.2.3 (YYYY-MM-DD) - My Feature
+### <next> (YYYY-MM-DD) - My Feature
 
 Added fields:
 - `my_field`: Description of what this captures
@@ -1101,7 +1101,7 @@ Goal: Gated/private/not-found repos must not pollute the cache and should fail f
 
 - Quick checks:
   - `pytest -q tests_2.0/test_issue_30_preflight.py`
-  - CLI: `unset HF_TOKEN HUGGINGFACE_HUB_TOKEN; mlxk-json pull meta-llama/Llama-2-7b-hf --json`
+  - CLI: `unset HF_TOKEN HUGGINGFACE_HUB_TOKEN; mlxk pull meta-llama/Llama-2-7b-hf --json`
 
 ## Runner: Interruption & Recovery
 
@@ -2010,7 +2010,8 @@ tests_2.0/
 │   ├── test_push_error_matches_schema.py      # Push error output matches schema
 │   ├── test_push_output_matches_schema.py     # Push success output matches schema
 │   ├── test_spec_doc_examples_validate.py     # Docs examples validate against JSON schema
-│   └── test_spec_version_sync.py              # Code/docs version consistency check
+│   ├── test_spec_version_sync.py              # Code/docs version consistency check
+│   └── test_version_prose.py                  # Version numbers in tracked text: none past the release or schema, echoes current, "unreleased" gone at the cut
 ├── live/                              # Opt-in live tests (markers)
 │   ├── __init__.py
 │   ├── conftest.py                              # Shared fixtures for live E2E tests (text_portfolio, vision_portfolio, audio_portfolio, pytest_generate_tests hook)

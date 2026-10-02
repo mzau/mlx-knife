@@ -268,7 +268,7 @@ Example: 57 GB used in test_text_request_still_works_on_vision_model
 - [ ] Hover shows full test names (not truncated)
 - [ ] Color-blind mode (alternative palette)
 
-**For schema v1.0:**
+**For the schema:**
 - [ ] Model load/unload events → precise "in RAM" regions
 - [ ] Log parsing for server tests → correct attribution
 - [ ] GPU activity (Metal performance)
@@ -389,12 +389,12 @@ differ, and why the RAM figure is system-wide - is in
 
 ## Roadmap
 
-| Phase | Release | Description |
-|-------|---------|-------------|
-| **Phase 0** | 2.0.3-2.0.4 | Organic Data Collection ✅ |
-| Phase 1 | 2.1+ | `mlxk-benchmark` package (separate tool) |
-| Phase 2 | 2.2+ | Report aggregation, hardware correlation |
-| Phase 3 | 2.3+ | Public database, community contributions |
+| Phase | Description |
+|-------|-------------|
+| **Phase 0** | Organic Data Collection ✅ |
+| Phase 1 | `mlxk-benchmark` package (separate tool) |
+| Phase 2 | Report aggregation, hardware correlation |
+| Phase 3 | Public database, community contributions |
 
 ## Further Documentation
 

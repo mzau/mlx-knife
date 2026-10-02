@@ -7,11 +7,17 @@
 - SERVER-HANDBOOK, the `--version --json` example in the JSON API specification and `examples/`
   name 2.0.8 as released. ADR-012, ADR-018 and ADR-025 give shipped phases their version and
   deferred ones no target release.
+- Version numbers in prose follow one writing rule, set in CONTRIBUTING.md. The docs name no
+  release or schema version after the current one, and the `--version` examples in MIGRATION
+  show the output form instead of a release number.
+- Examples and contributor notes use `mlxk` instead of the `mlxk-json` alias.
+- CONTRIBUTING states Python 3.11–3.14; the GitHub-release install in MIGRATION no longer
+  points at a missing wheel.
 
 ### Testing and Tooling
 
-- `scripts/check-handbook-contract.py` fails on "unreleased" in the SERVER-HANDBOOK once the
-  CHANGELOG is cut to a final version.
+- `tests_2.0/spec/test_version_prose.py` holds that writing rule for every tracked text file,
+  "unreleased" at a release cut included.
 
 ## [2.0.8] - 2026-09-30
 

@@ -269,13 +269,13 @@ All commands support `--json` for machine-readable output. Commands that accept 
 }
 ```
 
-### `mlxk-json list [pattern] --json`
+### `mlxk list [pattern] --json`
 
 **Basic Usage:**
 ```bash
-mlxk-json list --json                        # All models with full validation
-mlxk-json list "mlx-community" --json        # Filter by pattern
-mlxk-json list "Llama" --json                # Fuzzy matching
+mlxk list --json                        # All models with full validation
+mlxk list "mlx-community" --json        # Filter by pattern
+mlxk list "Llama" --json                # Fuzzy matching
 ```
 
 **Behavior:**
@@ -426,13 +426,13 @@ mlxk-json list "Llama" --json                # Fuzzy matching
 }
 ```
 
-### `mlxk-json health [pattern] --json`
+### `mlxk health [pattern] --json`
 
 **Usage:**
 ```bash
-mlxk-json health --json                      # Check all models
-mlxk-json health "Phi-3" --json              # Check specific pattern
-mlxk-json health "Qwen3@e96" --json          # Check specific hash
+mlxk health --json                      # Check all models
+mlxk health "Phi-3" --json              # Check specific pattern
+mlxk health "Qwen3@e96" --json          # Check specific hash
 ```
 
 **Healthy Models:**
@@ -505,15 +505,15 @@ mlxk-json health "Qwen3@e96" --json          # Check specific hash
 }
 ```
 
-### `mlxk-json show <model> --json`
+### `mlxk show <model> --json`
 
 **Usage:**
 ```bash
-mlxk-json show "Phi-3-mini" --json               # Short name expansion
-mlxk-json show "mlx-community/Phi-3-mini" --json # Full name
-mlxk-json show "Qwen3@e96" --json                # Specific hash
-mlxk-json show "Phi-3-mini" --files --json       # Include file listing
-mlxk-json show "Phi-3-mini" --config --json      # Include config.json content
+mlxk show "Phi-3-mini" --json               # Short name expansion
+mlxk show "mlx-community/Phi-3-mini" --json # Full name
+mlxk show "Qwen3@e96" --json                # Specific hash
+mlxk show "Phi-3-mini" --files --json       # Include file listing
+mlxk show "Phi-3-mini" --config --json      # Include config.json content
 ```
 
 **Basic Model Information:**
@@ -746,13 +746,13 @@ Major version bump to reflect the workspace-first paradigm shift. New fields in 
 
 ## Operations
 
-### `mlxk-json pull <model> --json`
+### `mlxk pull <model> --json`
 
 **Usage:**
 ```bash
-mlxk-json pull "Phi-3-mini" --json               # Short name expansion
-mlxk-json pull "mlx-community/Phi-3-mini" --json # Full name
-mlxk-json pull "microsoft/DialoGPT-small" --json # Non-MLX model
+mlxk pull "Phi-3-mini" --json               # Short name expansion
+mlxk pull "mlx-community/Phi-3-mini" --json # Full name
+mlxk pull "microsoft/DialoGPT-small" --json # Non-MLX model
 ```
 
 **Successful Download:**
@@ -843,13 +843,13 @@ mlxk-json pull "microsoft/DialoGPT-small" --json # Non-MLX model
 }
 ```
 
-### `mlxk-json rm <model> [--force] --json`
+### `mlxk rm <model> [--force] --json`
 
 **Usage:**
 ```bash
-mlxk-json rm "Phi-3-mini" --json                 # Direct deletion (no locks)
-mlxk-json rm "Phi-3-mini" --force --json         # Force deletion (ignores locks)
-mlxk-json rm "locked-model" --json               # Error: requires --force due to locks
+mlxk rm "Phi-3-mini" --json                 # Direct deletion (no locks)
+mlxk rm "Phi-3-mini" --force --json         # Force deletion (ignores locks)
+mlxk rm "locked-model" --json               # Error: requires --force due to locks
 ```
 
 **Successful Deletion:**
@@ -1331,44 +1331,44 @@ A prompt that fills the model's context window is rejected before anything is ge
 **Model Management Automation:**
 ```bash
 # List all MLX models with hashes
-mlxk-json list --json | jq -r '.data.models[] | select(.framework=="MLX") | "\(.name)@\(.hash)"'
+mlxk list --json | jq -r '.data.models[] | select(.framework=="MLX") | "\(.name)@\(.hash)"'
 
 # Get model hashes for pattern matching
-mlxk-json list "Qwen" --json | jq -r '.data.models[] | .hash'
+mlxk list "Qwen" --json | jq -r '.data.models[] | .hash'
 
 # Count models by framework
-mlxk-json list --json | jq '.data.models | group_by(.framework) | map({framework: .[0].framework, count: length})'
+mlxk list --json | jq '.data.models | group_by(.framework) | map({framework: .[0].framework, count: length})'
 
 # Health summary
-mlxk-json health --json | jq '.data.summary'
+mlxk health --json | jq '.data.summary'
 
 # Find unhealthy models
-mlxk-json health --json | jq -r '.data.unhealthy[].name'
+mlxk health --json | jq -r '.data.unhealthy[].name'
 
 # Filter by pattern
-mlxk-json list "Llama" --json | jq '.data.count'
+mlxk list "Llama" --json | jq '.data.count'
 
 # Model sizes with hashes
-mlxk-json list --json | jq -r '.data.models[] | "\(.name)@\(.hash): \(.size_bytes)"'
+mlxk list --json | jq -r '.data.models[] | "\(.name)@\(.hash): \(.size_bytes)"'
 
 # Get detailed model info
-mlxk-json show "Phi-3-mini" --json | jq '.data.model'
+mlxk show "Phi-3-mini" --json | jq '.data.model'
 
 # List all files in a model
-mlxk-json show "Phi-3-mini" --files --json | jq -r '.data.files[] | "\(.name): \(.size)"'
+mlxk show "Phi-3-mini" --files --json | jq -r '.data.files[] | "\(.name): \(.size)"'
 
 # Extract model config
-mlxk-json show "Phi-3-mini" --config --json | jq '.data.config.quantization'
+mlxk show "Phi-3-mini" --config --json | jq '.data.config.quantization'
 ```
 
 **Automated Health Monitoring:**
 ```bash
 #!/bin/bash
 # Check if any models are unhealthy
-unhealthy_count=$(mlxk-json health --json | jq '.data.summary.unhealthy_count')
+unhealthy_count=$(mlxk health --json | jq '.data.summary.unhealthy_count')
 if [ "$unhealthy_count" -gt 0 ]; then
   echo "Warning: $unhealthy_count unhealthy models found"
-  mlxk-json health --json | jq -r '.data.unhealthy[] | "UNHEALTHY: \(.name) - \(.reason)"'
+  mlxk health --json | jq -r '.data.unhealthy[] | "UNHEALTHY: \(.name) - \(.reason)"'
 fi
 ```
 
@@ -1377,11 +1377,11 @@ fi
 # Pull multiple models
 for model in "Phi-3-mini" "Llama-3.2-1B"; do
   echo "Pulling $model..."
-  mlxk-json pull "$model" --json | jq '.data.download_status'
+  mlxk pull "$model" --json | jq '.data.download_status'
 done
 
 # Clean up old models
-mlxk-json list --json | jq -r '.data.models[] | select(.size | test("GB")) | .name' | while read model; do
+mlxk list --json | jq -r '.data.models[] | select(.size | test("GB")) | .name' | while read model; do
   echo "Found large model: $model"
 done
 ```
